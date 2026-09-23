@@ -8,6 +8,7 @@ import '../../theme/app_theme.dart';
 import '../../services/finance_local_storage.dart';
 import '../../services/local_storage_service.dart';
 import 'shared_widgets.dart';
+import '../../design/design_system.dart';
 
 class HolidayManagerDialog extends StatefulWidget {
   final String branchId;
@@ -112,7 +113,7 @@ class _HolidayManagerDialogState extends State<HolidayManagerDialog> {
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
     final size = MediaQuery.of(context).size;
-    final isNarrow = size.width < 600;
+    final isNarrow = GBreakpoint.isMobile(context);
 
     return Container(
       constraints: BoxConstraints(

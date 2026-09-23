@@ -1730,6 +1730,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                 final cat = _typeCategories[idx];
                 final isSelected = _selectedTypeFilter == cat;
                 return ChoiceChip(
+                  checkmarkColor: Colors.white,
                   label: Text(
                     cat,
                     style: TextStyle(

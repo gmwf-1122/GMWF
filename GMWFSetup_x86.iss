@@ -8,7 +8,7 @@
 [Setup]
 AppId={{A1B2C3D4-9F23-4C11-8ABC-1234567890AB}
 AppName=GMWF
-AppVersion=1.5.0
+AppVersion=1.5.4
 AppPublisher=GMWF
 AppPublisherURL=https://gmwf.pk/
 AppSupportURL=https://gmwf.pk/
@@ -24,7 +24,7 @@ DefaultGroupName=GMWF
 
 ; Output
 OutputDir=installer
-OutputBaseFilename=GMWF-v1.5.0-x86
+OutputBaseFilename=GMWF-v1.5.4-x86
 SetupIconFile=Installer\gmwf.ico
 
 ; Compression
@@ -36,13 +36,15 @@ PrivilegesRequired=admin
 
 ; UI & Modern Dialogs
 WizardStyle=modern
-WizardSizePercent=100
+WizardSizePercent=120,120
 WizardResizable=no
+WizardImageStretch=no
 WizardImageFile=Installer\gmwf_wizard_large.bmp
 WizardSmallImageFile=Installer\gmwf_wizard_small.bmp
 DisableDirPage=no
 DisableProgramGroupPage=yes
 SetupLogging=yes
+UsePreviousTasks=no
 
 ; Uninstall display
 UninstallDisplayIcon={app}\gmwf.exe
@@ -57,7 +59,7 @@ RestartApplications=no
 Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Messages]
-SetupWindowTitle=GMWF Management Platform Setup (32-bit)
+SetupWindowTitle=GMWF Management System Setup (32-bit)
 WelcomeLabel1=Welcome to the GMWF Setup Wizard (32-bit)
 WelcomeLabel2=This wizard will install or safely upgrade GMWF on your computer.%n%nAll your local records, sync queues, and existing Python environments will be preserved.
 ReadyLabel1=Ready to Install
@@ -102,7 +104,7 @@ Name: "{group}\GMWF";          Filename: "{app}\gmwf.exe"; WorkingDir: "{app}"; 
 Name: "{commondesktop}\GMWF";  Filename: "{app}\gmwf.exe"; WorkingDir: "{app}"; IconFilename: "{app}\gmwf.ico"
 
 [Tasks]
-Name: "serverautostart"; Description: "Start GMWF automatically when this Windows server user logs in"; GroupDescription: "Server startup:"; Flags: checkedonce
+Name: "serverautostart"; Description: "Start GMWF automatically when this Windows server user logs in"; GroupDescription: "Server startup:"; Flags: checkablealone
 
 [Run]
 ; 1. Trust GMWF Digital Certificate on this PC
@@ -239,29 +241,175 @@ begin
   Result := S;
 end;
 
+// Global references so we can show/hide accent lines per page
+var
+  GAccentLine: TPanel;
+  GGoldLine: TPanel;
+
 procedure InitializeWizard();
+var
+  BottomDividerLine: TPanel;
+  BrandFooterLabel: TLabel;
 begin
   // Set clean modern typography across the wizard
   WizardForm.Font.Name := 'Segoe UI';
 
-  // Style Welcome page title with GMWF Brand Emerald Green
-  WizardForm.WelcomeLabel1.Font.Name := 'Segoe UI';
-  WizardForm.WelcomeLabel1.Font.Size := 13;
-  WizardForm.WelcomeLabel1.Font.Style := [fsBold];
-  WizardForm.WelcomeLabel1.Font.Color := $00404D00; // GMWF Emerald Green BGR ($00404D00 = #004D40)
+  // Remove retro 3D beveled borders
+  WizardForm.Bevel.Visible := False;
+  WizardForm.Bevel1.Visible := False;
 
-  // Style Finished page title
-  WizardForm.FinishedHeadingLabel.Font.Name := 'Segoe UI';
-  WizardForm.FinishedHeadingLabel.Font.Size := 13;
-  WizardForm.FinishedHeadingLabel.Font.Style := [fsBold];
-  WizardForm.FinishedHeadingLabel.Font.Color := $00404D00;
-
-  // Style Header Page
+  // Modern clean header (keep default height — no override to avoid white-bar on Welcome/Finish)
   WizardForm.MainPanel.Color := clWhite;
+
+  // Custom GMWF Emerald Green Accent Stripe beneath Header
+  GAccentLine := TPanel.Create(WizardForm);
+  GAccentLine.Parent := WizardForm;
+  GAccentLine.Left := 0;
+  GAccentLine.Top := WizardForm.MainPanel.Top + WizardForm.MainPanel.Height;
+  GAccentLine.Width := WizardForm.ClientWidth;
+  GAccentLine.Height := ScaleY(3);
+  GAccentLine.BevelOuter := bvNone;
+  GAccentLine.Color := $004A7A1A; // GMWF Primary Green (#1A7A4A in BGR)
+
+  // Secondary Gold Accent Line (GMWF brand secondary gold)
+  GGoldLine := TPanel.Create(WizardForm);
+  GGoldLine.Parent := WizardForm;
+  GGoldLine.Left := 0;
+  GGoldLine.Top := GAccentLine.Top + GAccentLine.Height;
+  GGoldLine.Width := WizardForm.ClientWidth;
+  GGoldLine.Height := ScaleY(1);
+  GGoldLine.BevelOuter := bvNone;
+  GGoldLine.Color := $005BA1C6; // GMWF Gold (#C6A15B in BGR)
+
+  // Modern Bottom Divider Line (Emerald green thin separator above buttons)
+  BottomDividerLine := TPanel.Create(WizardForm);
+  BottomDividerLine.Parent := WizardForm;
+  BottomDividerLine.Left := 0;
+  BottomDividerLine.Top := WizardForm.CancelButton.Top - ScaleY(12);
+  BottomDividerLine.Width := WizardForm.ClientWidth;
+  BottomDividerLine.Height := ScaleY(1);
+  BottomDividerLine.BevelOuter := bvNone;
+  BottomDividerLine.Color := $004A7A1A; // GMWF Green instead of light gray
+
+  // Branded Footer Label at Bottom-Left
+  BrandFooterLabel := TLabel.Create(WizardForm);
+  BrandFooterLabel.Parent := WizardForm;
+  BrandFooterLabel.Left := ScaleX(16);
+  BrandFooterLabel.Top := WizardForm.CancelButton.Top + ScaleY(4);
+  BrandFooterLabel.Caption := Chr($E2)+Chr($9C)+Chr($A6) + ' GMWF Management System v1.5.4 (32-bit)';
+  BrandFooterLabel.Font.Name := 'Segoe UI';
+  BrandFooterLabel.Font.Size := 8;
+  BrandFooterLabel.Font.Style := [fsBold];
+  BrandFooterLabel.Font.Color := $004A7A1A;
+  BrandFooterLabel.AutoSize := True;
+
+  // Header Titles & Subtitles (AutoSize=True prevents text clipping)
+  WizardForm.PageNameLabel.AutoSize := True;
   WizardForm.PageNameLabel.Font.Name := 'Segoe UI';
+  WizardForm.PageNameLabel.Font.Size := 11;
   WizardForm.PageNameLabel.Font.Style := [fsBold];
-  WizardForm.PageNameLabel.Font.Color := $00404D00;
+  WizardForm.PageNameLabel.Font.Color := $002F4F0F; // GMWF Primary Dark (#0F4F2F in BGR)
+
+  WizardForm.PageDescriptionLabel.AutoSize := True;
   WizardForm.PageDescriptionLabel.Font.Name := 'Segoe UI';
+  WizardForm.PageDescriptionLabel.Font.Size := 9;
+  WizardForm.PageDescriptionLabel.Font.Color := $00514137; // Slate Gray 700 (#374151 in BGR)
+  WizardForm.PageDescriptionLabel.Top := WizardForm.PageNameLabel.Top + WizardForm.PageNameLabel.Height + ScaleY(4);
+
+  // Welcome page branding
+  WizardForm.WelcomeLabel1.AutoSize := True;
+  WizardForm.WelcomeLabel1.Font.Name := 'Segoe UI';
+  WizardForm.WelcomeLabel1.Font.Size := 14;
+  WizardForm.WelcomeLabel1.Font.Style := [fsBold];
+  WizardForm.WelcomeLabel1.Font.Color := $002F4F0F;
+  WizardForm.WelcomeLabel2.Font.Name := 'Segoe UI';
+  WizardForm.WelcomeLabel2.Font.Size := 9;
+  WizardForm.WelcomeLabel2.Font.Color := $0037291F;
+
+  // Finished page branding
+  WizardForm.FinishedHeadingLabel.AutoSize := True;
+  WizardForm.FinishedHeadingLabel.Font.Name := 'Segoe UI';
+  WizardForm.FinishedHeadingLabel.Font.Size := 14;
+  WizardForm.FinishedHeadingLabel.Font.Style := [fsBold];
+  WizardForm.FinishedHeadingLabel.Font.Color := $002F4F0F;
+  WizardForm.FinishedLabel.Font.Name := 'Segoe UI';
+  WizardForm.FinishedLabel.Font.Size := 9;
+  WizardForm.FinishedLabel.Font.Color := $0037291F;
+
+  // Destination Selection Page styling
+  WizardForm.SelectDirBitmapImage.Visible := False;
+  WizardForm.SelectDirLabel.Left := ScaleX(8);
+  WizardForm.SelectDirLabel.Font.Name := 'Segoe UI';
+  WizardForm.SelectDirLabel.Font.Size := 10;
+  WizardForm.SelectDirLabel.Font.Style := [fsBold];
+  WizardForm.SelectDirLabel.Font.Color := $002F4F0F;
+
+  WizardForm.SelectDirBrowseLabel.Left := ScaleX(8);
+  WizardForm.SelectDirBrowseLabel.Font.Name := 'Segoe UI';
+  WizardForm.SelectDirBrowseLabel.Font.Size := 9;
+  WizardForm.SelectDirBrowseLabel.Font.Color := $00514137;
+
+  WizardForm.DirEdit.Left := ScaleX(8);
+  WizardForm.DirEdit.Font.Name := 'Segoe UI';
+  WizardForm.DirEdit.Font.Size := 10;
+
+  WizardForm.DirBrowseButton.Font.Name := 'Segoe UI';
+  WizardForm.DirBrowseButton.Font.Style := [fsBold];
+
+  WizardForm.DiskSpaceLabel.Visible := True;
+  WizardForm.DiskSpaceLabel.Left := ScaleX(8);
+  WizardForm.DiskSpaceLabel.Font.Name := 'Segoe UI';
+  WizardForm.DiskSpaceLabel.Font.Size := 9;
+  WizardForm.DiskSpaceLabel.Font.Color := $00514137;
+
+  // Tasks & Checklist Customization
+  WizardForm.SelectTasksLabel.Font.Name := 'Segoe UI';
+  WizardForm.SelectTasksLabel.Font.Size := 10;
+  WizardForm.SelectTasksLabel.Font.Color := $002F4F0F;
+
+  WizardForm.TasksList.Font.Name := 'Segoe UI';
+  WizardForm.TasksList.Font.Size := 10;
+  WizardForm.TasksList.Color := clWhite;
+
+  // Ready & Installing
+  WizardForm.ReadyLabel.Font.Name := 'Segoe UI';
+  WizardForm.ReadyLabel.Font.Size := 10;
+  WizardForm.ReadyLabel.Font.Style := [fsBold];
+  WizardForm.ReadyLabel.Font.Color := $002F4F0F;
+
+  WizardForm.ReadyMemo.Font.Name := 'Segoe UI';
+  WizardForm.ReadyMemo.Font.Size := 9;
+  WizardForm.ReadyMemo.Color := $00FAF8F7;
+
+  WizardForm.StatusLabel.Font.Name := 'Segoe UI';
+  WizardForm.StatusLabel.Font.Size := 11;
+  WizardForm.StatusLabel.Font.Style := [fsBold];
+  WizardForm.StatusLabel.Font.Color := $004A7A1A;
+  WizardForm.FilenameLabel.Font.Name := 'Segoe UI';
+  WizardForm.ProgressGauge.Height := ScaleY(22);
+
+  // Button Typography
+  WizardForm.NextButton.Font.Name := 'Segoe UI';
+  WizardForm.NextButton.Font.Style := [fsBold];
+  WizardForm.BackButton.Font.Name := 'Segoe UI';
+  WizardForm.CancelButton.Font.Name := 'Segoe UI';
+
+  // Toggle serverautostart on by default
+  WizardSelectTasks('serverautostart');
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+var
+  IsFullPage: Boolean;
+begin
+  // Welcome and Finished pages show the large wizard image panel;
+  // hide accent lines on those pages so they don't overlap the image.
+  IsFullPage := (CurPageID = wpWelcome) or (CurPageID = wpFinished);
+  GAccentLine.Visible := not IsFullPage;
+  GGoldLine.Visible := not IsFullPage;
+
+  if CurPageID = wpSelectTasks then
+    WizardSelectTasks('serverautostart');
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);

@@ -8,7 +8,10 @@ import 'views/monthly_report_view.dart';
 import 'views/madrassa_config_view.dart';
 import 'views/madrassa_overview_view.dart';
 import 'views/madrassa_progress_view.dart';
+import 'views/madrassa_teachers_view.dart';
 import 'dialogs/enrollment_dialog.dart';
+import 'dialogs/madrassa_profile_dialog.dart';
+import 'dialogs/register_teacher_dialog.dart';
 import 'madrassa_strings.dart';
 import 'utils/madrassa_local_storage.dart';
 import '../../services/local_storage_service.dart';
@@ -17,6 +20,7 @@ import '../../services/auth_service.dart';
 import '../../services/user_theme_service.dart';
 import '../../theme/role_theme_provider.dart';
 import '../../theme/app_theme.dart';
+import '../../design/design_system.dart';
 
 class MadrassaDashboard extends StatefulWidget {
   final String branchId;
@@ -43,21 +47,70 @@ class MadrassaDashboard extends StatefulWidget {
 class _MadrassaDashboardState extends State<MadrassaDashboard> {
   late int _selectedIndex;
   late Future<void> _bootstrapFuture;
+  late String _displayUsername;
 
   @override
   void initState() {
     super.initState();
     _selectedIndex = widget.initialIndex ?? 0;
+    _displayUsername = widget.username;
     _bootstrapFuture = _bootstrapMadrassa();
     if (widget.autoOpenAddStudent) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         showAddStudentDialog(
           context,
           widget.branchId,
-          username: widget.username,
+          username: _displayUsername,
           role: widget.role,
         );
       });
+    }
+  }
+
+  Future<void> _openProfileDialog() async {
+    final updated = await MadrassaProfileDialog.show(
+      context,
+      branchId: widget.branchId,
+      currentUsername: _displayUsername,
+      userRole: widget.role,
+    );
+    if (updated != null && updated.isNotEmpty && mounted) {
+      setState(() {
+        _displayUsername = updated;
+      });
+    }
+  }
+
+  Future<void> _openRegisterTeacherDialog() async {
+    // Derive branch display name (fallback to branchId if not stored)
+    String branchDisplayName = widget.branchId.toUpperCase();
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final box = Hive.box('app_settings');
+        final bn = box.get('branch_name_${widget.branchId.toLowerCase()}');
+        if (bn is String && bn.isNotEmpty) branchDisplayName = bn;
+      }
+    } catch (_) {}
+
+    final registered = await showRegisterTeacherDialog(
+      context,
+      branchId: widget.branchId,
+      branchName: branchDisplayName,
+      principalUsername: _displayUsername,
+    );
+    if (registered == true && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        content: Row(children: [
+          Icon(Icons.check_circle_outline, color: Colors.white, size: 17),
+          SizedBox(width: 8),
+          Text('Teacher registered successfully!'),
+        ]),
+        backgroundColor: Color(0xFF0F766E),
+        behavior: SnackBarBehavior.floating,
+        margin: EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
+        duration: Duration(seconds: 3),
+      ));
     }
   }
 
@@ -69,11 +122,33 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
       'madrassa teacher',
       'qari',
       'nazim',
+      'chairman',
+      'hq manager',
+      'hq_manager',
+      'ceo',
+      'admin',
     ]);
     await MadrassaLocalStorage.ensureBoxesOpen();
     if (widget.branchId.isNotEmpty && widget.branchId != 'unknown') {
       SyncService().start(widget.branchId);
     }
+  }
+
+  bool get _effectiveIsAdmin {
+    final r = widget.role.toLowerCase().trim();
+    return widget.isAdmin ||
+        r.contains('admin') ||
+        r.contains('chairman') ||
+        r.contains('hq') ||
+        r.contains('hq manager') ||
+        r.contains('hqmanager') ||
+        r.contains('hq_manager') ||
+        r.contains('ceo') ||
+        r.contains('principal') ||
+        r.contains('manager') ||
+        r.contains('director') ||
+        r.contains('supervisor') ||
+        r.contains('global');
   }
 
   @override
@@ -104,50 +179,56 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
             );
           }
 
-          final isTeacherOrAdmin = widget.isAdmin || widget.role.toLowerCase() == 'madrassa teacher';
+          final isTeacherOrAdmin = _effectiveIsAdmin || widget.role.toLowerCase() == 'madrassa teacher';
 
           final views = [
-            if (widget.isAdmin)
+            if (_effectiveIsAdmin)
               MadrassaOverviewView(
                 branchId: branchId,
-                isAdmin: widget.isAdmin,
+                isAdmin: _effectiveIsAdmin,
                 onAction: (index) => setState(() => _selectedIndex = index),
               ),
             DailyLogView(
               branchId: branchId,
-              editorName: widget.username,
+              editorName: _displayUsername,
               editorRole: widget.role,
             ),
             StudentManagementView(
               branchId: branchId,
-              isAdmin: widget.isAdmin,
-              username: widget.username,
+              isAdmin: _effectiveIsAdmin,
+              username: _displayUsername,
               role: widget.role,
             ),
+            if (_effectiveIsAdmin)
+              MadrassaTeachersView(
+                branchId: branchId,
+                principalUsername: _displayUsername,
+                role: widget.role,
+              ),
             if (isTeacherOrAdmin) ...[
               MadrassaProgressView(
                 branchId: branchId,
-                isAdmin: widget.isAdmin,
-                username: widget.username,
+                isAdmin: _effectiveIsAdmin,
+                username: _displayUsername,
               ),
               MonthlyReportView(
                 branchId: branchId,
-                username: widget.username,
+                username: _displayUsername,
                 role: widget.role,
               ),
               MadrassaConfigView(
                 branchId: branchId,
-                username: widget.username,
+                username: _displayUsername,
                 role: widget.role,
               ),
             ],
           ];
 
-          final isMobileLayout = MediaQuery.of(context).size.width < 600;
+          final isMobileLayout = GBreakpoint.isMobile(context);
 
           // Navigation items definitions
           final navTitles = [
-            if (widget.isAdmin)
+            if (_effectiveIsAdmin)
               isMobileLayout
                   ? (context.isUrdu ? 'اوور ویو' : 'Home')
                   : context.l.overviewTitle,
@@ -157,6 +238,10 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
             isMobileLayout
                 ? (context.isUrdu ? 'طلبہ' : 'Students')
                 : context.l.students,
+            if (_effectiveIsAdmin)
+              isMobileLayout
+                  ? (context.isUrdu ? 'اساتذہ' : 'Teachers')
+                  : context.l.teachers,
             if (isTeacherOrAdmin) ...[
               context.isUrdu ? 'پیشرفت' : 'Progress',
               isMobileLayout
@@ -169,9 +254,10 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
           ];
 
           final navIcons = [
-            if (widget.isAdmin) Icons.dashboard_outlined,
+            if (_effectiveIsAdmin) Icons.dashboard_outlined,
             Icons.calendar_today_outlined,
             Icons.people_outline,
+            if (_effectiveIsAdmin) Icons.school_outlined,
             if (isTeacherOrAdmin) ...[
               Icons.trending_up_outlined,
               Icons.bar_chart_outlined,
@@ -180,9 +266,10 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
           ];
 
           final navActiveIcons = [
-            if (widget.isAdmin) Icons.dashboard_rounded,
+            if (_effectiveIsAdmin) Icons.dashboard_rounded,
             Icons.calendar_today_rounded,
             Icons.people_alt_rounded,
+            if (_effectiveIsAdmin) Icons.school_rounded,
             if (isTeacherOrAdmin) ...[
               Icons.trending_up_rounded,
               Icons.bar_chart_rounded,
@@ -206,8 +293,8 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
 
                 return LayoutBuilder(
                   builder: (context, constraints) {
-                    final isMobile = constraints.maxWidth < 600;
-                    final isTablet = constraints.maxWidth >= 600 && constraints.maxWidth <= 960;
+                    final isMobile = GBreakpoint.isMobileC(constraints);
+                    final isTablet = GBreakpoint.isTabletC(constraints);
 
                     if (isMobile) {
                       return Scaffold(
@@ -478,8 +565,8 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                           const SizedBox(width: 6),
                           Flexible(
                             child: Text(
-                              widget.username.isNotEmpty && widget.username.toLowerCase() != 'unknown'
-                                  ? widget.username
+                              _displayUsername.isNotEmpty && _displayUsername.toLowerCase() != 'unknown'
+                                  ? _displayUsername
                                   : widget.role,
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
@@ -494,6 +581,20 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                     ],
                   ),
                 ),
+                // Profile & Security Button
+                IconButton(
+                  icon: const Icon(Icons.manage_accounts_rounded, size: 20, color: Color(0xFF0F766E)),
+                  tooltip: 'Profile & Password',
+                  onPressed: _openProfileDialog,
+                  padding: const EdgeInsets.all(4),
+                  constraints: const BoxConstraints(),
+                ),
+                const SizedBox(width: 6),
+                // Register Teacher (principal / chairman / hq / admin)
+                if (_effectiveIsAdmin) ...[
+                  _buildRegisterTeacherBtn(compact: true),
+                  const SizedBox(width: 4),
+                ],
                 // Modern Action Buttons
                 _buildSyncBtn(context, isDark),
                 const SizedBox(width: 4),
@@ -548,7 +649,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                       ),
                     ),
                     Text(
-                      '${widget.branchId.toUpperCase()} • ${widget.username} (${widget.role})',
+                      '${widget.branchId.toUpperCase()} • $_displayUsername (${widget.role})',
                       style: TextStyle(color: textMuted, fontSize: 11.5, fontWeight: FontWeight.w500),
                     ),
                   ],
@@ -573,6 +674,16 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                   ),
                 ),
                 const SizedBox(width: 12),
+                IconButton(
+                  icon: const Icon(Icons.manage_accounts_rounded, size: 22, color: Color(0xFF0F766E)),
+                  tooltip: 'Profile & Password',
+                  onPressed: _openProfileDialog,
+                ),
+                const SizedBox(width: 6),
+                if (_effectiveIsAdmin) ...[
+                  _buildRegisterTeacherBtn(compact: true),
+                  const SizedBox(width: 6),
+                ],
                 _buildSyncBtn(context, isDark),
                 const SizedBox(width: 6),
                 _buildThemeToggleBtn(isDark),
@@ -704,6 +815,13 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
             ),
           ),
           const SizedBox(width: 12),
+          // Profile & Password Button
+          IconButton(
+            icon: const Icon(Icons.manage_accounts_rounded, size: 22, color: Color(0xFF0F766E)),
+            tooltip: 'Profile & Password',
+            onPressed: _openProfileDialog,
+          ),
+          const SizedBox(width: 8),
           // Sync button
           _buildSyncBtn(context, isDark),
           const SizedBox(width: 8),
@@ -828,76 +946,106 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
             ),
           ),
 
+          // Register Teacher button (principal / chairman / hq / admin)
+          if (_effectiveIsAdmin)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              child: _buildRegisterTeacherBtn(compact: false),
+            ),
           // User Profile Card at Bottom
           Container(
-            padding: const EdgeInsets.all(14),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             decoration: BoxDecoration(
               color: isDark ? const Color(0xFF0E1626) : const Color(0xFFF8FAFC),
               border: Border(top: BorderSide(color: borderColor, width: 1)),
             ),
             child: Row(
               children: [
-                // Avatar Circle
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF0F766E), Color(0xFF14B8A6)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF0F766E).withValues(alpha: 0.3),
-                        blurRadius: 6,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
-                  ),
-                  child: Center(
-                    child: Text(
-                      widget.username.isNotEmpty ? widget.username[0].toUpperCase() : 'M',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 15,
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                // User Details
+                // Avatar Circle & User Details (Tappable)
                 Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        widget.username,
-                        style: TextStyle(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 12.5,
-                          color: textPrimary,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                  child: InkWell(
+                    onTap: _openProfileDialog,
+                    borderRadius: BorderRadius.circular(10),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 2),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFF0F766E), Color(0xFF14B8A6)],
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                              shape: BoxShape.circle,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFF0F766E).withValues(alpha: 0.3),
+                                  blurRadius: 6,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: Center(
+                              child: Text(
+                                _displayUsername.isNotEmpty ? _displayUsername[0].toUpperCase() : 'M',
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 14,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Row(
+                                  children: [
+                                    Expanded(
+                                      child: Text(
+                                        _displayUsername,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 12,
+                                          color: textPrimary,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                    Icon(
+                                      Icons.edit_outlined,
+                                      size: 13,
+                                      color: const Color(0xFF0F766E).withValues(alpha: 0.7),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 1),
+                                Text(
+                                  widget.isAdmin
+                                      ? 'Principal / Admin'
+                                      : widget.role,
+                                  style: TextStyle(
+                                    fontSize: 10,
+                                    color: textMuted,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
                       ),
-                      const SizedBox(height: 1),
-                      Text(
-                        widget.isAdmin
-                            ? 'Principal / Administrator'
-                            : widget.role,
-                        style: TextStyle(
-                          fontSize: 10.5,
-                          color: textMuted,
-                          fontWeight: FontWeight.w500,
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+                    ),
                   ),
                 ),
+                const SizedBox(width: 4),
                 // Sign Out Button
                 IconButton(
                   icon: const Icon(Icons.logout_rounded, color: Color(0xFFEF4444), size: 18),
@@ -917,6 +1065,49 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  // --- Register Teacher Button ---
+  Widget _buildRegisterTeacherBtn({required bool compact}) {
+    if (compact) {
+      // Icon-only for app bars
+      return Container(
+        width: 36,
+        height: 36,
+        decoration: BoxDecoration(
+          color: const Color(0xFF0F766E).withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: const Color(0xFF0F766E).withValues(alpha: 0.3), width: 1),
+        ),
+        child: IconButton(
+          padding: EdgeInsets.zero,
+          icon: const Icon(Icons.person_add_rounded, size: 18, color: Color(0xFF0F766E)),
+          tooltip: 'Register New Teacher',
+          onPressed: _openRegisterTeacherDialog,
+        ),
+      );
+    }
+    // Full-width button for desktop sidebar
+    return SizedBox(
+      width: double.infinity,
+      height: 40,
+      child: ElevatedButton.icon(
+        style: ElevatedButton.styleFrom(
+          backgroundColor: const Color(0xFF0F766E),
+          foregroundColor: Colors.white,
+          elevation: 2,
+          shadowColor: const Color(0xFF0F766E).withValues(alpha: 0.35),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+        ),
+        icon: const Icon(Icons.person_add_rounded, size: 17),
+        label: const Text(
+          'Register Teacher',
+          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5),
+        ),
+        onPressed: _openRegisterTeacherDialog,
       ),
     );
   }
@@ -1180,6 +1371,76 @@ class MadrassaMotionBottomBar extends StatelessWidget {
         : const LinearGradient(colors: [Color(0xFF0F766E), Color(0xFF0D9488)]);
     final inactiveColor = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
 
+    final isScrollable = titles.length > 5;
+
+    Widget buildItem(int i) {
+      final isSelected = selectedIndex == i;
+      final item = GestureDetector(
+        onTap: () {
+          HapticFeedback.selectionClick();
+          onTabSelected(i);
+        },
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          curve: Curves.easeOutCubic,
+          margin: const EdgeInsets.symmetric(horizontal: 2),
+          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
+          decoration: BoxDecoration(
+            gradient: isSelected ? activeGradient : null,
+            borderRadius: BorderRadius.circular(16),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: const Color(0xFF0F766E).withValues(alpha: 0.35),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AnimatedScale(
+                scale: isSelected ? 1.08 : 1.0,
+                duration: const Duration(milliseconds: 200),
+                child: Icon(
+                  isSelected ? activeIcons[i] : icons[i],
+                  size: 19,
+                  color: isSelected ? Colors.white : inactiveColor,
+                ),
+              ),
+              if (isSelected) ...[
+                const SizedBox(width: 5),
+                Text(
+                  titles[i],
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.urduStyle(
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 11.5,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+
+      if (isScrollable) {
+        return item;
+      }
+      return Expanded(
+        flex: isSelected ? 2 : 1,
+        child: item,
+      );
+    }
+
     return Container(
       decoration: BoxDecoration(
         color: bg,
@@ -1198,72 +1459,17 @@ class MadrassaMotionBottomBar extends StatelessWidget {
         top: false,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-          child: Row(
-            children: List.generate(titles.length, (i) {
-              final isSelected = selectedIndex == i;
-              return Expanded(
-                flex: isSelected ? 2 : 1,
-                child: GestureDetector(
-                  onTap: () {
-                    HapticFeedback.selectionClick();
-                    onTabSelected(i);
-                  },
-                  behavior: HitTestBehavior.opaque,
-                  child: AnimatedContainer(
-                    duration: const Duration(milliseconds: 250),
-                    curve: Curves.easeOutCubic,
-                    margin: const EdgeInsets.symmetric(horizontal: 2),
-                    padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-                    decoration: BoxDecoration(
-                      gradient: isSelected ? activeGradient : null,
-                      borderRadius: BorderRadius.circular(16),
-                      boxShadow: isSelected
-                          ? [
-                              BoxShadow(
-                                color: const Color(0xFF0F766E).withValues(alpha: 0.35),
-                                blurRadius: 8,
-                                offset: const Offset(0, 2),
-                              ),
-                            ]
-                          : null,
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        AnimatedScale(
-                          scale: isSelected ? 1.08 : 1.0,
-                          duration: const Duration(milliseconds: 200),
-                          child: Icon(
-                            isSelected ? activeIcons[i] : icons[i],
-                            size: 19,
-                            color: isSelected ? Colors.white : inactiveColor,
-                          ),
-                        ),
-                        if (isSelected) ...[
-                          const SizedBox(width: 5),
-                          Flexible(
-                            child: Text(
-                              titles[i],
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: context.urduStyle(
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 11.5,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
+          child: isScrollable
+              ? SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  physics: const BouncingScrollPhysics(),
+                  child: Row(
+                    children: List.generate(titles.length, buildItem),
                   ),
+                )
+              : Row(
+                  children: List.generate(titles.length, buildItem),
                 ),
-              );
-            }),
-          ),
         ),
       ),
     );

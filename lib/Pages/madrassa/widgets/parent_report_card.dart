@@ -22,6 +22,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../../../services/user_theme_service.dart';
 import '../../../services/sync_service.dart';
 import '../utils/islamic_calendar_helper.dart';
+import '../../../design/design_system.dart';
 
 
 Map<String, dynamic>? _asStringMap(dynamic raw) {
@@ -95,15 +96,37 @@ class _ParentReportCardState extends State<ParentReportCard> {
   void _changeTab(int tabIndex) {
     setState(() {
       _selectedTab = tabIndex;
-      _selectedDate = DateTime.now();
-      _selectedMonth = DateTime.now().month;
-      _selectedYear = DateTime.now().year;
+      final now = DateTime.now();
+      if (_selectedMonth != now.month || _selectedYear != now.year) {
+        _selectedMonth = now.month;
+        _selectedYear = now.year;
+        _onMonthChanged();
+      }
+      _selectedDate = now;
     });
   }
 
   bool _isSyncing = false;
+  DateTime? _lastSyncTime;
+  static const Duration _syncCooldown = Duration(seconds: 60);
+
   Future<void> _syncLatestData(BuildContext context) async {
     if (_isSyncing) return;
+    final now = DateTime.now();
+    if (_lastSyncTime != null && now.difference(_lastSyncTime!) < _syncCooldown) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(context.isUrdu ? 'مقامی ڈیٹا پہلے ہی تازہ ترین ہے' : 'Showing up-to-date data from local storage'),
+            backgroundColor: const Color(0xFF0F766E),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
+    }
+    _lastSyncTime = now;
     setState(() => _isSyncing = true);
     try {
       if (widget.branchId.isNotEmpty) {
@@ -111,8 +134,7 @@ class _ParentReportCardState extends State<ParentReportCard> {
           await MadrassaLocalStorage.downloadStudentsForGuardian(widget.branchId, [widget.studentId])
               .timeout(const Duration(seconds: 5), onTimeout: () {});
         }
-        final now = DateTime.now();
-        await MadrassaLocalStorage.downloadLogsForMonth(widget.branchId, now.year, now.month)
+        await MadrassaLocalStorage.downloadLogsForMonth(widget.branchId, _selectedYear, _selectedMonth)
             .timeout(const Duration(seconds: 5), onTimeout: () {});
         await MadrassaLocalStorage.downloadHolidays(widget.branchId)
             .timeout(const Duration(seconds: 5), onTimeout: () {});
@@ -200,6 +222,12 @@ class _ParentReportCardState extends State<ParentReportCard> {
   Map<String, dynamic>? _liveStudentData;
   Map<String, dynamic> get studentData => _liveStudentData ?? widget.studentData;
 
+  bool get isNazraStudent =>
+      (studentData['isNazra'] == true) ||
+      (studentData['program']?.toString().toLowerCase() == 'nazra') ||
+      (studentData['class']?.toString().toLowerCase() == 'nazra') ||
+      LocalStorageService.isMadrassaNazraOnly(widget.branchId);
+
   late Stream<List<Map<String, dynamic>>> _logsStream;
   late Stream<MadrassaConfig> _configStream;
   late Stream<List<Map<String, dynamic>>> _holidaysStream;
@@ -284,20 +312,17 @@ class _ParentReportCardState extends State<ParentReportCard> {
       }
 
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(context.isUrdu 
-                ? 'جواب کامیابی کے ساتھ درج کر دیا گیا ہے۔' 
-                : 'Reply submitted successfully.'),
-            backgroundColor: Colors.green,
-          ),
+        AppFeedback.showSuccess(
+          context,
+          context.isUrdu 
+              ? 'جواب کامیابی کے ساتھ درج کر دیا گیا ہے۔' 
+              : 'Reply submitted successfully.',
+          subtitle: 'Saved locally • Syncing to cloud',
         );
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error: $e')),
-        );
+        AppFeedback.showError(context, 'Error: $e');
       }
     }
   }
@@ -525,24 +550,18 @@ class _ParentReportCardState extends State<ParentReportCard> {
 
                           if (ctx.mounted) {
                             Navigator.pop(ctx);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(context.isUrdu
-                                    ? 'رخصت کی درخواست ($totalDays دن) کامیابی کے ساتھ جمع ہو گئی ہے۔'
-                                    : 'Leave request for $totalDays day(s) submitted successfully.'),
-                                backgroundColor: Colors.green,
-                              ),
+                            AppFeedback.showSuccess(
+                              context,
+                              context.isUrdu
+                                  ? 'رخصت کی درخواست ($totalDays دن) کامیابی کے ساتھ جمع ہو گئی ہے۔'
+                                  : 'Leave request for $totalDays day(s) submitted successfully.',
+                              subtitle: 'Saved locally • Enqueued for sync',
                             );
                           }
                         } catch (e) {
                           if (ctx.mounted) {
                             setDs(() => isSaving = false);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Error submitting leave request: $e'),
-                                backgroundColor: Colors.red,
-                              ),
-                            );
+                            AppFeedback.showError(context, 'Error submitting leave request: $e');
                           }
                         }
                       },
@@ -1123,19 +1142,16 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
 
                           if (ctx.mounted) {
                             Navigator.pop(ctx);
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(context.isUrdu ? 'جواب کامیابی سے بھیج دیا گیا!' : 'Reply sent successfully!'),
-                                backgroundColor: Colors.green,
-                              ),
+                            AppFeedback.showSuccess(
+                              context,
+                              context.isUrdu ? 'جواب کامیابی سے بھیج دیا گیا!' : 'Reply sent successfully!',
+                              subtitle: 'Saved locally • Syncing to cloud',
                             );
                           }
                         } catch (e) {
                           setDs(() => isSaving = false);
                           if (ctx.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-                            );
+                            AppFeedback.showError(context, 'Error: $e');
                           }
                         }
                       },
@@ -1436,10 +1452,20 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                               if (newEmail.isNotEmpty) 'email': newEmail,
                               if (newPw.isNotEmpty) 'password': newPw,
                               if (newPw.isNotEmpty) 'passwordHash': LocalStorageService.hashPassword(newPw),
-                              'lastUpdatedAt': FieldValue.serverTimestamp(),
+                              'lastUpdatedAt': DateTime.now().toIso8601String(),
                             };
+                            await LocalStorageService.enqueueSync({
+                              'type': 'save_user',
+                              'uid': user.uid,
+                              'branchId': widget.branchId,
+                              'data': userUpdates,
+                            });
+                            unawaited(SyncService().triggerUpload());
+
+                            final fsUserUpdates = Map<String, dynamic>.from(userUpdates)
+                              ..['lastUpdatedAt'] = FieldValue.serverTimestamp();
                             unawaited(
-                              FirebaseFirestore.instance.collection('users').doc(user.uid).set(userUpdates, SetOptions(merge: true))
+                              FirebaseFirestore.instance.collection('users').doc(user.uid).set(fsUserUpdates, SetOptions(merge: true))
                                   .timeout(const Duration(seconds: 4))
                                   .catchError((_) {})
                             );
@@ -1449,7 +1475,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                                   .doc(widget.branchId)
                                   .collection('users')
                                   .doc(user.uid)
-                                  .set(userUpdates, SetOptions(merge: true))
+                                  .set(fsUserUpdates, SetOptions(merge: true))
                                   .timeout(const Duration(seconds: 4))
                                   .catchError((_) {})
                             );
@@ -1644,9 +1670,19 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                           );
 
                           if (mounted) setState(() {});
-                          if (ctx.mounted) Navigator.pop(ctx);
+                          if (ctx.mounted) {
+                            Navigator.pop(ctx);
+                            AppFeedback.showSuccess(
+                              context,
+                              context.isUrdu ? 'استاد کو جواب کامیابی سے بھیج دیا گیا!' : 'Reply submitted successfully!',
+                              subtitle: 'Saved locally • Syncing to cloud',
+                            );
+                          }
                         } catch (e) {
-                          if (ctx.mounted) setDs(() => isSaving = false);
+                          if (ctx.mounted) {
+                            setDs(() => isSaving = false);
+                            AppFeedback.showError(context, 'Error submitting reply: $e');
+                          }
                         }
                       },
                 style: ElevatedButton.styleFrom(
@@ -1770,8 +1806,12 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 // Congratulatory Body Text
                 Text(
                   context.isUrdu
-                      ? 'طالب علم نے 2 سال کے اندر قرآن مجید کے حفظ کا ہدف شاندار انداز میں مکمل کر لیا ہے اور ادارہ کی جانب سے خصوصی اعزازی گفٹ اور نقد انعام (PKR) کا حقدار بن گیا ہے!'
-                      : 'The student has successfully completed the Quran Hifz Target within the record 2-year goal and has won the prestigious Honor Trophy & Cash Reward (PKR)!',
+                      ? (isNazraStudent
+                          ? 'طالب علم نے ناظرہ قرآن مجید کا ہدف شاندار انداز میں مکمل کر لیا ہے اور ادارہ کی جانب سے خصوصی اعزاز کا حقدار بن گیا ہے!'
+                          : 'طالب علم نے 2 سال کے اندر قرآن مجید کے حفظ کا ہدف شاندار انداز میں مکمل کر لیا ہے اور ادارہ کی جانب سے خصوصی اعزازی گفٹ اور نقد انعام (PKR) کا حقدار بن گیا ہے!')
+                      : (isNazraStudent
+                          ? 'The student has successfully completed the full Nazra Quran reading target and has achieved special honor!'
+                          : 'The student has successfully completed the Quran Hifz Target within the record 2-year goal and has won the prestigious Honor Trophy & Cash Reward (PKR)!'),
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 13.5,
@@ -1820,7 +1860,9 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                           const Icon(Icons.card_membership_rounded, color: Color(0xFF67E8F9), size: 28),
                           const SizedBox(height: 4),
                           Text(
-                            context.isUrdu ? 'حفظ سرٹیفکیٹ' : 'Hifz Certificate',
+                            isNazraStudent
+                                ? (context.isUrdu ? 'ناظرہ سرٹیفکیٹ' : 'Nazra Certificate')
+                                : (context.isUrdu ? 'حفظ سرٹیفکیٹ' : 'Hifz Certificate'),
                             style: TextStyle(fontSize: 11, color: Colors.cyan.shade200, fontWeight: FontWeight.bold),
                           ),
                         ],
@@ -1878,6 +1920,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
     // Disable all interactive actions for hifz_completed or archived students
     final studentStatus = (studentData['status']?.toString() ?? 'active').toLowerCase().trim();
     final bool isReadOnly = studentStatus == 'hifz_completed' ||
+        studentStatus == 'nazra_completed' ||
         studentStatus == 'archived' ||
         studentStatus == 'left' ||
         studentStatus == 'dropped' ||
@@ -1964,7 +2007,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       }
     }
 
-    final bool isMobile = MediaQuery.of(context).size.width < 600;
+    final bool isMobile = GBreakpoint.isMobile(context);
 
     return Container(
       width: double.infinity,
@@ -2080,6 +2123,16 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       _selectedDate = now;
     } else {
       _selectedDate = DateTime(_selectedYear, _selectedMonth, 1);
+    }
+  }
+
+  void _onMonthChanged() {
+    _updateSelectedDateForNewMonth();
+    _logsStream = MadrassaLocalStorage.streamLogsForMonthCached(widget.branchId, _selectedYear, _selectedMonth);
+    // Hive-first: only download from Firestore if this month's logs are completely absent from local storage
+    final cached = MadrassaLocalStorage.getLogsForMonthCached(widget.branchId, _selectedYear, _selectedMonth);
+    if (cached.isEmpty && widget.branchId.isNotEmpty) {
+      MadrassaLocalStorage.downloadLogsForMonth(widget.branchId, _selectedYear, _selectedMonth);
     }
   }
 
@@ -2251,7 +2304,9 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                       ),
                     ),
                     Text(
-                      context.t('Hifz Completed Successfully'),
+                      isNazraStudent
+                          ? (context.isUrdu ? 'ناظرہ قرآن کریم کامیابی سے مکمل' : 'Nazra Completed Successfully')
+                          : context.t('Hifz Completed Successfully'),
                       style: TextStyle(
                         color: Colors.white70,
                         fontSize: 13,
@@ -2273,8 +2328,12 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           const SizedBox(height: 20),
           Text(
             context.isUrdu
-                ? 'محترم والدین، ہم آپ کو اور آپ کے خاندان کو دلی مبارکباد پیش کرتے ہیں! اللہ تعالیٰ کے فضل و کرم سے، $studentName نے قرآن پاک کا حفظ (8,640 لائنیں) مکمل کر لیا ہے۔'
-                : 'Dear Parents, we offer our warmest congratulations to you and your family! By the grace of Almighty Allah, $studentName has completed the memorization of the Holy Quran Majeed (8,640 lines).',
+                ? (isNazraStudent
+                    ? 'محترم والدین، ہم آپ کو اور آپ کے خاندان کو دلی مبارکباد پیش کرتے ہیں! اللہ تعالیٰ کے فضل و کرم سے، $studentName نے ناظرہ قرآن پاک (8,640 لائنیں) مکمل کر لیا ہے۔'
+                    : 'محترم والدین، ہم آپ کو اور آپ کے خاندان کو دلی مبارکباد پیش کرتے ہیں! اللہ تعالیٰ کے فضل و کرم سے، $studentName نے قرآن پاک کا حفظ (8,640 لائنیں) مکمل کر لیا ہے۔')
+                : (isNazraStudent
+                    ? 'Dear Parents, we offer our warmest congratulations to you and your family! By the grace of Almighty Allah, $studentName has completed the full Nazra reading of the Holy Quran Majeed (8,640 lines).'
+                    : 'Dear Parents, we offer our warmest congratulations to you and your family! By the grace of Almighty Allah, $studentName has completed the memorization of the Holy Quran Majeed (8,640 lines).'),
             style: TextStyle(
               color: Colors.white,
               fontSize: 14,
@@ -2320,7 +2379,9 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      context.t('Started Hifz:'),
+                      isNazraStudent
+                          ? (context.isUrdu ? 'ناظرہ کا آغاز:' : 'Started Nazra:')
+                          : context.t('Started Hifz:'),
                       style: TextStyle(
                         color: Colors.white70,
                         fontSize: 12,
@@ -2343,7 +2404,9 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      context.t('Completed Hifz:'),
+                      isNazraStudent
+                          ? (context.isUrdu ? 'ناظرہ کی تکمیل:' : 'Completed Nazra:')
+                          : context.t('Completed Hifz:'),
                       style: TextStyle(
                         color: Colors.white70,
                         fontSize: 12,
@@ -2482,6 +2545,10 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         color = isDarkMode ? const Color(0xFF2DD4BF) : ParentReportCard.primaryColor;
         label = 'Hifz Completed';
         break;
+      case 'nazra_completed':
+        color = isDarkMode ? const Color(0xFF2DD4BF) : const Color(0xFF0D9488);
+        label = 'Nazra Completed';
+        break;
       default:
         color = Colors.grey;
         label = status.toUpperCase();
@@ -2574,8 +2641,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       );
     }
 
-    // ── Hifz completed: no rejoin action ──
-    if (status == 'hifz_completed') return const SizedBox();
+    // ── Hifz / Nazra completed: no rejoin action ──
+    if (status == 'hifz_completed' || status == 'nazra_completed') return const SizedBox();
 
     if (status != 'left') return const SizedBox();
 
@@ -2684,6 +2751,9 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             } else if (logStatus == 'hifz_completed') {
               dotColor = isDarkMode ? const Color(0xFF2DD4BF) : ParentReportCard.primaryColor;
               icon = Icons.stars_outlined;
+            } else if (logStatus == 'nazra_completed') {
+              dotColor = isDarkMode ? const Color(0xFF2DD4BF) : const Color(0xFF0D9488);
+              icon = Icons.menu_book_rounded;
             }
 
             String displayStatus = context.t(logStatus);
@@ -2782,7 +2852,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 } else {
                   _selectedMonth--;
                 }
-                _updateSelectedDateForNewMonth();
+                _onMonthChanged();
               });
             },
           ),
@@ -2811,7 +2881,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 } else {
                   _selectedMonth++;
                 }
-                _updateSelectedDateForNewMonth();
+                _onMonthChanged();
               });
             },
           ),
@@ -2828,6 +2898,13 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
     return '';
   }
 
+  static Map<String, dynamic>? _asStringMap(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is Map<String, dynamic>) return raw;
+    if (raw is Map) return Map<String, dynamic>.from(raw);
+    return null;
+  }
+
   Map<String, dynamic>? _logDocData(dynamic l) {
     if (l is Map) return Map<String, dynamic>.from(l);
     if (l is QueryDocumentSnapshot) return l.data() as Map<String, dynamic>?;
@@ -2842,7 +2919,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
     if (targetIndex == -1) return 0;
     
     final targetLog = _logDocData(sorted[targetIndex]);
-    final sLog = targetLog?[studentId] as Map<String, dynamic>?;
+    final sLog = _asStringMap(targetLog?[studentId]);
     if (sLog == null) return 0;
 
     if (sLog.containsKey('sabakLines') && sLog['sabakLines'] != null) {
@@ -3122,6 +3199,29 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             manzilText = context.isUrdu ? 'نہیں سنایا' : 'Nahi Sunaya';
           }
 
+          final int rukuParaVal = statusData['rukuPara'] is int ? statusData['rukuPara'] as int : (int.tryParse(statusData['rukuPara']?.toString() ?? '') ?? 0);
+          final rukuVal = statusData['ruku']?.toString();
+          final qaidaSabakVal = statusData['qaidaSabak']?.toString();
+          final isQaidaDone = studentData['qaidaCompleted'] == true ||
+              studentData['qaidaSabak'] == 'completed' ||
+              qaidaSabakVal == 'completed';
+
+          String rukuText = context.t('No test today');
+          if (rukuVal == 'nahi_sunaya') {
+            rukuText = context.isUrdu ? 'نہیں سنایا' : 'Nahi Sunaya';
+          } else if (rukuVal != null && rukuVal.isNotEmpty && rukuVal != '-') {
+            if (rukuParaVal > 0) {
+              rukuText = context.isUrdu ? 'پارہ $rukuParaVal • $rukuVal رُكوع' : 'Para $rukuParaVal • $rukuVal Ruku';
+            } else {
+              rukuText = context.isUrdu ? '$rukuVal رُكوع' : '$rukuVal Ruku';
+            }
+          }
+
+          String qaidaText = isQaidaDone
+              ? (context.isUrdu ? 'قاعدہ مکمل ✅' : 'Qaida Completed ✅')
+              : (qaidaSabakVal != null && qaidaSabakVal.isNotEmpty && qaidaSabakVal != '-'
+                  ? (context.isUrdu ? 'سبق نمبر $qaidaSabakVal / ۲۱' : 'Lesson $qaidaSabakVal / 21')
+                  : (context.isUrdu ? 'جاری' : 'In Progress'));
 
           content = Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -3165,7 +3265,9 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                             Row(
                               children: [
                                 Text(
-                                  '${context.t('Sabak')}: ',
+                                  isNazraStudent
+                                      ? (context.isUrdu ? 'سبق (ناظرہ): ' : 'Sabak (Nazra): ')
+                                      : '${context.t('Sabak')}: ',
                                   style: TextStyle(fontSize: 13, color: ParentReportCard.textMutedColor, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
                                 ),
                                 Expanded(
@@ -3178,38 +3280,73 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                                 ),
                               ],
                             ),
-                            const SizedBox(height: 6),
-                            // Sabki
-                            Row(
-                              children: [
-                                Text(
-                                  '${context.t('Sabki')}: ',
-                                  style: TextStyle(fontSize: 13, color: ParentReportCard.textMutedColor, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
-                                ),
-                                Expanded(
-                                  child: Text(
-                                    sabkiText,
-                                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: const Color(0xFFED6C02), fontFamily: context.isUrdu ? 'Noori' : null),
+                            if (!isNazraStudent) ...[
+                              const SizedBox(height: 6),
+                              // Sabki
+                              Row(
+                                children: [
+                                  Text(
+                                    '${context.t('Sabki')}: ',
+                                    style: TextStyle(fontSize: 13, color: ParentReportCard.textMutedColor, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
                                   ),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: 6),
-                            // Manzil
-                            Row(
-                              children: [
-                                Text(
-                                  '${context.t('Manzil')}: ',
-                                  style: TextStyle(fontSize: 13, color: ParentReportCard.textMutedColor, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
-                                ),
-                                Expanded(
-                                  child: Text(
-                                    manzilText,
-                                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: const Color(0xFF4C4DDC), fontFamily: context.isUrdu ? 'Noori' : null),
+                                  Expanded(
+                                    child: Text(
+                                      sabkiText,
+                                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: const Color(0xFFED6C02), fontFamily: context.isUrdu ? 'Noori' : null),
+                                    ),
                                   ),
-                                ),
-                              ],
-                            ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              // Manzil
+                              Row(
+                                children: [
+                                  Text(
+                                    '${context.t('Manzil')}: ',
+                                    style: TextStyle(fontSize: 13, color: ParentReportCard.textMutedColor, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
+                                  ),
+                                  Expanded(
+                                    child: Text(
+                                      manzilText,
+                                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: const Color(0xFF4C4DDC), fontFamily: context.isUrdu ? 'Noori' : null),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ] else ...[
+                              const SizedBox(height: 6),
+                              // Ruku (replaces Sabki for Nazra)
+                              Row(
+                                children: [
+                                  Text(
+                                    context.isUrdu ? 'رُكوع: ' : 'Ruku (رُكوع): ',
+                                    style: TextStyle(fontSize: 13, color: ParentReportCard.textMutedColor, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
+                                  ),
+                                  Expanded(
+                                    child: Text(
+                                      rukuText,
+                                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: const Color(0xFFED6C02), fontFamily: context.isUrdu ? 'Noori' : null),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+                              // Qaida Sabak (replaces Manzil for Nazra)
+                              Row(
+                                children: [
+                                  Text(
+                                    context.isUrdu ? 'قاعدہ سبق: ' : 'Qaida Sabak: ',
+                                    style: TextStyle(fontSize: 13, color: ParentReportCard.textMutedColor, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
+                                  ),
+                                  Expanded(
+                                    child: Text(
+                                      qaidaText,
+                                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: isQaidaDone ? Colors.green : const Color(0xFF4C4DDC), fontFamily: context.isUrdu ? 'Noori' : null),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
                             const SizedBox(height: 10),
                             const Divider(),
                             const SizedBox(height: 6),
@@ -3798,7 +3935,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
     int maxLogCurrentLines = 0;
     for (final doc in allLogs) {
       final rawData = _logDocData(doc);
-      final studentLog = rawData?[widget.studentId] as Map<String, dynamic>?;
+      final studentLog = _asStringMap(rawData?[widget.studentId]);
       if (studentLog != null) {
         final sLines = (studentLog['sabakLines'] as num?)?.toInt() ?? int.tryParse(studentLog['sabakLines']?.toString() ?? '');
         if (sLines != null && sLines > 0) {
@@ -3843,7 +3980,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         final date = DateTime.tryParse(_logDocId(doc));
         if (date == null) continue;
         final rawData = _logDocData(doc);
-        final studentLog = rawData?[widget.studentId] as Map<String, dynamic>?;
+        final studentLog = _asStringMap(rawData?[widget.studentId]);
         if (studentLog != null) {
           final lines = (studentLog['currentLines'] as num?)?.toInt();
           if (lines != null && lines > 0) {
@@ -4199,6 +4336,22 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   spacing: 6,
                   runSpacing: 4,
                   children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: isNazraStudent ? const Color(0xFF0D9488).withValues(alpha: 0.35) : Colors.white.withValues(alpha: 0.2),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: isNazraStudent ? const Color(0xFF2DD4BF).withValues(alpha: 0.5) : Colors.white.withValues(alpha: 0.3)),
+                      ),
+                      child: Text(
+                        isNazraStudent ? (context.isUrdu ? '📖 ناظرہ' : '📖 Nazra') : (context.isUrdu ? '🕋 حفظ' : '🕋 Hifz'),
+                        style: const TextStyle(
+                          fontSize: 11,
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ),
                     if (rollNo.isNotEmpty)
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
@@ -4356,8 +4509,12 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 const SizedBox(height: 4),
                 Text(
                   context.isUrdu
-                      ? '$studentName حفظ مکمل ہونے کے قریب ہیں — صرف $remaining لائنیں باقی ہیں!'
-                      : '$studentName is nearing Hifz completion — only $remaining lines remaining!',
+                      ? (isNazraStudent
+                          ? '$studentName ناظرہ مکمل ہونے کے قریب ہیں — صرف $remaining لائنیں باقی ہیں!'
+                          : '$studentName حفظ مکمل ہونے کے قریب ہیں — صرف $remaining لائنیں باقی ہیں!')
+                      : (isNazraStudent
+                          ? '$studentName is nearing Nazra completion — only $remaining lines remaining!'
+                          : '$studentName is nearing Hifz completion — only $remaining lines remaining!'),
                   style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 13, fontWeight: FontWeight.w500, fontFamily: context.isUrdu ? 'Noori' : null),
                 ),
               ],
@@ -4490,7 +4647,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       onTap: () => _changeTab(1),
     );
 
-    final bool isMobile = MediaQuery.of(context).size.width < 600;
+    final bool isMobile = GBreakpoint.isMobile(context);
 
     if (forceSquare || isMobile) {
       return Column(
@@ -4498,7 +4655,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           Row(
             children: [
               Expanded(child: attCard),
-              Expanded(child: uniformCard),
+              if (!isNazraStudent) Expanded(child: uniformCard),
             ],
           ),
           const SizedBox(height: 8),
@@ -4514,7 +4671,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       return Row(
         children: [
           Expanded(child: attCard),
-          Expanded(child: uniformCard),
+          if (!isNazraStudent) Expanded(child: uniformCard),
           Expanded(child: replyCard),
           Expanded(child: ptmCard),
         ],
@@ -4931,7 +5088,9 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    context.isUrdu ? 'حفظ اور سبق کی پیشرفت' : 'Hifz & Lesson Progress',
+                    isNazraStudent
+                        ? (context.isUrdu ? 'ناظرہ اور سبق کی پیشرفت' : 'Nazra & Lesson Progress')
+                        : (context.isUrdu ? 'حفظ اور سبق کی پیشرفت' : 'Hifz & Lesson Progress'),
                     style: TextStyle(
                       fontSize: 12.5,
                       color: textMuted,
@@ -5030,8 +5189,12 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   children: [
                     Text(
                       context.isUrdu
-                          ? 'کل محفوظ شدہ: $currentTotalLines / 8640 لائنیں'
-                          : 'Total Memorized: $currentTotalLines / 8640 lines',
+                          ? (isNazraStudent
+                              ? 'کل ناظرہ شدہ: $currentTotalLines / 8640 لائنیں'
+                              : 'کل محفوظ شدہ: $currentTotalLines / 8640 لائنیں')
+                          : (isNazraStudent
+                              ? 'Total Nazra Lines: $currentTotalLines / 8640 lines'
+                              : 'Total Memorized: $currentTotalLines / 8640 lines'),
                       style: TextStyle(
                         fontWeight: FontWeight.w800,
                         fontSize: 14.5,
@@ -5066,7 +5229,9 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                           const Icon(Icons.trending_up_rounded, size: 14, color: ParentReportCard.accentColor),
                           const SizedBox(width: 4),
                           Text(
-                            context.isUrdu ? '+$monthGain لائنیں رواں ماہ' : '+$monthGain lines gained this month',
+                            context.isUrdu
+                                ? (isNazraStudent ? '+$monthGain لائنیں رواں ماہ ناظرہ' : '+$monthGain لائنیں رواں ماہ')
+                                : (isNazraStudent ? '+$monthGain Nazra lines read this month' : '+$monthGain lines gained this month'),
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.bold,
@@ -5190,7 +5355,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
     // Check if PTM joined or claimed in selected date or anywhere in allLogs for the month
     final monthPtmJoined = allLogs.any((l) {
       final map = _logDocData(l);
-      final studentLog = map?[widget.studentId] as Map<String, dynamic>?;
+      final studentLog = _asStringMap(map?[widget.studentId]);
       if (studentLog == null) return false;
       final p = studentLog['ptm'];
       final s = studentLog['ptmRequestStatus']?.toString().toLowerCase();
@@ -5280,7 +5445,9 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              context.isUrdu ? 'اس مہینے کی پیش رفت: +$monthGain لائنیں حفظ کیں' : 'Progress this month: +$monthGain lines memorized',
+              context.isUrdu
+                  ? (isNazraStudent ? 'اس مہینے کی پیش رفت: +$monthGain لائنیں ناظرہ پڑھیں' : 'اس مہینے کی پیش رفت: +$monthGain لائنیں حفظ کیں')
+                  : (isNazraStudent ? 'Progress this month: +$monthGain lines read' : 'Progress this month: +$monthGain lines memorized'),
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: ParentReportCard.primaryColor, fontFamily: context.isUrdu ? 'Noori' : null),
             ),
           ),
@@ -5567,7 +5734,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     clickableQuranCard,
-                    if (config.enableFees) ...[
+                    if (config.enableFees && !isNazraStudent) ...[
                       const SizedBox(height: 16),
                       clickableFeeSummary,
                     ],
@@ -5628,7 +5795,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     clickableQuranCard,
-                    if (config.enableFees) ...[
+                    if (config.enableFees && !isNazraStudent) ...[
                       const SizedBox(height: 16),
                       clickableFeeSummary,
                     ],
@@ -5655,7 +5822,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           clickableQuranCard,
           const SizedBox(height: 16),
           embeddedCalendarCard,
-          if (config.enableFees) ...[
+          if (config.enableFees && !isNazraStudent) ...[
             const SizedBox(height: 16),
             clickableFeeSummary,
           ],
@@ -5741,7 +5908,9 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      context.isUrdu ? '2 سالہ حفظ اونر گفٹ ہدف (Gift Goal)' : '2-Year Hifz Honor Gift & Goal',
+                      isNazraStudent
+                          ? (context.isUrdu ? 'ناظرہ تکمیل ہدف (Goal)' : 'Nazra Completion Goal')
+                          : (context.isUrdu ? '2 سالہ حفظ اونر گفٹ ہدف (Gift Goal)' : '2-Year Hifz Honor Gift & Goal'),
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
@@ -5751,9 +5920,13 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      context.isUrdu 
-                          ? 'شمولیت کے 2 سال کے اندر حفظ مکمل کرنے والے طلبا کے لیے خاص انعام!' 
-                          : 'Special prize & honor gift for completing Hifz within 2 years of joining!',
+                      isNazraStudent
+                          ? (context.isUrdu
+                              ? 'قرآن پاک کا مکمل ناظرہ کرنے والے طلبا کے لیے خصوصی ہدف اور رہنمائی!'
+                              : 'Target and tracking for students completing full Nazra Quran reading!')
+                          : (context.isUrdu 
+                              ? 'شمولیت کے 2 سال کے اندر حفظ مکمل کرنے والے طلبا کے لیے خاص انعام!' 
+                              : 'Special prize & honor gift for completing Hifz within 2 years of joining!'),
                       style: TextStyle(fontSize: 11, color: Colors.white70, fontFamily: context.isUrdu ? 'Noori' : null),
                     ),
                   ],
@@ -5871,10 +6044,16 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                       children: [
                         Text(
                           isCompletedHifz
-                              ? (context.isUrdu ? '🎉 مبارک ہو! 2 سال کے اندر حفظ مکمل ہو گیا!' : '🎉 Congratulations! Hifz Completed within 2 Years!')
+                              ? (isNazraStudent
+                                  ? (context.isUrdu ? '🎉 مبارک ہو! ناظرہ قرآن مکمل ہو گیا!' : '🎉 Congratulations! Nazra Completed!')
+                                  : (context.isUrdu ? '🎉 مبارک ہو! 2 سال کے اندر حفظ مکمل ہو گیا!' : '🎉 Congratulations! Hifz Completed within 2 Years!'))
                               : (isOnTrackForGift
-                                  ? (context.isUrdu ? '🏆 انعام کا ہدف حاصل کرنے کے راستے پر ہیں!' : '🏆 On Track to Win the 2-Year Honor Gift!')
-                                  : (context.isUrdu ? '🎯 گفٹ ہدف حاصل کرنے کے لیے رفتار بڑھائیں' : '🎯 Target Needed to Win the Honor Gift')),
+                                  ? (isNazraStudent
+                                      ? (context.isUrdu ? '🏆 تکمیل کے راستے پر ہیں!' : '🏆 On Track to Complete Nazra!')
+                                      : (context.isUrdu ? '🏆 انعام کا ہدف حاصل کرنے کے راستے پر ہیں!' : '🏆 On Track to Win the 2-Year Honor Gift!'))
+                                  : (isNazraStudent
+                                      ? (context.isUrdu ? '🎯 ناظرہ ہدف حاصل کرنے کے لیے رفتار بڑھائیں' : '🎯 Target Needed to Complete Nazra')
+                                      : (context.isUrdu ? '🎯 گفٹ ہدف حاصل کرنے کے لیے رفتار بڑھائیں' : '🎯 Target Needed to Win the Honor Gift'))),
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.bold,
@@ -5885,14 +6064,20 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                         const SizedBox(height: 2),
                         Text(
                           isCompletedHifz
-                              ? (context.isUrdu ? 'طالب علم شاندار نقد انعام (PKR) کا حقدار ہے۔ مبارکبادی سرٹیفکیٹ دیکھنے کے لیے یہاں دبائیں۔' : 'Student has won the Grand Honor Prize & Cash Award (PKR)! Tap to view celebration.')
+                              ? (isNazraStudent
+                                  ? (context.isUrdu ? 'طالب علم نے ناظرہ مکمل کر لیا ہے۔ مبارکبادی سرٹیفکیٹ دیکھنے کے لیے یہاں دبائیں۔' : 'Student has completed full Nazra! Tap to view celebration.')
+                                  : (context.isUrdu ? 'طالب علم شاندار نقد انعام (PKR) کا حقدار ہے۔ مبارکبادی سرٹیفکیٹ دیکھنے کے لیے یہاں دبائیں۔' : 'Student has won the Grand Honor Prize & Cash Award (PKR)! Tap to view celebration.'))
                               : (isOnTrackForGift
                                   ? (context.isUrdu 
                                       ? 'موجودہ رفتار (${overallPace.toStringAsFixed(1)} لائنیں/دن) مطلوبہ رفتار سے بہتر ہے۔ شاندار! تفصیلات کے لیے دبائیں۔' 
                                       : 'Current pace (${overallPace.toStringAsFixed(1)} lines/day) meets required target (${requiredDailyForGift.toStringAsFixed(1)} lines/day)! Tap for details.')
-                                  : (context.isUrdu
-                                      ? 'انعام جیتنے کے لیے روزانہ ${requiredDailyForGift.toStringAsFixed(1)} لائنیں (${requiredWeeklyForGift.toStringAsFixed(0)} لائنیں/ہفتہ) حفظ کرنا لازمی ہے۔'
-                                      : 'Need ${requiredDailyForGift.toStringAsFixed(1)} lines/day (${requiredWeeklyForGift.toStringAsFixed(0)} lines/week) over the next $daysLeftForGiftGoal days to win the gift!')),
+                                  : (isNazraStudent
+                                      ? (context.isUrdu
+                                          ? 'ناظرہ مکمل کرنے کے لیے روزانہ ${requiredDailyForGift.toStringAsFixed(1)} لائنیں (${requiredWeeklyForGift.toStringAsFixed(0)} لائنیں/ہفتہ) پڑھنا لازمی ہے۔'
+                                          : 'Need ${requiredDailyForGift.toStringAsFixed(1)} lines/day (${requiredWeeklyForGift.toStringAsFixed(0)} lines/week) over the next $daysLeftForGiftGoal days to complete Nazra!')
+                                      : (context.isUrdu
+                                          ? 'انعام جیتنے کے لیے روزانہ ${requiredDailyForGift.toStringAsFixed(1)} لائنیں (${requiredWeeklyForGift.toStringAsFixed(0)} لائنیں/ہفتہ) حفظ کرنا لازمی ہے۔'
+                                          : 'Need ${requiredDailyForGift.toStringAsFixed(1)} lines/day (${requiredWeeklyForGift.toStringAsFixed(0)} lines/week) over the next $daysLeftForGiftGoal days to win the gift!'))),
                           style: TextStyle(
                             fontSize: 11,
                             color: Colors.grey.shade800,
@@ -5953,7 +6138,9 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       child: Column(
         children: [
           Text(
-            context.t('Overall Quran Majeed Memorization Progress'),
+            isNazraStudent
+                ? (context.isUrdu ? 'قرآن مجید ناظرہ کی مجموعی پیشرفت' : 'Overall Quran Majeed Nazra Progress')
+                : context.t('Overall Quran Majeed Memorization Progress'),
             style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500, fontFamily: context.isUrdu ? 'Noori' : null),
           ),
           const SizedBox(height: 20),
@@ -6004,7 +6191,9 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           const SizedBox(width: 12),
           Expanded(
             child: Text(
-              context.isUrdu ? 'اس مہینے کی پیش رفت: +$monthGain لائنیں حفظ کیں' : 'Progress this month: +$monthGain lines memorized',
+              context.isUrdu
+                  ? (isNazraStudent ? 'اس مہینے کی پیش رفت: +$monthGain لائنیں ناظرہ پڑھیں' : 'اس مہینے کی پیش رفت: +$monthGain لائنیں حفظ کیں')
+                  : (isNazraStudent ? 'Progress this month: +$monthGain lines read' : 'Progress this month: +$monthGain lines memorized'),
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: ParentReportCard.primaryColor, fontFamily: context.isUrdu ? 'Noori' : null),
             ),
           ),
@@ -6017,7 +6206,9 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            context.t('Quran Majeed Hifz Progress & Gift Goal'),
+            isNazraStudent
+                ? (context.isUrdu ? 'قرآن مجید ناظرہ کی پیشرفت اور ہدف' : 'Quran Majeed Nazra Progress & Reading Goal')
+                : context.t('Quran Majeed Hifz Progress & Gift Goal'),
             style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: textPrimary, fontFamily: context.isUrdu ? 'Noori' : null),
           ),
           const SizedBox(height: 24),
@@ -6518,6 +6709,33 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           const SizedBox(height: 16),
           Divider(color: dividerColor),
           const SizedBox(height: 12),
+          _buildDetailRow(
+            Icons.menu_book_rounded,
+            context.isUrdu ? 'پروگرام (Program)' : 'Program',
+            isNazraStudent
+                ? (context.isUrdu ? '📖 ناظرہ (Nazra)' : '📖 Nazra')
+                : (context.isUrdu ? '🕋 حفظ (Hifz)' : '🕋 Hifz'),
+          ),
+          if (studentData['session'] != null)
+            _buildDetailRow(
+              Icons.schedule_rounded,
+              context.isUrdu ? 'شفٹ / سیشن' : 'Shift / Session',
+              studentData['session'].toString() == 'morning'
+                  ? (context.isUrdu ? '☀️ صبح (Morning)' : '☀️ Morning')
+                  : (studentData['session'].toString() == 'evening'
+                      ? (context.isUrdu ? '🌅 شام (Evening)' : '🌅 Evening')
+                      : (studentData['session'].toString() == 'night'
+                          ? (context.isUrdu ? '🌙 رات (Night)' : '🌙 Night')
+                          : studentData['session'].toString())),
+            ),
+          if (studentData['gender'] != null)
+            _buildDetailRow(
+              Icons.person_outline_rounded,
+              context.isUrdu ? 'جنس (Gender)' : 'Gender',
+              studentData['gender'].toString().toLowerCase() == 'female'
+                  ? (context.isUrdu ? '👧 لڑکی (Girl)' : '👧 Girl')
+                  : (context.isUrdu ? '👦 لڑکا (Boy)' : '👦 Boy'),
+            ),
           _buildDetailRow(Icons.credit_card, context.t('Student CNIC'), studentData['studentCnic'] ?? context.t('Not Provided')),
           _buildDetailRow(
             Icons.calendar_today,
@@ -6528,7 +6746,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                     : DateFormat('dd MMMM yyyy').format(_parseDateTime(studentData['joinDate'])))
                 : context.t('Not Provided'),
           ),
-          if (studentData['hasPrevMadrassa'] == true) ...[
+          if (!isNazraStudent && studentData['hasPrevMadrassa'] == true) ...[
             _buildDetailRow(Icons.school, context.t('Prev Madrassa'), studentData['prevMadrassaName'] ?? context.t('Not Provided')),
             _buildDetailRow(Icons.auto_stories, context.t('Prev Hifz Lines'), context.isUrdu ? '${studentData['prevHifzLines'] ?? 0} لائنیں' : '${studentData['prevHifzLines'] ?? 0} lines'),
           ],
@@ -6956,7 +7174,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       int monthSabakSum = 0;
       for (final doc in monthLogsFiltered) {
         final logMap = _logDocData(doc);
-        final sLog = logMap?[widget.studentId] as Map<String, dynamic>?;
+        final sLog = _asStringMap(logMap?[widget.studentId]);
         if (sLog != null) {
           final sLines = (sLog['sabakLines'] as num?)?.toInt() ?? int.tryParse(sLog['sabakLines']?.toString() ?? '');
           if (sLines != null && sLines > 0) {
@@ -7651,18 +7869,27 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            buildBackBar(context.t('Quran Majeed Hifz Progress')),
+            buildBackBar(isNazraStudent
+                ? (context.isUrdu ? 'قرآن مجید ناظرہ کی پیشرفت' : 'Quran Majeed Nazra Progress')
+                : context.t('Quran Majeed Hifz Progress')),
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
                   _buildTabFilterChip('all', context.isUrdu ? 'تمام پیش رفت' : 'Overall Progress', _quranProgressFilter == 'all', (val) => setState(() => _quranProgressFilter = val)),
                   const SizedBox(width: 8),
-                  _buildTabFilterChip('sabak', context.isUrdu ? 'سبق ریکارڈز' : 'Sabak Progress', _quranProgressFilter == 'sabak', (val) => setState(() => _quranProgressFilter = val), activeColor: ParentReportCard.primaryColor),
-                  const SizedBox(width: 8),
-                  _buildTabFilterChip('sabki', context.isUrdu ? 'سبقی دہرائی' : 'Sabki Revision', _quranProgressFilter == 'sabki', (val) => setState(() => _quranProgressFilter = val), activeColor: const Color(0xFFED6C02)),
-                  const SizedBox(width: 8),
-                  _buildTabFilterChip('manzil', context.isUrdu ? 'منزل دہرائی' : 'Manzil Revision', _quranProgressFilter == 'manzil', (val) => setState(() => _quranProgressFilter = val), activeColor: const Color(0xFF4C4DDC)),
+                  _buildTabFilterChip('sabak', isNazraStudent ? (context.isUrdu ? 'سبق (ناظرہ)' : 'Sabak (Nazra)') : (context.isUrdu ? 'سبق ریکارڈز' : 'Sabak Progress'), _quranProgressFilter == 'sabak', (val) => setState(() => _quranProgressFilter = val), activeColor: ParentReportCard.primaryColor),
+                  if (!isNazraStudent) ...[
+                    const SizedBox(width: 8),
+                    _buildTabFilterChip('sabki', context.isUrdu ? 'سبقی دہرائی' : 'Sabki Revision', _quranProgressFilter == 'sabki', (val) => setState(() => _quranProgressFilter = val), activeColor: const Color(0xFFED6C02)),
+                    const SizedBox(width: 8),
+                    _buildTabFilterChip('manzil', context.isUrdu ? 'منزل دہرائی' : 'Manzil Revision', _quranProgressFilter == 'manzil', (val) => setState(() => _quranProgressFilter = val), activeColor: const Color(0xFF4C4DDC)),
+                  ] else ...[
+                    const SizedBox(width: 8),
+                    _buildTabFilterChip('ruku', context.isUrdu ? 'رُكوع' : 'Ruku', _quranProgressFilter == 'ruku', (val) => setState(() => _quranProgressFilter = val), activeColor: const Color(0xFFED6C02)),
+                    const SizedBox(width: 8),
+                    _buildTabFilterChip('qaida', context.isUrdu ? 'قاعدہ سبق' : 'Qaida Sabak', _quranProgressFilter == 'qaida', (val) => setState(() => _quranProgressFilter = val), activeColor: const Color(0xFF4C4DDC)),
+                  ],
                 ],
               ),
             ),
@@ -7696,12 +7923,14 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           ],
         );
       case 3:
-        if (!displayConfig.enableFees) {
+        if (!displayConfig.enableFees || isNazraStudent) {
           return Center(
             child: Padding(
               padding: const EdgeInsets.all(32.0),
               child: Text(
-                context.isUrdu ? 'اس برانچ کے لیے فیس کا نظام فعال نہیں ہے۔' : 'Fee system is disabled for this branch.',
+                isNazraStudent
+                    ? (context.isUrdu ? 'ناظرہ کے طلبا کے لیے کوئی فیس لاگو نہیں ہے۔' : 'Fee is not applicable for Nazra students.')
+                    : (context.isUrdu ? 'اس برانچ کے لیے فیس کا نظام فعال نہیں ہے۔' : 'Fee system is disabled for this branch.'),
                 style: TextStyle(fontSize: 14, color: textMuted, fontWeight: FontWeight.bold),
               ),
             ),
@@ -8143,7 +8372,9 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         return StreamBuilder<MadrassaConfig>(
           stream: _configStream,
           builder: (context, configSnap) {
-            if (configSnap.hasError) return _ErrorView('Config Error: ${configSnap.error}');
+            if (configSnap.hasError) {
+              debugPrint('[ParentReportCard] Config error handled gracefully: ${configSnap.error}');
+            }
             
             return StreamBuilder<List<Map<String, dynamic>>>(
               stream: _holidaysStream,
@@ -8151,7 +8382,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 if (holidaySnap.hasError) return _ErrorView('Holidays Error: ${holidaySnap.error}');
 
                 if (logSnap.connectionState == ConnectionState.waiting ||
-                    configSnap.connectionState == ConnectionState.waiting ||
+                    (configSnap.connectionState == ConnectionState.waiting && !configSnap.hasData && !configSnap.hasError) ||
                     holidaySnap.connectionState == ConnectionState.waiting) {
                   return const ColoredBox(
                     color: ParentReportCard.surfaceColor,
@@ -8159,7 +8390,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   );
                 }
 
-                if (!logSnap.hasData || !configSnap.hasData || !holidaySnap.hasData) {
+                if (!logSnap.hasData || (!configSnap.hasData && !configSnap.hasError) || !holidaySnap.hasData) {
                   return const _ErrorView('Waiting for data...');
                 }
 

@@ -14,11 +14,8 @@ import '../providers/branches_providers.dart';
 import '../theme/app_theme.dart';
 import '../theme/role_theme_provider.dart';
 
-import 'dispensary/dispensar/inventory.dart';
-import 'office/finance_page.dart';
 import 'branches_register.dart';
 import 'dispensary/patient_detail_screen.dart';
-import 'settings/biometric_device_manager_page.dart';
 import '../services/local_storage_service.dart';
 import '../services/branch_record_service.dart';
 
@@ -251,13 +248,14 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
             continue;
           }
           if (_selectedCampFilter != 'all') {
-            final serial = (val['serial'] ?? val['id'] ?? '').toString().toUpperCase();
-            final camp = (val['campId'] ?? val['dispensaryId'] ?? val['dispensaryTag'] ?? '').toString().toLowerCase();
-            if (_selectedCampFilter == 'haji') {
-              if (!serial.contains('-HAJI') && !serial.contains('HAJI-') && !camp.contains('haji')) continue;
-            } else if (_selectedCampFilter == 'saddar') {
-              if (!serial.contains('-SADD') && !serial.contains('SADD-') && !camp.contains('saddar') && !camp.contains('kapaya')) continue;
-            }
+            final matches = CampSessionService.matchesCamp(
+              selectedCamp: _selectedCampFilter,
+              dispensaryId: val['dispensaryId']?.toString(),
+              campId: val['campId']?.toString(),
+              dispensaryTag: val['dispensaryTag']?.toString(),
+              serial: (val['serial'] ?? val['id'])?.toString(),
+            );
+            if (!matches) continue;
           }
 
           final dk = (val['dateKey'] ?? val['date'] ?? '').toString().trim();
@@ -767,50 +765,6 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
           ),
-          const SizedBox(width: 8),
-
-          // + New Branch Button
-          if (!_isSupervisorUser && widget.showRegisterButton) ...[
-            OutlinedButton.icon(
-              onPressed: () => Navigator.push(context, MaterialPageRoute(builder: (_) => BranchesRegister())),
-              icon: Icon(Icons.add_business_rounded, size: 14, color: t.accent),
-              label: Text("New Branch", style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: t.accent)),
-              style: OutlinedButton.styleFrom(
-                backgroundColor: t.accent.withValues(alpha: 0.08),
-                side: BorderSide(color: t.accent.withValues(alpha: 0.25)),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-            ),
-            const SizedBox(width: 8),
-          ],
-
-          // + New Token Button
-          if (!_isSupervisorUser) ...[
-            ElevatedButton.icon(
-              onPressed: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => PatientDetailScreen(
-                    patientId: '',
-                    isOnline: true,
-                    localBox: Hive.box('local_patients'),
-                    branchId: _selectedBranchId ?? 'karachi',
-                    doctorId: FirebaseAuth.instance.currentUser?.uid ?? 'unknown',
-                    isAdmin: true,
-                  ),
-                ),
-              ),
-              icon: const Icon(Icons.add_rounded, size: 15, color: Colors.white),
-              label: const Text("New Token", style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Colors.white)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF6366F1),
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-            ),
-          ],
         ],
       ),
     );
@@ -842,6 +796,19 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
     final dispensed = data['disp_dispensed'] ?? 0;
     final pendingDisp = data['disp_pending'] ?? 0;
 
+    final dateRange = ref.watch(branchDateRangeProvider);
+    final now = DateTime.now();
+    final isSingleDayToday = dateRange.start == null || (
+      dateRange.start!.year == now.year &&
+      dateRange.start!.month == now.month &&
+      dateRange.start!.day == now.day &&
+      (dateRange.end == null || (
+        dateRange.end!.year == now.year &&
+        dateRange.end!.month == now.month &&
+        dateRange.end!.day == now.day
+      ))
+    );
+
     return ValueListenableBuilder<String?>(
       valueListenable: CampSessionService.activeCampNotifier,
       builder: (context, activeCamp, _) {
@@ -849,7 +816,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
         final records = BranchRecordService.getBranchRecords(
           branchId,
           campId: effCamp,
-          todayCount: totalTokens,
+          todayCount: isSingleDayToday ? totalTokens : null,
         );
         final peakCount = records.peakRecord.count;
         final peakDate = records.peakRecord.dateFormatted.isNotEmpty
@@ -881,7 +848,6 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                     isPositiveTrend: true,
                     badgeColor: const Color(0xFF6366F1),
                     badgeIcon: Icons.people_alt_rounded,
-                    symbolType: MetricSymbolType.tokens,
                     subItems: [
                       {'label': 'Zakat (Rs 20)', 'val': NumberFormat('#,###').format(zakatTokens)},
                       {'label': 'Non-Zakat (Rs 100)', 'val': NumberFormat('#,###').format(nonZakatTokens)},
@@ -899,7 +865,6 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                     isPositiveTrend: true,
                     badgeColor: const Color(0xFF0D9488),
                     badgeIcon: Icons.account_balance_wallet_rounded,
-                    symbolType: MetricSymbolType.revenue,
                     subItems: [
                       {'label': 'Zakat Rec.', 'val': 'Rs $fmtZakat'},
                       {'label': 'Non-Zakat Rec.', 'val': 'Rs $fmtNonZakat'},
@@ -917,7 +882,6 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                     isPositiveTrend: true,
                     badgeColor: const Color(0xFF10B981),
                     badgeIcon: Icons.assignment_rounded,
-                    symbolType: MetricSymbolType.prescriptions,
                     subItems: [
                       {'label': 'Waiting', 'val': NumberFormat('#,###').format(waitingDoctor)},
                       {'label': 'Prescribed', 'val': NumberFormat('#,###').format(prescribed)},
@@ -934,7 +898,6 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                     isPositiveTrend: true,
                     badgeColor: const Color(0xFFF59E0B),
                     badgeIcon: Icons.medication_liquid_rounded,
-                    symbolType: MetricSymbolType.dispensary,
                     subItems: [
                       {'label': 'Pending', 'val': NumberFormat('#,###').format(pendingDisp)},
                       {'label': 'Dispensed', 'val': NumberFormat('#,###').format(dispensed)},
@@ -951,7 +914,6 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                     isPositiveTrend: true,
                     badgeColor: const Color(0xFFD97706),
                     badgeIcon: Icons.emoji_events_rounded,
-                    symbolType: MetricSymbolType.peak,
                     subItems: [
                       {'label': 'Record Date', 'val': peakDate},
                       {'label': 'Today Dealt', 'val': NumberFormat('#,###').format(totalTokens)},
@@ -967,55 +929,6 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
     );
   }
 
-  Widget _buildMetricAbstractBadge(MetricSymbolType type, Color color, RoleThemeData t) {
-    IconData icon;
-    switch (type) {
-      case MetricSymbolType.tokens:
-        icon = Icons.confirmation_number_rounded;
-        break;
-      case MetricSymbolType.revenue:
-        icon = Icons.account_balance_wallet_rounded;
-        break;
-      case MetricSymbolType.prescriptions:
-        icon = Icons.receipt_long_rounded;
-        break;
-      case MetricSymbolType.dispensary:
-        icon = Icons.medication_rounded;
-        break;
-      case MetricSymbolType.peak:
-        icon = Icons.emoji_events_rounded;
-        break;
-    }
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4.5),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            color.withValues(alpha: 0.15),
-            color.withValues(alpha: 0.05),
-          ],
-        ),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: color.withValues(alpha: 0.28), width: 0.8),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          Icon(icon, size: 13, color: color),
-          const SizedBox(width: 5),
-          CustomPaint(
-            size: const Size(20, 14),
-            painter: _AbstractGraphicPainter(type: type, color: color),
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildKpiCard({
     required String title,
     required String mainCount,
@@ -1023,7 +936,6 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
     required bool isPositiveTrend,
     required Color badgeColor,
     required IconData badgeIcon,
-    required MetricSymbolType symbolType,
     required List<Map<String, String>> subItems,
     required RoleThemeData t,
   }) {
@@ -1130,8 +1042,6 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                   ],
                 ),
               ),
-              const SizedBox(width: 8),
-              _buildMetricAbstractBadge(symbolType, badgeColor, t),
             ],
           ),
           const SizedBox(height: 14),
@@ -1184,30 +1094,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
   // ───────────────────────────────────────────────────────────────────────────
 
   Widget _buildMiddleSection(BuildContext context, RoleThemeData t, String branchId) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final isStacked = constraints.maxWidth < 950;
-
-        if (isStacked) {
-          return Column(
-            children: [
-              _buildPerformanceChartCard(context, t, branchId),
-              const SizedBox(height: 16),
-              _buildQuickActionsCard(context, t, branchId),
-            ],
-          );
-        }
-
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(flex: 6, child: _buildPerformanceChartCard(context, t, branchId)),
-            const SizedBox(width: 16),
-            Expanded(flex: 4, child: _buildQuickActionsCard(context, t, branchId)),
-          ],
-        );
-      },
-    );
+    return _buildPerformanceChartCard(context, t, branchId);
   }
 
   Widget _buildPerformanceChartCard(BuildContext context, RoleThemeData t, String branchId) {
@@ -1324,143 +1211,6 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
     );
   }
 
-  Widget _buildQuickActionsCard(BuildContext context, RoleThemeData t, String branchId) {
-    final isDark = t.isDarkCanvas || UserThemeService.isDarkMode();
-
-    return Container(
-      padding: const EdgeInsets.all(22),
-      decoration: BoxDecoration(
-        color: t.bgCard,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: t.bgRule, width: 1),
-        boxShadow: [
-          BoxShadow(
-            color: isDark ? Colors.black.withValues(alpha: 0.3) : Colors.black.withValues(alpha: 0.02),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            "Quick Actions",
-            style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: t.textPrimary),
-          ),
-          const SizedBox(height: 16),
-          Row(
-            children: [
-              Expanded(
-                child: _buildActionTile(
-                  icon: Icons.inventory_2_rounded,
-                  title: "Inventory",
-                  subtitle: "Manage stock",
-                  accentColor: const Color(0xFF6366F1),
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => InventoryPage(branchId: branchId))),
-                  t: t,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildActionTile(
-                  icon: Icons.account_balance_wallet_rounded,
-                  title: "Finance",
-                  subtitle: "View transactions",
-                  accentColor: const Color(0xFFF59E0B),
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => FinancePage(branchId: branchId))),
-                  t: t,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _buildActionTile(
-                  icon: Icons.fingerprint_rounded,
-                  title: "Biometrics",
-                  subtitle: "Live punches",
-                  accentColor: const Color(0xFF0EA5E9),
-                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const BiometricDeviceManagerPage())),
-                  t: t,
-                ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: _buildActionTile(
-                  icon: Icons.person_add_alt_1_rounded,
-                  title: "Add Patient",
-                  subtitle: "New registration",
-                  accentColor: const Color(0xFF10B981),
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(
-                      builder: (_) => PatientDetailScreen(
-                        patientId: '',
-                        isOnline: true,
-                        localBox: Hive.box('local_patients'),
-                        branchId: branchId,
-                        doctorId: FirebaseAuth.instance.currentUser?.uid ?? 'unknown',
-                        isAdmin: true,
-                      ),
-                    ),
-                  ),
-                  t: t,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildActionTile({
-    required IconData icon,
-    required String title,
-    required String subtitle,
-    required Color accentColor,
-    required VoidCallback onTap,
-    required RoleThemeData t,
-  }) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(12),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
-        decoration: BoxDecoration(
-          color: t.bg.withValues(alpha: 0.7),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: t.bgRule),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: accentColor.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Icon(icon, color: accentColor, size: 20),
-            ),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: t.textPrimary)),
-                  const SizedBox(height: 2),
-                  Text(subtitle, style: TextStyle(fontSize: 10, color: t.textTertiary), maxLines: 1, overflow: TextOverflow.ellipsis),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   // ───────────────────────────────────────────────────────────────────────────
   // 4. All Branch Patient Records Section (Table, Filter Tabs, Search & Pagination)
@@ -1469,7 +1219,55 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
   Widget _buildPatientRecordsSection(BuildContext context, RoleThemeData t, String branchId) {
     final isDark = t.isDarkCanvas || UserThemeService.isDarkMode();
     final dispState = ref.watch(dispensaryProvider(branchId));
-    final allList = dispState.records;
+    final allList = List<Map<String, dynamic>>.from(dispState.records);
+
+    // Deep search across local branch history when searching by name, token, CNIC, or phone
+    if (_searchQuery.isNotEmpty && Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+      final eBox = Hive.box(LocalStorageService.entriesBox);
+      final q = _searchQuery.toLowerCase().trim();
+      final qClean = q.replaceAll('-', '').replaceAll(' ', '');
+      final existingSerials = allList
+          .map((e) => (e['serial'] ?? e['tokenSerial'] ?? e['id'] ?? '').toString().toUpperCase().trim())
+          .toSet();
+      final normBranch = branchId.toLowerCase().trim();
+
+      for (final k in eBox.keys) {
+        final val = eBox.get(k);
+        if (val is! Map) continue;
+        final d = Map<String, dynamic>.from(val);
+        final b = (d['branchId'] ?? '').toString().toLowerCase().trim();
+        final matchBranch = normBranch == 'all' || normBranch.isEmpty || b == normBranch || b.isEmpty;
+        if (!matchBranch) continue;
+
+        final name = (d['patientName'] ?? d['name'] ?? '').toString().toLowerCase();
+        final serial = (d['serial'] ?? d['tokenSerial'] ?? d['id'] ?? k).toString().toLowerCase();
+        final cnic = (d['displayCnic'] ?? d['cnic'] ?? d['patientCnic'] ?? d['guardianCnic'] ?? '')
+            .toString()
+            .replaceAll('-', '')
+            .replaceAll(' ', '');
+        final phone = (d['phone'] ?? d['patientPhone'] ?? '').toString().replaceAll('-', '').replaceAll(' ', '');
+
+        if (name.contains(q) || serial.contains(q) || (qClean.isNotEmpty && (cnic.contains(qClean) || phone.contains(qClean)))) {
+          final upperSerial = (d['serial'] ?? d['tokenSerial'] ?? d['id'] ?? k).toString().toUpperCase().trim();
+          if (!existingSerials.contains(upperSerial)) {
+            existingSerials.add(upperSerial);
+            d['name'] = d['patientName'] ?? d['name'] ?? 'Unknown';
+            final dk = d['dateKey']?.toString() ?? '';
+            if (dk.length == 6) {
+              try {
+                d['dispenseDate'] = DateFormat('dd MMM yyyy').format(LocalStorageService.parseDdMMyy(dk));
+              } catch (_) {
+                d['dispenseDate'] = dk;
+              }
+            } else {
+              d['dispenseDate'] = d['date']?.toString() ?? dk;
+            }
+            d['type'] = (d['queueType'] ?? d['type'] ?? 'zakat').toString().toLowerCase();
+            allList.add(d);
+          }
+        }
+      }
+    }
 
     final typeFilter = ref.watch(branchTypeFilterProvider);
     final shiftFilter = ref.watch(branchShiftFilterProvider);
@@ -1479,15 +1277,16 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
 
     // Filter list
     final filtered = allList.where((p) {
-      // Camp filter (Haji Camp vs Saddar Camp vs All)
+      // Camp filter (dynamic matching for any branch camps)
       if (_selectedCampFilter != 'all') {
-        final serial = (p['serial'] ?? p['id'] ?? '').toString().toUpperCase();
-        final camp = (p['campId'] ?? p['dispensaryId'] ?? p['dispensaryTag'] ?? '').toString().toLowerCase();
-        if (_selectedCampFilter == 'haji') {
-          if (!serial.contains('-HAJI') && !serial.contains('HAJI-') && !camp.contains('haji')) return false;
-        } else if (_selectedCampFilter == 'saddar') {
-          if (!serial.contains('-SADD') && !serial.contains('SADD-') && !camp.contains('saddar') && !camp.contains('kapaya')) return false;
-        }
+        final matches = CampSessionService.matchesCamp(
+          selectedCamp: _selectedCampFilter,
+          dispensaryId: p['dispensaryId']?.toString(),
+          campId: p['campId']?.toString(),
+          dispensaryTag: p['dispensaryTag']?.toString(),
+          serial: (p['serial'] ?? p['id'])?.toString(),
+        );
+        if (!matches) return false;
       }
 
       // Type
@@ -1548,14 +1347,13 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
     // Stage counts with camp filter applied
     final campFilteredAllList = allList.where((p) {
       if (_selectedCampFilter == 'all') return true;
-      final serial = (p['serial'] ?? p['id'] ?? '').toString().toUpperCase();
-      final camp = (p['campId'] ?? p['dispensaryId'] ?? p['dispensaryTag'] ?? '').toString().toLowerCase();
-      if (_selectedCampFilter == 'haji') {
-        return serial.contains('-HAJI') || serial.contains('HAJI-') || camp.contains('haji');
-      } else if (_selectedCampFilter == 'saddar') {
-        return serial.contains('-SADD') || serial.contains('SADD-') || camp.contains('saddar') || camp.contains('kapaya');
-      }
-      return true;
+      return CampSessionService.matchesCamp(
+        selectedCamp: _selectedCampFilter,
+        dispensaryId: p['dispensaryId']?.toString(),
+        campId: p['campId']?.toString(),
+        dispensaryTag: p['dispensaryTag']?.toString(),
+        serial: (p['serial'] ?? p['id'])?.toString(),
+      );
     }).toList();
 
     final waitingDoctorCount = campFilteredAllList.where((p) => _recordStage(p) == 'waiting_doctor').length;
@@ -1605,24 +1403,69 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
           ],
           const SizedBox(height: 16),
 
-          // Karachi Camp Selector (Collective vs Haji Camp vs Saddar)
-          if (branchId.toLowerCase().contains('karachi') || branchId.toLowerCase() == 'all') ...[
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                _buildCampFilterChip('All Karachi (Collective)', _selectedCampFilter == 'all', () {
-                  setState(() { _selectedCampFilter = 'all'; _currentPage = 1; });
-                }, const Color(0xFF0D9488), t),
-                _buildCampFilterChip('Haji Camp Dispensary', _selectedCampFilter == 'haji', () {
-                  setState(() { _selectedCampFilter = 'haji'; _currentPage = 1; });
-                }, const Color(0xFF6366F1), t),
-                _buildCampFilterChip('Saddar Dispensary', _selectedCampFilter == 'saddar', () {
-                  setState(() { _selectedCampFilter = 'saddar'; _currentPage = 1; });
-                }, const Color(0xFFF59E0B), t),
-              ],
+          // Dynamic Camp Selector for any branch configured with multiple camps
+          if (CampSessionService.hasCampsForBranch(branchId) || branchId.toLowerCase().contains('karachi') || branchId.toLowerCase() == 'all') ...[
+            Builder(
+              builder: (context) {
+                final rawCamps = CampSessionService.getCampsForBranch(branchId, includeClosed: false);
+                final List<Map<String, String>> campOptions = [];
+                if (rawCamps.isNotEmpty) {
+                  for (final c in rawCamps) {
+                    final cId = (c['id'] ?? '').toString().trim();
+                    final cName = (c['name'] ?? c['id'] ?? '').toString().trim();
+                    if (cId.isNotEmpty) {
+                      campOptions.add({'id': cId.toLowerCase(), 'name': cName});
+                    }
+                  }
+                } else if (branchId.toLowerCase().contains('karachi') || branchId.toLowerCase() == 'all') {
+                  campOptions.addAll([
+                    {'id': 'haji', 'name': 'Haji Camp Dispensary'},
+                    {'id': 'saddar', 'name': 'Saddar Dispensary'},
+                  ]);
+                }
+
+                if (campOptions.isEmpty) return const SizedBox.shrink();
+
+                final colors = [
+                  const Color(0xFF6366F1),
+                  const Color(0xFFF59E0B),
+                  const Color(0xFF10B981),
+                  const Color(0xFFEC4899),
+                  const Color(0xFF3B82F6),
+                ];
+
+                final bDisplayName = branchId == 'all' ? 'All' : _selectedBranchName;
+
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        _buildCampFilterChip('All $bDisplayName (Collective)', _selectedCampFilter == 'all', () {
+                          setState(() { _selectedCampFilter = 'all'; _currentPage = 1; });
+                        }, const Color(0xFF0D9488), t),
+                        for (int i = 0; i < campOptions.length; i++)
+                          _buildCampFilterChip(
+                            campOptions[i]['name']!,
+                            _selectedCampFilter == campOptions[i]['id']!,
+                            () {
+                              setState(() {
+                                _selectedCampFilter = campOptions[i]['id']!;
+                                _currentPage = 1;
+                              });
+                            },
+                            colors[i % colors.length],
+                            t,
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                  ],
+                );
+              },
             ),
-            const SizedBox(height: 14),
           ],
 
           // Stage Pills & Search Row
@@ -1775,9 +1618,13 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                 padding: const EdgeInsets.all(40),
                 child: Column(
                   children: [
-                    Icon(Icons.person_search_rounded, size: 40, color: t.textTertiary),
-                    const SizedBox(height: 10),
-                    Text("No matching records found", style: TextStyle(color: t.textSecondary, fontWeight: FontWeight.w600)),
+                    Text(
+                      _searchQuery.isNotEmpty
+                          ? "No matching records found for '$_searchQuery'"
+                          : "No patient records for the selected date range. Select 'Last 7 Days' from the calendar filter at the top to view earlier visits.",
+                      style: TextStyle(color: t.textSecondary, fontWeight: FontWeight.w600, fontSize: 13),
+                      textAlign: TextAlign.center,
+                    ),
                   ],
                 ),
               ),
@@ -2754,118 +2601,8 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
 // Custom Painters for Sparklines and Performance Charts
 // ─────────────────────────────────────────────────────────────────────────────
 
-enum MetricSymbolType {
-  tokens,
-  revenue,
-  prescriptions,
-  dispensary,
-  peak,
-}
 
-class _AbstractGraphicPainter extends CustomPainter {
-  final MetricSymbolType type;
-  final Color color;
 
-  const _AbstractGraphicPainter({required this.type, required this.color});
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    final strokePaint = Paint()
-      ..color = color.withValues(alpha: 0.85)
-      ..strokeWidth = 1.4
-      ..style = PaintingStyle.stroke
-      ..strokeCap = StrokeCap.round
-      ..strokeJoin = StrokeJoin.round;
-
-    final fillPaint = Paint()
-      ..color = color.withValues(alpha: 0.22)
-      ..style = PaintingStyle.fill;
-
-    switch (type) {
-      case MetricSymbolType.tokens:
-        // Dual overlapping ticket/token shapes
-        final r1 = RRect.fromRectAndRadius(
-          Rect.fromLTWH(0, 2.5, size.width * 0.65, size.height - 3.5),
-          const Radius.circular(3),
-        );
-        final r2 = RRect.fromRectAndRadius(
-          Rect.fromLTWH(size.width * 0.35, 0, size.width * 0.65, size.height - 3.5),
-          const Radius.circular(3),
-        );
-        canvas.drawRRect(r1, fillPaint);
-        canvas.drawRRect(r1, strokePaint);
-        canvas.drawRRect(r2, fillPaint);
-        canvas.drawRRect(r2, strokePaint);
-        // Perforation indicator dot
-        canvas.drawCircle(Offset(size.width * 0.68, size.height * 0.35), 1.2, Paint()..color = color);
-        break;
-
-      case MetricSymbolType.revenue:
-        // Dual tiered currency coins with spark aura
-        final c1 = Offset(size.width * 0.35, size.height * 0.6);
-        final c2 = Offset(size.width * 0.65, size.height * 0.35);
-        canvas.drawCircle(c1, 4.5, fillPaint);
-        canvas.drawCircle(c1, 4.5, strokePaint);
-        canvas.drawCircle(c2, 5.5, fillPaint);
-        canvas.drawCircle(c2, 5.5, strokePaint);
-        // Trend spark dot
-        canvas.drawCircle(Offset(size.width * 0.9, size.height * 0.15), 1.3, Paint()..color = color);
-        break;
-
-      case MetricSymbolType.prescriptions:
-        // Medical Rx sheet with diagnostic check lines
-        final padRect = RRect.fromRectAndRadius(
-          Rect.fromLTWH(size.width * 0.15, 0.5, size.width * 0.7, size.height - 1.5),
-          const Radius.circular(2.5),
-        );
-        canvas.drawRRect(padRect, fillPaint);
-        canvas.drawRRect(padRect, strokePaint);
-        canvas.drawLine(
-          Offset(size.width * 0.3, size.height * 0.38),
-          Offset(size.width * 0.7, size.height * 0.38),
-          strokePaint..strokeWidth = 1.1,
-        );
-        canvas.drawLine(
-          Offset(size.width * 0.3, size.height * 0.65),
-          Offset(size.width * 0.58, size.height * 0.65),
-          strokePaint..strokeWidth = 1.1,
-        );
-        break;
-
-      case MetricSymbolType.dispensary:
-        // Pharmaceutical split capsule
-        final pillRect = RRect.fromRectAndRadius(
-          Rect.fromLTWH(size.width * 0.1, 1.5, size.width * 0.8, size.height - 3),
-          Radius.circular((size.height - 3) / 2),
-        );
-        canvas.drawRRect(pillRect, fillPaint);
-        canvas.drawRRect(pillRect, strokePaint);
-        canvas.drawLine(
-          Offset(size.width * 0.5, 1.5),
-          Offset(size.width * 0.5, size.height - 1.5),
-          strokePaint..strokeWidth = 1.1,
-        );
-        break;
-
-      case MetricSymbolType.peak:
-        // Radiant 4-point star crest
-        final center = Offset(size.width * 0.5, size.height * 0.5);
-        final starPath = Path();
-        starPath.moveTo(center.dx, center.dy - 6.5);
-        starPath.quadraticBezierTo(center.dx, center.dy, center.dx + 6.5, center.dy);
-        starPath.quadraticBezierTo(center.dx, center.dy, center.dx, center.dy + 6.5);
-        starPath.quadraticBezierTo(center.dx, center.dy, center.dx - 6.5, center.dy);
-        starPath.quadraticBezierTo(center.dx, center.dy, center.dx, center.dy - 6.5);
-        starPath.close();
-        canvas.drawPath(starPath, fillPaint);
-        canvas.drawPath(starPath, strokePaint);
-        break;
-    }
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
-}
 
 class _PerformanceMultiLinePainter extends CustomPainter {
   final RoleThemeData theme;

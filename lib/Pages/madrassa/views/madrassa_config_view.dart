@@ -11,9 +11,10 @@ import '../utils/madrassa_csv_service.dart';
 import '../utils/madrassa_local_storage.dart';
 import '../../../services/local_storage_service.dart';
 import '../../../services/user_theme_service.dart';
+import '../../../design/design_system.dart';
 
 // Breakpoints for responsive configuration sizing
-const double kConfigMobileBreakpoint = 800.0;
+const double kConfigMobileBreakpoint = GBreakpoint.compact;
 
 class MadrassaConfigView extends StatefulWidget {
   final String branchId;
@@ -69,26 +70,53 @@ class _MadrassaConfigViewState extends State<MadrassaConfigView> {
   }
 
   Future<void> _loadCurrent() async {
-    final doc = await FirebaseFirestore.instance
-        .collection('branches')
-        .doc(widget.branchId)
-        .collection('madrassa_config')
-        .doc('current')
-        .get();
-    if (doc.exists && mounted) {
-      final data = doc.data()!;
-      setState(() {
-        _year = data['year'] ?? _year;
-        _month = data['month'] ?? _month;
-        _ptmDay = data['ptmDay'] ?? 0;
-        _initialPtmDay = _ptmDay;
-        _baseFeeController.text = (data['baseFee'] ?? 3000).toString();
-        _ptmDeductionController.text = (data['ptmDeduction'] ?? 700).toString();
-        _msgDeductionController.text = (data['messageTotalDeduction'] ?? 1300).toString();
-        _maxAttDeductionController.text = (data['attendanceMaxDeduction'] ?? 500).toString();
-        _maxUniDeductionController.text = (data['uniformMaxDeduction'] ?? 500).toString();
-      });
-    }
+    // 1. Try local cache first (instant load, zero Firestore reads)
+    try {
+      final box = await LocalStorageService.ensureBoxOpen(MadrassaLocalStorage.studentsBox);
+      final key = '${widget.branchId.toLowerCase().trim()}__config__current';
+      final cached = box.get(key);
+      if (cached is Map && mounted) {
+        final data = Map<String, dynamic>.from(cached);
+        setState(() {
+          _year = data['year'] ?? _year;
+          _month = data['month'] ?? _month;
+          _ptmDay = data['ptmDay'] ?? 0;
+          _initialPtmDay = _ptmDay;
+          _baseFeeController.text = (data['baseFee'] ?? 3000).toString();
+          _ptmDeductionController.text = (data['ptmDeduction'] ?? 700).toString();
+          _msgDeductionController.text = (data['messageTotalDeduction'] ?? 1300).toString();
+          _maxAttDeductionController.text = (data['attendanceMaxDeduction'] ?? 500).toString();
+          _maxUniDeductionController.text = (data['uniformMaxDeduction'] ?? 500).toString();
+        });
+      }
+    } catch (_) {}
+
+    // 2. Refresh from Firestore if network is available
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('madrassa_config')
+          .doc('current')
+          .get();
+      if (doc.exists && mounted && doc.data() != null) {
+        final data = doc.data()!;
+        final box = await LocalStorageService.ensureBoxOpen(MadrassaLocalStorage.studentsBox);
+        final key = '${widget.branchId.toLowerCase().trim()}__config__current';
+        await box.put(key, LocalStorageService.sanitize(data));
+        setState(() {
+          _year = data['year'] ?? _year;
+          _month = data['month'] ?? _month;
+          _ptmDay = data['ptmDay'] ?? 0;
+          _initialPtmDay = _ptmDay;
+          _baseFeeController.text = (data['baseFee'] ?? 3000).toString();
+          _ptmDeductionController.text = (data['ptmDeduction'] ?? 700).toString();
+          _msgDeductionController.text = (data['messageTotalDeduction'] ?? 1300).toString();
+          _maxAttDeductionController.text = (data['attendanceMaxDeduction'] ?? 500).toString();
+          _maxUniDeductionController.text = (data['uniformMaxDeduction'] ?? 500).toString();
+        });
+      }
+    } catch (_) {}
   }
 
   DateTime _getFirstFriday(int year, int month) {
@@ -299,6 +327,18 @@ class _MadrassaConfigViewState extends State<MadrassaConfigView> {
           .doc('current')
           .set(updateData, SetOptions(merge: true))
           .timeout(const Duration(seconds: 5));
+
+      // Cache locally in Hive for instant future offline/local-first loading
+      try {
+        final box = await LocalStorageService.ensureBoxOpen(MadrassaLocalStorage.studentsBox);
+        final key = '${widget.branchId.toLowerCase().trim()}__config__current';
+        final cached = box.get(key);
+        final merged = cached is Map ? Map<String, dynamic>.from(cached) : <String, dynamic>{};
+        updateData.forEach((k, v) {
+          if (k != 'auditLog') merged[k] = v;
+        });
+        await box.put(key, LocalStorageService.sanitize(merged));
+      } catch (_) {}
 
       if (isRescheduled) {
         await _migratePtmAttendance(oldPtmDay, _ptmDay, _year, _month);
@@ -562,7 +602,7 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
                 ),
                 LayoutBuilder(
                   builder: (context, constraints) {
-                    final isMobile = MediaQuery.of(context).size.width < kConfigMobileBreakpoint;
+                    final isMobile = constraints.maxWidth < kConfigMobileBreakpoint;
                     if (isMobile) {
                       return Column(
                         children: [

@@ -13,6 +13,7 @@ import '../models/school_student.dart';
 import '../theme/school_theme.dart';
 import '../utils/school_local_storage.dart';
 import '../constants/school_constants.dart';
+import '../../../design/design_system.dart';
 
 class SchoolGradingView extends StatefulWidget {
   final String branchId;
@@ -445,7 +446,7 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
     required double highestScore,
     required double passRate,
   }) {
-    final isMobile = MediaQuery.of(context).size.width < 750;
+    final isMobile = GBreakpoint.isMobile(context);
     final avgColor = SchoolTheme.getLetterGradeColor(
       classAvg >= 90 ? 'A+' : (classAvg >= 80 ? 'A' : (classAvg >= 70 ? 'B' : (classAvg >= 60 ? 'C' : 'F'))),
     );

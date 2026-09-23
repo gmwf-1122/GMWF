@@ -14,6 +14,7 @@ import '../services/local_storage_service.dart';
 import 'school/utils/school_local_storage.dart';
 import '../theme/role_theme_provider.dart';
 import '../theme/app_theme.dart';
+import '../design/design_system.dart';
 
 // ─── Date Filter Mode ────────────────────────────────────────────────────────
 enum DateFilterMode { allTime, singleDay, dateRange }
@@ -1169,7 +1170,7 @@ class _DownloadScreenState extends State<DownloadScreen>
       );
 
   Widget _buildHeaderCard(RoleThemeData t) {
-    final isMobile = MediaQuery.of(context).size.width < 600;
+    final isMobile = GBreakpoint.isMobile(context);
     return Container(
       padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 24, vertical: 20),
       decoration: _cardDecor(t),

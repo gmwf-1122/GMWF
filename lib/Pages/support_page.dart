@@ -5,6 +5,8 @@ import 'package:sentry_flutter/sentry_flutter.dart';
 import '../theme/app_theme.dart';
 import '../theme/role_theme_provider.dart';
 import '../utils/localization_helper.dart';
+import '../services/auto_update_service.dart';
+import '../design/design_system.dart';
 
 class SupportPage extends StatefulWidget {
   const SupportPage({super.key});
@@ -287,7 +289,7 @@ class _SupportPageState extends State<SupportPage> {
   @override
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
-    final isDesktop = MediaQuery.of(context).size.width >= 900;
+    final isDesktop = GBreakpoint.isDesktop(context);
 
     // Filter items based on search query
     final filteredResources = _resources.where((res) {
@@ -674,7 +676,7 @@ class _SupportPageState extends State<SupportPage> {
                   // FOOTER
                   Center(
                     child: Text(
-                      "GMWF Desktop · v2.4.1 · June 2026",
+                      "GMWF Platform · v${AutoUpdateService.resolvedVersion}",
                       style: TextStyle(color: t.textTertiary, fontSize: 11, fontWeight: FontWeight.w500),
                     ),
                   ),

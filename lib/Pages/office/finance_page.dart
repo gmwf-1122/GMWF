@@ -92,16 +92,30 @@ class _FinancePageState extends State<FinancePage> {
     super.initState();
     _activeBranchId = _getEffectiveUserBranch();
     _selectedIndex = widget.initialTabIndex.clamp(0, 7);
-    _syncBox = Hive.box(LocalStorageService.syncBox);
-    _updateSyncCount();
-    _syncBox.listenable().addListener(_updateSyncCount);
+    FinanceLocalStorage.ensureBoxesOpen().then((_) {
+      if (mounted) setState(() {});
+    });
+    if (Hive.isBoxOpen(LocalStorageService.syncBox)) {
+      _syncBox = Hive.box(LocalStorageService.syncBox);
+      _updateSyncCount();
+      _syncBox.listenable().addListener(_updateSyncCount);
+    } else {
+      LocalStorageService.ensureBoxOpen(LocalStorageService.syncBox).then((box) {
+        if (!mounted) return;
+        _syncBox = box;
+        _updateSyncCount();
+        _syncBox.listenable().addListener(_updateSyncCount);
+      });
+    }
     FinanceLedgerStorage.initEngine();
     _loadBranches();
   }
 
   @override
   void dispose() {
-    _syncBox.listenable().removeListener(_updateSyncCount);
+    try {
+      _syncBox.listenable().removeListener(_updateSyncCount);
+    } catch (_) {}
     super.dispose();
   }
 
@@ -121,7 +135,9 @@ class _FinancePageState extends State<FinancePage> {
         )
       ).length;
 
-      final conflicts = Hive.box(LocalStorageService.financeSettingsBox).get('sync_conflicts') as List?;
+      final conflicts = Hive.isBoxOpen(LocalStorageService.financeSettingsBox)
+          ? Hive.box(LocalStorageService.financeSettingsBox).get('sync_conflicts') as List?
+          : null;
       _hasConflicts = conflicts != null && conflicts.isNotEmpty;
     });
   }
@@ -130,6 +146,36 @@ class _FinancePageState extends State<FinancePage> {
     setState(() => _isLoadingBranches = true);
     final userRole = LocalStorageService.getActiveUserRole();
     final isBranchScoped = userRole == 'branch manager' || userRole == 'supervisor';
+
+    // 1. Load 100% locally from Hive first
+    if (Hive.isBoxOpen(LocalStorageService.branchesBox)) {
+      final box = Hive.box(LocalStorageService.branchesBox);
+      final localBranches = <Map<String, dynamic>>[];
+      for (final v in box.values) {
+        if (v is Map) {
+          final m = Map<String, dynamic>.from(v);
+          final id = (m['id'] ?? '').toString();
+          if (id.isNotEmpty && id != 'all' && id != 'global') {
+            localBranches.add({'id': id, 'name': (m['name'] as String?) ?? id});
+          }
+        }
+      }
+      if (localBranches.isNotEmpty) {
+        if (!mounted) return;
+        setState(() {
+          _branches = localBranches;
+          if (isBranchScoped) {
+            _activeBranchId = _getEffectiveUserBranch();
+            _branches = _branches.where((b) => b['id'].toString().toLowerCase() == _activeBranchId.toLowerCase()).toList();
+          }
+          _isLoadingBranches = false;
+        });
+        _triggerDownloadForActiveBranch();
+        return;
+      }
+    }
+
+    // 2. Fallback to Firestore only if local box is empty
     try {
       final snap = await FirebaseFirestore.instance.collection('branches').get();
       if (!mounted) return;
@@ -146,17 +192,8 @@ class _FinancePageState extends State<FinancePage> {
       });
       _triggerDownloadForActiveBranch();
     } catch (e) {
-      final box = Hive.box(LocalStorageService.branchesBox);
       if (!mounted) return;
-      setState(() {
-        _branches = box.values.map((v) => Map<String, dynamic>.from(v as Map)).toList();
-        if (isBranchScoped) {
-          _activeBranchId = _getEffectiveUserBranch();
-          _branches = _branches.where((b) => b['id'].toString().toLowerCase() == _activeBranchId.toLowerCase()).toList();
-        }
-        _isLoadingBranches = false;
-      });
-      _triggerDownloadForActiveBranch();
+      setState(() => _isLoadingBranches = false);
     }
   }
 

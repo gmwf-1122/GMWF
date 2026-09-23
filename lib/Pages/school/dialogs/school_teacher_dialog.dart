@@ -6,6 +6,7 @@ import '../../../widgets/media_upload_tile.dart';
 import '../models/school_teacher.dart';
 import '../utils/school_local_storage.dart';
 import '../constants/school_constants.dart';
+import '../../../widgets/app_feedback.dart';
 
 class SchoolTeacherDialog extends StatefulWidget {
   final String branchId;
@@ -199,6 +200,11 @@ class _SchoolTeacherDialogState extends State<SchoolTeacherDialog> {
     if (mounted) {
       setState(() => _isSaving = false);
       Navigator.of(context).pop(true);
+      AppFeedback.showSuccess(
+        context,
+        widget.teacherToEdit != null ? 'Teacher profile updated successfully!' : 'Teacher profile created successfully!',
+        subtitle: 'Saved locally • Syncing to cloud',
+      );
     }
   }
 

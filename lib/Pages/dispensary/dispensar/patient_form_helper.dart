@@ -95,29 +95,37 @@ class PatientFormHelper {
     final timing = med['timing']?.toString() ?? '';
     final quantity = med['quantity'] ?? 1;
     if (isInjectable(med)) return 'مقدار $quantity';
-    num dosePerTime = 1;
-    final dosage = med['dosage']?.toString() ?? '';
-    if (dosage.isNotEmpty) {
-      final match = RegExp(r'(\d+(?:\.\d+)?)').firstMatch(dosage);
-      if (match != null) dosePerTime = num.tryParse(match.group(1)!) ?? 1;
-    }
+
     final unitUrdu = getUnitUrdu(med);
     final parts = parseTiming(timing);
+
+    // Only syrups / spoon-based medicines use fractional spoon amounts
+    String spoonPrefix = '';
+    final dosage = (med['dosage'] ?? med['dose'] ?? '').toString().toLowerCase();
+    if (unitUrdu == 'چمچ') {
+      if (dosage.contains('1/2') || dosage.contains('half') || dosage.contains('0.5')) {
+        spoonPrefix = 'آدھا ';
+      } else if (dosage.contains('1/3')) {
+        spoonPrefix = 'ایک تہائی ';
+      } else if (dosage.contains('1/4')) {
+        spoonPrefix = 'چوتھائی ';
+      }
+    }
+
     List<String> periods = [];
     if (parts[0] > 0) {
-      periods.add('${(parts[0] * dosePerTime).toInt()} $unitUrdu صبح');
+      periods.add('${parts[0]} $spoonPrefix$unitUrdu صبح');
     }
     if (parts[1] > 0) {
-      periods.add('${(parts[1] * dosePerTime).toInt()} $unitUrdu دوپہر');
+      periods.add('${parts[1]} $spoonPrefix$unitUrdu دوپہر');
     }
     if (parts[2] > 0) {
-      periods.add('${(parts[2] * dosePerTime).toInt()} $unitUrdu شام');
+      periods.add('${parts[2]} $spoonPrefix$unitUrdu شام');
     }
     if (periods.isNotEmpty) return periods.join(' - ');
-    final doseStr = dosePerTime == dosePerTime.floor()
-        ? dosePerTime.toInt().toString()
-        : dosePerTime.toStringAsFixed(1);
-    return 'مقدار: $doseStr $unitUrdu';
+
+    final q = quantity is num ? quantity.toInt() : (int.tryParse(quantity.toString()) ?? 1);
+    return 'مقدار: $q $unitUrdu';
   }
 
   static String getMealUrdu(String meal) {

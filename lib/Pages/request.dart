@@ -13,6 +13,7 @@ import '../realtime/realtime_manager.dart';
 import '../realtime/realtime_events.dart';
 import '../utils/formatters.dart';
 import '../widgets/global_module_wrapper.dart';
+import '../design/design_system.dart';
 
 class RequestUtils {
   static String getTitle(String type, String patient) {
@@ -956,7 +957,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
             : _safeItemList(data['items']))
         : _safeItemList(data['items']);
 
-    final isWide = MediaQuery.of(context).size.width > 600;
+    final isWide = !GBreakpoint.isMobile(context);
     return isWide
         ? _buildTable(items, requestId, requestType)
         : _buildCompactItems(items, requestId, requestType);
@@ -1188,7 +1189,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
       return result[0].toUpperCase() + result.substring(1).trim();
     }
 
-    final isWide = MediaQuery.of(context).size.width > 600;
+    final isWide = !GBreakpoint.isMobile(context);
 
     return Container(
       decoration: BoxDecoration(
@@ -1432,7 +1433,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
       return v?.toString() ?? '—';
     }
 
-    final isWide = MediaQuery.of(context).size.width > 600;
+    final isWide = !GBreakpoint.isMobile(context);
 
     return Container(
       decoration: BoxDecoration(

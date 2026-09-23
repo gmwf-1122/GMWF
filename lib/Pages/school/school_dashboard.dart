@@ -21,6 +21,7 @@ import '../../services/auth_service.dart';
 import '../settings_page.dart';
 import '../../theme/role_theme_provider.dart';
 import '../../theme/app_theme.dart';
+import '../../design/design_system.dart';
 import 'package:motion_tab_bar_v2/motion-tab-bar.dart';
 import 'package:motion_tab_bar_v2/motion-tab-controller.dart';
 
@@ -73,7 +74,23 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
 
   bool get _isPrincipal {
     final r = widget.role.toLowerCase().trim();
-    return r.contains('principal');
+    return r.contains('principal') ||
+        r.contains('school admin') ||
+        r.contains('school_admin') ||
+        r == 'school' ||
+        r == 'headmaster' ||
+        r == 'headmistress';
+  }
+
+  String get _effectiveBranchId {
+    final b = widget.branchId.trim().toLowerCase();
+    if (b.isNotEmpty && b != 'all' && b != 'global') {
+      if (!LocalStorageService.hasSchoolFacility(b) && !_isSchoolRole) {
+        return 'gujrat';
+      }
+      return b;
+    }
+    return 'gujrat';
   }
 
   @override
@@ -109,38 +126,38 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
       ];
       _views = [
         SchoolPrincipalDashboardView(
-          branchId: widget.branchId,
+          branchId: _effectiveBranchId,
           userName: widget.username,
         ),
         SchoolStudentManagementView(
-          branchId: widget.branchId,
+          branchId: _effectiveBranchId,
           userRole: widget.role,
         ),
         SchoolDailyAttendanceView(
-          branchId: widget.branchId,
+          branchId: _effectiveBranchId,
           editorName: widget.username,
           userRole: widget.role,
         ),
         SchoolTeacherAttendanceView(
-          branchId: widget.branchId,
+          branchId: _effectiveBranchId,
           editorName: widget.username,
         ),
-        SchoolTeacherManagementView(branchId: widget.branchId),
+        SchoolTeacherManagementView(branchId: _effectiveBranchId),
         SchoolFeeManagementView(
-          branchId: widget.branchId,
+          branchId: _effectiveBranchId,
           userName: widget.username,
           userRole: widget.role,
         ),
         SchoolLibraryView(
-          branchId: widget.branchId,
+          branchId: _effectiveBranchId,
           userName: widget.username,
         ),
         SchoolGradingView(
-          branchId: widget.branchId,
+          branchId: _effectiveBranchId,
           userRole: widget.role,
           userName: widget.username,
         ),
-        SchoolAuditLogView(branchId: widget.branchId),
+        SchoolAuditLogView(branchId: _effectiveBranchId),
       ];
     } else if (_isTeacher) {
       // Teachers see assigned Daily Class Attendance, Class Grading & Reports, Student Directory, School Library
@@ -152,21 +169,21 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
       ];
       _views = [
         SchoolDailyAttendanceView(
-          branchId: widget.branchId,
+          branchId: _effectiveBranchId,
           editorName: widget.username,
           userRole: widget.role,
         ),
         SchoolGradingView(
-          branchId: widget.branchId,
+          branchId: _effectiveBranchId,
           userRole: widget.role,
           userName: widget.username,
         ),
         SchoolStudentManagementView(
-          branchId: widget.branchId,
+          branchId: _effectiveBranchId,
           userRole: widget.role,
         ),
         SchoolLibraryView(
-          branchId: widget.branchId,
+          branchId: _effectiveBranchId,
           userName: widget.username,
         ),
       ];
@@ -184,36 +201,36 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
         _NavItem(label: 'Audit Trail', icon: Icons.security_rounded),
       ];
       _views = [
-        SchoolOverviewView(branchId: widget.branchId),
+        SchoolOverviewView(branchId: _effectiveBranchId),
         SchoolStudentManagementView(
-          branchId: widget.branchId,
+          branchId: _effectiveBranchId,
           userRole: widget.role,
         ),
         SchoolDailyAttendanceView(
-          branchId: widget.branchId,
+          branchId: _effectiveBranchId,
           editorName: widget.username,
           userRole: widget.role,
         ),
         SchoolTeacherAttendanceView(
-          branchId: widget.branchId,
+          branchId: _effectiveBranchId,
           editorName: widget.username,
         ),
-        SchoolTeacherManagementView(branchId: widget.branchId),
+        SchoolTeacherManagementView(branchId: _effectiveBranchId),
         SchoolFeeManagementView(
-          branchId: widget.branchId,
+          branchId: _effectiveBranchId,
           userName: widget.username,
           userRole: widget.role,
         ),
         SchoolLibraryView(
-          branchId: widget.branchId,
+          branchId: _effectiveBranchId,
           userName: widget.username,
         ),
         SchoolGradingView(
-          branchId: widget.branchId,
+          branchId: _effectiveBranchId,
           userRole: widget.role,
           userName: widget.username,
         ),
-        SchoolAuditLogView(branchId: widget.branchId),
+        SchoolAuditLogView(branchId: _effectiveBranchId),
       ];
     }
 
@@ -278,9 +295,9 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
 
   @override
   Widget build(BuildContext context) {
-    final hasSchool = LocalStorageService.hasSchoolFacility(widget.branchId);
-    if (!hasSchool) {
-      final bName = LocalStorageService.getBranchName(widget.branchId);
+    final hasSchool = LocalStorageService.hasSchoolFacility(_effectiveBranchId);
+    if (!hasSchool && !_isSchoolRole) {
+      final bName = LocalStorageService.getBranchName(_effectiveBranchId);
       return Scaffold(
         backgroundColor: const Color(0xFFF8FAFC),
         appBar: AppBar(
@@ -363,9 +380,8 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
       _initNavItemsAndViews();
     }
     final t = RoleThemeScope.dataOf(context);
-    final mediaWidth = MediaQuery.of(context).size.width;
-    final isMobile = mediaWidth < 700;
-    final isSmallScreen = mediaWidth < 850;
+    final isMobile = GBreakpoint.isMobile(context);
+    final isSmallScreen = GBreakpoint.isCompact(context);
     final effectiveCollapsed = _isCollapsed || isSmallScreen;
     final isWrapped = GlobalModuleWrapper.isWrapped(context);
 
@@ -488,7 +504,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
   }
 
   PreferredSizeWidget _buildTopAppBar(BuildContext context, RoleThemeData t) {
-    final isMobile = MediaQuery.of(context).size.width < 700;
+    final isMobile = GBreakpoint.isMobile(context);
 
     return AppBar(
       backgroundColor: t.bgCard,
@@ -554,7 +570,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
                     overflow: TextOverflow.ellipsis,
                   ),
                   Text(
-                    'User: ${widget.username} • Role: ${widget.role} • Branch: ${widget.branchId}',
+                    'User: ${widget.username} • Role: ${widget.role} • Campus: ${LocalStorageService.getBranchName(_effectiveBranchId)}',
                     style: TextStyle(color: t.textSecondary, fontSize: 12),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -566,7 +582,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
         ],
       ),
       actions: [
-        _SchoolSyncBadge(branchId: widget.branchId),
+        _SchoolSyncBadge(branchId: _effectiveBranchId),
         // Sidebar toggle only on desktop and school roles
         if (!isMobile && _isSchoolRole)
           IconButton(
@@ -844,7 +860,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
                           ),
                           const SizedBox(width: 8),
                           Text(
-                            widget.branchId.toUpperCase(),
+                            _effectiveBranchId.toUpperCase(),
                             style: const TextStyle(
                               color: Color(0xFF94A3B8),
                               fontSize: 11,

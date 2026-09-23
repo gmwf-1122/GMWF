@@ -39,7 +39,7 @@ import 'services/auth_service.dart';
 import 'widgets/gmwf_loading_view.dart';
 import 'widgets/custom_title_bar.dart';
 import 'tools/finance_v2_migration.dart';
-
+import 'services/auto_update_service.dart';
 import 'constants/navigator_key.dart';
 
 class TimestampAdapter extends TypeAdapter<Timestamp> {
@@ -224,6 +224,7 @@ Future<void> main() async {
         AuthService.onSignOutCallback = AuthHomeWrapper.clearSession;
 
         // Start background daemons & services
+        unawaited(AutoUpdateService.getAppVersion());
         unawaited(CloudMessagingService().initialize().catchError((e) {
           debugPrint('[Init] CloudMessagingService init warning: $e');
         }));
@@ -383,6 +384,15 @@ class _MyAppState extends State<MyApp> {
         style: TextButton.styleFrom(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(cardRadius)),
         ),
+      ),
+      snackBarTheme: SnackBarThemeData(
+        contentTextStyle: const TextStyle(
+          color: Colors.white,
+          fontSize: 13.5,
+          fontWeight: FontWeight.w600,
+        ),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
       ),
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
@@ -555,11 +565,32 @@ class _AuthHomeWrapperState extends State<AuthHomeWrapper> {
         } catch (_) {}
       }
 
+      // 0. Primary Check: Fast local user data cached in Hive app_settings
+      // This preserves active session across Hot Restart and launches instantly without timeout
+      Map<String, dynamic>? localUserData;
+      if (Hive.isBoxOpen('app_settings')) {
+        final box = Hive.box('app_settings');
+        final raw = box.get('user_data') ?? box.get('currentUser');
+        if (raw is Map) {
+          final m = Map<String, dynamic>.from(raw);
+          final r = (m['role'] ?? '').toString().toLowerCase().trim();
+          if (r.isNotEmpty && r != 'unknown') {
+            localUserData = m;
+          }
+        }
+      }
+
       // 1. Check if Firebase currentUser is available immediately
       final currentUser = FirebaseAuth.instance.currentUser;
       if (currentUser != null) {
-        final localData = _getLocalUserData(currentUser);
+        final localData = localUserData ?? _getLocalUserData(currentUser);
         _cachedSession = _SessionData(user: currentUser, localUser: localData);
+        return _cachedSession!;
+      }
+
+      // If we have valid local user data, restore session immediately (prevents logout on hot restart)
+      if (localUserData != null) {
+        _cachedSession = _SessionData(user: null, localUser: localUserData);
         return _cachedSession!;
       }
 
@@ -596,14 +627,16 @@ class _AuthHomeWrapperState extends State<AuthHomeWrapper> {
   Map<String, dynamic>? _getLocalUserData(User user) {
     try {
       if (Hive.isBoxOpen('app_settings')) {
-        final cached = Hive.box('app_settings').get('user_data');
+        final cached = Hive.box('app_settings').get('user_data') ?? Hive.box('app_settings').get('currentUser');
         if (cached is Map) {
           final m = Map<String, dynamic>.from(cached);
           final r = (m['role'] ?? '').toString().toLowerCase().trim();
-          final uUid = (m['uid'] ?? '').toString();
+          final uUid = (m['uid'] ?? m['id'] ?? '').toString();
           final uEmail = (m['email'] ?? '').toString().toLowerCase().trim();
-          if (r.isNotEmpty && r != 'unknown' && (uUid == user.uid || uEmail == (user.email ?? '').toLowerCase())) {
-            return m;
+          if (r.isNotEmpty && r != 'unknown') {
+            if (uUid == user.uid || uEmail == (user.email ?? '').toLowerCase() || uUid.isEmpty || uEmail.isEmpty) {
+              return m;
+            }
           }
         }
       }

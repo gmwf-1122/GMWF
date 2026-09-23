@@ -49,6 +49,7 @@ class RealtimeEvents {
   static const String requestCreated = 'request_created';
   static const String requestApproved = 'request_approved';
   static const String requestRejected = 'request_rejected';
+  static const String restockRequest = 'restock_request';
 
   // Offline-first workflow requests are persisted and synchronized by the
   // LAN server rather than written directly by client screens.
@@ -70,6 +71,7 @@ class RealtimeEvents {
   static const String saveMadrassaFee = 'save_madrassa_fee';
   static const String saveMadrassaFeePayment = 'save_madrassa_fee_payment';
   static const String saveMadrassaDailyLog = 'save_madrassa_daily_log';
+  static const String saveMadrassaTeacherAttendance = 'save_madrassa_teacher_attendance';
   static const String saveMadrassaHifzProgress = 'save_madrassa_hifz_progress';
   static const String saveExamResult = 'save_exam_result';
 
@@ -84,6 +86,8 @@ class RealtimeEvents {
   static const String saveDonationReceipt = 'save_donation_receipt';
   static const String saveDonor = 'save_donor';
   static const String saveDonationCollection = 'save_donation_collection';
+  static const String saveDonationBox = 'save_donation_box';
+  static const String saveBoxOpening = 'save_box_opening';
 
   // ---- Dasterkhwaan Events ----
   static const String saveDasterkhwanEntry = 'save_dasterkhwan_entry';
@@ -122,9 +126,17 @@ class RealtimeEvents {
     String? branchId,
     String? senderId,
   }) {
-    // Make a clean copy of data WITHOUT branchId to avoid duplicates
+    // Make a clean copy of data.
+    // Preserve branchId for entity models (employee, user, donor, patient, student)
     final cleanData = Map<String, dynamic>.from(data);
-    cleanData.remove('branchId'); // Remove if accidentally included in data
+    if (type != saveEmployee &&
+        type != saveUser &&
+        type != saveDonor &&
+        type != savePatient &&
+        type != saveMadrassaStudent &&
+        type != saveFaculty) {
+      cleanData.remove('branchId');
+    }
     
     final msgId = 'msg_${DateTime.now().microsecondsSinceEpoch}_${Random().nextInt(999999)}';
     final version = (data['version'] is int)

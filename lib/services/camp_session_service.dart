@@ -111,22 +111,22 @@ class CampSessionService {
 
     // Fallback: Default branch facilities
     if (b == 'karachi') {
-      final defaultKarachiCamps = [
-        {
+      final defaultKarachiCamps = <Map<String, dynamic>>[
+        <String, dynamic>{
           'id': 'saddar',
           'name': 'Saddar Dispensary',
           'status': 'active',
           'isClosed': false,
-          'departments': ['dispensary', 'dasterkhwaan'],
-          'sessions': ['morning', 'evening'],
+          'departments': <String>['dispensary', 'dasterkhwaan'],
+          'sessions': <String>['morning', 'evening'],
         },
-        {
+        <String, dynamic>{
           'id': 'haji_camp',
           'name': 'Haji Camp Dispensary',
           'status': 'active',
           'isClosed': false,
-          'departments': ['dispensary'],
-          'sessions': ['morning', 'evening'],
+          'departments': <String>['dispensary'],
+          'sessions': <String>['morning', 'evening'],
         },
       ];
       return defaultKarachiCamps;
@@ -148,6 +148,68 @@ class CampSessionService {
     }
 
     if (b == 'karachi') return true;
+
+    return false;
+  }
+
+  /// Checks if a branch is Karachi or part of Karachi camp sub-facilities.
+  static bool isKarachiFamily(String? branchId) {
+    if (branchId == null || branchId.trim().isEmpty) return false;
+    final b = branchId.toLowerCase().trim();
+    return b == 'karachi' ||
+        b == 'karachi_saddar' ||
+        b == 'karachi_haji' ||
+        b == 'saddar' ||
+        b == 'haji_camp' ||
+        b.startsWith('karachi_') ||
+        b.startsWith('karachi-');
+  }
+
+  /// Canonical branch and dynamic camp matching for ANY branch (not just Karachi).
+  /// Handles parent branch match, sub-branch match, dynamic camps configured via Branch Management,
+  /// and universal prefixes.
+  static bool areBranchesMatching(String? branchA, String? branchB) {
+    if (branchA == null || branchB == null) return false;
+    final a = branchA.toLowerCase().trim();
+    final b = branchB.toLowerCase().trim();
+
+    if (a.isEmpty || b.isEmpty) return false;
+    if (a == 'all' || b == 'all' || a == 'default' || b == 'default') return true;
+    if (a == b) return true;
+
+    // Karachi family check
+    if (isKarachiFamily(a) && isKarachiFamily(b)) return true;
+
+    // Direct containment (e.g. 'lahore_camp1' vs 'lahore')
+    if (a.contains(b) || b.contains(a)) return true;
+
+    // Dynamic camp check across any branch from local branches box
+    try {
+      if (Hive.isBoxOpen('local_branches')) {
+        final box = Hive.box('local_branches');
+        for (final key in box.keys) {
+          final val = box.get(key);
+          if (val is Map) {
+            final parentId = (val['id'] ?? key.toString().replaceAll('branch:', '')).toString().toLowerCase().trim();
+            final camps = val['camps'] is List ? (val['camps'] as List) : [];
+            final campIds = <String>{};
+            for (final c in camps) {
+              if (c is Map) {
+                final cId = (c['id'] ?? '').toString().toLowerCase().trim();
+                if (cId.isNotEmpty) {
+                  campIds.add(cId);
+                  campIds.add('${parentId}_$cId');
+                }
+              }
+            }
+
+            final aMatches = a == parentId || campIds.contains(a) || campIds.any((c) => a.contains(c) || c.contains(a));
+            final bMatches = b == parentId || campIds.contains(b) || campIds.any((c) => b.contains(c) || c.contains(b));
+            if (aMatches && bMatches) return true;
+          }
+        }
+      }
+    } catch (_) {}
 
     return false;
   }
@@ -966,6 +1028,34 @@ class CampSessionService {
     } catch (_) {}
   }
 
+  /// Returns the configured sessions for Madrassa in a branch (e.g. ['morning', 'evening'] or ['morning', 'evening', 'night']).
+  static List<String> getMadrassaSessions(String? branchId) {
+    return getAllowedSessions(branchId, department: 'madrassa');
+  }
+
+  /// Returns whether a branch operates in Nazra-Only mode.
+  static bool isNazraOnlyBranch(String? branchId) {
+    if (branchId == null || branchId.isEmpty) return false;
+    final b = branchId.toLowerCase().trim();
+    try {
+      if (Hive.isBoxOpen('local_branches')) {
+        final raw = Hive.box('local_branches').get('branch:$b') ?? Hive.box('local_branches').get(b);
+        if (raw is Map) {
+          if (raw['isNazraOnly'] == true || raw['madrassaMode'] == 'nazra_only') return true;
+          if (raw['sessionsConfig'] is Map) {
+            final s = raw['sessionsConfig'] as Map;
+            if (s['madrassa'] is Map) {
+              final m = s['madrassa'] as Map;
+              if (m['isNazraOnly'] == true || m['madrassaMode'] == 'nazra_only') return true;
+            }
+            if (s['isNazraOnly'] == true || s['madrassaMode'] == 'nazra_only') return true;
+          }
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
+
   /// Returns the list of enabled session keys for a branch and optional department/facility/user.
   static List<String> getAllowedSessions(String? branchId, {String? department, String? facilityId, Map<String, dynamic>? userData}) {
     final dep = (department ?? '').toLowerCase().trim();
@@ -1155,17 +1245,49 @@ class CampSessionService {
 
     final ser = (serial ?? '').toUpperCase();
     final tag = (dispensaryTag ?? '').toUpperCase();
-    final c = (campId ?? '').toLowerCase();
+    final c = (campId ?? '').toLowerCase().trim();
 
+    // 1. Check dynamic camps configured for this branch
+    final camps = getCampsForBranch(b, includeClosed: true);
+    for (final camp in camps) {
+      final id = (camp['id'] ?? '').toString().toLowerCase().trim();
+      final name = (camp['name'] ?? '').toString().toLowerCase().trim();
+      final cTag = (camp['dispensaryTag'] ?? camp['tag'] ?? '').toString().toUpperCase().trim();
+      if (id.isEmpty) continue;
+
+      if (c == id || (c.isNotEmpty && (c.contains(id) || id.contains(c)))) {
+        return '${dateKey}_$id';
+      }
+      if (cTag.isNotEmpty && (tag == cTag || ser.contains('-$cTag-') || ser.contains('-$cTag'))) {
+        return '${dateKey}_$id';
+      }
+      if (id.length >= 3 && (ser.contains('-$id-') || ser.contains('-$id') || ser.contains(id.toUpperCase()))) {
+        return '${dateKey}_$id';
+      }
+      if (name.isNotEmpty && c == name) {
+        return '${dateKey}_$id';
+      }
+    }
+
+    // 2. Karachi legacy fallback
     if (ser.contains('-HAJI-') || ser.contains('-HC-') || tag == 'HAJI' || tag == 'HC' || c.contains('haji')) {
       return '${dateKey}_haji';
     }
-    return '${dateKey}_saddar';
+    if (isKarachiFamily(b)) {
+      return '${dateKey}_saddar';
+    }
+
+    // 3. Fallback: if branch has configured camps, pick first active camp
+    if (camps.isNotEmpty) {
+      final firstId = (camps.first['id'] ?? '').toString().toLowerCase().trim();
+      if (firstId.isNotEmpty) return '${dateKey}_$firstId';
+    }
+
+    return dateKey;
   }
 
   /// Returns all active Firestore date document IDs for a given dateKey.
-  /// For multi-camp branches: ['${dateKey}_saddar', '${dateKey}_haji', dateKey] (includes legacy dateKey).
-  /// For single-camp branches: [dateKey].
+  /// Dynamically supports ANY branch with configured camps.
   static List<String> getAllCampDateDocIds({
     required String branchId,
     required String dateKey,
@@ -1174,20 +1296,44 @@ class CampSessionService {
     final b = branchId.toLowerCase().trim();
     if (!hasCampsForBranch(b)) return [dateKey];
 
+    final camps = getCampsForBranch(b, includeClosed: false);
     final sel = (selectedCamp ?? '').toLowerCase().trim();
-    if (sel == 'saddar' || sel == 'kapayya' || sel == 'kap') {
-      return ['${dateKey}_saddar', dateKey];
-    } else if (sel == 'haji_camp' || sel == 'haji' || sel == 'hc') {
-      return ['${dateKey}_haji', dateKey];
+
+    if (sel.isNotEmpty && sel != 'all') {
+      for (final camp in camps) {
+        final id = (camp['id'] ?? '').toString().toLowerCase().trim();
+        if (id == sel || id.contains(sel) || sel.contains(id)) {
+          return ['${dateKey}_$id', dateKey];
+        }
+      }
     }
-    return ['${dateKey}_saddar', '${dateKey}_haji', dateKey];
+
+    // Karachi legacy check
+    if (isKarachiFamily(b)) {
+      if (sel == 'saddar' || sel == 'kapayya' || sel == 'kap') {
+        return ['${dateKey}_saddar', dateKey];
+      } else if (sel == 'haji_camp' || sel == 'haji' || sel == 'hc') {
+        return ['${dateKey}_haji', dateKey];
+      }
+      return ['${dateKey}_saddar', '${dateKey}_haji', dateKey];
+    }
+
+    // Dynamic camps for any branch
+    if (camps.isNotEmpty) {
+      final result = <String>[];
+      for (final camp in camps) {
+        final id = (camp['id'] ?? '').toString().toLowerCase().trim();
+        if (id.isNotEmpty) result.add('${dateKey}_$id');
+      }
+      result.add(dateKey);
+      return result;
+    }
+
+    return [dateKey];
   }
 
   /// Returns the Firestore collection name for inventory.
-  /// For multi-camp branches like Karachi:
-  /// - Saddar: 'inventory_saddar'
-  /// - Haji Camp: 'inventory_haji'
-  /// For single-camp branches: 'inventory'
+  /// Dynamically supports ANY branch with configured camps ('inventory_${campId}').
   static String getCampInventoryPath({
     required String branchId,
     String? campId,
@@ -1199,12 +1345,41 @@ class CampSessionService {
 
     final ser = (serial ?? '').toUpperCase();
     final tag = (dispensaryTag ?? '').toUpperCase();
-    final c = (campId ?? '').toLowerCase();
+    final c = (campId ?? '').toLowerCase().trim();
 
+    // 1. Dynamic camps check
+    final camps = getCampsForBranch(b, includeClosed: true);
+    for (final camp in camps) {
+      final id = (camp['id'] ?? '').toString().toLowerCase().trim();
+      final cTag = (camp['dispensaryTag'] ?? camp['tag'] ?? '').toString().toUpperCase().trim();
+      if (id.isEmpty) continue;
+
+      if (c == id || (c.isNotEmpty && (c.contains(id) || id.contains(c)))) {
+        return 'inventory_$id';
+      }
+      if (cTag.isNotEmpty && (tag == cTag || ser.contains('-$cTag-') || ser.contains('-$cTag'))) {
+        return 'inventory_$id';
+      }
+      if (id.length >= 3 && (ser.contains('-$id-') || ser.contains('-$id') || ser.contains(id.toUpperCase()))) {
+        return 'inventory_$id';
+      }
+    }
+
+    // 2. Karachi legacy check
     if (ser.contains('-HAJI-') || ser.contains('-HC-') || tag == 'HAJI' || tag == 'HC' || c.contains('haji')) {
       return 'inventory_haji';
     }
-    return 'inventory_saddar';
+    if (isKarachiFamily(b)) {
+      return 'inventory_saddar';
+    }
+
+    // 3. Fallback: first camp if available
+    if (camps.isNotEmpty) {
+      final firstId = (camps.first['id'] ?? '').toString().toLowerCase().trim();
+      if (firstId.isNotEmpty) return 'inventory_$firstId';
+    }
+
+    return 'inventory';
   }
 
   /// Returns all active Firestore inventory collection names for a given branch.
@@ -1215,13 +1390,39 @@ class CampSessionService {
     final b = branchId.toLowerCase().trim();
     if (!hasCampsForBranch(b)) return ['inventory'];
 
+    final camps = getCampsForBranch(b, includeClosed: false);
     final sel = (selectedCamp ?? '').toLowerCase().trim();
-    if (sel == 'saddar' || sel == 'kapayya' || sel == 'kap') {
-      return ['inventory_saddar'];
-    } else if (sel == 'haji_camp' || sel == 'haji' || sel == 'hc') {
-      return ['inventory_haji'];
+
+    if (sel.isNotEmpty && sel != 'all') {
+      for (final camp in camps) {
+        final id = (camp['id'] ?? '').toString().toLowerCase().trim();
+        if (id == sel || id.contains(sel) || sel.contains(id)) {
+          return ['inventory_$id'];
+        }
+      }
     }
-    return ['inventory_saddar', 'inventory_haji'];
+
+    // Karachi legacy check
+    if (isKarachiFamily(b)) {
+      if (sel == 'saddar' || sel == 'kapayya' || sel == 'kap') {
+        return ['inventory_saddar'];
+      } else if (sel == 'haji_camp' || sel == 'haji' || sel == 'hc') {
+        return ['inventory_haji'];
+      }
+      return ['inventory_saddar', 'inventory_haji'];
+    }
+
+    // Dynamic camps for any branch
+    if (camps.isNotEmpty) {
+      final list = camps
+          .map((c) => (c['id'] ?? '').toString().toLowerCase().trim())
+          .where((id) => id.isNotEmpty)
+          .map((id) => 'inventory_$id')
+          .toList();
+      if (list.isNotEmpty) return list;
+    }
+
+    return ['inventory'];
   }
 
   /// Validates keyword tag uniqueness when creating/editing a dispensary.

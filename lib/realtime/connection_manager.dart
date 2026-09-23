@@ -130,6 +130,12 @@ class ConnectionManager {
     _disposed = false;
     _reconnectAttempts = 0;
 
+    RealtimeManager().onNeedRediscovery = () {
+      if (!_running || _disposed) return;
+      debugPrint('[ConnectionManager] RealtimeManager requested rediscovery after failed retries');
+      _scheduleReconnect();
+    };
+
     debugPrint('[ConnectionManager] Starting: role=$_role branch=$_branchId'
         '${AppNetwork.useDedicatedServer ? " [dedicated: ${AppNetwork.dedicatedServerIp}]" : ""}');
     await _tryConnect();
@@ -278,7 +284,7 @@ class ConnectionManager {
     }
 
     // ── Auto-discovery path (UDP broadcast + fast parallel subnet scan + mDNS) ─
-    if (kIsWeb) {
+    if (!kIsWeb) {
       final connList = await Connectivity().checkConnectivity();
       final hasNetwork = connList.contains(ConnectivityResult.wifi) ||
           connList.contains(ConnectivityResult.ethernet) ||
@@ -438,13 +444,18 @@ class ConnectionManager {
       // [BUG-11] Explicit disposed guard.
       if (!_running || _disposed) return;
 
-      // When RealtimeManager is disconnected and no reconnect is actively scheduled,
-      // emit disconnected state and immediately schedule automatic reconnect.
-      if (!RealtimeManager().isConnected && _reconnectTimer == null) {
-        debugPrint('[ConnectionManager] Heartbeat: disconnect detected, scheduling auto-reconnect...');
+      final rm = RealtimeManager();
+      // Case 1: RealtimeManager is disconnected and no reconnect is actively scheduled.
+      // Case 2: RealtimeManager has failed reconnecting to the current IP 3+ times.
+      //         The server may have rebooted with a new DHCP IP, so run full discovery.
+      final bool needsRediscovery = !rm.isConnected && rm.reconnectAttempts >= 3;
+      final bool isDeadSilent = !rm.isConnected && _reconnectTimer == null && !rm.isReconnecting;
+
+      if (needsRediscovery || isDeadSilent) {
+        debugPrint('[ConnectionManager] Heartbeat: ${needsRediscovery ? "reconnect attempts (${rm.reconnectAttempts}) exhausted" : "disconnect detected"}, scheduling server rediscovery...');
         _emit(const ConnectionStatus(
           state: LanConnectionState.disconnected,
-          message: 'Connection lost — reconnecting...',
+          message: 'Connection lost — rediscovering server...',
         ));
         _scheduleReconnect();
       }

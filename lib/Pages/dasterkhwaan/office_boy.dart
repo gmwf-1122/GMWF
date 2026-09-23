@@ -21,6 +21,7 @@ import '../donations/donations_shared.dart';
 import '../../services/donations_local_storage.dart';
 import '../../services/donation_box_storage.dart';
 import '../../models/donation_box_models.dart';
+import '../../widgets/app_feedback.dart';
 import '../../services/local_storage_service.dart';
 import '../../services/camp_session_service.dart';
 import '../../services/auth_service.dart';
@@ -31,6 +32,7 @@ import '../../theme/role_theme_provider.dart';
 import '../../realtime/realtime_manager.dart';
 import '../../realtime/realtime_events.dart';
 import '../../services/sync_service.dart';
+import '../../services/network_health_service.dart';
 
 // ─────────────────────────── Design Tokens ──────────────────────────────────
 
@@ -126,10 +128,16 @@ class DasterkhwaanOfficeBoy extends StatefulWidget {
 }
 
 class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, WidgetsBindingObserver {
   int _currentNav = 0;
   String _userName = 'User';
   String? _branchId;
+
+  bool _isRefreshing = false;
+  bool _isGenerating = false;
+  bool _isReversing = false;
+  DateTime? _lastManualRefresh;
+  static const Duration _refreshCooldown = Duration(seconds: 30);
 
   late PageController _pageController;
   final _qtyCtrl = TextEditingController(text: '1');
@@ -179,6 +187,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _pageController = PageController(initialPage: _currentNav);
 
     _fadeCtrl = AnimationController(
@@ -205,6 +214,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
     });
     DonationBoxStorage.init().then((_) {
       if (mounted) setState(() {});
+      DonationBoxStorage.backfillUnsyncedBoxes(_branchId);
     });
     LocalStorageService.openBoxSafe('dasterkhwaan_tokens').then((_) {
       if (mounted) {
@@ -215,15 +225,28 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
       }
     });
 
-    if (widget.branchId != null) {
-      _branchId = widget.branchId;
+    final resolvedBranch = LocalStorageService.isValidBranchId(widget.branchId)
+        ? LocalStorageService.sanitizeBranchId(widget.branchId)
+        : null;
+    if (resolvedBranch != null) {
+      _branchId = resolvedBranch;
       _userName = widget.userName ?? 'Office Boy';
+      SyncService().start(_branchId!);
       _recalculateLocalStats();
       _setupRealtimeListeners();
     } else {
       _loadUserAndBranch();
     }
     _selectedSession = CampSessionService.resolveDasterkhwaanSession(null, _branchId);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
+      if (_pulseCtrl.isAnimating) _pulseCtrl.stop();
+    } else if (state == AppLifecycleState.resumed) {
+      if (!_pulseCtrl.isAnimating) _pulseCtrl.repeat(reverse: true);
+    }
   }
 
   void _goToTab(int index) {
@@ -272,6 +295,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _dayDocSub?.cancel();
     _tokensSub?.cancel();
     _pageController.dispose();
@@ -287,6 +311,44 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
     try {
+      // Check local Hive cache first (0 cloud reads)
+      if (Hive.isBoxOpen('app_settings')) {
+        final box = Hive.box('app_settings');
+        final u = box.get('user_data') ?? box.get('currentUser');
+        if (u is Map) {
+          final uMap = Map<String, dynamic>.from(u);
+          final b = (uMap['branchId'] ?? uMap['branch'] ?? uMap['selectedBranchId'])?.toString();
+          if (b != null && b.isNotEmpty && b != 'all') {
+            SyncService().start(b);
+            setState(() {
+              _userName = resolveUserDisplayName(
+                uMap,
+                fallback: (uMap['username'] ?? uMap['name'] ?? user.email?.split('@').first ?? 'Office Boy').toString(),
+              );
+              _branchId = b;
+              _selectedSession = CampSessionService.resolveDasterkhwaanSession(null, _branchId);
+            });
+            _recalculateLocalStats();
+            _setupRealtimeListeners();
+            _backfillUnsyncedTokens();
+            return;
+          }
+        }
+        final cb = box.get('current_branch_id')?.toString();
+        if (cb != null && cb.isNotEmpty && cb != 'all') {
+          SyncService().start(cb);
+          setState(() {
+            _userName = user.email?.split('@').first ?? 'Office Boy';
+            _branchId = cb;
+            _selectedSession = CampSessionService.resolveDasterkhwaanSession(null, _branchId);
+          });
+          _recalculateLocalStats();
+          _setupRealtimeListeners();
+          _backfillUnsyncedTokens();
+          return;
+        }
+      }
+
       final branches =
           await FirebaseFirestore.instance.collection('branches').get();
       for (final branch in branches.docs) {
@@ -294,6 +356,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
             await branch.reference.collection('users').doc(user.uid).get();
         if (userDoc.exists) {
           final data = userDoc.data()!;
+          SyncService().start(branch.id);
           setState(() {
             _userName = resolveUserDisplayName(
               data,
@@ -304,6 +367,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
           });
           _recalculateLocalStats();
           _setupRealtimeListeners();
+          _backfillUnsyncedTokens();
           return;
         }
       }
@@ -341,10 +405,16 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
     try {
       if (Hive.isBoxOpen('dasterkhwaan_tokens')) {
         final box = Hive.box('dasterkhwaan_tokens');
+        final Set<int> seenTokenNumbers = {};
         for (final raw in box.values) {
           if (raw is Map) {
             final t = Map<String, dynamic>.from(raw);
             if (t['dateKey'] == today && t['branchId'] == _branchId) {
+              final n = (t['number'] as num?)?.toInt() ?? 0;
+              if (n > 0 && !seenTokenNumbers.add(n)) {
+                // duplicate token number for today, skip it
+                continue;
+              }
               localTotal++;
               final isServed = t['served'] == true;
               if (isServed) localServed++;
@@ -373,9 +443,13 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
         .where((d) => d.date == today && ((uid.isNotEmpty && d.collectorId == uid) || (_effectiveUserName.isNotEmpty && d.recordedBy.toLowerCase().trim() == _effectiveUserName.toLowerCase().trim()) || (d.collectorId == null || d.collectorId!.isEmpty)));
     double donTotal = 0.0;
     int donCount = 0;
+    final Set<String> seenDonKeys = {};
     for (var d in localDonations) {
-      donTotal += d.amount;
-      donCount++;
+      final key = d.localId.isNotEmpty ? d.localId : (d.receiptNo.isNotEmpty ? d.receiptNo : '${d.date}_${d.amount}_${d.donorName}');
+      if (seenDonKeys.add(key)) {
+        donTotal += d.amount > 0 ? d.amount : (d.probableAmount ?? 0.0);
+        donCount++;
+      }
     }
 
     final updated = {
@@ -406,170 +480,187 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
   }
 
   Future<void> _generateTokens() async {
-    final quantity = int.tryParse(_qtyCtrl.text.trim()) ?? 0;
-    if (quantity <= 0) {
-      _showSnack('Enter a valid quantity', isError: true);
-      return;
-    }
-    if (_branchId == null) {
-      _showSnack('Branch not found!', isError: true);
-      return;
-    }
-    HapticFeedback.mediumImpact();
-
-    // 1. Calculate next sequential start number
-    int startNum = 1;
+    if (_isGenerating) return;
+    _isGenerating = true;
     try {
-      final tokenBox = await _getTokensBox();
-      int maxNum = 0;
-      for (final raw in tokenBox.values) {
-        if (raw is Map) {
-          final t = Map<String, dynamic>.from(raw);
-          if (t['dateKey'] == today && t['branchId'] == _branchId) {
-            final n = (t['number'] as num?)?.toInt() ?? 0;
-            if (n > maxNum) maxNum = n;
+      final quantity = int.tryParse(_qtyCtrl.text.trim()) ?? 0;
+      if (quantity <= 0) {
+        _showSnack('Enter a valid quantity', isError: true);
+        return;
+      }
+      _branchId = LocalStorageService.sanitizeBranchId(_branchId);
+      if (_branchId == null || !LocalStorageService.isValidBranchId(_branchId)) {
+        _showSnack('Branch not found!', isError: true);
+        return;
+      }
+      HapticFeedback.mediumImpact();
+
+      // 1. Calculate next sequential start number
+      int startNum = 1;
+      try {
+        final tokenBox = await _getTokensBox();
+        int maxNum = 0;
+        for (final raw in tokenBox.values) {
+          if (raw is Map) {
+            final t = Map<String, dynamic>.from(raw);
+            if (t['dateKey'] == today && t['branchId'] == _branchId) {
+              final n = (t['number'] as num?)?.toInt() ?? 0;
+              if (n > maxNum) maxNum = n;
+            }
           }
         }
-      }
-      startNum = maxNum + 1;
-    } catch (_) {}
+        startNum = maxNum + 1;
+      } catch (_) {}
 
-    final nowIso = DateTime.now().toIso8601String();
-    final tokensList = <Map<String, dynamic>>[];
+      final nowIso = DateTime.now().toIso8601String();
+      final tokensList = <Map<String, dynamic>>[];
 
-    for (int i = 0; i < quantity; i++) {
-      final num = startNum + i;
-      final tid = 'dst_${_branchId}_${today}_$num';
-      tokensList.add({
-        'id': tid,
-        'localId': tid,
-        'number': num,
-        'time': nowIso,
-        'served': false,
-        'session': _selectedSession,
-        'branchId': _branchId,
-        'dateKey': today,
-        'issuedBy': _effectiveUserName,
-        'pricePerToken': _pricePerToken,
-        'syncStatus': 'pending',
-      });
-    }
-
-    // ── STEP 1: Save Locally First (Hive) ──────────────────────────────
-    try {
-      final tokenBox = await _getTokensBox();
-      for (final t in tokensList) {
-        await tokenBox.put(t['id'], t);
-      }
-    } catch (e) {
-      debugPrint('[OfficeBoy] Local token write error: $e');
-    }
-
-    // ── STEP 2: Send to LAN Server (if connected) ──────────────────────
-    final isLanConnected = RealtimeManager().isConnected;
-    if (isLanConnected) {
-      try {
-        RealtimeManager().sendMessage(
-          RealtimeEvents.payload(
-            type: RealtimeEvents.saveOfficeBoyToken,
-            data: {
-              'branchId': _branchId,
-              'dateKey': today,
-              'session': _selectedSession,
-              'quantity': quantity,
-              'tokens': tokensList,
-              'issuedBy': _effectiveUserName,
-              'pricePerToken': _pricePerToken,
-              'timestamp': nowIso,
-            },
-          ),
-        );
-      } catch (e) {
-        debugPrint('[OfficeBoy] Realtime LAN broadcast error: $e');
-      }
-    }
-
-    // ── STEP 3: Always Enqueue for Cloud Sync ───────────────────────────
-    try {
-      await LocalStorageService.enqueueSync({
-        'type': 'save_dasterkhwan_tokens',
-        'branchId': _branchId,
-        'dateKey': today,
-        'data': {
+      for (int i = 0; i < quantity; i++) {
+        final num = startNum + i;
+        final tid = 'dst_${_branchId}_${today}_$num';
+        tokensList.add({
+          'id': tid,
+          'localId': tid,
+          'number': num,
+          'time': nowIso,
+          'served': false,
+          'session': _selectedSession,
           'branchId': _branchId,
           'dateKey': today,
-          'session': _selectedSession,
-          'quantity': quantity,
-          'tokens': tokensList,
           'issuedBy': _effectiveUserName,
           'pricePerToken': _pricePerToken,
-        },
-      });
-      SyncService().triggerUpload(force: true);
-    } catch (e) {
-      debugPrint('[OfficeBoy] Sync enqueue error: $e');
-    }
-
-    // ── STEP 4: Direct Firestore write in parallel for instant cloud sync ─────
-    try {
-      final tokensRef = _tokensCol;
-      final dayRef = _dayDoc;
-      final batch = FirebaseFirestore.instance.batch();
-
-      for (final t in tokensList) {
-        final docRef = tokensRef.doc(t['id']);
-        batch.set(docRef, {
-          'number': t['number'],
-          'time': FieldValue.serverTimestamp(),
-          'served': false,
-          'session': t['session'],
-          'issuedBy': t['issuedBy'],
-          'localId': t['id'],
-        }, SetOptions(merge: true));
+          'syncStatus': 'pending',
+        });
       }
-      batch.set(dayRef, {
-        'totalTokens': FieldValue.increment(quantity),
-        'session_${_selectedSession}_total': FieldValue.increment(quantity),
-        'lastUpdated': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true));
 
-      batch.commit().then((_) async {
+      // ── STEP 1: Save Locally First (Hive) ──────────────────────────────
+      try {
         final tokenBox = await _getTokensBox();
         for (final t in tokensList) {
-          final existing = tokenBox.get(t['id']);
-          if (existing is Map) {
-            final updated = Map<String, dynamic>.from(existing)
-              ..['syncStatus'] = 'synced'
-              ..['synced'] = true;
-            await tokenBox.put(t['id'], updated);
-          }
+          await tokenBox.put(t['id'], t);
         }
-      }).catchError((err) {
-        debugPrint('[OfficeBoy] Direct Firestore write deferred to sync queue: $err');
-      });
-    } catch (_) {}
+      } catch (e) {
+        debugPrint('[OfficeBoy] Local token write error: $e');
+      }
 
-    if (!mounted) return;
-    _recalculateLocalStats();
-    String sessionDisplayName = 'Meal';
-    if (_selectedSession == 'breakfast') {
-      sessionDisplayName = 'Breakfast (ناشتہ)';
-    } else if (_selectedSession == 'lunch') {
-      sessionDisplayName = 'Lunch (دوپہر)';
-    } else if (_selectedSession == 'dinner') {
-      sessionDisplayName = 'Dinner (رات)';
+      final firstNum = tokensList.isNotEmpty ? tokensList.first['number'] : 1;
+      final lastNum = tokensList.isNotEmpty ? tokensList.last['number'] : quantity;
+      final batchId = 'dst_batch_${_branchId}_${today}_${firstNum}_$lastNum';
+
+      // ── STEP 2: Send to LAN Server (if connected) ──────────────────────
+      final isLanConnected = RealtimeManager().isConnected;
+      if (isLanConnected) {
+        try {
+          RealtimeManager().sendMessage(
+            RealtimeEvents.payload(
+              type: RealtimeEvents.saveOfficeBoyToken,
+              data: {
+                'branchId': _branchId,
+                'dateKey': today,
+                'session': _selectedSession,
+                'quantity': quantity,
+                'tokens': tokensList,
+                'issuedBy': _effectiveUserName,
+                'pricePerToken': _pricePerToken,
+                'timestamp': nowIso,
+                'batchId': batchId,
+              },
+            ),
+          );
+        } catch (e) {
+          debugPrint('[OfficeBoy] Realtime LAN broadcast error: $e');
+        }
+      }
+
+      // ── STEP 3: Enqueue for Cloud Sync (Offline-first idempotent sync) ─────
+      try {
+        if (_branchId != null && _branchId!.isNotEmpty) {
+          SyncService().start(_branchId!);
+        }
+        await LocalStorageService.enqueueSync({
+          'type': 'save_dasterkhwan_tokens',
+          'entityId': batchId,
+          'batchId': batchId,
+          'branchId': _branchId,
+          'dateKey': today,
+          'data': {
+            'branchId': _branchId,
+            'dateKey': today,
+            'session': _selectedSession,
+            'quantity': quantity,
+            'tokens': tokensList,
+            'issuedBy': _effectiveUserName,
+            'pricePerToken': _pricePerToken,
+            'batchId': batchId,
+          },
+        });
+
+        // Direct cloud write fallback if device is online and branch is valid
+        try {
+          if (LocalStorageService.isValidBranchId(_branchId)) {
+            final dayDocRef = FirebaseFirestore.instance
+                .collection('branches')
+                .doc(_branchId)
+                .collection('dasterkhwaan')
+                .doc(today);
+            final tokensCol = dayDocRef.collection('tokens');
+            final batch = FirebaseFirestore.instance.batch();
+            for (final t in tokensList) {
+              if (t is Map) {
+                final tokenId = t['id']?.toString() ?? tokensCol.doc().id;
+                batch.set(tokensCol.doc(tokenId), {
+                  'number': t['number'] ?? 1,
+                  'served': t['served'] == true,
+                  'session': t['session'] ?? _selectedSession,
+                  'time': t['time'] != null
+                      ? Timestamp.fromDate(DateTime.tryParse(t['time'].toString()) ?? DateTime.now())
+                      : FieldValue.serverTimestamp(),
+                  'issuedBy': t['issuedBy'] ?? '',
+                  'localId': tokenId,
+                }, SetOptions(merge: true));
+              }
+            }
+            batch.set(dayDocRef, {
+              'totalTokens': FieldValue.increment(quantity),
+              'session_${_selectedSession}_total': FieldValue.increment(quantity),
+              'lastUpdated': FieldValue.serverTimestamp(),
+            }, SetOptions(merge: true));
+            unawaited(batch.commit().catchError((_) {}));
+          }
+        } catch (_) {}
+
+        SyncService().triggerUpload(force: true);
+      } catch (e) {
+        debugPrint('[OfficeBoy] Sync enqueue error: $e');
+      }
+
+      if (!mounted) return;
+      _recalculateLocalStats();
+      String sessionDisplayName = 'Meal';
+      if (_selectedSession == 'breakfast') {
+        sessionDisplayName = 'Breakfast (ناشتہ)';
+      } else if (_selectedSession == 'lunch') {
+        sessionDisplayName = 'Lunch (دوپہر)';
+      } else if (_selectedSession == 'dinner') {
+        sessionDisplayName = 'Dinner (رات)';
+      }
+      _showSnack(
+          '$quantity $sessionDisplayName Token${quantity > 1 ? 's' : ''} Issued · PKR ${(quantity * _pricePerToken).toStringAsFixed(0)}');
+      _qtyCtrl.text = '1';
+      setState(() {});
+    } finally {
+      _isGenerating = false;
     }
-    _showSnack(
-        '$quantity $sessionDisplayName Token${quantity > 1 ? 's' : ''} Issued · PKR ${(quantity * _pricePerToken).toStringAsFixed(0)}');
-    _qtyCtrl.text = '1';
-    setState(() {});
   }
 
   Future<void> _showReverseTokensDialog() async {
-    if (_branchId == null) {
-      _showSnack('Branch not found!', isError: true);
-      return;
-    }
+    if (_isReversing) return;
+    _isReversing = true;
+    try {
+      if (_branchId == null) {
+        _showSnack('Branch not found!', isError: true);
+        return;
+      }
 
     // Load unserved tokens from local Hive first
     final List<Map<String, dynamic>> localUnserved = [];
@@ -710,8 +801,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
 
     if (confirmQty == null || confirmQty <= 0) return;
 
-    try {
-      final tokensToVoid = localUnserved.take(confirmQty).toList();
+    final tokensToVoid = localUnserved.take(confirmQty).toList();
       final voidIds = tokensToVoid.map((t) => t['id']?.toString() ?? t['localId']?.toString() ?? '').where((id) => id.isNotEmpty).toList();
       final Map<String, int> sessionCounts = {};
 
@@ -728,6 +818,8 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
         }
       } catch (_) {}
 
+      final revBatchId = 'dst_rev_${_branchId}_${today}_${voidIds.join('_')}';
+
       // ── STEP 2: Send over LAN (if connected) ────────────────────────
       final isLanConnected = RealtimeManager().isConnected;
       if (isLanConnected) {
@@ -743,16 +835,19 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
                 'tokenIds': voidIds,
                 'sessionCounts': sessionCounts,
                 'timestamp': DateTime.now().toIso8601String(),
+                'batchId': revBatchId,
               },
             ),
           );
         } catch (_) {}
       }
 
-      // ── STEP 3: Always Enqueue for Cloud Sync ────────────────────────
+      // ── STEP 3: Enqueue for Cloud Sync (Offline-first idempotent sync) ─────
       try {
         await LocalStorageService.enqueueSync({
           'type': 'reverse_dasterkhwan_tokens',
+          'entityId': revBatchId,
+          'batchId': revBatchId,
           'branchId': _branchId,
           'dateKey': today,
           'data': {
@@ -761,28 +856,10 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
             'quantity': confirmQty,
             'tokenIds': voidIds,
             'sessionCounts': sessionCounts,
+            'batchId': revBatchId,
           },
         });
         SyncService().triggerUpload(force: true);
-      } catch (_) {}
-
-      // ── STEP 4: Direct Firestore deletion in parallel ─────────────────
-      try {
-        final batch = FirebaseFirestore.instance.batch();
-        for (final id in voidIds) {
-          batch.delete(_tokensCol.doc(id));
-        }
-        final Map<String, dynamic> dayUpdate = {
-          'totalTokens': FieldValue.increment(-confirmQty),
-          'lastUpdated': FieldValue.serverTimestamp(),
-        };
-        sessionCounts.forEach((s, cnt) {
-          if (cnt > 0) {
-            dayUpdate['session_${s}_total'] = FieldValue.increment(-cnt);
-          }
-        });
-        batch.set(_dayDoc, dayUpdate, SetOptions(merge: true));
-        batch.commit().catchError((_) {});
       } catch (_) {}
 
       if (!mounted) return;
@@ -791,50 +868,37 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
       setState(() {});
     } catch (e) {
       _showSnack('Error reversing tokens: $e', isError: true);
+    } finally {
+      _isReversing = false;
     }
   }
 
   void _showSnack(String msg, {bool isError = false}) {
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Row(children: [
-        Container(
-          width: 26, height: 26,
-          decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.15), shape: BoxShape.circle),
-          child: Icon(
-            isError ? Icons.close_rounded : Icons.check_rounded,
-            color: Colors.white, size: 14,
-          ),
-        ),
-        const SizedBox(width: 10),
-        Expanded(
-          child: Text(msg,
-              style: GoogleFonts.dmSans(
-                  fontWeight: FontWeight.w600,
-                  fontSize: 13,
-                  color: Colors.white)),
-        ),
-      ]),
-      backgroundColor: isError ? _DS.red : _DS.sage,
-      behavior: SnackBarBehavior.floating,
-      margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      duration: const Duration(seconds: 3),
-      shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(_DS.r14)),
-    ));
+    if (isError) {
+      AppFeedback.showError(context, msg);
+    } else {
+      AppFeedback.showSuccess(context, msg);
+    }
   }
 
   Future<void> _backfillUnsyncedTokens() async {
     try {
-      if (_branchId == null || _branchId!.isEmpty) return;
+      final effectiveBranch = LocalStorageService.sanitizeBranchId(_branchId);
+      _branchId = effectiveBranch;
+      if (!LocalStorageService.isValidBranchId(_branchId)) return;
       final box = await _getTokensBox();
       final unsynced = <Map<String, dynamic>>[];
       for (final raw in box.values) {
         if (raw is Map) {
           final t = Map<String, dynamic>.from(raw);
-          final tBranch = (t['branchId']?.toString() ?? '').toLowerCase().trim();
-          if (tBranch.isNotEmpty && tBranch != _branchId!.toLowerCase().trim()) continue;
+          var tBranch = (t['branchId']?.toString() ?? '').toLowerCase().trim();
+          // If token had 'unknown', 'all', or invalid branch, reparent to current branch
+          if (!LocalStorageService.isValidBranchId(tBranch)) {
+            tBranch = _branchId!.toLowerCase().trim();
+            t['branchId'] = tBranch;
+            await box.put(t['id'], t);
+          }
+          if (tBranch != _branchId!.toLowerCase().trim()) continue;
           if (t['synced'] != true && t['syncStatus'] != 'synced') {
             unsynced.add(t);
           }
@@ -848,8 +912,13 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
           byDate.putIfAbsent(dk, () => []).add(t);
         }
         for (final entry in byDate.entries) {
+          final firstNum = entry.value.isNotEmpty ? (entry.value.first['number'] ?? '') : '';
+          final lastNum = entry.value.isNotEmpty ? (entry.value.last['number'] ?? '') : '';
+          final batchId = 'dst_backfill_${_branchId}_${entry.key}_${firstNum}_$lastNum';
           await LocalStorageService.enqueueSync({
             'type': 'save_dasterkhwan_tokens',
+            'entityId': batchId,
+            'batchId': batchId,
             'branchId': _branchId,
             'dateKey': entry.key,
             'data': {
@@ -859,6 +928,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
               'tokens': entry.value,
               'issuedBy': _effectiveUserName,
               'pricePerToken': _pricePerToken,
+              'batchId': batchId,
             },
           });
         }
@@ -870,18 +940,46 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
   }
 
   Future<void> _refresh() async {
+    if (_isRefreshing) return;
+
+    // Recalculate local Hive stats immediately (zero cloud quota cost)
     _recalculateLocalStats();
-    if (_branchId != null) {
-      await _backfillUnsyncedTokens();
-      SyncService().triggerUpload(force: true);
-      try {
-        await DonationsLocalStorage.downloadAllDonations(_branchId!);
-        await DonationsLocalStorage.downloadDonors(_branchId!);
-      } catch (_) {}
+
+    final now = DateTime.now();
+    if (_lastManualRefresh != null && now.difference(_lastManualRefresh!) < _refreshCooldown) {
+      final remainingSec = _refreshCooldown.inSeconds - now.difference(_lastManualRefresh!).inSeconds;
+      if (mounted) {
+        setState(() {});
+        _showSnack('Local data refreshed. Cloud sync on cooldown (${remainingSec}s remaining)', isError: false);
+      }
+      return;
     }
-    if (mounted) {
-      setState(() {});
-      _showSnack('Refreshed data & checked cloud sync', isError: false);
+
+    _lastManualRefresh = now;
+    _isRefreshing = true;
+
+    try {
+      if (_branchId != null) {
+        SyncService().start(_branchId!);
+        await _backfillUnsyncedTokens();
+        await DonationBoxStorage.backfillUnsyncedBoxes(_branchId);
+        SyncService().triggerUpload(force: true);
+        try {
+          // Quota guard: delta fetch only recent 3 days instead of default 90 days
+          await DonationsLocalStorage.downloadAllDonations(_branchId!, days: 3);
+          await DonationsLocalStorage.downloadDonors(_branchId!);
+        } catch (_) {}
+      }
+      if (mounted) {
+        setState(() {});
+        _showSnack('Refreshed data & checked cloud sync', isError: false);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isRefreshing = false);
+      } else {
+        _isRefreshing = false;
+      }
     }
   }
 
@@ -934,40 +1032,16 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Row(
-                    children: [
-                      Flexible(
-                        child: Text(
-                          'GMWF Dasterkhwaan',
-                          style: GoogleFonts.dmSans(
-                            color: Colors.white,
-                            fontSize: 15,
-                            fontWeight: FontWeight.w800,
-                            letterSpacing: -0.3,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ),
-                      const SizedBox(width: 6),
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: _DS.mint.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: _DS.mint.withValues(alpha: 0.4), width: 0.5),
-                        ),
-                        child: Text(
-                          branchName,
-                          style: GoogleFonts.dmSans(
-                            color: _DS.mint,
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                          ),
-                        ),
-                      ),
-                    ],
+                  Text(
+                    'GMWF',
+                    style: GoogleFonts.dmSans(
+                      color: Colors.white,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 0.2,
+                    ),
                   ),
-                  const SizedBox(height: 2),
+                  const SizedBox(height: 1),
                   Text(
                     _effectiveUserName,
                     style: GoogleFonts.dmSans(
@@ -981,13 +1055,9 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
               ),
             ),
             const SizedBox(width: 8),
-            if (MediaQuery.of(context).size.width >= 380) ...[
-              _RefreshHeaderButton(onTap: _refresh),
-              const SizedBox(width: 6),
-            ],
-            _SettingsButton(onTap: _openSettings),
+            _RefreshHeaderButton(onTap: _refresh),
             const SizedBox(width: 6),
-            _LogoutButton(onTap: _logout),
+            _SettingsButton(onTap: _openSettings),
           ],
         ),
       ),
@@ -1051,10 +1121,11 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
             _branchId == null
                 ? const GmwfLoadingView()
                 : DonationsScreen.embedded(
-                    branchId: _branchId!,
-                    username: _effectiveUserName,
-                    userId:   _effectiveUserId,
-                    role:     UserRole.officeBoy,
+                    branchId:   _branchId!,
+                    branchName: (LocalStorageService.getActiveUserData()['branchName'] as String?) ?? 'Dasterkhwaan',
+                    username:   _effectiveUserName,
+                    userId:     _effectiveUserId,
+                    role:       UserRole.officeBoy,
                   ),
             // 3 – Donors
             _branchId == null
@@ -1468,8 +1539,8 @@ class _HomeScreen extends StatelessWidget {
                     const SizedBox(height: 10),
                     _ActionCardWide(
                       icon:      Icons.history_rounded,
-                      iconColor: _DS.purple,
-                      iconBg:    _DS.purpleBg,
+                      iconColor: const Color(0xFF0D9488),
+                      iconBg:    const Color(0xFFCCFBF1),
                       title:     'History & Analytics',
                       subtitle:  'Daily tokens, revenue & audit trail',
                       urdu:      'روزانہ اور ماہانہ ریکارڈ',
@@ -1695,7 +1766,7 @@ class _SettingsButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Tooltip(
-        message: 'Settings',
+        message: 'Profile & Settings',
         child: InkWell(
           onTap: onTap,
           borderRadius: BorderRadius.circular(_DS.r12),
@@ -1709,7 +1780,7 @@ class _SettingsButton extends StatelessWidget {
                   color: Colors.white.withValues(alpha: 0.22), width: 0.5),
             ),
             child: const Center(
-              child: Icon(Icons.settings_outlined, color: Colors.white, size: 18),
+              child: Icon(Icons.person_rounded, color: Colors.white, size: 20),
             ),
           ),
         ),
@@ -3335,10 +3406,13 @@ class _TokensScreenState extends State<_TokensScreen> {
               valueListenable: box.listenable(),
               builder: (ctx, Box box, _) {
                 final List<Map<String, dynamic>> tokenList = [];
+                final Set<int> seenTokenNumbers = {};
                 for (final raw in box.values) {
                   if (raw is Map) {
                     final t = Map<String, dynamic>.from(raw);
                     if (t['dateKey'] == widget.today && t['branchId'] == widget.branchId) {
+                      final tokenNum = (t['number'] as num?)?.toInt() ?? 0;
+                      if (tokenNum > 0 && !seenTokenNumbers.add(tokenNum)) continue;
                       String rawSession = (t['session'] as String? ?? 'lunch').toLowerCase();
                       if (rawSession == 'evening' || rawSession == 'night') {
                         rawSession = 'dinner';
@@ -3684,10 +3758,12 @@ class _HistoryScreenState extends State<_HistoryScreen> {
 
     int totalTokens = 0;
     int servedTokens = 0;
+    int dayTokens = 0, dayServed = 0;
+    int nightTokens = 0, nightServed = 0;
     final List<Map<String, dynamic>> tokenList = [];
     final List<Map<String, dynamic>> donationList = [];
-    final Set<String> seenTokenIds = {};
-    final Set<String> seenDonationIds = {};
+    final Set<String> seenTokenUniqueKeys = {};
+    final Set<String> seenDonationKeys = {};
 
     // 1. Read tokens from Local Hive Box first (Instant offline access)
     try {
@@ -3700,33 +3776,68 @@ class _HistoryScreenState extends State<_HistoryScreen> {
           final matchesDate = _isMonthView ? tDate.startsWith(monthKey) : tDate == dateKey;
 
           if (matchesBranch && matchesDate) {
-            final tId = t['id']?.toString() ?? '${tDate}_${t['number']}';
-            if (seenTokenIds.add(tId)) {
-              totalTokens++;
-              final isServed = t['served'] == true;
-              if (isServed) servedTokens++;
+            final tNum = (t['number'] as num?)?.toInt() ?? 0;
+            final tUniqueKey = '${tDate}_$tNum';
+            final tId = (t['id'] ?? t['localId'] ?? tUniqueKey).toString();
 
-              if (!_isMonthView) {
-                DateTime? tTime;
-                if (t['time'] is DateTime) {
-                  tTime = t['time'];
-                } else if (t['time'] is String) {
-                  tTime = DateTime.tryParse(t['time']);
+            if (tNum > 0 && seenTokenUniqueKeys.contains(tUniqueKey)) {
+              // Duplicate token number for this date; merge served status if needed
+                Map<String, dynamic>? existing;
+                for (final item in tokenList) {
+                  if ((item['number'] as int?) == tNum) {
+                    existing = item;
+                    break;
+                  }
                 }
-                DateTime? sTime;
-                if (t['servedTime'] is DateTime) {
-                  sTime = t['servedTime'];
-                } else if (t['servedTime'] is String) {
-                  sTime = DateTime.tryParse(t['servedTime']);
+                if (existing != null && existing['served'] != true) {
+                  existing['served'] = true;
+                  servedTokens++;
+                  final sess = (t['session'] ?? '').toString().toLowerCase();
+                  if (sess == 'dinner' || sess == 'night' || sess == 'evening') {
+                    nightServed++;
+                  } else {
+                    dayServed++;
+                  }
                 }
+              continue;
+            }
 
-                tokenList.add({
-                  'number': (t['number'] as num?)?.toInt() ?? 0,
-                  'served': isServed,
-                  'time': tTime,
-                  'servedTime': sTime,
-                });
+            seenTokenUniqueKeys.add(tUniqueKey);
+            seenTokenUniqueKeys.add(tId);
+            totalTokens++;
+            final isServed = t['served'] == true;
+            if (isServed) servedTokens++;
+
+            final sess = (t['session'] ?? '').toString().toLowerCase();
+            final isNight = sess == 'dinner' || sess == 'night' || sess == 'evening';
+            if (isNight) {
+              nightTokens++;
+              if (isServed) nightServed++;
+            } else {
+              dayTokens++;
+              if (isServed) dayServed++;
+            }
+
+            if (!_isMonthView) {
+              DateTime? tTime;
+              if (t['time'] is DateTime) {
+                tTime = t['time'];
+              } else if (t['time'] is String) {
+                tTime = DateTime.tryParse(t['time']);
               }
+              DateTime? sTime;
+              if (t['servedTime'] is DateTime) {
+                sTime = t['servedTime'];
+              } else if (t['servedTime'] is String) {
+                sTime = DateTime.tryParse(t['servedTime']);
+              }
+
+              tokenList.add({
+                'number': tNum,
+                'served': isServed,
+                'time': tTime,
+                'servedTime': sTime,
+              });
             }
           }
         }
@@ -3751,17 +3862,33 @@ class _HistoryScreenState extends State<_HistoryScreen> {
       }).toList();
 
       for (var d in localList) {
-        if (seenDonationIds.add(d.localId)) {
-          donationList.add({
-            'donorName':  d.donorName,
-            'amount':     d.amount > 0 ? d.amount : (d.probableAmount ?? 0.0),
-            'type':       d.categoryId,
-            'status':     d.status,
-            'syncStatus': d.syncStatus,
-            'localId':    d.localId,
-            'time':       DateTime.tryParse(d.timestamp ?? ''),
-          });
+        final lid = d.localId.trim();
+        final fid = (d.firestoreId ?? '').trim();
+        final rno = (d.receiptNo).trim();
+        final amt = d.amount > 0 ? d.amount : (d.probableAmount ?? 0.0);
+        final contentKey = '${d.date}_${amt.toStringAsFixed(0)}_${d.donorName.trim().toLowerCase()}';
+
+        if (seenDonationKeys.contains(lid) ||
+            (fid.isNotEmpty && seenDonationKeys.contains(fid)) ||
+            (rno.isNotEmpty && seenDonationKeys.contains(rno)) ||
+            seenDonationKeys.contains(contentKey)) {
+          continue;
         }
+
+        if (lid.isNotEmpty) seenDonationKeys.add(lid);
+        if (fid.isNotEmpty) seenDonationKeys.add(fid);
+        if (rno.isNotEmpty) seenDonationKeys.add(rno);
+        seenDonationKeys.add(contentKey);
+
+        donationList.add({
+          'donorName':  d.donorName,
+          'amount':     amt,
+          'type':       d.categoryId,
+          'status':     d.status,
+          'syncStatus': d.syncStatus,
+          'localId':    d.localId,
+          'time':       DateTime.tryParse(d.timestamp ?? ''),
+        });
       }
     } catch (e) {
       debugPrint('[OfficeBoyHistory] Local donation read error: $e');
@@ -3779,19 +3906,56 @@ class _HistoryScreenState extends State<_HistoryScreen> {
 
         for (final doc in tokensSnap.docs) {
           final data = doc.data();
+          final tNum = (data['number'] as num?)?.toInt() ?? 0;
+          final tUniqueKey = '${dateKey}_$tNum';
           final tId = doc.id;
-          if (seenTokenIds.add(tId)) {
-            totalTokens++;
-            final isServed = data['served'] == true;
-            if (isServed) servedTokens++;
 
-            tokenList.add({
-              'number':     (data['number'] as num?)?.toInt() ?? 0,
-              'served':     isServed,
-              'time':       (data['time'] as Timestamp?)?.toDate(),
-              'servedTime': (data['servedTime'] as Timestamp?)?.toDate(),
-            });
+          if (tNum > 0 && seenTokenUniqueKeys.contains(tUniqueKey)) {
+            // Already counted from Hive; update served status if needed
+            if (data['served'] == true) {
+              Map<String, dynamic>? existing;
+              for (final item in tokenList) {
+                if ((item['number'] as int?) == tNum) {
+                  existing = item;
+                  break;
+                }
+              }
+              if (existing != null && existing['served'] != true) {
+                existing['served'] = true;
+                servedTokens++;
+                final sess = (data['session'] ?? '').toString().toLowerCase();
+                if (sess == 'dinner' || sess == 'night' || sess == 'evening') {
+                  nightServed++;
+                } else {
+                  dayServed++;
+                }
+              }
+            }
+            continue;
           }
+
+          seenTokenUniqueKeys.add(tUniqueKey);
+          seenTokenUniqueKeys.add(tId);
+          totalTokens++;
+          final isServed = data['served'] == true;
+          if (isServed) servedTokens++;
+
+          final sess = (data['session'] ?? '').toString().toLowerCase();
+          final isNight = sess == 'dinner' || sess == 'night' || sess == 'evening';
+          if (isNight) {
+            nightTokens++;
+            if (isServed) nightServed++;
+          } else {
+            dayTokens++;
+            if (isServed) dayServed++;
+          }
+
+          tokenList.add({
+            'number':     tNum,
+            'served':     isServed,
+            'time':       (data['time'] as Timestamp?)?.toDate(),
+            'servedTime': (data['servedTime'] as Timestamp?)?.toDate(),
+          });
         }
         tokenList.sort((a, b) => ((a['number'] as int?) ?? 0).compareTo((b['number'] as int?) ?? 0));
 
@@ -3814,17 +3978,34 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                 dCollector.isEmpty;
             if (!matchesUser) continue;
 
-            final lid = data['localId'] as String? ?? d.id;
-            if (seenDonationIds.add(lid)) {
-              donationList.add({
-                ...data,
-                'donorName':  data['donorName']  ?? 'Walk-in Donor',
-                'amount':     (data['amount']    as num? ?? 0.0).toDouble(),
-                'type':       data['categoryId'] ?? 'GMWF',
-                'status':     data['status']     ?? 'pending',
-                'time':       (data['time']      as Timestamp?)?.toDate(),
-              });
+            final lid = (data['localId'] as String? ?? '').trim();
+            final fid = d.id.trim();
+            final rno = (data['receiptNo'] as String? ?? '').trim();
+            final amt = (data['amount'] as num? ?? 0.0).toDouble();
+            final dDate = (data['date'] as String? ?? dateKey).trim();
+            final dDonor = (data['donorName'] as String? ?? 'Walk-in Donor').trim().toLowerCase();
+            final contentKey = '${dDate}_${amt.toStringAsFixed(0)}_$dDonor';
+
+            if ((lid.isNotEmpty && seenDonationKeys.contains(lid)) ||
+                seenDonationKeys.contains(fid) ||
+                (rno.isNotEmpty && seenDonationKeys.contains(rno)) ||
+                seenDonationKeys.contains(contentKey)) {
+              continue;
             }
+
+            if (lid.isNotEmpty) seenDonationKeys.add(lid);
+            seenDonationKeys.add(fid);
+            if (rno.isNotEmpty) seenDonationKeys.add(rno);
+            seenDonationKeys.add(contentKey);
+
+            donationList.add({
+              ...data,
+              'donorName':  data['donorName']  ?? 'Walk-in Donor',
+              'amount':     amt,
+              'type':       data['categoryId'] ?? 'GMWF',
+              'status':     data['status']     ?? 'pending',
+              'time':       (data['time']      as Timestamp?)?.toDate(),
+            });
           }
         } catch (_) {}
       } else {
@@ -3848,17 +4029,34 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                   dCollector.isEmpty;
               if (!matchesUser) continue;
 
-              final lid = data['localId'] as String? ?? d.id;
-              if (seenDonationIds.add(lid)) {
-                donationList.add({
-                  ...data,
-                  'donorName':  data['donorName']  ?? 'Walk-in Donor',
-                  'amount':     (data['amount']    as num? ?? 0.0).toDouble(),
-                  'type':       data['categoryId'] ?? 'GMWF',
-                  'status':     data['status']     ?? 'pending',
-                  'time':       (data['time']      as Timestamp?)?.toDate(),
-                });
+              final lid = (data['localId'] as String? ?? '').trim();
+              final fid = d.id.trim();
+              final rno = (data['receiptNo'] as String? ?? '').trim();
+              final amt = (data['amount'] as num? ?? 0.0).toDouble();
+              final dDate = dtStr.trim();
+              final dDonor = (data['donorName'] as String? ?? 'Walk-in Donor').trim().toLowerCase();
+              final contentKey = '${dDate}_${amt.toStringAsFixed(0)}_$dDonor';
+
+              if ((lid.isNotEmpty && seenDonationKeys.contains(lid)) ||
+                  seenDonationKeys.contains(fid) ||
+                  (rno.isNotEmpty && seenDonationKeys.contains(rno)) ||
+                  seenDonationKeys.contains(contentKey)) {
+                continue;
               }
+
+              if (lid.isNotEmpty) seenDonationKeys.add(lid);
+              seenDonationKeys.add(fid);
+              if (rno.isNotEmpty) seenDonationKeys.add(rno);
+              seenDonationKeys.add(contentKey);
+
+              donationList.add({
+                ...data,
+                'donorName':  data['donorName']  ?? 'Walk-in Donor',
+                'amount':     amt,
+                'type':       data['categoryId'] ?? 'GMWF',
+                'status':     data['status']     ?? 'pending',
+                'time':       (data['time']      as Timestamp?)?.toDate(),
+              });
             }
           }
         } catch (_) {}
@@ -3885,6 +4083,10 @@ class _HistoryScreenState extends State<_HistoryScreen> {
     return {
       'totalTokens':    totalTokens,
       'servedTokens':   servedTokens,
+      'dayTokens':      dayTokens,
+      'dayServed':      dayServed,
+      'nightTokens':    nightTokens,
+      'nightServed':    nightServed,
       'totalRevenue':   totalRevenue,
       'tokenList':      tokenList,
       'donationList':   donationList,
@@ -3907,7 +4109,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
       Container(
         decoration: const BoxDecoration(
           gradient: LinearGradient(
-            colors: [Color(0xFF2D1B69), Color(0xFF4C1D95)],
+            colors: [_DS.sage, _DS.sage2],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
@@ -3962,7 +4164,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                 style: GoogleFonts.dmSans(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w700,
-                                  color: !_isMonthView ? _DS.purple : Colors.white70,
+                                  color: !_isMonthView ? _DS.sage : Colors.white70,
                                 ),
                               ),
                             ),
@@ -3981,7 +4183,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                 style: GoogleFonts.dmSans(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w700,
-                                  color: _isMonthView ? _DS.purple : Colors.white70,
+                                  color: _isMonthView ? _DS.sage : Colors.white70,
                                 ),
                               ),
                             ),
@@ -4023,9 +4225,9 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                             lastDate: DateTime.now(),
                             builder: (ctx, child) => Theme(
                               data: ThemeData.light().copyWith(
-                                colorScheme: const ColorScheme.light(primary: _DS.purple),
+                                colorScheme: const ColorScheme.light(primary: _DS.sage),
                                 textButtonTheme: TextButtonThemeData(
-                                  style: TextButton.styleFrom(foregroundColor: _DS.purple),
+                                  style: TextButton.styleFrom(foregroundColor: _DS.sage),
                                 ),
                               ),
                               child: child!,
@@ -4091,7 +4293,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
             if (snap.connectionState == ConnectionState.waiting) {
               return const Center(
                   child: CircularProgressIndicator(
-                      color: _DS.purple, strokeWidth: 2));
+                      color: _DS.mint, strokeWidth: 2));
             }
             if (snap.hasError) {
               return Center(
@@ -4101,6 +4303,10 @@ class _HistoryScreenState extends State<_HistoryScreen> {
             final d              = snap.data!;
             final totalTokens   = d['totalTokens']    as int;
             final servedTokens  = d['servedTokens']   as int;
+            final dayTokens     = (d['dayTokens'] as num?)?.toInt() ?? 0;
+            final dayServed     = (d['dayServed'] as num?)?.toInt() ?? 0;
+            final nightTokens   = (d['nightTokens'] as num?)?.toInt() ?? 0;
+            final nightServed   = (d['nightServed'] as num?)?.toInt() ?? 0;
             final totalRevenue  = d['totalRevenue']   as double;
             final tokenList     = d['tokenList'] as List<Map<String, dynamic>>;
             final donationList  = d['donationList'] as List<Map<String, dynamic>>;
@@ -4115,7 +4321,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                   children: [
                     Icon(Icons.event_note_rounded,
                         size: 64,
-                        color: _DS.purple.withValues(alpha: 0.15)),
+                        color: _DS.mint.withValues(alpha: 0.20)),
                     const SizedBox(height: 12),
                     Text(
                       _isMonthView
@@ -4147,9 +4353,15 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                     ]),
                     const SizedBox(height: 8),
                     Row(children: [
+                      _HistStatTile('☀️ Day (Lunch)', '$dayTokens ($dayServed served)', const Color(0xFF0284C7), smallVal: true),
+                      const SizedBox(width: 8),
+                      _HistStatTile('🌙 Night (Dinner)', '$nightTokens ($nightServed served)', const Color(0xFF7C3AED), smallVal: true),
+                    ]),
+                    const SizedBox(height: 8),
+                    Row(children: [
                       _HistStatTile('Pending', '${totalTokens - servedTokens}', _DS.amber),
                       const SizedBox(width: 8),
-                      _HistStatTile('Revenue', 'PKR ${totalRevenue.toStringAsFixed(0)}', _DS.purple, smallVal: true),
+                      _HistStatTile('Revenue', 'PKR ${totalRevenue.toStringAsFixed(0)}', const Color(0xFF0D9488), smallVal: true),
                     ]),
                     const SizedBox(height: 14),
                     // Progress
@@ -4347,7 +4559,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                 // Donations
                 _HistSectionCard(
                   icon:  Icons.volunteer_activism_rounded,
-                  color: _DS.purple,
+                  color: const Color(0xFF0D9488),
                   title: 'Donations (${donationList.length})',
                   child: donationList.isEmpty
                       ? Padding(
@@ -4363,7 +4575,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                             width: double.infinity,
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: _DS.purpleBg,
+                              color: const Color(0xFFCCFBF1),
                               borderRadius: BorderRadius.circular(_DS.r12),
                             ),
                             child: Row(
@@ -4372,12 +4584,12 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                 Text('Total Donations',
                                     style: GoogleFonts.dmSans(
                                         fontWeight: FontWeight.w600,
-                                        color: _DS.purple,
+                                        color: const Color(0xFF0F766E),
                                         fontSize: 13)),
                                 Text(
                                   'PKR ${totalDonations.toStringAsFixed(0)}',
                                   style: GoogleFonts.dmSerifDisplay(
-                                      color: _DS.purple,
+                                      color: const Color(0xFF0F766E),
                                       fontSize: 18),
                                 ),
                               ],
@@ -4399,7 +4611,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                 Container(
                                   width: 34, height: 34,
                                   decoration: const BoxDecoration(
-                                    color: _DS.purpleBg,
+                                    color: Color(0xFFCCFBF1),
                                     shape: BoxShape.circle,
                                   ),
                                   child: Center(
@@ -4410,7 +4622,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                       style: GoogleFonts.dmSans(
                                           fontSize: 13,
                                           fontWeight: FontWeight.w600,
-                                          color: _DS.purple),
+                                          color: const Color(0xFF0F766E)),
                                     ),
                                   ),
                                 ),

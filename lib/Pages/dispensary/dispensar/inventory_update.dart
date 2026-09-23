@@ -17,6 +17,7 @@ import 'package:gmwf/realtime/realtime_events.dart';
 import 'package:gmwf/widgets/app_back_button.dart';
 import 'package:gmwf/widgets/camp_selector_chip.dart';
 import 'package:gmwf/services/cloud_messaging_service.dart';
+import 'package:gmwf/widgets/app_feedback.dart';
 
 class InventoryUpdatePage extends StatefulWidget {
   final String branchId;
@@ -294,22 +295,11 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
   // ── Helper methods ────────────────────────────────────────────────────────
   void _snack(String msg, {bool err = false}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Row(children: [
-          Icon(err ? Icons.error_rounded : Icons.check_circle_rounded,
-              color: Colors.white, size: 18),
-          const SizedBox(width: 10),
-          Expanded(
-              child: Text(msg,
-                  style: const TextStyle(color: Colors.white, fontSize: 13))),
-        ]),
-        backgroundColor: err ? _red : _green600,
-        behavior: SnackBarBehavior.floating,
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
-    );
+    if (err) {
+      AppFeedback.showError(context, msg);
+    } else {
+      AppFeedback.showSuccess(context, msg);
+    }
   }
 
   // ── Barcode uniqueness check ────────────────────────────────────────────
@@ -425,17 +415,17 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
               'data': updatedItem,
               'logData': logData,
             });
-          }
 
-          // Background fire-and-forget sync to Firestore if not connected via LAN
-          unawaited(FirebaseFirestore.instance
-              .collection('branches')
-              .doc(widget.branchId)
-              .collection('inventory')
-              .doc(docId)
-              .update(Map<String, dynamic>.from(updatedFields)..addAll({
-                'updatedAt': FieldValue.serverTimestamp(),
-              })).catchError((_) {}));
+            // Background fire-and-forget sync to Firestore only if not connected via LAN
+            unawaited(FirebaseFirestore.instance
+                .collection('branches')
+                .doc(widget.branchId)
+                .collection('inventory')
+                .doc(docId)
+                .update(Map<String, dynamic>.from(updatedFields)..addAll({
+                  'updatedAt': FieldValue.serverTimestamp(),
+                })).catchError((_) {}));
+          }
 
           _snack('Medicine updated successfully!');
           _loadAllMedicines();
@@ -508,7 +498,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
       });
 
       try {
-        await db
+        unawaited(db
             .collection('branches')
             .doc(widget.branchId)
             .collection('edit_requests')
@@ -516,7 +506,9 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
             .set({
           ...reqMap,
           'requestedAt': FieldValue.serverTimestamp(),
-        });
+        }).catchError((e) {
+          debugPrint('[InventoryUpdate] Background Firestore edit request upload note: $e');
+        }));
       } catch (e) {
         debugPrint('[InventoryUpdate] Firestore offline, saved locally: $e');
       }

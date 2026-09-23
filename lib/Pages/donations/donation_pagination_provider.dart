@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../services/donations_local_storage.dart';
 import '../../models/donation_models.dart';
+import 'donations_shared.dart';
 import 'package:flutter/foundation.dart'; // for kIsWeb
 import 'dart:async';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -175,7 +176,19 @@ class DonationPaginationNotifier
 
       state = AsyncValue.data(merged);
     } catch (e, st) {
-      if (mounted) state = AsyncValue.error(e, st);
+      debugPrint('[DonPagination] _fetchPage error (branchId=$branchId): $e');
+      if (mounted) {
+        // If Firestore query fails (e.g. missing collectionGroup index, network disconnect, or timeout),
+        // fallback to local Hive storage so the user always has a functional screen with their data.
+        final local = DonationsLocalStorage.getAllDonations(branchId);
+        final existing = state.valueOrNull ?? [];
+        final fallbackData = _dedup(existing, local);
+        if (fallbackData.isNotEmpty) {
+          state = AsyncValue.data(fallbackData);
+        } else {
+          state = AsyncValue.error(e, st);
+        }
+      }
     } finally {
       _loading = false;
     }
@@ -184,12 +197,43 @@ class DonationPaginationNotifier
   /// Merge [existing] with [incoming], cloud wins on conflict, then sort by date desc.
   List<DonationRecord> _dedup(
       List<DonationRecord> existing, List<DonationRecord> incoming) {
+    // Collect all local tombstones from Hive to prevent any resurrection
+    final tombstoneLocalIds = <String>{};
+    final tombstoneFsIds = <String>{};
+    final tombstoneReceipts = <String>{};
+
+    if (Hive.isBoxOpen(DonationsLocalStorage.donationsBox)) {
+      final box = Hive.box(DonationsLocalStorage.donationsBox);
+      for (final v in box.values) {
+        if (v is Map && (v['syncStatus'] == 'deleted' || v['isDeleted'] == true || v['status'] == 'deleted')) {
+          final lId = v['localId']?.toString();
+          if (lId != null && lId.isNotEmpty) tombstoneLocalIds.add(lId);
+          final fsId = v['firestoreId']?.toString();
+          if (fsId != null && fsId.isNotEmpty) tombstoneFsIds.add(fsId);
+          final rClean = v['receiptNoClean']?.toString() ?? cleanReceiptNumber(v['receiptNo']?.toString() ?? '');
+          if (rClean.isNotEmpty) tombstoneReceipts.add(rClean);
+        }
+      }
+    }
+
+    bool isRecordTombstoned(DonationRecord d) {
+      if (d.syncStatus == 'deleted' || d.status == 'deleted') return true;
+      if (d.localId.isNotEmpty && tombstoneLocalIds.contains(d.localId)) return true;
+      if (d.firestoreId != null && d.firestoreId!.isNotEmpty && tombstoneFsIds.contains(d.firestoreId)) return true;
+      final clean = cleanReceiptNumber(d.receiptNo);
+      if (clean.isNotEmpty && tombstoneReceipts.contains(clean)) return true;
+      return false;
+    }
+
     final map = <String, DonationRecord>{};
     for (final d in existing) {
-      map['${d.branchId}_${d.localId}'] = d;
+      if (isRecordTombstoned(d)) continue;
+      final key = d.localId.isNotEmpty ? '${d.branchId}_${d.localId}' : (d.firestoreId ?? '${d.branchId}_${d.hiveKey}');
+      map[key] = d;
     }
     for (final d in incoming) {
-      final key = '${d.branchId}_${d.localId}';
+      if (isRecordTombstoned(d)) continue;
+      final key = d.localId.isNotEmpty ? '${d.branchId}_${d.localId}' : (d.firestoreId ?? '${d.branchId}_${d.hiveKey}');
       final current = map[key];
       if (current == null) {
         map[key] = d;
@@ -200,7 +244,7 @@ class DonationPaginationNotifier
         if (!tNew.isBefore(tExisting)) map[key] = d;
       }
     }
-    final result = map.values.where((d) => d.syncStatus != 'deleted').toList();
+    final result = map.values.where((d) => !isRecordTombstoned(d)).toList();
     result.sort((a, b) {
       final c = b.date.compareTo(a.date);
       return c != 0 ? c : b.localId.compareTo(a.localId);

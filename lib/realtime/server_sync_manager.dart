@@ -96,6 +96,7 @@ class ServerSyncManager {
   // Per-client serial tracking
   final Map<String, Set<String>> _clientSeenSerials = {};
   static const int _maxSeenPerClient = 2000;
+  DateTime? _lastTokenDownloadTime;
 
   // [USER-TRACK] Connected user identity by socketId
   final Map<String, _UserContext> _connectedUsers = {};
@@ -179,14 +180,13 @@ class ServerSyncManager {
 
       _prevOnConnected?.call(socketId, info);
 
-      // Refresh today's tokens from Firestore FIRST, then push catch-up.
-      // Without this, catch-up only sees what was already sitting in this
-      // server's local Hive cache, which can be stale for a reconnecting
-      // client that needs exactly the records created during the gap.
+      // Immediately push catch-up to the connecting client from authoritative local Hive cache.
+      _pushCatchUpToSocket(socketId, info).ignore();
+
+      // Refresh today's tokens from Firestore in the background if cooldown has passed
       Future.delayed(const Duration(milliseconds: 500), () async {
         if (!_running) return;
         await _downloadTodayTokens();
-        if (_running) _pushCatchUpToSocket(socketId, info).ignore();
       });
     };
 
@@ -198,6 +198,8 @@ class ServerSyncManager {
       _prevOnDisconnected?.call(socketId);
     };
 
+    // Revive any items stuck by the old infinite-retry bug BEFORE the first upload pass.
+    _recoverStuckServerQueue();
     purgeDuplicateServerQueue().ignore();
     _uploadQueue().ignore();
 
@@ -285,6 +287,84 @@ class ServerSyncManager {
     }
   }
 
+  // ── Startup Server Queue Recovery ──────────────────────────────────────────
+  /// Fixes items in server_sync_queue that were permanently stuck by the old
+  /// _attempts=0 reset bug:
+  ///
+  ///   Before fix: op['_attempts'] = 0  → item stays at HEAD forever
+  ///   After fix:  any item with _attempts < 5 but age > 15 min is reset to 0
+  ///
+  /// Also revives eligible items from server_sync_failed (dead-letter) within
+  /// 48h that were quarantined due to transient errors rather than logic bugs.
+  void _recoverStuckServerQueue() {
+    try {
+      final now = DateTime.now();
+      const recoverableWindow = Duration(hours: 48);
+      int revived = 0;
+
+      // ── 1. Reset corrupted _attempts in server_sync_queue ─────────────────
+      if (Hive.isBoxOpen(_serverQueueBox)) {
+        final q = Hive.box(_serverQueueBox);
+        for (final key in q.keys.toList()) {
+          final raw = q.get(key);
+          if (raw is! Map) continue;
+          final item = Map<String, dynamic>.from(raw);
+
+          final attempts = (item['_attempts'] as num?)?.toInt() ?? 0;
+          final createdAtStr = item['createdAt']?.toString();
+          final createdAt = createdAtStr != null ? DateTime.tryParse(createdAtStr) : null;
+          final isOld = createdAt != null && now.difference(createdAt).inMinutes > 15;
+
+          // Reset if old and stuck with non-zero attempts below threshold
+          if (isOld && attempts > 0 && attempts < 5) {
+            item['_attempts'] = 0;
+            item['_recoveredAt'] = now.toIso8601String();
+            q.put(key, LocalStorageService.sanitize(item));
+            revived++;
+          }
+        }
+      }
+
+      // ── 2. Re-queue eligible server_sync_failed entries ──────────────────
+      if (Hive.isBoxOpen(_failedBox)) {
+        final failed = Hive.box(_failedBox);
+        if (failed.isNotEmpty && Hive.isBoxOpen(_serverQueueBox)) {
+          final queue = Hive.box(_serverQueueBox);
+          for (final key in failed.keys.toList()) {
+            final raw = failed.get(key);
+            if (raw is! Map) { failed.delete(key); continue; }
+            final item = Map<String, dynamic>.from(raw);
+
+            if (item['permanentlyFailed'] == true) continue;
+
+            final tsStr = (item['createdAt'] ?? item['_failedAt'])?.toString();
+            final ts = tsStr != null ? DateTime.tryParse(tsStr) : null;
+            if (ts != null && now.difference(ts) > recoverableWindow) continue;
+
+            item.remove('_attempts');
+            item.remove('_err');
+            item.remove('_failedAt');
+            item.remove('_originalKey');
+            item['_recoveredAt'] = now.toIso8601String();
+
+            final newKey = 'ssync_startup_recovery_${now.microsecondsSinceEpoch}_$key';
+            queue.put(newKey, LocalStorageService.sanitize(item));
+            failed.delete(key);
+            revived++;
+          }
+        }
+      }
+
+      if (revived > 0) {
+        debugPrint('[SSM] ♻️ Startup recovery: revived $revived stuck server queue item(s)');
+      } else {
+        debugPrint('[SSM] Startup recovery complete — server queue clean');
+      }
+    } catch (e) {
+      debugPrint('[SSM] _recoverStuckServerQueue error: $e');
+    }
+  }
+
   // ── Periodic Catch-up ─────────────────────────────────────────────────────
     void _periodicCatchUpAll() async {
     if (_server == null || _branchId == null || !_running) return;
@@ -322,7 +402,7 @@ class ServerSyncManager {
       return;
     }
 
-        if (type == 'request_catch_up') {
+        if (type == 'request_catch_up' || type == 'request_full_lan_sync') {
       final socketId = msg['_socketId']?.toString();
       final info = socketId == null
           ? null
@@ -330,9 +410,10 @@ class ServerSyncManager {
                 (client) => client?['socketId']?.toString() == socketId,
                 orElse: () => null,
               );
+      final forceAll = msg['forceAll'] == true || msg['force'] == true || type == 'request_full_lan_sync';
       if (socketId != null && info != null) {
         _downloadTodayTokens().then((_) {
-          if (_running) _pushCatchUpToSocket(socketId, info);
+          if (_running) _pushCatchUpToSocket(socketId, info, forceAll: forceAll);
         });
       }
       return;
@@ -467,6 +548,8 @@ class ServerSyncManager {
       case RealtimeEvents.saveDonationReceipt:
       case RealtimeEvents.saveDonor:
       case RealtimeEvents.saveDonationCollection:
+      case RealtimeEvents.saveDonationBox:
+      case RealtimeEvents.saveBoxOpening:
         _saveDonation(type, data, msg, user: user);
         break;
 
@@ -851,6 +934,32 @@ class ServerSyncManager {
 
   void _saveAttendance(String eventType, Map<String, dynamic> data, Map<String, dynamic> full, {_UserContext? user}) {
     final branchId = _field(data, full, 'branchId') ?? _branchId!;
+
+    // For biometric raw punches: enforce deterministic key and 24h freshness to prevent queue floods
+    if (eventType == RealtimeEvents.saveBiometricLog) {
+      final pin = (data['pin'] ?? '').toString().trim();
+      final devIp = (data['deviceIp'] ?? '').toString().trim();
+      final timeStr = (data['timestamp'] ?? data['deviceTimestamp'] ?? '').toString().trim();
+      if (timeStr.isNotEmpty) {
+        final parsedTime = DateTime.tryParse(timeStr);
+        if (parsedTime != null && DateTime.now().difference(parsedTime).inHours.abs() > 24) {
+          // Stale log (> 24h): skip queueing to avoid historical memory dump flooding
+          return;
+        }
+      }
+      final cleanTime = timeStr.replaceAll(RegExp(r'[^0-9]'), '');
+      final id = 'bio_${devIp}_${pin}_$cleanTime';
+      final rec = {...data, 'branchId': branchId, ...?user?.toAuditMap()};
+      _enqueue({
+        'type': 'save_attendance',
+        'subType': eventType,
+        'branchId': branchId,
+        'docId': id,
+        'data': rec,
+      });
+      return;
+    }
+
     final id = data['id']?.toString() ?? data['punchId']?.toString() ?? 'att_${DateTime.now().microsecondsSinceEpoch}';
     final rec = {...data, 'branchId': branchId, ...?user?.toAuditMap()};
     _enqueue({
@@ -982,31 +1091,39 @@ class ServerSyncManager {
 
   // ── Catch-up Push ─────────────────────────────────────────────────────────
   Future<void> _pushCatchUpToSocket(
-      String socketId, Map<String, dynamic> info) async {
+      String socketId, Map<String, dynamic> info, {bool forceAll = false}) async {
     if (_server == null || _branchId == null || !_running) return;
 
     final role = (info['role'] ?? '').toString().toLowerCase();
-    if (role == 'receptionist') return;
 
-    final today   = CampSessionService.resolveShiftAndDateKey().dateKey;
+    final shiftInfo = CampSessionService.resolveShiftAndDateKey(null, _branchId);
+    final today = shiftInfo.dateKey;
     final entries = LocalStorageService.getLocalEntries(_branchId!)
         .where((e) {
           final dk = (e['dateKey'] ?? '').toString().trim();
           final serial = (e['serial'] ?? '').toString().trim();
           final serialDk = _dateKeyFromSerial(serial, '');
-          return dk == today || serialDk == today;
+          if (dk == today || serialDk == today) return true;
+          final createdAt = (e['createdAt'] ?? e['timestamp'] ?? '').toString().trim();
+          if (createdAt.isNotEmpty) {
+            final parsed = DateTime.tryParse(createdAt);
+            if (parsed != null) {
+              final entryDk = CampSessionService.resolveShiftAndDateKey(parsed, _branchId).dateKey;
+              if (entryDk == today) return true;
+            }
+          }
+          return false;
         })
         .toList();
 
-    final clientSeen = _clientSeenSerials[socketId] ?? <String>{};
+    final clientSeen = forceAll ? <String>{} : (_clientSeenSerials[socketId] ?? <String>{});
     final unseen = entries.where((e) {
       final serial = e['serial']?.toString().trim() ?? '';
-      return serial.isNotEmpty && !clientSeen.contains(serial);
+      final statusKey = '$serial|${e['status'] ?? 'waiting'}|${e['dispenseStatus'] ?? 'pending'}';
+      return serial.isNotEmpty && (forceAll || !clientSeen.contains(statusKey));
     }).toList();
 
-    if (unseen.isEmpty) return;
-
-    debugPrint('[SSM] Catch-up to $role ($socketId): ${unseen.length} unseen');
+    debugPrint('[SSM] Catch-up to $role ($socketId): ${unseen.length} entries (forceAll: $forceAll)');
 
     for (final entry in unseen) {
       if (!_running || _server == null) break;
@@ -1034,6 +1151,8 @@ class ServerSyncManager {
         '_serverPush': true,
         'isCatchUp':   true,
         '_isReplay':   true,
+        '_timestamp':  DateTime.now().millisecondsSinceEpoch,
+        '_messageId':  'catchup_${entryCopy['serial']}_${entryCopy['status']}_${DateTime.now().millisecondsSinceEpoch}',
       });
 
       if (presc != null && presc.isNotEmpty) {
@@ -1044,6 +1163,8 @@ class ServerSyncManager {
           '_serverPush': true,
           'isCatchUp':   true,
           '_isReplay':   true,
+          '_timestamp':  DateTime.now().millisecondsSinceEpoch,
+          '_messageId':  'catchup_presc_${serial}_${DateTime.now().millisecondsSinceEpoch}',
         });
       }
 
@@ -1055,10 +1176,36 @@ class ServerSyncManager {
           '_serverPush': true,
           'isCatchUp':   true,
           '_isReplay':   true,
+          '_timestamp':  DateTime.now().millisecondsSinceEpoch,
+          '_messageId':  'catchup_disp_${serial}_${DateTime.now().millisecondsSinceEpoch}',
         });
       }
 
-      await Future.delayed(const Duration(milliseconds: 30));
+      final statusKey = '$serial|${entryCopy['status'] ?? 'waiting'}|${entryCopy['dispenseStatus'] ?? 'pending'}';
+      _clientSeenSerials[socketId] ??= {};
+      _clientSeenSerials[socketId]!.add(statusKey);
+      if (_clientSeenSerials[socketId]!.length > _maxSeenPerClient) {
+        _clientSeenSerials[socketId]!.remove(_clientSeenSerials[socketId]!.first);
+      }
+
+      await Future.delayed(const Duration(milliseconds: 25));
+    }
+
+    // Push latest inventory stock from LAN server to client
+    try {
+      final stockItems = LocalStorageService.getAllLocalStockItems(branchId: _branchId);
+      if (stockItems.isNotEmpty) {
+        debugPrint('[SSM] Pushing ${stockItems.length} inventory stock items to $role ($socketId)');
+        _sendToSocket(socketId, {
+          'event_type':  'inventory_stock_sync',
+          'branchId':    _branchId,
+          'data':        stockItems,
+          '_serverPush': true,
+          'isCatchUp':   true,
+        });
+      }
+    } catch (e) {
+      debugPrint('[SSM] Inventory catch-up push error: $e');
     }
   }
 
@@ -1091,6 +1238,20 @@ class ServerSyncManager {
         }
         final item = Map<String, dynamic>.from(raw);
         final type = (item['type'] ?? '').toString();
+        final subType = (item['subType'] ?? '').toString();
+
+        // Stale historical biometric log purge (> 24h)
+        if (subType == 'save_biometric_log' || type == 'save_biometric_log') {
+          final ts = (item['data']?['timestamp'] ?? item['data']?['deviceTimestamp'] ?? item['createdAt'] ?? '').toString();
+          if (ts.isNotEmpty) {
+            final parsed = DateTime.tryParse(ts);
+            if (parsed != null && DateTime.now().difference(parsed).inHours.abs() > 24) {
+              keysToDelete.add(key);
+              continue;
+            }
+          }
+        }
+
         final serial = (item['serial'] ?? item['data']?['serial'] ?? '').toString();
         final patientId = (item['patientId'] ?? item['data']?['patientId'] ?? item['id'] ?? '').toString();
         final medicineId = (item['medicineId'] ?? '').toString();
@@ -1174,15 +1335,9 @@ class ServerSyncManager {
         // Token and prescription writes are durable until Firestore accepts
         // them. Quota exhaustion must never remove a LAN-delivered record.
         if (attempts >= 5) {
-          final type = op['type']?.toString() ?? '';
-          if (type == 'save_entry' || type == 'save_prescription' ||
-              type == 'update_serial_status') {
-            op['_attempts'] = 0;
-            await box.put(key, op);
-          } else {
-            _moveToFailedBox(key, op, reason: op['_err']?.toString() ?? 'max attempts');
-            box.delete(key);
-          }
+          debugPrint('[ServerSyncManager] ⚠️ Quarantining failed op $key after 5 attempts: ${op['_err']}');
+          _moveToFailedBox(key, op, reason: op['_err']?.toString() ?? 'max attempts (5)');
+          box.delete(key);
           continue;
         }
 
@@ -1651,13 +1806,34 @@ class ServerSyncManager {
 
       case 'save_donation':
         final docId = op['docId']?.toString() ?? 'don_${DateTime.now().microsecondsSinceEpoch}';
-        await _db
-            .collection('branches').doc(branchId)
-            .collection('donations').doc(docId)
-            .set(cleanData, SetOptions(merge: true));
-        await _db
-            .collection('donations').doc(docId)
-            .set(cleanData, SetOptions(merge: true));
+        final subType = op['subType']?.toString() ?? '';
+        if (subType == RealtimeEvents.saveDonationBox) {
+          final boxNumber = cleanData['boxNumber']?.toString() ?? '';
+          final boxId = cleanData['id']?.toString() ?? docId;
+          final dId = boxNumber.isNotEmpty ? boxNumber : boxId;
+          await _db
+              .collection('branches').doc(branchId)
+              .collection('donation_boxes').doc(dId)
+              .set({...cleanData, 'syncedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+        } else if (subType == RealtimeEvents.saveBoxOpening) {
+          final boxNumber = cleanData['boxNumber']?.toString() ?? '';
+          final boxId = cleanData['boxId']?.toString() ?? '';
+          final pDoc = boxNumber.isNotEmpty ? boxNumber : (boxId.isNotEmpty ? boxId : 'unknown');
+          final oId = cleanData['id']?.toString() ?? docId;
+          await _db
+              .collection('branches').doc(branchId)
+              .collection('donation_boxes').doc(pDoc)
+              .collection('openings').doc(oId)
+              .set({...cleanData, 'syncedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+        } else {
+          await _db
+              .collection('branches').doc(branchId)
+              .collection('donations').doc(docId)
+              .set(cleanData, SetOptions(merge: true));
+          await _db
+              .collection('donations').doc(docId)
+              .set(cleanData, SetOptions(merge: true));
+        }
         break;
 
       case 'save_dasterkhwan':
@@ -1801,8 +1977,14 @@ class ServerSyncManager {
 
   /// Fetches today's serial documents for all three queue types and saves
   /// them to the local entries box.
-  Future<void> _downloadTodayTokens() async {
+  Future<void> _downloadTodayTokens({bool force = false}) async {
     if (_branchId == null || !_running) return;
+    if (!force && _lastTokenDownloadTime != null &&
+        DateTime.now().difference(_lastTokenDownloadTime!) < const Duration(minutes: 5)) {
+      debugPrint('[SSM] _downloadTodayTokens skipped (throttled by 5m cooldown)');
+      return;
+    }
+    _lastTokenDownloadTime = DateTime.now();
     try {
       final today      = _todayKey();
       final queueTypes = ['zakat', 'non-zakat', 'gmwf'];

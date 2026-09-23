@@ -11,6 +11,7 @@ import 'package:gmwf/services/local_storage_service.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
 import 'package:gmwf/utils/formatters.dart';
+import 'package:gmwf/design/design_system.dart';
 
 class PatientRegisterPage extends StatefulWidget {
   final String branchId;
@@ -121,6 +122,15 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
     _genderNode.addListener(()     { if (_genderNode.hasFocus)     scrollTo(_genderKey.currentContext); });
     _bloodGroupNode.addListener(() { if (_bloodGroupNode.hasFocus) scrollTo(_bloodGroupKey.currentContext); });
     _visitNode.addListener(()      { if (_visitNode.hasFocus)      scrollTo(_visitKey.currentContext); });
+
+    _cnicController.addListener(() {
+      if (_isChild && _phoneController.text.trim().isEmpty) {
+        final digits = _cnicController.text.replaceAll(RegExp(r'[^0-9]'), '');
+        if (digits.length == 13) {
+          _autoFillGuardianPhoneIfChild();
+        }
+      }
+    });
   }
 
   @override
@@ -139,8 +149,29 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
     super.dispose();
   }
 
+  void _autoFillGuardianPhoneIfChild([String? cnicOverride]) {
+    if (!_isChild) return;
+    final cnicInput = (cnicOverride ?? _cnicController.text).trim();
+    final digits = cnicInput.replaceAll(RegExp(r'[^0-9]'), '');
+    if (digits.length != 13) return;
+
+    final guardian = LocalStorageService.getLocalPatientByCnic(cnicInput) ??
+        LocalStorageService.getLocalPatientByCnic(digits);
+    if (guardian != null) {
+      final guardianPhone = (guardian['phone'] ?? guardian['contactPhone'])?.toString().trim();
+      if (guardianPhone != null && guardianPhone.isNotEmpty && _phoneController.text.trim().isEmpty) {
+        setState(() {
+          _phoneController.text = guardianPhone;
+        });
+      }
+    }
+  }
+
   void prefillCnic(String cnic) {
-    setState(() => _cnicController.text = _formatCnic(cnic));
+    setState(() {
+      _cnicController.text = _formatCnic(cnic);
+      _autoFillGuardianPhoneIfChild(cnic);
+    });
     _nameNode.requestFocus();
   }
 
@@ -198,21 +229,17 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
       final dob = parseDobDateTime(_dobController.text);
       if (dob == null) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Please enter a valid date of birth')),
-          );
+          AppFeedback.showWarning(context, 'Please enter a valid date of birth');
         }
         return;
       }
 
       if (_isChild && _calculatedAge >= 20) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Text('⚠️ Patient is $_calculatedAge years old. In this age, the person is considered an adult (child limit is under 20). Please bring/register with their own CNIC.'),
-              backgroundColor: Colors.red,
-              duration: const Duration(seconds: 5),
-            ),
+          AppFeedback.showWarning(
+            context,
+            'Patient is $_calculatedAge years old',
+            subtitle: 'Considered adult (child limit is under 20). Register with their own CNIC.',
           );
         }
         return;
@@ -224,11 +251,10 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
       if (effectiveIsChild) {
         if (formattedCnic.isEmpty) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('Guardian CNIC is required for child registration!'),
-                backgroundColor: Colors.red,
-              ),
+            AppFeedback.showWarning(
+              context,
+              'Guardian CNIC required',
+              subtitle: 'A valid guardian CNIC is required for child registration.',
             );
           }
           return;
@@ -240,29 +266,38 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
           branchId: widget.branchId,
         );
 
-        // An adult record must be POSITIVELY identified — never inferred from
-        // the absence of guardianCnic, since that's exactly the ambiguous
-        // state Bug 3's legacy/corrupted records are in.
-        final adultExists = existingPatients.any((p) {
+        // An adult record must be POSITIVELY identified — check direct local adult first then list
+        final rawClean = formattedCnic.replaceAll('-', '').trim();
+        final localAdult = LocalStorageService.getLocalPatientByCnic(formattedCnic) ??
+            LocalStorageService.getLocalPatientByCnic(rawClean);
+        final hasDirectAdult = localAdult != null &&
+            localAdult['isAdult'] != false &&
+            !(localAdult['patientId']?.toString().contains('_child_') ?? false);
+
+        final adultExists = hasDirectAdult || existingPatients.any((p) {
           final pid = (p['patientId'] ?? p['id'] ?? '').toString();
           final isFlaggedAdult = p['isAdult'] == true;
           final looksLikeChildRecord = pid.contains('_child_');
-          return isFlaggedAdult && !looksLikeChildRecord;
+          final pCnic = (p['cnic'] ?? p['patientCnic'])?.toString().replaceAll('-', '').trim();
+          return (isFlaggedAdult || pCnic == rawClean) && !looksLikeChildRecord;
         });
 
         if (!adultExists) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              const SnackBar(
-                content: Text('⚠️ Cannot register child: No adult (guardian) is registered under this CNIC. Please register the adult first.'),
-                backgroundColor: Colors.red,
-                duration: Duration(seconds: 4),
-              ),
+            AppFeedback.showWarning(
+              context,
+              'Cannot register child: No adult found',
+              subtitle: 'No adult (guardian) is registered under this CNIC. Please register the adult first.',
             );
           }
           return;
         }
       }
+
+      final rawClean = formattedCnic.replaceAll('-', '').trim();
+      final localAdult = LocalStorageService.getLocalPatientByCnic(formattedCnic) ??
+          LocalStorageService.getLocalPatientByCnic(rawClean);
+      final guardianPhone = (localAdult?['phone'] ?? localAdult?['contactPhone'])?.toString().trim();
 
       final patientMap = <String, dynamic>{
         'branchId':    widget.branchId,
@@ -276,7 +311,7 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
         'status':      (_isKarachi && _visitType == 'Non-Zakat') ? 'Zakat' : _visitType,
         'phone':       _phoneController.text.trim().isNotEmpty
             ? _phoneController.text.trim()
-            : null,
+            : (effectiveIsChild && guardianPhone != null && guardianPhone.isNotEmpty ? guardianPhone : null),
         'age':         _calculatedAge,
         'createdBy':   widget.receptionistId,
         'createdAt':   DateTime.now().toIso8601String(),
@@ -285,13 +320,13 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
       final patientId = LocalStorageService.getPatientKey(patientMap);
       patientMap['patientId'] = patientId;
 
-      // Check for duplicate in local Hive before doing anything
       if (Hive.box(LocalStorageService.patientsBox).containsKey(patientId)) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text("Patient with this identifier already exists!"),
-            backgroundColor: Colors.orange,
-          ));
+          AppFeedback.showWarning(
+            context,
+            'Patient already exists',
+            subtitle: 'A patient record with this identifier is already registered.',
+          );
         }
         return;
       }
@@ -337,8 +372,11 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
           ? 'Child patient registered successfully!'
           : 'Adult patient registered successfully!';
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(message), backgroundColor: const Color(0xFF00695C)));
+        AppFeedback.showSuccess(
+          context,
+          message,
+          subtitle: 'Patient record saved locally and queued for sync.',
+        );
       }
 
       final searchKey = _isChild
@@ -360,8 +398,11 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
     } catch (e, stack) {
       debugPrint('Patient registration failed: $e\n$stack');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Error: $e'), backgroundColor: Colors.redAccent));
+        AppFeedback.showError(
+          context,
+          'Registration failed',
+          subtitle: e.toString(),
+        );
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -389,11 +430,11 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
           _isChild = true;
         });
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('ℹ️ Adult patient already exists on this CNIC. Switched to Child registration.'),
-            backgroundColor: Color(0xFF00695C),
-            duration: Duration(seconds: 2),
-          ));
+          AppFeedback.showInfo(
+            context,
+            'Adult patient found on CNIC',
+            subtitle: 'Switched form automatically to Child registration.',
+          );
         }
       }
     } catch (_) {}
@@ -401,7 +442,7 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
 
   @override
   Widget build(BuildContext context) {
-    final isMobile  = MediaQuery.of(context).size.width < 600;
+    final isMobile  = GBreakpoint.isMobile(context);
     final formWidth = isMobile ? double.infinity : 480.0;
     final fontSize  = isMobile ? 14.0 : 16.0;
 
@@ -550,6 +591,9 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                                     _dobController.clear();
                                   }
                                   _isChild = v!;
+                                  if (_isChild) {
+                                    _autoFillGuardianPhoneIfChild();
+                                  }
                                 });
                               },
                             )),
@@ -841,7 +885,7 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
     int? maxLength,
     TextInputType? keyboardType,
   }) {
-    final isMobile = MediaQuery.of(context).size.width < 600;
+    final isMobile = GBreakpoint.isMobile(context);
     final isDark = _isDark;
     return TextFormField(
       key:            key,
@@ -875,7 +919,7 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
     required List<String> items,
     required void Function(String?) onChanged,
   }) {
-    final isMobile = MediaQuery.of(context).size.width < 600;
+    final isMobile = GBreakpoint.isMobile(context);
     final isDark = _isDark;
     return DropdownButtonFormField2<String>(
       key:        key,

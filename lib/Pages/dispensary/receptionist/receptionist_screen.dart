@@ -25,6 +25,7 @@ import '../../../utils/notification_deduper.dart';
 import 'package:gmwf/services/cloud_messaging_service.dart';
 import 'patient_register.dart';
 import 'token_screen.dart';
+import 'package:gmwf/design/design_system.dart';
 
 class ReceptionistScreen extends StatefulWidget {
   final String branchId;
@@ -107,6 +108,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
   void initState() {
     super.initState();
     _mobileTabController = TabController(length: 3, vsync: this);
+
+    _selectedSessionFilter = 'all';
 
     if (_hasMultiCamps) {
       final active = CampSessionService.getActiveCamp(widget.branchId);
@@ -565,7 +568,10 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       // Immediate UI feedback
       _refreshNotifier.value++;
 
-      // Re-download today's tokens (most reliable for reversal issues)
+      // 1. Force flush stuck outbox and request catch-up over LAN
+      await RealtimeManager().forceFlushAndCatchUp();
+
+      // 2. Re-download today's tokens (most reliable for reversal issues)
       await lss.LocalStorageService.downloadTodayTokens(widget.branchId);
 
       debugPrint('[Receptionist] Token log manually refreshed');
@@ -764,6 +770,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
   PreferredSizeWidget _buildAppBar(bool isMobile) {
     return GmwfAppBar(
+      isFloating: false,
       title: 'Receptionist – ${_username ?? widget.receptionistName}',
       subtitle: CampSessionService.getBranchAndCampDisplayName(
         branchName: _branchName ?? 'Free Dispensary',
@@ -771,6 +778,13 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         campId: CampSessionService.getActiveCamp(),
       ),
       onTitleLongPress: () => DispensaryUserSettingsDialog.show(
+        context,
+        branchId: widget.branchId,
+        onUserUpdated: () {
+          if (mounted) setState(() { _fetchReceptionistName(); });
+        },
+      ),
+      onUserSettings: () => DispensaryUserSettingsDialog.show(
         context,
         branchId: widget.branchId,
         onUserUpdated: () {
@@ -799,63 +813,67 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     return {};
   }
 
-  bool _isEffectivelyToday(Map<String, dynamic> e, String currentTodayKey, String todayIso) {
-    final status = (e['status'] ?? '').toString().toLowerCase().trim();
-    final dispenseStatus = (e['dispenseStatus'] ?? '').toString().toLowerCase().trim();
-    final isTerminal = status == 'completed' ||
-        status == 'dispensed' ||
-        status == 'cancelled' ||
-        status == 'expired' ||
-        status == 'reversed' ||
-        status == 'deleted' ||
-        dispenseStatus == 'dispensed';
+  bool _isCreatedByMe(Map<String, dynamic> e) {
+    final myId = widget.receptionistId.trim().toLowerCase();
+    final myName = widget.receptionistName.trim().toLowerCase();
+    final myDisplay = (_username ?? '').trim().toLowerCase();
 
+    // Admins and supervisors can view tokens across the branch
+    if (myId == 'admin' || myName == 'admin' || myDisplay == 'admin' || 
+        myName.contains('supervisor') || myDisplay.contains('supervisor')) {
+      return true;
+    }
+
+    final cBy = (e['createdBy'] ?? e['receptionistId'] ?? e['userId'] ?? '').toString().trim().toLowerCase();
+    // [FIX] Never check performedBy here! performedBy gets updated on dispense/vitals/audit actions
+    // to the dispenser or supervisor, which silently hides the token from the receptionist who created it.
+    final cName = (e['createdByName'] ?? e['receptionistName'] ?? e['tokenBy'] ?? e['addedByName'] ?? e['addedBy'] ?? '').toString().trim().toLowerCase();
+
+    if (myId.isNotEmpty && cBy.isNotEmpty) {
+      if (cBy == myId || cBy.contains(myId) || myId.contains(cBy)) return true;
+    }
+    if (myName.isNotEmpty && cName.isNotEmpty) {
+      if (cName == myName || cName.contains(myName) || myName.contains(cName)) return true;
+    }
+    if (myDisplay.isNotEmpty && cName.isNotEmpty) {
+      if (cName == myDisplay || cName.contains(myDisplay) || myDisplay.contains(cName)) return true;
+    }
+
+    // Fallback for demo / temp staff sessions or tokens where creator was omitted
+    if (cName == 'temp' || cBy == 'temp' || cBy.isEmpty || cName.isEmpty || cName == 'unknown') {
+      return true;
+    }
+
+    if (cBy.isNotEmpty || cName.isNotEmpty) {
+      return false;
+    }
+
+    return true;
+  }
+
+  bool _isEffectivelyToday(Map<String, dynamic> e, String currentTodayKey, String todayIso) {
     final serial = (e['serial'] ?? e['id'] ?? '').toString().trim();
     final serialDk = CampSessionService.getDateKeyFromSerial(serial);
     final dk = (e['dateKey'] as String?)?.trim() ?? '';
     final rawTime = e['createdAt'] ?? e['timestamp'] ?? e['time'] ?? e['date'];
 
-    // 1. Exact match with today's dateKey or ISO date string
-    bool isTodayExact = false;
+    // 1. Exact match with today's dateKey or ISO date string only
     if (dk == currentTodayKey || (serialDk.isNotEmpty && serialDk == currentTodayKey)) {
-      isTodayExact = true;
+      return true;
     } else if (rawTime != null) {
       final rawStr = rawTime.toString();
       if (rawStr.startsWith(todayIso)) {
-        isTodayExact = true;
+        return true;
       } else {
         final dt = DateTime.tryParse(rawStr);
         if (dt != null) {
           final dtKey = CampSessionService.resolveShiftAndDateKey(dt, widget.branchId).dateKey;
-          if (dtKey == currentTodayKey) isTodayExact = true;
+          if (dtKey == currentTodayKey) return true;
         }
       }
     }
 
-    if (isTodayExact) return true;
-
-    // 2. Shift/Rollover Tolerance [FIX-B]: If the token's status is non-terminal
-    // (still actively waiting / in-progress), also accept the previous calendar day's dateKey
-    // or timestamp within 24h so active patients don't suddenly vanish across boundaries.
-    if (!isTerminal) {
-      final prevDateKey = DateFormat('ddMMyy').format(DateTime.now().subtract(const Duration(days: 1)));
-      final prevTodayIso = DateFormat('yyyy-MM-dd').format(DateTime.now().subtract(const Duration(days: 1)));
-
-      if (dk == prevDateKey || (serialDk.isNotEmpty && serialDk == prevDateKey)) {
-        return true;
-      }
-      if (rawTime != null) {
-        final rawStr = rawTime.toString();
-        if (rawStr.startsWith(prevTodayIso)) {
-          return true;
-        }
-        final dt = DateTime.tryParse(rawStr);
-        if (dt != null && DateTime.now().difference(dt).inHours < 24) {
-          return true;
-        }
-      }
-    }
-
+    // Never accept yesterday's tokens regardless of status (waiting, skipped, in-progress, etc.)
     return false;
   }
 
@@ -864,21 +882,34 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     try {
       final today = CampSessionService.resolveShiftAndDateKey(DateTime.now(), widget.branchId).dateKey;
       final todayIso = DateFormat('yyyy-MM-dd').format(DateTime.now());
+      final currentStaffSession = CampSessionService.getCurrentSession(null, widget.branchId);
+      final activeSession = (_selectedSessionFilter.isNotEmpty && _selectedSessionFilter != 'all')
+          ? _selectedSessionFilter
+          : currentStaffSession;
+
       final rawEntries = lss.LocalStorageService.getLocalEntries(widget.branchId);
+      final normBranch = widget.branchId.toLowerCase().trim();
 
     final filtered = rawEntries.where((e) {
-      // 1. Date filter (today by dateKey, serial, or rollover tolerance)
+      // 1. Date filter (strictly today only - no yesterday tokens regardless of status)
       if (!_isEffectivelyToday(e, today, todayIso)) return false;
 
       final serial = (e['serial'] ?? e['id'])?.toString();
       if (!CampSessionService.isSerialMatchingBranch(serial, widget.branchId)) return false;
 
-      // 2. Deleted status filter
+      // 2. Strict Branch filter
+      final eBranch = (e['branchId'] ?? '').toString().toLowerCase().trim();
+      if (eBranch.isNotEmpty && eBranch != normBranch) return false;
+
+      // 3. Strict User filter (cannot see another user's tokens)
+      if (!_isCreatedByMe(e)) return false;
+
+      // 4. Deleted status filter
       final st = (e['status'] as String?)?.toLowerCase().trim();
       final syncSt = (e['syncStatus'] as String?)?.toLowerCase().trim();
       if (st == 'deleted' || syncSt == 'deleted') return false;
 
-      // 3. Must have valid patient name or cnic
+      // 5. Must have valid patient name or cnic
       var name = (e['patientName'] ?? e['name'] ?? '').toString().trim().toLowerCase();
       var cnic = (e['patientCnic'] ?? e['cnic'] ?? e['guardianCnic'] ?? '').toString().trim();
       if ((name.isEmpty || name == 'unknown patient' || name == 'unknown' || name == 'null') && cnic.isEmpty) {
@@ -898,28 +929,37 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         }
       }
 
-      // 4. Camp Filter (Uses selected camp filter if set)
-      if (_hasMultiCamps && _selectedCampFilter.isNotEmpty && _selectedCampFilter != 'all') {
-        final matches = CampSessionService.matchesCamp(
-          selectedCamp: _selectedCampFilter,
-          dispensaryId: e['dispensaryId']?.toString(),
-          campId: e['campId']?.toString(),
-          dispensaryTag: e['dispensaryTag']?.toString(),
-          serial: serial,
-        );
-        if (!matches) return false;
+      // 6. Strict Camp Filter (cannot see another camp's tokens)
+      if (_hasMultiCamps) {
+        final targetCamp = (_selectedCampFilter.isNotEmpty && _selectedCampFilter != 'all')
+            ? _selectedCampFilter
+            : CampSessionService.getActiveCamp(widget.branchId);
+        if (targetCamp != null && targetCamp.isNotEmpty && targetCamp != 'all') {
+          final matches = CampSessionService.matchesCamp(
+            selectedCamp: targetCamp,
+            dispensaryId: e['dispensaryId']?.toString(),
+            campId: e['campId']?.toString(),
+            dispensaryTag: e['dispensaryTag']?.toString(),
+            serial: serial,
+          );
+          if (!matches) return false;
+        }
       }
 
-      // 5. Shift Filter (Supports 'all', 'morning', 'evening', 'night')
+      // 7. Strict Session Filter (evening staff cannot see morning, morning cannot see evening)
       if (_selectedSessionFilter != 'all') {
         final eSession = (e['session'] as String?)?.trim().toLowerCase() ?? '';
-        if (eSession.isNotEmpty) {
-          if (eSession != _selectedSessionFilter) return false;
+        if (eSession.isNotEmpty && eSession != 'unknown' && eSession != 'auto') {
+          if (eSession != activeSession) return false;
         } else {
+          final ser = (serial ?? '').toUpperCase();
+          if (ser.contains('-M-') && activeSession != 'morning') return false;
+          if (ser.contains('-E-') && activeSession != 'evening') return false;
+          if (ser.contains('-N-') && activeSession != 'night') return false;
           final rawTime = e['createdAt'] ?? e['timestamp'] ?? e['time'];
           if (rawTime != null) {
             final dt = DateTime.tryParse(rawTime.toString());
-            if (dt != null && CampSessionService.getCurrentSession(dt, widget.branchId) != _selectedSessionFilter) {
+            if (dt != null && CampSessionService.getCurrentSession(dt, widget.branchId) != activeSession) {
               return false;
             }
           }
@@ -967,75 +1007,82 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       final today = CampSessionService.resolveShiftAndDateKey(DateTime.now(), widget.branchId).dateKey;
       final todayIso = DateFormat('yyyy-MM-dd').format(DateTime.now());
       final rawEntries = lss.LocalStorageService.getLocalEntries(widget.branchId);
+      final normBranch = widget.branchId.toLowerCase().trim();
 
-    int all = 0, morning = 0, evening = 0, night = 0;
+      int all = 0, morning = 0, evening = 0, night = 0;
 
-    final Map<String, Map<String, dynamic>> uniqueBySerial = {};
-    for (final e in rawEntries) {
-      if (!_isEffectivelyToday(e, today, todayIso)) continue;
+      final Map<String, Map<String, dynamic>> uniqueBySerial = {};
+      for (final e in rawEntries) {
+        if (!_isEffectivelyToday(e, today, todayIso)) continue;
 
-      final serial = (e['serial'] ?? e['id'])?.toString();
-      if (!CampSessionService.isSerialMatchingBranch(serial, widget.branchId)) continue;
-      final st = (e['status'] as String?)?.toLowerCase().trim();
-      final syncSt = (e['syncStatus'] as String?)?.toLowerCase().trim();
-      if (st == 'deleted' || syncSt == 'deleted') continue;
-      var name = (e['patientName'] ?? e['name'] ?? '').toString().trim().toLowerCase();
-      var cnic = (e['patientCnic'] ?? e['cnic'] ?? e['guardianCnic'] ?? '').toString().trim();
-      if ((name.isEmpty || name == 'unknown patient' || name == 'unknown' || name == 'null') && cnic.isEmpty) {
-        final presc = e['prescription'];
-        if (presc is Map) {
-          final pName = (presc['patientName'] ?? presc['name'])?.toString().trim();
-          if (pName != null && pName.isNotEmpty && pName.toLowerCase() != 'unknown' && pName.toLowerCase() != 'unknown patient' && pName.toLowerCase() != 'null') {
-            name = pName.toLowerCase();
+        final serial = (e['serial'] ?? e['id'])?.toString();
+        if (!CampSessionService.isSerialMatchingBranch(serial, widget.branchId)) continue;
+
+        final eBranch = (e['branchId'] ?? '').toString().toLowerCase().trim();
+        if (eBranch.isNotEmpty && eBranch != normBranch) continue;
+
+        if (!_isCreatedByMe(e)) continue;
+
+        final st = (e['status'] as String?)?.toLowerCase().trim();
+        final syncSt = (e['syncStatus'] as String?)?.toLowerCase().trim();
+        if (st == 'deleted' || syncSt == 'deleted') continue;
+
+        if (_hasMultiCamps) {
+          final targetCamp = (_selectedCampFilter.isNotEmpty && _selectedCampFilter != 'all')
+              ? _selectedCampFilter
+              : CampSessionService.getActiveCamp(widget.branchId);
+          if (targetCamp != null && targetCamp.isNotEmpty && targetCamp != 'all') {
+            final matches = CampSessionService.matchesCamp(
+              selectedCamp: targetCamp,
+              dispensaryId: e['dispensaryId']?.toString(),
+              campId: e['campId']?.toString(),
+              dispensaryTag: e['dispensaryTag']?.toString(),
+              serial: serial,
+            );
+            if (!matches) continue;
           }
         }
-        if ((name.isEmpty || name == 'unknown patient' || name == 'unknown' || name == 'null') && cnic.isEmpty) {
-          if (serial == null || serial.isEmpty) continue;
+
+        String s = (serial ?? '').trim().toUpperCase();
+        final branchPrefix = '${widget.branchId.trim().toUpperCase()}-';
+        if (s.startsWith(branchPrefix)) {
+          s = s.substring(branchPrefix.length);
+        }
+        if (s.isNotEmpty) {
+          uniqueBySerial[s] = e;
         }
       }
 
-      if (_hasMultiCamps && _selectedCampFilter.isNotEmpty && _selectedCampFilter != 'all') {
-        final matches = CampSessionService.matchesCamp(
-          selectedCamp: _selectedCampFilter,
-          dispensaryId: e['dispensaryId']?.toString(),
-          campId: e['campId']?.toString(),
-          dispensaryTag: e['dispensaryTag']?.toString(),
-          serial: serial,
-        );
-        if (!matches) continue;
-      }
-
-      String s = (e['serial'] ?? e['id'] ?? '').toString().trim().toUpperCase();
-      final branchPrefix = '${widget.branchId.trim().toUpperCase()}-';
-      if (s.startsWith(branchPrefix)) {
-        s = s.substring(branchPrefix.length);
-      }
-      if (s.isNotEmpty) {
-        uniqueBySerial[s] = e;
-      }
-    }
-
-    all = uniqueBySerial.length;
-    for (final e in uniqueBySerial.values) {
-      final eSession = (e['session'] as String?)?.trim().toLowerCase() ?? '';
-      String resolved = eSession;
-      if (resolved.isEmpty) {
-        final rawTime = e['timestamp'] ?? e['createdAt'] ?? e['date'];
-        if (rawTime != null) {
-          final dt = DateTime.tryParse(rawTime.toString());
-          if (dt != null) resolved = CampSessionService.getCurrentSession(dt);
+      for (final e in uniqueBySerial.values) {
+        final eSession = (e['session'] as String?)?.trim().toLowerCase() ?? '';
+        String resolved = eSession;
+        if (resolved.isEmpty || resolved == 'auto' || resolved == 'unknown') {
+          final ser = (e['serial'] ?? '').toString().toUpperCase();
+          if (ser.contains('-M-')) {
+            resolved = 'morning';
+          } else if (ser.contains('-E-')) {
+            resolved = 'evening';
+          } else if (ser.contains('-N-')) {
+            resolved = 'night';
+          } else {
+            final rawTime = e['timestamp'] ?? e['createdAt'] ?? e['date'];
+            if (rawTime != null) {
+              final dt = DateTime.tryParse(rawTime.toString());
+              if (dt != null) resolved = CampSessionService.getCurrentSession(dt, widget.branchId);
+            }
+          }
+        }
+        if (resolved.contains('morn')) {
+          morning++;
+        } else if (resolved.contains('eve')) {
+          evening++;
+        } else if (resolved.contains('night')) {
+          night++;
         }
       }
-      if (resolved.contains('morn')) {
-        morning++;
-      } else if (resolved.contains('eve')) {
-        evening++;
-      } else if (resolved.contains('night')) {
-        night++;
-      }
-    }
 
-    return {'all': all, 'morning': morning, 'evening': evening, 'night': night};
+      all = morning + evening + night;
+      return {'all': all, 'morning': morning, 'evening': evening, 'night': night};
     } catch (e) {
       debugPrint('[ReceptionistScreen] _getSessionCounts error: $e');
       return {'all': 0, 'morning': 0, 'evening': 0, 'night': 0};
@@ -1547,7 +1594,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         final isWaitingToDispense = !isDispensed && (hasPrescription || s == 'completed' || s == 'prescribed' || s == 'waiting_to_dispense' || s == 'waiting_for_dispense');
 
         // Only tokens strictly waiting for doctor (not yet prescribed or dispensed) can be reversed/undone!
-        final isWaitingOnly = !isDispensed && !isWaitingToDispense && s != 'with_doctor' && s != 'with doctor' && s != 'in_consultation' && s != 'cancelled' && s != 'reversed' && s != 'deleted';
+        final isWaitingOnly = !isDispensed && !isWaitingToDispense && s != 'with_doctor' && s != 'with doctor' && s != 'in_consultation' && s != 'cancelled' && s != 'reversed' && s != 'deleted' && s != 'skipped';
         final canReverse = isWaitingOnly;
 
         String statusLabel;
@@ -1575,6 +1622,11 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
           statusBg = _isDark ? const Color(0xFF450A0A) : Colors.red.shade50;
           statusText = _isDark ? const Color(0xFFFCA5A5) : Colors.red.shade800;
           statusIcon = Icons.cancel_outlined;
+        } else if (s == 'skipped') {
+          statusLabel = 'Skipped';
+          statusBg = _isDark ? const Color(0xFF334155) : Colors.grey.shade200;
+          statusText = _isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700;
+          statusIcon = Icons.skip_next_rounded;
         } else {
           statusLabel = 'Waiting';
           statusBg = _isDark ? const Color(0xFF451A03) : Colors.amber.shade50;
@@ -1888,8 +1940,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isMobile = screenWidth < 800;
+    final isMobile = GBreakpoint.isCompact(context);
 
     if (!Hive.isBoxOpen('app_settings')) {
       return FutureBuilder<Box>(

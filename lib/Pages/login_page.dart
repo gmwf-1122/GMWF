@@ -10,6 +10,7 @@ import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:hive/hive.dart';
 import 'package:another_flushbar/flushbar.dart';
 
+import '../services/local_storage_service.dart';
 import '../services/offline_auth_service.dart';
 import '../services/device_info_service.dart';
 import '../services/pre_login_security_service.dart';
@@ -50,7 +51,25 @@ class _LoginPageState extends State<LoginPage> {
     // Pre-authentication security logging & Auto-update check
     PreLoginSecurityService.logAppLaunch();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) UpdateDialogWidget.showUpdateDialogIfNeeded(context);
+      if (mounted) {
+        final screenWidth = MediaQuery.sizeOf(context).width;
+        final dpr = MediaQuery.devicePixelRatioOf(context);
+        final isMobile = screenWidth < 600;
+        final targetDecodeWidth = isMobile
+            ? (screenWidth * 0.75 * dpr).toInt().clamp(240, 480)
+            : 800;
+
+        // Pre-cache background images with responsive decode size for instant mobile rendering
+        precacheImage(
+          ResizeImage(
+            const AssetImage('assets/images/2.webp'),
+            width: targetDecodeWidth,
+          ),
+          context,
+        );
+        precacheImage(const AssetImage('assets/logo/gmwf-1.webp'), context);
+        UpdateDialogWidget.showUpdateDialogIfNeeded(context);
+      }
     });
 
     // Periodic auto-check every 3 seconds to automatically recover online mode
@@ -104,24 +123,22 @@ class _LoginPageState extends State<LoginPage> {
       return false;
     }
     try {
-      final lookup = await InternetAddress.lookup('google.com').timeout(const Duration(seconds: 2));
-      if (lookup.isNotEmpty && lookup[0].rawAddress.isNotEmpty) {
-        return true;
-      }
-    } catch (_) {
-      try {
-        final lookup2 = await InternetAddress.lookup('firebase.google.com').timeout(const Duration(seconds: 2));
-        if (lookup2.isNotEmpty && lookup2[0].rawAddress.isNotEmpty) {
-          return true;
-        }
-      } catch (_) {}
-    }
-
-    try {
       final result = await Connectivity().checkConnectivity();
-      return result.any((r) => r != ConnectivityResult.none);
+      final hasConn = result.any((r) => r != ConnectivityResult.none);
+      if (!hasConn) return false;
     } catch (_) {
       return false;
+    }
+
+    // Fast DNS probe with 1 second timeout — non-blocking fallback
+    try {
+      final lookup = await InternetAddress.lookup('google.com')
+          .timeout(const Duration(milliseconds: 1000));
+      return lookup.isNotEmpty && lookup[0].rawAddress.isNotEmpty;
+    } catch (_) {
+      // If DNS probe times out or is restricted, assume online since connectivity interface is active;
+      // Firebase Auth's built-in timeout handles offline fallback gracefully.
+      return true;
     }
   }
 
@@ -227,26 +244,46 @@ class _LoginPageState extends State<LoginPage> {
         }
       }
 
-      // Firebase sign-in — single attempt
-      UserCredential cred;
+      // Firebase sign-in — single attempt with strict 6-second timeout
+      UserCredential? cred;
       try {
         cred = await FirebaseAuth.instance
             .signInWithEmailAndPassword(
               email: email.toLowerCase(),
               password: password,
             )
-            .timeout(const Duration(seconds: 15));
+            .timeout(const Duration(seconds: 6));
       } on FirebaseAuthException catch (e) {
-        if (e.code == 'user-not-found' || e.code == 'invalid-credential') {
-          // Attempt offline fallback before failing
-          final ok = await _attemptOfflineLogin(input, password);
-          if (ok) return;
+        debugPrint('[LoginPage] FirebaseAuthException during sign-in: ${e.code}');
+        final ok = await _attemptOfflineLogin(input, password);
+        if (ok) return;
+        final okLocal = await _tryLocalUsersFallbackLogin(input, password);
+        if (okLocal) return;
+        await _handleFirebaseAuthError(e, input, password);
+        return;
+      } on TimeoutException {
+        debugPrint('[LoginPage] Cloud sign-in timed out, falling back to offline/local');
+        final ok = await _attemptOfflineLogin(input, password);
+        if (ok) return;
+        final okLocal = await _tryLocalUsersFallbackLogin(input, password);
+        if (okLocal) return;
+        if (mounted) {
+          _showError("Connection timed out. Please check your credentials or try offline mode.");
         }
+        return;
+      } catch (authErr) {
+        debugPrint('[LoginPage] Cloud sign-in error: $authErr, falling back to offline/local');
+        final ok = await _attemptOfflineLogin(input, password);
+        if (ok) return;
+        final okLocal = await _tryLocalUsersFallbackLogin(input, password);
+        if (okLocal) return;
         rethrow;
       }
 
       final user = cred.user;
       if (user == null) {
+        final ok = await _attemptOfflineLogin(input, password);
+        if (ok) return;
         _showError("Login failed: no user returned");
         return;
       }
@@ -255,6 +292,8 @@ class _LoginPageState extends State<LoginPage> {
 
       final userData = await _fetchUserDataFromFirestore(user, input);
       if (userData == null) {
+        final ok = await _attemptOfflineLogin(input, password);
+        if (ok) return;
         _showError("User account data not found. Contact admin.");
         return;
       }
@@ -280,7 +319,7 @@ class _LoginPageState extends State<LoginPage> {
           userData['isActive'] == false;
 
       if (isRevoked) {
-        await FirebaseAuth.instance.signOut();
+        await FirebaseAuth.instance.signOut().catchError((_) {});
         final userKey = (userData['uid'] ?? userData['email'] ?? userData['username'] ?? '').toString();
         if (userKey.isNotEmpty) {
           await OfflineAuthService.clearCredentialsForUser(userKey);
@@ -294,58 +333,66 @@ class _LoginPageState extends State<LoginPage> {
         return;
       }
 
-      // Record last login timestamp
+      // Account is confirmed active online — lift any stale local revocation restrictions
+      final cleanActiveUserData = Map<String, dynamic>.from(userData);
+      cleanActiveUserData['status'] = 'active';
+      cleanActiveUserData['accountStatus'] = 'active';
+      cleanActiveUserData['isActive'] = true;
+      cleanActiveUserData['isRevoked'] = false;
+      cleanActiveUserData['accessRevoked'] = false;
+      try {
+        await LocalStorageService.saveLocalUser(cleanActiveUserData);
+      } catch (e) {
+        debugPrint('[LoginPage] Error syncing active user to local storage: $e');
+      }
+
+      // Record last login timestamp non-blockingly
       final nowIso = DateTime.now().toIso8601String();
       userData['lastLoginAt'] = nowIso;
       userData['lastOnlineAt'] = nowIso;
 
-      try {
-        final nowTs = FieldValue.serverTimestamp();
-        final uid = user.uid;
-        final bId = userData['branchId']?.toString() ?? 'all';
-        FirebaseFirestore.instance.collection('users').doc(uid).set({
-          'lastLoginAt': nowTs,
-          'lastOnlineAt': nowTs,
-        }, SetOptions(merge: true));
-
-        DeviceInfoService.recordUserSession(userId: uid, email: user.email);
-
-        if (bId != 'global' && bId != 'all' && bId.isNotEmpty) {
-          FirebaseFirestore.instance
-              .collection('branches')
-              .doc(bId)
-              .collection('users')
-              .doc(uid)
-              .set({
+      unawaited(() async {
+        try {
+          final nowTs = FieldValue.serverTimestamp();
+          final uid = user.uid;
+          final bId = userData['branchId']?.toString() ?? 'all';
+          FirebaseFirestore.instance.collection('users').doc(uid).set({
             'lastLoginAt': nowTs,
             'lastOnlineAt': nowTs,
-          }, SetOptions(merge: true));
-        }
-      } catch (e) {
-        debugPrint('[LoginPage] Could not update lastLoginAt in Firestore: $e');
-      }
+          }, SetOptions(merge: true)).timeout(const Duration(seconds: 3)).catchError((_) {});
 
-      // ── Cache credentials for offline use ─────────────────────────────────
-      // ✅ FIX: saveCredentials now returns bool instead of throwing.
-      // We attempt to save under both the typed input AND the resolved email
-      // so offline lookup works with either key.
-      await _cacheCredentialsSafely(
+          await DeviceInfoService.recordUserSession(userId: uid, email: user.email);
+
+          if (bId != 'global' && bId != 'all' && bId.isNotEmpty) {
+            FirebaseFirestore.instance
+                .collection('branches')
+                .doc(bId)
+                .collection('users')
+                .doc(uid)
+                .set({
+              'lastLoginAt': nowTs,
+              'lastOnlineAt': nowTs,
+            }, SetOptions(merge: true)).timeout(const Duration(seconds: 3)).catchError((_) {});
+          }
+        } catch (e) {
+          debugPrint('[LoginPage] Could not update lastLoginAt in Firestore: $e');
+        }
+      }());
+
+      // Cache credentials for offline use asynchronously
+      unawaited(_cacheCredentialsSafely(
         usernameOrEmail: input.toLowerCase(),
         password: password,
         userData: userData,
-      );
+      ));
 
-      // Also cache by email so either key works offline
       if (!input.contains('@') && email.isNotEmpty) {
-        await _cacheCredentialsSafely(
+        unawaited(_cacheCredentialsSafely(
           usernameOrEmail: email.toLowerCase(),
           password: password,
           userData: userData,
-        );
+        ));
       }
-
-      // Debug: confirm what was stored
-      await OfflineAuthService.debugDumpStoredKeys();
 
       if (mounted) {
         Flushbar(
@@ -361,12 +408,18 @@ class _LoginPageState extends State<LoginPage> {
     } on TimeoutException {
       debugPrint('[LoginPage] Timeout');
       final ok = await _attemptOfflineLogin(input, password);
+      if (ok) return;
+      final okLocal = await _tryLocalUsersFallbackLogin(input, password);
+      if (okLocal) return;
       if (!ok && mounted) {
         _showError("Connection timed out. Please check your internet and try again.");
       }
     } catch (e) {
       debugPrint('[LoginPage] Unexpected error: $e');
       final ok = await _attemptOfflineLogin(input, password);
+      if (ok) return;
+      final okLocal = await _tryLocalUsersFallbackLogin(input, password);
+      if (okLocal) return;
       if (!ok && mounted) {
         _showError("An unexpected error occurred. Please try again.");
       }
@@ -539,11 +592,16 @@ class _LoginPageState extends State<LoginPage> {
       for (final val in box.values) {
         if (val is Map) {
           final u = Map<String, dynamic>.from(val);
-          final email = (u['email']?.toString() ?? '').toLowerCase();
-          final username = (u['username']?.toString() ?? '').toLowerCase();
-          final usernameLower = (u['usernameLower']?.toString() ?? '').toLowerCase();
-          final savedPass = u['password']?.toString() ?? '1122';
-          if ((username == lowerInput || usernameLower == lowerInput || email == lowerInput) && savedPass == password) {
+          final status = (u['status'] ?? u['accountStatus'] ?? '').toString().toLowerCase().trim();
+          final isDeleted = u['isDeleted'] == true || status == 'deleted';
+          if (isDeleted) continue; // Never authenticate a deleted user
+
+          final email = (u['email']?.toString() ?? '').toLowerCase().trim();
+          final username = (u['username']?.toString() ?? '').toLowerCase().trim();
+          final usernameLower = (u['usernameLower']?.toString() ?? '').toLowerCase().trim();
+          final savedPass = u['password']?.toString();
+          if ((username == lowerInput || usernameLower == lowerInput || email == lowerInput) &&
+              savedPass != null && savedPass == password) {
             if (mounted) {
               Flushbar(
                 message: "Welcome back, ${u['username']}!",
@@ -599,13 +657,13 @@ class _LoginPageState extends State<LoginPage> {
     final uid = user.uid;
     final userEmail = user.email?.toLowerCase().trim() ?? '';
 
-    // 1. Top-level users collection by UID
+    // 1. Top-level users collection by UID (fast 3.5s timeout)
     try {
       final doc = await FirebaseFirestore.instance
           .collection('users')
           .doc(uid)
           .get()
-          .timeout(const Duration(seconds: 8));
+          .timeout(const Duration(milliseconds: 3500));
       if (doc.exists && doc.data() != null) {
         final d = doc.data()!;
         final resolvedRole = _resolveRoleFromMap(d);
@@ -620,17 +678,38 @@ class _LoginPageState extends State<LoginPage> {
         };
       }
     } catch (e) {
-      debugPrint('[LoginPage] Top-level /users fetch failed: $e');
+      debugPrint('[LoginPage] Top-level /users fetch notice: $e');
     }
 
-    // 2. Branch users subcollections by UID
+    // 2. Fast check in local storage before heavy network collectionGroup queries
+    try {
+      final local = LocalStorageService.getLocalUserByUid(uid) ??
+          LocalStorageService.findLocalUser(uid) ??
+          (userEmail.isNotEmpty ? LocalStorageService.findLocalUser(userEmail) : null);
+      if (local != null) {
+        final r = _resolveRoleFromMap(local);
+        if (r != 'unknown') {
+          debugPrint('[LoginPage] Fast user data resolved from local storage');
+          return {
+            ...local,
+            'uid': uid,
+            'email': user.email,
+            'role': r,
+            'username': local['username'] ?? inputUsername.split('@').first.toLowerCase(),
+            'name': local['name'] ?? local['username'] ?? inputUsername.split('@').first,
+          };
+        }
+      }
+    } catch (_) {}
+
+    // 3. Branch users subcollections by UID (3.5s timeout)
     try {
       final querySnap = await FirebaseFirestore.instance
           .collectionGroup('users')
           .where('uid', isEqualTo: uid)
           .limit(1)
           .get()
-          .timeout(const Duration(seconds: 8));
+          .timeout(const Duration(milliseconds: 3500));
       if (querySnap.docs.isNotEmpty) {
         final doc = querySnap.docs.first;
         final d = doc.data();
@@ -651,7 +730,7 @@ class _LoginPageState extends State<LoginPage> {
       debugPrint('[LoginPage] Branch /users fetch failed via collectionGroup: $e');
     }
 
-    // 3. Fallback: Search by email in collectionGroup('users')
+    // 4. Fallback: Search by email in collectionGroup('users') (3.5s timeout)
     if (userEmail.isNotEmpty) {
       try {
         final queryByEmail = await FirebaseFirestore.instance
@@ -659,7 +738,7 @@ class _LoginPageState extends State<LoginPage> {
             .where('email', isEqualTo: userEmail)
             .limit(1)
             .get()
-            .timeout(const Duration(seconds: 8));
+            .timeout(const Duration(milliseconds: 3500));
         if (queryByEmail.docs.isNotEmpty) {
           final doc = queryByEmail.docs.first;
           final d = doc.data();
@@ -715,19 +794,23 @@ class _LoginPageState extends State<LoginPage> {
           : await Hive.openBox('local_users');
       for (final val in box.values) {
         if (val is Map) {
-          final uName = (val['username']?.toString() ?? '').toLowerCase();
-          final uNameLower = (val['usernameLower']?.toString() ?? '').toLowerCase();
-          final name = (val['name']?.toString() ?? '').toLowerCase();
-          final email = (val['email']?.toString() ?? '').toLowerCase();
+          final u = Map<String, dynamic>.from(val);
+          final status = (u['status'] ?? u['accountStatus'] ?? '').toString().toLowerCase().trim();
+          final isDeleted = u['isDeleted'] == true || status == 'deleted';
+          if (isDeleted) continue;
+
+          final uName = (u['username']?.toString() ?? '').toLowerCase().trim();
+          final uNameLower = (u['usernameLower']?.toString() ?? '').toLowerCase().trim();
+          final name = (u['name']?.toString() ?? '').toLowerCase().trim();
+          final email = (u['email']?.toString() ?? '').toLowerCase().trim();
 
           if (uName == lower || uNameLower == lower || name == lower || email.startsWith('$lower@')) {
-            final m = Map<String, dynamic>.from(val);
             return {
-              ...m,
-              'email': val['email'],
-              'username': val['username'] ?? val['name'],
-              'branchId': val['branchId'] ?? 'all',
-              'role': _resolveRoleFromMap(m),
+              ...u,
+              'email': u['email'],
+              'username': u['username'] ?? u['name'],
+              'branchId': u['branchId'] ?? 'all',
+              'role': _resolveRoleFromMap(u),
             };
           }
         }
@@ -740,12 +823,13 @@ class _LoginPageState extends State<LoginPage> {
       final qLower = await FirebaseFirestore.instance
           .collection('users')
           .where('usernameLower', isEqualTo: lower)
-          .limit(1)
+          .limit(5)
           .get()
-          .timeout(const Duration(seconds: 5));
-      if (qLower.docs.isNotEmpty) {
-        final doc = qLower.docs.first;
+          .timeout(const Duration(milliseconds: 3500));
+      for (final doc in qLower.docs) {
         final d = doc.data();
+        final status = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
+        if (d['isDeleted'] == true || status == 'deleted') continue;
         return {
           ...d,
           'email': doc['email'],
@@ -757,12 +841,13 @@ class _LoginPageState extends State<LoginPage> {
       final q = await FirebaseFirestore.instance
           .collection('users')
           .where('username', isEqualTo: username.trim())
-          .limit(1)
+          .limit(5)
           .get()
-          .timeout(const Duration(seconds: 5));
-      if (q.docs.isNotEmpty) {
-        final doc = q.docs.first;
+          .timeout(const Duration(milliseconds: 3500));
+      for (final doc in q.docs) {
         final d = doc.data();
+        final status = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
+        if (d['isDeleted'] == true || status == 'deleted') continue;
         return {
           ...d,
           'email': doc['email'],
@@ -774,12 +859,13 @@ class _LoginPageState extends State<LoginPage> {
       final qName = await FirebaseFirestore.instance
           .collection('users')
           .where('name', isEqualTo: username.trim())
-          .limit(1)
+          .limit(5)
           .get()
-          .timeout(const Duration(seconds: 5));
-      if (qName.docs.isNotEmpty) {
-        final doc = qName.docs.first;
+          .timeout(const Duration(milliseconds: 3500));
+      for (final doc in qName.docs) {
         final d = doc.data();
+        final status = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
+        if (d['isDeleted'] == true || status == 'deleted') continue;
         return {
           ...d,
           'email': doc['email'],
@@ -791,12 +877,13 @@ class _LoginPageState extends State<LoginPage> {
       final querySnapLower = await FirebaseFirestore.instance
           .collectionGroup('users')
           .where('usernameLower', isEqualTo: lower)
-          .limit(1)
+          .limit(5)
           .get()
-          .timeout(const Duration(seconds: 5));
-      if (querySnapLower.docs.isNotEmpty) {
-        final doc = querySnapLower.docs.first;
+          .timeout(const Duration(milliseconds: 3500));
+      for (final doc in querySnapLower.docs) {
         final d = doc.data();
+        final status = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
+        if (d['isDeleted'] == true || status == 'deleted') continue;
         final pathParts = doc.reference.path.split('/');
         final branchId = pathParts.length >= 2 ? pathParts[1] : 'unknown';
         return {
@@ -811,12 +898,13 @@ class _LoginPageState extends State<LoginPage> {
       final querySnap = await FirebaseFirestore.instance
           .collectionGroup('users')
           .where('username', isEqualTo: username.trim())
-          .limit(1)
+          .limit(5)
           .get()
-          .timeout(const Duration(seconds: 5));
-      if (querySnap.docs.isNotEmpty) {
-        final doc = querySnap.docs.first;
+          .timeout(const Duration(milliseconds: 3500));
+      for (final doc in querySnap.docs) {
         final d = doc.data();
+        final status = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
+        if (d['isDeleted'] == true || status == 'deleted') continue;
         final pathParts = doc.reference.path.split('/');
         final branchId = pathParts.length >= 2 ? pathParts[1] : 'unknown';
         return {
@@ -893,6 +981,11 @@ class _LoginPageState extends State<LoginPage> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final s = MediaQuery.sizeOf(context);
+    final isDesktopScreen = s.width >= 900;
+    final patternW = isDesktopScreen ? 600.0 : (s.width * 0.75).clamp(240.0, 420.0);
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    final cacheW = isDesktopScreen ? 800 : (patternW * dpr).toInt().clamp(240, 500);
 
     return Scaffold(
       backgroundColor: isDark ? const Color(0xFF031611) : const Color(0xFFEFF6F0),
@@ -904,13 +997,15 @@ class _LoginPageState extends State<LoginPage> {
             top: 0,
             bottom: 0,
             left: 0,
-            width: 600,
+            width: patternW,
             child: Opacity(
               opacity: isDark ? 0.35 : 0.22,
               child: Image.asset(
                 'assets/images/2.webp',
                 fit: BoxFit.fitHeight,
                 alignment: Alignment.topLeft,
+                gaplessPlayback: true,
+                cacheWidth: cacheW, // responsive decode width — instant render on mobile
                 errorBuilder: (_, _, _) => const SizedBox.shrink(),
               ),
             ),
@@ -1533,7 +1628,7 @@ class _LoginPageState extends State<LoginPage> {
     final items = [
       {'icon': Icons.soup_kitchen_outlined, 'title': 'GMWF FREE', 'sub': 'DASTERKHAWAAN'},
       {'icon': Icons.shopping_bag_outlined, 'title': 'GMWF FREE', 'sub': 'RATION'},
-      {'icon': Icons.checkroom_outlined, 'title': 'GMWF EID', 'sub': 'LIBAAS'},
+      {'icon': Icons.checkroom_outlined, 'title': 'GMWF FREE', 'sub': 'LIBAAS'},
       {'icon': Icons.medical_services_outlined, 'title': 'GMWF FREE', 'sub': 'DISPENSARY'},
       {'icon': Icons.menu_book_outlined, 'title': 'GMWF FREE', 'sub': 'MADRASSA'},
     ];

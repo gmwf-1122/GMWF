@@ -64,6 +64,9 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
   bool _autoStudentDialogTriggered = false;
   bool _showDetailed = false;
 
+  static const Duration _guardianRefreshCooldown = Duration(seconds: 30);
+  static DateTime? _lastGuardianRefreshTime;
+
   @override
   void initState() {
     super.initState();
@@ -98,7 +101,6 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
     }
   }
 
-
   Future<void> _logout() async {
     try {
       await OfflineAuthService.clearCachedUserData();
@@ -117,40 +119,73 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
       String branchId, List<String> ids) async {
     if (ids.isEmpty) return [];
 
-    // Trigger scoped download only for linked children to optimize payload & ensure privacy
-    try {
-      await MadrassaLocalStorage.downloadStudentsForGuardian(branchId, ids);
-      final now = DateTime.now();
-      MadrassaLocalStorage.downloadLogsForMonth(branchId, now.year, now.month);
-      MadrassaLocalStorage.downloadHolidays(branchId);
-      MadrassaLocalStorage.downloadConfig(branchId);
-    } catch (_) {}
+    final now = DateTime.now();
+    final allStudentsCached = ids.every((id) => MadrassaLocalStorage.getStudentCached(branchId, id) != null);
+
+    // If any linked student is missing from local Hive, download scoped records
+    if (!allStudentsCached) {
+      try {
+        await MadrassaLocalStorage.downloadStudentsForGuardian(branchId, ids)
+            .timeout(const Duration(seconds: 4), onTimeout: () {});
+        await Future.wait([
+          MadrassaLocalStorage.downloadLogsForMonth(branchId, now.year, now.month),
+          MadrassaLocalStorage.downloadHolidays(branchId),
+          MadrassaLocalStorage.downloadConfig(branchId),
+        ]).timeout(const Duration(seconds: 4), onTimeout: () => []);
+      } catch (_) {}
+    } else {
+      // Hive already has all linked student records.
+      // Only do a low-priority background refresh if 30 minutes have elapsed.
+      if (_lastGuardianRefreshTime == null || now.difference(_lastGuardianRefreshTime!) > const Duration(minutes: 30)) {
+        _lastGuardianRefreshTime = now;
+        Future.wait([
+          MadrassaLocalStorage.downloadLogsForMonth(branchId, now.year, now.month),
+          MadrassaLocalStorage.downloadConfig(branchId),
+        ]).catchError((_) => <void>[]);
+      }
+    }
 
     try {
+      // downloadStudentsForGuardian already fetched into local Firestore cache and Hive.
+      // Reading with Source.cache eliminates duplicate network reads.
       final snaps = await Future.wait(ids.map((id) => FirebaseFirestore.instance
           .collection('branches')
           .doc(branchId)
           .collection('madrassa_students')
           .doc(id)
-          .get()));
-      for (final s in snaps) {
-        if (s.exists && s.data() != null) {
-          await MadrassaLocalStorage.cacheStudent(branchId, s.id, s.data()!);
-        }
-      }
+          .get(const GetOptions(source: Source.cache))));
       return snaps;
     } catch (e) {
-      debugPrint('[MadrassaGuardianScreen] Firestore fetch failed (offline mode): $e');
-      return Future.wait(ids.map((id) => FirebaseFirestore.instance
-          .collection('branches')
-          .doc(branchId)
-          .collection('madrassa_students')
-          .doc(id)
-          .get(const GetOptions(source: Source.cache))));
+      debugPrint('[MadrassaGuardianScreen] Firestore cache fetch fallback: $e');
+      try {
+        return await Future.wait(ids.map((id) => FirebaseFirestore.instance
+            .collection('branches')
+            .doc(branchId)
+            .collection('madrassa_students')
+            .doc(id)
+            .get()));
+      } catch (_) {
+        return [];
+      }
     }
   }
 
   Future<void> _refreshData() async {
+    final now = DateTime.now();
+    if (_lastGuardianRefreshTime != null && now.difference(_lastGuardianRefreshTime!) < _guardianRefreshCooldown) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(context.t('Showing up-to-date data from local storage')),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 2),
+          ),
+        );
+      }
+      return;
+    }
+    _lastGuardianRefreshTime = now;
+
     final branchId = widget.userData['branchId'] as String? ?? '';
     final dynamic rawIds = widget.userData['studentIds'] ?? widget.userData['studentId'];
     final List<String> studentIds = [];
@@ -170,8 +205,8 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
         } else {
           await MadrassaLocalStorage.downloadStudents(branchId);
         }
-        final now = DateTime.now();
-        await MadrassaLocalStorage.downloadLogsForMonth(branchId, now.year, now.month);
+        final nowDt = DateTime.now();
+        await MadrassaLocalStorage.downloadLogsForMonth(branchId, nowDt.year, nowDt.month);
         await MadrassaLocalStorage.downloadHolidays(branchId);
         await MadrassaLocalStorage.downloadConfig(branchId);
       }
@@ -204,11 +239,27 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
     return role != 'madrassa guardian';
   }
 
-  // New helper to fetch branches and show a picker when branchId is missing
+  // Helper to fetch branches and show a picker when branchId is missing
   Future<void> _showBranchPickerDialog(BuildContext context) async {
-    final snap = await FirebaseFirestore.instance.collection('branches').get();
+    final localBranches = LocalStorageService.getLocalBranchesList();
+    List<Map<String, String>> branches = [];
+
+    if (localBranches.isNotEmpty) {
+      branches = localBranches.map((b) => {
+        'id': b['id'].toString(),
+        'name': b['name'].toString(),
+      }).toList();
+    } else {
+      try {
+        final snap = await FirebaseFirestore.instance.collection('branches').get();
+        branches = snap.docs.map((d) => {
+          'id': d.id,
+          'name': (d.data()['name'] as String?) ?? d.id,
+        }).toList();
+      } catch (_) {}
+    }
+
     if (!mounted) return;
-    final branches = snap.docs;
     if (branches.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(context.t('No branches available.'))),
@@ -223,8 +274,8 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
         return StatefulBuilder(
           builder: (ctx, setStateDialog) {
             final query = searchCtrl.text.toLowerCase().trim();
-            final filtered = branches.where((doc) {
-              final name = (doc.data()['name'] as String? ?? '').toLowerCase();
+            final filtered = branches.where((b) {
+              final name = (b['name'] ?? '').toLowerCase();
               return name.contains(query);
             }).toList();
             return Dialog(
@@ -249,13 +300,14 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
                         itemCount: filtered.length,
                         separatorBuilder: (_, __) => const SizedBox(height: 8),
                         itemBuilder: (_, i) {
-                          final doc = filtered[i];
-                          final name = (doc.data()['name'] as String?) ?? 'Branch';
+                          final bMap = filtered[i];
+                          final id = bMap['id'] ?? '';
+                          final name = bMap['name'] ?? 'Branch';
                           return ListTile(
                             title: Text(name),
                             onTap: () {
                               setState(() {
-                                _selectedBranchId = doc.id;
+                                _selectedBranchId = id;
                                 _selectedBranchName = name;
                                 _studentsFuture = null;
                                 _lastBranchId = null;
@@ -612,32 +664,35 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
               if (!selectedDoc.exists) return _EmptyState(onLogout: _logout);
               final studentData = selectedDoc.data() as Map<String, dynamic>;
 
-              return _showDetailed || allDocs.length == 1
-                  ? ParentReportCard(
-                      branchId: branchId,
-                      studentId: selectedDoc.id,
-                      studentData: studentData,
-                      allDocs: allDocs,
-                      selectedIndex: _selectedIndex,
-                      onStudentChanged: (i) => setState(() => _selectedIndex = i),
-                      onBackToSummary: allDocs.length > 1 ? () => setState(() => _showDetailed = false) : null,
-                      onLogout: _logout,
-                      isParentView: true,
-                    )
-                  : _FamilySummaryView(
-                      branchId: branchId,
-                      allDocs: allDocs,
-                      onViewDetails: (index) {
-                        setState(() {
-                          _selectedIndex = index;
-                          _showDetailed = true;
-                        });
-                      },
-                      onLogout: _logout,
-                      langCode: _langCode,
-                      onSelectLanguage: _selectLanguage,
-                      userData: widget.userData,
-                    );
+              return RefreshIndicator(
+                onRefresh: _refreshData,
+                child: _showDetailed || allDocs.length == 1
+                    ? ParentReportCard(
+                        branchId: branchId,
+                        studentId: selectedDoc.id,
+                        studentData: studentData,
+                        allDocs: allDocs,
+                        selectedIndex: _selectedIndex,
+                        onStudentChanged: (i) => setState(() => _selectedIndex = i),
+                        onBackToSummary: allDocs.length > 1 ? () => setState(() => _showDetailed = false) : null,
+                        onLogout: _logout,
+                        isParentView: true,
+                      )
+                    : _FamilySummaryView(
+                        branchId: branchId,
+                        allDocs: allDocs,
+                        onViewDetails: (index) {
+                          setState(() {
+                            _selectedIndex = index;
+                            _showDetailed = true;
+                          });
+                        },
+                        onLogout: _logout,
+                        langCode: _langCode,
+                        onSelectLanguage: _selectLanguage,
+                        userData: widget.userData,
+                      ),
+              );
             },
           );
         }
@@ -1117,7 +1172,7 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
                               int sumSabakLogs = 0;
                               for (var logDoc in logsDocs) {
                                 final map = logDoc;
-                                final sLog = map[studentId] as Map<String, dynamic>?;
+                                final sLog = map[studentId] is Map ? Map<String, dynamic>.from(map[studentId] as Map) : null;
                                 if (sLog != null) {
                                   final sL = (sLog['sabakLines'] as num?)?.toInt() ?? int.tryParse(sLog['sabakLines']?.toString() ?? '');
                                   if (sL != null && sL > 0) sumSabakLogs += sL;
@@ -1132,7 +1187,12 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
                               const total = 8640;
                               final pct = totalMemorized / total;
 
-                              final todayStudentLog = todayLogData[studentId] as Map<String, dynamic>?;
+                              final isNazraStudent = (d['isNazra'] == true) ||
+                                  (d['program']?.toString().toLowerCase() == 'nazra') ||
+                                  (d['class']?.toString().toLowerCase() == 'nazra') ||
+                                  LocalStorageService.isMadrassaNazraOnly(branchId);
+
+                              final todayStudentLog = todayLogData[studentId] is Map ? Map<String, dynamic>.from(todayLogData[studentId] as Map) : null;
 
                               int sabakDelta = 0;
                               bool hasSabak = false;
@@ -1146,7 +1206,7 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
                                   for (var logDoc in logsDocs) {
                                     if (logDoc['id'] == todayStr) continue;
                                     final map = logDoc;
-                                    final sLog = map[studentId] as Map<String, dynamic>?;
+                                    final sLog = map[studentId] is Map ? Map<String, dynamic>.from(map[studentId] as Map) : null;
                                     if (sLog != null && sLog.containsKey('currentLines')) {
                                       prevCumulativeLines = sLog['currentLines'] as int? ?? 0;
                                       break;
@@ -1249,7 +1309,7 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
                                               ),
                                               const SizedBox(height: 2),
                                               Text(
-                                                '${context.t('Roll No')}: $rollNumber  •  $className',
+                                                '${context.t('Roll No')}: $rollNumber  •  ${isNazraStudent ? (context.isUrdu ? 'ناظرہ' : 'Nazra') : className}',
                                                 style: TextStyle(fontSize: 12, color: textMuted),
                                               ),
                                               const SizedBox(height: 8),
@@ -1276,8 +1336,12 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
                                               const SizedBox(height: 4),
                                               Text(
                                                 context.isUrdu 
-                                                    ? 'کل $total میں سے لائن $totalMemorized مکمل'
-                                                    : 'Line $totalMemorized of $total completed',
+                                                    ? (isNazraStudent
+                                                        ? 'کل $total میں سے $totalMemorized لائنیں ناظرہ مکمل'
+                                                        : 'کل $total میں سے لائن $totalMemorized مکمل')
+                                                    : (isNazraStudent
+                                                        ? 'Line $totalMemorized of $total Nazra completed'
+                                                        : 'Line $totalMemorized of $total completed'),
                                                 style: TextStyle(color: textMuted, fontSize: 12, fontFamily: context.isUrdu ? 'Noori' : null),
                                               ),
                                             ],
@@ -1371,42 +1435,46 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
                                           buildStatusChip(
                                             icon: Icons.menu_book,
                                             label: hasSabak && sabakDelta > 0
-                                                ? (context.isUrdu ? 'سبق: +$sabakDelta لائنیں' : 'Sabak: +$sabakDelta lines')
+                                                ? (context.isUrdu 
+                                                    ? (isNazraStudent ? 'سبق (ناظرہ): +$sabakDelta لائنیں' : 'سبق: +$sabakDelta لائنیں')
+                                                    : (isNazraStudent ? 'Sabak (Nazra): +$sabakDelta lines' : 'Sabak: +$sabakDelta lines'))
                                                 : context.t('No lines recorded'),
                                             color: const Color(0xFF0F6C5A),
                                             textColor: const Color(0xFF312E81),
                                           ),
                                           
-                                          buildStatusChip(
-                                            icon: Icons.repeat,
-                                            label: sabkiPara > 0 && sabkiRatio != '-' && sabkiRatio != 'nahi_sunaya'
-                                                ? (context.isUrdu ? 'سبقی: پارہ $sabkiPara (${formatRatio(sabkiRatio)})' : 'Sabki: Para $sabkiPara (${formatRatio(sabkiRatio)})')
-                                                : (sabkiRatio == 'nahi_sunaya'
-                                                    ? (context.isUrdu ? 'سبقی: نہیں سنایا' : 'Sabki: Nahi Sunaya')
-                                                    : (context.isUrdu ? 'سبقی: کوئی سبق نہیں' : 'Sabki: None')),
-                                            color: const Color(0xFFED6C02),
-                                            textColor: const Color(0xFF7E2D11),
-                                          ),
-                                          
-                                          buildStatusChip(
-                                            icon: Icons.track_changes,
-                                            label: manzilPara > 0 && manzilRatio != '-' && manzilRatio != 'nahi_sunaya'
-                                                ? (context.isUrdu ? 'منزل: پارہ $manzilPara (${formatRatio(manzilRatio)})' : 'Manzil: Para $manzilPara (${formatRatio(manzilRatio)})')
-                                                : (manzilRatio == 'nahi_sunaya'
-                                                    ? (context.isUrdu ? 'منزل: نہیں سنایا' : 'Manzil: Nahi Sunaya')
-                                                    : (context.isUrdu ? 'منزل: کوئی منزل نہیں' : 'Manzil: None')),
-                                            color: const Color(0xFF9C27B0),
-                                            textColor: const Color(0xFF4A0E4E),
-                                          ),
-                                          
-                                          buildStatusChip(
-                                            icon: Icons.checkroom,
-                                            label: uniformOk 
-                                                ? context.t('Uniform: Clean') 
-                                                : context.t('Uniform: Unclean'),
-                                            color: uniformOk ? Colors.blue : const Color(0xFFEF4444),
-                                            textColor: uniformOk ? Colors.blue.shade900 : const Color(0xFF991B1B),
-                                          ),
+                                          if (!isNazraStudent) ...[
+                                            buildStatusChip(
+                                              icon: Icons.repeat,
+                                              label: sabkiPara > 0 && sabkiRatio != '-' && sabkiRatio != 'nahi_sunaya'
+                                                  ? (context.isUrdu ? 'سبقی: پارہ $sabkiPara (${formatRatio(sabkiRatio)})' : 'Sabki: Para $sabkiPara (${formatRatio(sabkiRatio)})')
+                                                  : (sabkiRatio == 'nahi_sunaya'
+                                                      ? (context.isUrdu ? 'سبقی: نہیں سنایا' : 'Sabki: Nahi Sunaya')
+                                                      : (context.isUrdu ? 'سبقی: کوئی سبق نہیں' : 'Sabki: None')),
+                                              color: const Color(0xFFED6C02),
+                                              textColor: const Color(0xFF7E2D11),
+                                            ),
+                                            
+                                            buildStatusChip(
+                                              icon: Icons.track_changes,
+                                              label: manzilPara > 0 && manzilRatio != '-' && manzilRatio != 'nahi_sunaya'
+                                                  ? (context.isUrdu ? 'منزل: پارہ $manzilPara (${formatRatio(manzilRatio)})' : 'Manzil: Para $manzilPara (${formatRatio(manzilRatio)})')
+                                                  : (manzilRatio == 'nahi_sunaya'
+                                                      ? (context.isUrdu ? 'منزل: نہیں سنایا' : 'Manzil: Nahi Sunaya')
+                                                      : (context.isUrdu ? 'منزل: کوئی منزل نہیں' : 'Manzil: None')),
+                                              color: const Color(0xFF9C27B0),
+                                              textColor: const Color(0xFF4A0E4E),
+                                            ),
+                                            
+                                            buildStatusChip(
+                                              icon: Icons.checkroom,
+                                              label: uniformOk 
+                                                  ? context.t('Uniform: Clean') 
+                                                  : context.t('Uniform: Unclean'),
+                                              color: uniformOk ? Colors.blue : const Color(0xFFEF4444),
+                                              textColor: uniformOk ? Colors.blue.shade900 : const Color(0xFF991B1B),
+                                            ),
+                                          ],
                                           
                                           buildStatusChip(
                                             icon: Icons.reply,

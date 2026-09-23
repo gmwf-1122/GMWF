@@ -17,6 +17,7 @@ import 'package:gmwf/services/network_health_service.dart';
 import 'package:gmwf/services/prescription_template_service.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
+import 'package:gmwf/design/design_system.dart';
 
 class DoctorRightPanel extends StatefulWidget {
   final String branchId;
@@ -126,6 +127,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
   final Set<String> _selectedQuickTests = {};
 
   List<Map<String, dynamic>> _prescriptionTemplates = [];
+  bool _showMedicinesForVitalsOnly = false;
 
   late final List<FocusNode> _tabOrder = [
     _complaintFocus,
@@ -215,6 +217,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
         oldWidget.branchId != widget.branchId) {
       setState(() {
         _daysOfMedicine = _resolveDaysOfMedicine();
+        _showMedicinesForVitalsOnly = false;
       });
       _loadInventory();
     }
@@ -346,7 +349,23 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       ).where((m) => !_isSyringeItem(m)).toList();
     }
 
-    final List<Map<String, dynamic>> combined = [];
+    if (localItems.isEmpty) {
+      // Auto-heal: If local stock was deleted or is empty, restore directly from Firestore
+      LocalStorageService.downloadInventory(widget.branchId, forceFull: true).then((_) {
+        if (mounted) {
+          final restored = LocalStorageService.getAllLocalStockItems(
+            branchId: widget.branchId,
+            dispensaryId: shouldFilterByCamp ? effCamp : null,
+            filterByCamp: shouldFilterByCamp,
+          ).where((m) => !_isSyringeItem(m)).toList();
+          if (restored.isNotEmpty) {
+            _loadInventory(overrideCamp);
+          }
+        }
+      }).catchError((_) {});
+    }
+
+    final Map<String, List<Map<String, dynamic>>> grouped = {};
 
     for (final s in localItems) {
       final item = Map<String, dynamic>.from(s);
@@ -360,7 +379,72 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
         }
       }
       item['quantity'] = item['quantity'] ?? item['stock'] ?? 0;
-      combined.add(item);
+
+      final cleanName = (item['name'] ?? item['formula'] ?? '').toString().trim().toLowerCase();
+      final cleanType = _getMedicineType(item).toLowerCase();
+      final cleanDose = _getMedicineDose(item).toLowerCase().replaceAll(RegExp(r'\s+'), '');
+      String groupKey = '$cleanName|$cleanType|$cleanDose';
+
+      if (cleanDose.isEmpty) {
+        for (final k in grouped.keys) {
+          if (k.startsWith('$cleanName|$cleanType|')) {
+            groupKey = k;
+            break;
+          }
+        }
+      }
+
+      grouped.putIfAbsent(groupKey, () => []).add(item);
+    }
+
+    final List<Map<String, dynamic>> combined = [];
+
+    for (final entry in grouped.entries) {
+      final batches = entry.value;
+
+      // FEFO Sort: Earliest expiry date first, invalid/missing dates last
+      batches.sort((a, b) {
+        final expA = MasterProformaService.parseExpiryDate(a['expiryDate'] ?? a['expiry'], (a['id'] ?? a['medicineId'])?.toString());
+        final expB = MasterProformaService.parseExpiryDate(b['expiryDate'] ?? b['expiry'], (b['id'] ?? b['medicineId'])?.toString());
+        return expA.compareTo(expB);
+      });
+
+      // Aggregate total quantity across all batches
+      double totalQty = 0;
+      final List<String> batchIds = [];
+      for (final b in batches) {
+        final q = b['quantity'];
+        final numQty = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
+        totalQty += numQty;
+
+        final bId = (b['id'] ?? b['medicineId'] ?? b['docId'])?.toString().trim();
+        if (bId != null && bId.isNotEmpty && !batchIds.contains(bId)) {
+          batchIds.add(bId);
+        }
+      }
+
+      // Pick earliest batch with stock > 0, or default to earliest batch overall
+      final nonZeroBatch = batches.firstWhere(
+        (b) {
+          final q = b['quantity'];
+          final numQty = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
+          return numQty > 0;
+        },
+        orElse: () => batches.first,
+      );
+
+      final primary = Map<String, dynamic>.from(nonZeroBatch);
+      primary['quantity'] = totalQty.toInt() == totalQty ? totalQty.toInt() : totalQty;
+      primary['_batches'] = batches;
+      primary['_batchIds'] = batchIds;
+      primary['id'] = nonZeroBatch['id'] ?? nonZeroBatch['medicineId'] ?? (batchIds.isNotEmpty ? batchIds.first : 'unknown');
+
+      final dose = _getMedicineDose(primary);
+      if (dose.isNotEmpty && (primary['dose'] == null || primary['dose'].toString().trim().isEmpty)) {
+        primary['dose'] = dose;
+      }
+
+      combined.add(primary);
     }
 
     // Sort combined alphabetically by name / formula
@@ -393,13 +477,32 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       final prescBox   = await LocalStorageService.ensureBoxOpen(LocalStorageService.prescriptionsBox);
       final entriesBox = await LocalStorageService.ensureBoxOpen(LocalStorageService.entriesBox);
       final mySerial   = widget.serialId.trim().toLowerCase();
-      // PERF FIX: prescriptionsBox accumulates every prescription ever
-      // written locally. Scanning the whole box on every dialog-open and
-      // every save is what caused the doctor-panel freeze — only TODAY's
-      // prescriptions can possibly still be "reserved" (unreleased) stock,
-      // so skip everything else using the cheap date prefix on the serial
-      // before doing any Map/lookup work.
-      final todayKey = CampSessionService.resolveShiftAndDateKey(null, widget.branchId).dateKey;
+      final normBranch = widget.branchId.trim().toLowerCase();
+      final todayKey   = CampSessionService.resolveShiftAndDateKey(null, widget.branchId).dateKey;
+
+      // Fast set of serials and keys that are ALREADY dispensed, completed, or cancelled
+      final Set<String> dispensedOrFinishedSerials = {};
+      for (final eKey in entriesBox.keys) {
+        final entryVal = entriesBox.get(eKey);
+        if (entryVal is Map) {
+          final dStat = (entryVal['dispenseStatus'] ?? '').toString().toLowerCase().trim();
+          final sStat = (entryVal['status'] ?? '').toString().toLowerCase().trim();
+          if (dStat == 'dispensed' || sStat == 'completed' || dStat == 'cancelled' || sStat == 'cancelled') {
+            final eStr = eKey.toString().toLowerCase().trim();
+            dispensedOrFinishedSerials.add(eStr);
+            if (eStr.startsWith('$normBranch-')) {
+              dispensedOrFinishedSerials.add(eStr.substring(normBranch.length + 1).trim());
+            }
+            final sVal = (entryVal['serial'] ?? entryVal['id'])?.toString().toLowerCase().trim();
+            if (sVal != null && sVal.isNotEmpty) {
+              dispensedOrFinishedSerials.add(sVal);
+              if (sVal.startsWith('$normBranch-')) {
+                dispensedOrFinishedSerials.add(sVal.substring(normBranch.length + 1).trim());
+              }
+            }
+          }
+        }
+      }
 
       for (final key in prescBox.keys) {
         final raw = prescBox.get(key);
@@ -417,19 +520,27 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
         final prescSerial = prescSerialRaw.trim().toLowerCase();
         if (prescSerial == mySerial) continue;
 
-        // Check if already dispensed — look up in entriesBox
-        final entryKey = '${widget.branchId}-$prescSerial';
-        final entry    = entriesBox.get(entryKey);
-        if (entry is Map) {
-          final dispenseStatus =
-              (entry['dispenseStatus'] ?? '').toString().toLowerCase();
-          if (dispenseStatus == 'dispensed') continue;
+        var cleanSerial = prescSerial;
+        if (cleanSerial.startsWith('$normBranch-')) {
+          cleanSerial = cleanSerial.substring(normBranch.length + 1).trim();
+        }
+
+        // Check if already dispensed / finished in entriesBox
+        if (dispensedOrFinishedSerials.contains(prescSerial) ||
+            dispensedOrFinishedSerials.contains(cleanSerial) ||
+            dispensedOrFinishedSerials.contains('$normBranch-$cleanSerial') ||
+            dispensedOrFinishedSerials.contains(key.toString().toLowerCase().trim())) {
+          continue;
         }
 
         // Also check dispenseStatus on the prescription itself
         final dispenseStatusOnPresc =
-            (presc['dispenseStatus'] ?? '').toString().toLowerCase();
-        if (dispenseStatusOnPresc == 'dispensed') continue;
+            (presc['dispenseStatus'] ?? presc['status'] ?? '').toString().toLowerCase();
+        if (dispenseStatusOnPresc == 'dispensed' ||
+            dispenseStatusOnPresc == 'completed' ||
+            dispenseStatusOnPresc == 'cancelled') {
+          continue;
+        }
 
         // Sum up quantities for each inventory medicine
         final meds = presc['prescriptions'];
@@ -572,29 +683,78 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
         n.contains('inj') || n.contains('infusion') || n.contains('drip');
   }
 
-  bool _medicineExists(String name, {String? inventoryId}) {
+  static String _getMedicineDose(Map<String, dynamic> med) {
+    final d = (med['dose'] ?? med['dosage'] ?? '').toString().trim();
+    if (d.isNotEmpty && d.toLowerCase() != 'null') return d;
+    final n = (med['name'] ?? '').toString();
+    final reg = RegExp(r'(\d+(?:\.\d+)?\s*(?:mg|g|ml|mcg|iu|%))', caseSensitive: false);
+    final m = reg.firstMatch(n);
+    if (m != null) return m.group(1)!.trim();
+    return '';
+  }
+
+  int _getReservedCount(Map<String, dynamic>? inventoryMed) {
+    if (inventoryMed == null) return 0;
+    final batchIds = (inventoryMed['_batchIds'] as List?)?.map((e) => e.toString()).toSet() ?? <String>{};
+    final id = inventoryMed['id']?.toString() ?? '';
+    if (id.isNotEmpty) batchIds.add(id);
+    int sum = 0;
+    for (final bId in batchIds) {
+      sum += _reservedQuantities[bId] ?? 0;
+    }
+    return sum;
+  }
+
+  bool _medicineExists(String name, {String? inventoryId, String? type}) {
     final lower = name.trim().toLowerCase();
-    return widget.prescriptions.any((m) =>
-        (m['name'] ?? '').toString().trim().toLowerCase() == lower &&
-        (inventoryId == null || m['inventoryId'] == inventoryId));
+    final isCandidateInjectable = (type ?? '').toLowerCase().contains('inject') || (type ?? '').toLowerCase().contains('infus');
+    return widget.prescriptions.any((m) {
+      if (inventoryId != null && m['inventoryId'] != null) {
+        if (m['inventoryId'].toString() == inventoryId) return true;
+      }
+      final mName = (m['name'] ?? '').toString().trim().toLowerCase();
+      if (mName == lower) {
+        // If names match, check if one is an injection and the other is oral (tablet/syrup/capsule).
+        // A doctor is allowed to prescribe both Diclofenac (Tablet) and Diclofenac (Injection)!
+        final mType = (m['type'] ?? '').toString().toLowerCase();
+        final isExistingInjectable = mType.contains('inject') || mType.contains('infus');
+        if (type != null && type.isNotEmpty && mType.isNotEmpty) {
+          if (isCandidateInjectable != isExistingInjectable) {
+            // One is injectable, one is oral/other -> allowed!
+            return false;
+          }
+        }
+        return true;
+      }
+      return false;
+    });
   }
 
   // ── FIX: Available stock = total stock − reserved by other patients
-  //         − already added in this session
+  //         − already added in this session across all consolidated batches
   int _getAvailableStock(Map<String, dynamic>? inventoryMed) {
     if (inventoryMed == null) return 999999;
 
     final invQty = inventoryMed['quantity'];
     final totalStock = (invQty is num ? invQty.toInt() : int.tryParse(invQty?.toString() ?? '') ?? 0);
+    
+    final batchIds = (inventoryMed['_batchIds'] as List?)?.map((e) => e.toString()).toSet() ?? <String>{};
     final inventoryId = inventoryMed['id']?.toString() ?? '';
+    if (inventoryId.isNotEmpty) batchIds.add(inventoryId);
 
-    // Quantity reserved by OTHER pending patients (from Hive scan)
-    final reservedByOthers = _reservedQuantities[inventoryId] ?? 0;
+    // Quantity reserved by OTHER pending patients (from Hive scan across all batch IDs)
+    int reservedByOthers = 0;
+    for (final bId in batchIds) {
+      reservedByOthers += _reservedQuantities[bId] ?? 0;
+    }
 
     // Quantity already added in THIS doctor session for this patient
     int sessionQty = 0;
     for (final med in widget.prescriptions) {
-      if (med['inventoryId']?.toString() == inventoryId) {
+      final medInvId = med['inventoryId']?.toString() ?? '';
+      if (batchIds.contains(medInvId) ||
+          (med['name']?.toString().toLowerCase().trim() == (inventoryMed['name'] ?? '').toString().toLowerCase().trim() &&
+           med['type']?.toString().toLowerCase().trim() == (inventoryMed['type'] ?? '').toString().toLowerCase().trim())) {
         final medQty = med['quantity'];
         sessionQty += (medQty is num ? medQty.toInt() : int.tryParse(medQty?.toString() ?? '') ?? 0);
       }
@@ -705,7 +865,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
             }).toList();
 
             final mediaQuery = MediaQuery.of(context);
-            final isCompact = mediaQuery.size.width < 650;
+            final isCompact = GBreakpoint.isMobile(context);
 
             final categoryTabs = [
               {'id': 'All', 'label': 'All', 'icon': Icons.medical_services_outlined, 'count': countAll},
@@ -884,9 +1044,9 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                           ),
                           IconButton(
                             icon: const FaIcon(FontAwesomeIcons.arrowsRotate, color: Colors.white70, size: 15),
-                            tooltip: 'Refresh & Sync Inventory',
+                            tooltip: 'Restore & Sync Inventory from Cloud',
                             onPressed: () async {
-                              await LocalStorageService.downloadInventory(widget.branchId);
+                              await LocalStorageService.downloadInventory(widget.branchId, forceFull: true);
                               await _loadInventory(dialogCamp);
                               setDialogState(() {});
                             },
@@ -1141,7 +1301,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                 final medicineName = (m['name'] ?? '').toString().trim();
                                 final medType = _getMedicineType(m);
                                 final typeColors = _getTypeBadgeColors(medType, false);
-                                final reservedCount = _reservedQuantities[m['id']?.toString() ?? ''] ?? 0;
+                                final reservedCount = _getReservedCount(m);
 
                                 final itemBg = isOutOfStock
                                     ? (isDark ? const Color(0xFF450A0A) : const Color(0xFFFEF2F2))
@@ -1500,29 +1660,65 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     updateFields();
     if (!isInventory) nameCtrl.addListener(() => setState(() => updateFields()));
 
+    String? stockError;
+
     await showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        title: Text(
-          isInventory ? 'Add Inventory Medicine' : 'Add Custom Medicine',
-          style: const TextStyle(fontSize: 16),
-        ),
-        content: StatefulBuilder(
-          builder: (context, setStateDialog) => SingleChildScrollView(
+      builder: (ctx) => StatefulBuilder(
+        builder: (dialogCtx, setStateDialog) => AlertDialog(
+          title: Text(
+            isInventory ? 'Add Inventory Medicine' : 'Add Custom Medicine',
+            style: const TextStyle(fontSize: 16),
+          ),
+          content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
+                if (stockError != null) ...[
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    margin: const EdgeInsets.only(bottom: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFFFEBEE),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: const Color(0xFFEF5350)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.error_outline_rounded, color: Color(0xFFC62828), size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            stockError!,
+                            style: const TextStyle(
+                              color: Color(0xFFC62828),
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
                 TextField(
                   controller: nameCtrl,
                   readOnly: isInventory,
+                  style: TextStyle(color: _isDark ? Colors.white : Colors.black87),
                   decoration: InputDecoration(
                     labelText: 'Formula',
+                    labelStyle: TextStyle(color: _isDark ? const Color(0xFF94A3B8) : null),
                     border: const OutlineInputBorder(),
                     filled: isInventory,
-                    fillColor: isInventory ? Colors.grey[200] : null,
+                    fillColor: isInventory ? (_isDark ? const Color(0xFF1E293B) : Colors.grey[200]) : null,
                     isDense: true,
                   ),
-                  onChanged: isInventory ? null : (v) => setStateDialog(() => updateFields()),
+                  onChanged: isInventory ? null : (v) => setStateDialog(() {
+                    updateFields();
+                    stockError = null;
+                  }),
                 ),
                 if (isInventory) ...[
                   const SizedBox(height: 8),
@@ -1533,15 +1729,17 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                       'Available: ${_getAvailableStock(inventoryMed)}',
                       style: TextStyle(
                         fontSize: 13,
-                        color: _getAvailableStock(inventoryMed) < 10 ? Colors.red : Colors.grey[700],
+                        color: _getAvailableStock(inventoryMed) < 10
+                            ? Colors.red
+                            : (_isDark ? const Color(0xFFCBD5E1) : Colors.grey[700]),
                         fontWeight: FontWeight.bold,
                       ),
                     ),
                     // ── FIX: Show how many are reserved by other patients
-                    if ((_reservedQuantities[inventoryMed['id']?.toString() ?? ''] ?? 0) > 0) ...[
+                    if (_getReservedCount(inventoryMed) > 0) ...[
                       const SizedBox(width: 8),
                       Text(
-                        '(${_reservedQuantities[inventoryMed['id']?.toString() ?? '']} reserved)',
+                        '(${_getReservedCount(inventoryMed)} reserved)',
                         style: TextStyle(
                           fontSize: 11,
                           color: Colors.orange.shade700,
@@ -1637,7 +1835,6 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
               ],
             ),
           ),
-        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -1651,36 +1848,55 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
             onPressed: () {
               final name = nameCtrl.text.trim();
               if (name.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text('Enter medicine name'), backgroundColor: Colors.redAccent));
+                setStateDialog(() => stockError = 'Enter medicine name');
                 return;
               }
-              if (_medicineExists(name, inventoryId: inventoryMed?['id'])) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text('Medicine already added'), backgroundColor: Colors.orange));
+              final candidateType = isInjection
+                  ? (isInventory ? (inventoryMed['type'] ?? 'Injection') : (name.toLowerCase().contains('inf') || name.toLowerCase().contains('drip') ? 'Infusion' : 'Injection'))
+                  : (isSyrup ? 'Syrup' : (isInventory ? (inventoryMed['type'] ?? 'Tablet') : 'Tablet'));
+              if (_medicineExists(name, inventoryId: inventoryMed?['id'], type: candidateType.toString())) {
+                setStateDialog(() => stockError = 'Medicine already added to prescription');
                 return;
               }
 
               Map<String, dynamic> newMed;
               if (isInjection) {
                 final qty = int.tryParse(qtyCtrl.text) ?? 1;
-                if (qty <= 0) return;
+                if (qty <= 0) {
+                  setStateDialog(() => stockError = 'Quantity must be at least 1');
+                  return;
+                }
                 if (isInventory) {
                   final rawStock = (inventoryMed['quantity'] as num?)?.toDouble() ?? 0;
-                  if (rawStock > 0) {
-                    final availableStock = _getAvailableStock(inventoryMed);
-                    if (qty > availableStock) {
+                  final availableStock = _getAvailableStock(inventoryMed);
+                  if (rawStock <= 0) {
+                    if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                          content: Text('⚠️ Stock Limit Exceeded! Available: $availableStock'),
-                          backgroundColor: Colors.red));
-                      return;
+                        content: Text('⚠️ Note: "${inventoryMed['name']}" shows 0 on shelf. Added; dispensary will verify physical stock.'),
+                        backgroundColor: Colors.orange.shade900,
+                        duration: const Duration(seconds: 3),
+                      ));
+                    }
+                  } else if (qty > availableStock && availableStock > 0) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text('ℹ️ Note: $availableStock unreserved (Physical stock: ${rawStock.toInt()}). Added.'),
+                        backgroundColor: Colors.teal.shade800,
+                        duration: const Duration(seconds: 3),
+                      ));
                     }
                   }
                 }
                 final medType = isInventory
                     ? (inventoryMed['type'] ?? 'Injection')
                     : (name.toLowerCase().contains('inf') || name.toLowerCase().contains('drip') ? 'Infusion' : 'Injection');
-                newMed = {'name': name, 'quantity': qty, 'type': medType, 'inventoryId': inventoryMed?['id']};
+                newMed = {
+                  'name': name,
+                  'quantity': qty,
+                  'type': medType,
+                  'dose': isInventory ? (inventoryMed['dose'] ?? '') : '',
+                  'inventoryId': inventoryMed?['id'],
+                };
               } else {
                 final digits = timingCtrl.text.replaceAll('+', '');
                 final m      = int.tryParse(digits.isNotEmpty ? digits[0] : '0') ?? 0;
@@ -1688,25 +1904,40 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                 final n      = digits.length > 2 ? int.tryParse(digits[2]) ?? 0 : 0;
                 final sum    = m + e + n;
                 final qty    = (mealTiming == 'Before Sleep' && sum == 0) ? 1 : sum;
-                if (qty == 0) return;
+                if (qty == 0) {
+                  setStateDialog(() => stockError = 'Please enter timing (e.g. 1+0+1)');
+                  return;
+                }
                 if (isInventory) {
                   final rawStock = (inventoryMed['quantity'] as num?)?.toDouble() ?? 0;
-                  if (rawStock > 0) {
-                    final availableStock = _getAvailableStock(inventoryMed);
-                    final totalRequired = qty * _daysOfMedicine;
-                    if (totalRequired > availableStock) {
+                  final availableStock = _getAvailableStock(inventoryMed);
+                  final totalRequired = qty * _daysOfMedicine;
+                  if (rawStock <= 0) {
+                    if (mounted) {
                       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                          content: Text('⚠️ Stock Limit Exceeded! Need $totalRequired but only $availableStock available.'),
-                          backgroundColor: Colors.red));
-                      return;
+                        content: Text('⚠️ Note: "${inventoryMed['name']}" shows 0 on shelf. Added; dispensary will verify physical stock.'),
+                        backgroundColor: Colors.orange.shade900,
+                        duration: const Duration(seconds: 3),
+                      ));
+                    }
+                  } else if (totalRequired > availableStock) {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                        content: Text('ℹ️ Note: Need $totalRequired, $availableStock unreserved (Physical shelf stock: ${rawStock.toInt()}). Added.'),
+                        backgroundColor: Colors.teal.shade800,
+                        duration: const Duration(seconds: 3),
+                      ));
                     }
                   }
                 }
                 newMed = {
-                  'name': name, 'quantity': qty,
-                  'timing': '$m+$e+$n', 'meal': mealTiming,
-                  'dosage': isSyrup ? dosage : '',
-                  'type': isSyrup ? 'Syrup' : 'Tablet',
+                  'name': name,
+                  'quantity': qty,
+                  'timing': '$m+$e+$n',
+                  'meal': mealTiming,
+                  'dosage': isSyrup ? dosage : (isInventory ? (inventoryMed['dose'] ?? '') : ''),
+                  'dose': isInventory ? (inventoryMed['dose'] ?? '') : '',
+                  'type': isSyrup ? 'Syrup' : (isInventory ? (inventoryMed['type'] ?? 'Tablet') : 'Tablet'),
                   'inventoryId': inventoryMed?['id'],
                 };
               }
@@ -1738,8 +1969,9 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   Future<void> _addCustomLabTest() async {
     final ctrl = TextEditingController();
@@ -2659,163 +2891,133 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
   Widget _buildQuickTemplatesBar(bool compact, bool isDark) {
     return Container(
       width: double.infinity,
-      margin: const EdgeInsets.only(bottom: 16),
-      padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 14, vertical: 10),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 10, vertical: 6),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF0FDF4),
-        borderRadius: BorderRadius.circular(14),
+        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF0FDF4),
+        borderRadius: BorderRadius.circular(10),
         border: Border.all(
           color: isDark ? const Color(0xFF334155) : const Color(0xFFA7F3D0),
-          width: 1.2,
+          width: 1.0,
         ),
-        boxShadow: [
-          BoxShadow(
-            color: isDark ? Colors.black26 : Colors.teal.withValues(alpha: 0.05),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
         children: [
-          Row(
-            children: [
-              const Icon(Icons.bolt, color: Color(0xFFF59E0B), size: 18),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  'Disease Presets (Templates)',
-                  style: TextStyle(
-                    fontSize: compact ? 12.5 : 13.5,
-                    fontWeight: FontWeight.w800,
-                    color: isDark ? const Color(0xFF5EEAD4) : _teal,
-                  ),
-                ),
+          // ⚡ Templates button
+          InkWell(
+            borderRadius: BorderRadius.circular(6),
+            onTap: _showManageTemplatesDialog,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF0F766E) : _teal,
+                borderRadius: BorderRadius.circular(6),
               ),
-              InkWell(
-                borderRadius: BorderRadius.circular(8),
-                onTap: _showManageTemplatesDialog,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
-                  margin: const EdgeInsets.only(right: 6),
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF0F172A) : Colors.white,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: isDark ? const Color(0xFF475569) : Colors.grey.shade300, width: 0.8),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.tune_rounded, size: 13, color: isDark ? Colors.white70 : Colors.grey.shade700),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Manage',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: isDark ? Colors.white70 : Colors.grey.shade700,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              InkWell(
-                borderRadius: BorderRadius.circular(8),
-                onTap: _showSaveCurrentAsTemplateDialog,
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF0F172A) : Colors.white,
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: isDark ? const Color(0xFF2DD4BF) : _teal, width: 0.8),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.bookmark_add_outlined, size: 13, color: isDark ? const Color(0xFF2DD4BF) : _teal),
-                      const SizedBox(width: 4),
-                      Text(
-                        'Save as Preset',
-                        style: TextStyle(
-                          fontSize: 11,
-                          fontWeight: FontWeight.bold,
-                          color: isDark ? const Color(0xFF2DD4BF) : _teal,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          if (_prescriptionTemplates.isEmpty)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 4),
-              child: Row(
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.info_outline_rounded, size: 14, color: isDark ? Colors.white54 : Colors.grey.shade600),
-                  const SizedBox(width: 6),
-                  Expanded(
-                    child: Text(
-                      'No presets created yet. Fill diagnosis & medicines, then click "Save as Preset" above.',
-                      style: TextStyle(
-                        fontSize: 11.5,
-                        color: isDark ? Colors.white60 : Colors.grey.shade700,
-                        fontStyle: FontStyle.italic,
-                      ),
+                  Icon(Icons.bolt_rounded, size: 14, color: Colors.white),
+                  SizedBox(width: 4),
+                  Text(
+                    'Templates',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.bold,
                     ),
                   ),
                 ],
               ),
-            )
-          else
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: Row(
-                children: _prescriptionTemplates.map((tpl) {
-                  final name = tpl['name']?.toString() ?? 'Preset';
-                  final iconName = tpl['icon']?.toString();
-                  final iconData = PrescriptionTemplateService.getIcon(iconName);
+            ),
+          ),
+          const SizedBox(width: 8),
 
-                  return Padding(
-                    padding: const EdgeInsets.only(right: 6),
-                    child: ActionChip(
-                      avatar: FaIcon(iconData, size: 12, color: Colors.white),
-                      label: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            name,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 11.5,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(width: 4),
-                          InkWell(
-                            onTap: () => _showEditTemplateDialog(tpl),
-                            child: const Padding(
-                              padding: EdgeInsets.symmetric(horizontal: 2),
-                              child: Icon(Icons.more_vert, size: 13, color: Colors.white70),
-                            ),
-                          ),
-                        ],
-                      ),
-                      backgroundColor: isDark ? const Color(0xFF0F766E) : _teal,
-                      elevation: 1,
-                      pressElevation: 3,
-                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      onPressed: () => _applyPrescriptionTemplate(tpl),
+          // Horizontal scrollable template chips (if any exist)
+          Expanded(
+            child: _prescriptionTemplates.isEmpty
+                ? Text(
+                    'No saved presets yet',
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: isDark ? const Color(0xFF64748B) : Colors.grey.shade500,
+                      fontStyle: FontStyle.italic,
                     ),
-                  );
-                }).toList(),
+                  )
+                : SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    child: Row(
+                      children: _prescriptionTemplates.map((tpl) {
+                        final name = tpl['name']?.toString() ?? 'Preset';
+                        final iconName = tpl['icon']?.toString();
+                        final iconData = PrescriptionTemplateService.getIcon(iconName);
+
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 6),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(6),
+                            onTap: () => _applyPrescriptionTemplate(tpl),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                              decoration: BoxDecoration(
+                                color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(
+                                  color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
+                                  width: 0.8,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  FaIcon(iconData, size: 10, color: isDark ? const Color(0xFF2DD4BF) : _teal),
+                                  const SizedBox(width: 5),
+                                  Text(
+                                    name,
+                                    style: TextStyle(
+                                      color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                  ),
+          ),
+          const SizedBox(width: 6),
+
+          // Save current as Preset button
+          InkWell(
+            borderRadius: BorderRadius.circular(6),
+            onTap: _showSaveCurrentAsTemplateDialog,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+              decoration: BoxDecoration(
+                color: Colors.transparent,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: isDark ? const Color(0xFF475569) : Colors.grey.shade300, width: 0.8),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.bookmark_add_outlined, size: 12, color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700),
+                  const SizedBox(width: 3),
+                  Text(
+                    'Save Preset',
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700,
+                    ),
+                  ),
+                ],
               ),
             ),
+          ),
         ],
       ),
     );
@@ -3232,8 +3434,11 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
 
     if (complaint.isEmpty || diagnosis.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Both Patient Condition and Diagnosis are required!'),
-          backgroundColor: Colors.red));
+          content: Text(
+            'Both Patient Condition and Diagnosis are required!',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          ),
+          backgroundColor: Color(0xFFDC2626)));
       return;
     }
     final isVitalsOnly = widget.selectedPatientData?['isVitalsOnly'] == true ||
@@ -3241,8 +3446,11 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
 
     if (!isVitalsOnly && widget.prescriptions.isEmpty && widget.labResults.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Please add at least one medicine or lab test!'),
-          backgroundColor: Colors.orange));
+          content: Text(
+            'Please add at least one medicine or lab test!',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+          ),
+          backgroundColor: Color(0xFFD97706)));
       return;
     }
 
@@ -3255,7 +3463,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       await _buildReservedQuantities();
 
       final inventoryMed = _allInventory.firstWhere(
-        (m) => m['id']?.toString() == inventoryId,
+        (m) => m['id']?.toString() == inventoryId ||
+               ((m['_batchIds'] as List?)?.contains(inventoryId) ?? false),
         orElse: () => {},
       );
       if (inventoryMed.isEmpty) continue;
@@ -3273,17 +3482,17 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       final required = isInj ? perDayQty : perDayQty * _daysOfMedicine;
 
       if (required > othersOnly) {
+        final rawStock = (inventoryMed['quantity'] as num?)?.toInt() ?? 0;
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(SnackBar(
             content: Text(
-              '⚠️ "${med['name']}" stock insufficient! '
-              'Need $required but only $othersOnly available after reservations.',
+              '⚠️ "${med['name']}": Need $required (${rawStock > 0 ? "$rawStock on dispensary shelf" : "0 in stock"}). Dispensary will verify.',
             ),
-            backgroundColor: Colors.red,
-            duration: const Duration(seconds: 4),
+            backgroundColor: Colors.orange.shade800,
+            duration: const Duration(seconds: 3),
           ));
         }
-        return;
+        // Do NOT block saving! The dispensary is the physical source of truth for stock.
       }
     }
 
@@ -3554,29 +3763,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
         'updatedAt':      FieldValue.serverTimestamp(),
       };
 
-      final serialsCol = FirebaseFirestore.instance
-          .collection('branches').doc(widget.branchId)
-          .collection('serials');
-
-      serialsCol.doc(campDocKey)
-          .collection(queueType.toLowerCase())
-          .doc(widget.serialId.trim())
-          .set(cloudUpdatePayload, SetOptions(merge: true))
-          .then((_) {
-        debugPrint('[DoctorPanel] ☁️ Updated Firestore serials/$campDocKey/$queueType/${widget.serialId.trim()} to completed');
-      }).catchError((e) {
-        debugPrint('[DoctorPanel] ⚠️ Cloud Firestore update deferred: $e');
-      });
-
-      if (campDocKey != dateKey) {
-        serialsCol.doc(dateKey)
-            .collection(queueType.toLowerCase())
-            .doc(widget.serialId.trim())
-            .set(cloudUpdatePayload, SetOptions(merge: true))
-            .catchError((_) {});
-      }
-
-      // 4. LAN broadcast — send clinical prescription update ONLY (do not re-broadcast receptionist entry fields)
+      // 3. LAN broadcast — send clinical prescription update ONLY (do not re-broadcast receptionist entry fields)
       try {
         RealtimeManager().sendMessage(RealtimeEvents.payload(
           type: RealtimeEvents.savePrescription,
@@ -3584,7 +3771,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
           data: fullPrescriptionData,
         ));
       } catch (e) {
-        debugPrint('[DoctorPanel] Broadcast failed: $e');
+        debugPrint('[DoctorPanel] LAN Broadcast notice: $e');
       }
 
       // 4. Clear UI
@@ -3627,6 +3814,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       if (mounted) {
         Flushbar(
           message: 'Failed to save: $e',
+          messageColor: Colors.white,
           backgroundColor: Colors.red.shade700,
           duration: const Duration(seconds: 5),
         ).show(context);
@@ -3713,7 +3901,25 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
               'prescription':    medicalData,
               'dispenseStatus':  'pending',
             }, SetOptions(merge: true))
-            .timeout(const Duration(seconds: 4));
+            .timeout(const Duration(seconds: 15));
+
+        // Update local entry so pendingSync is cleared
+        try {
+          if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+            final eBox = Hive.box(LocalStorageService.entriesBox);
+            final normBranch = widget.branchId.toLowerCase().trim();
+            final canonicalKey = '$normBranch-${serial.toUpperCase()}';
+            final existing = eBox.get(canonicalKey) ?? eBox.get(serial);
+            if (existing is Map) {
+              final upd = Map<String, dynamic>.from(existing);
+              upd['pendingSync'] = false;
+              upd['synced'] = true;
+              upd['prescriptionSynced'] = true;
+              upd['syncStatus'] = 'synced';
+              await eBox.put(canonicalKey, upd);
+            }
+          }
+        } catch (_) {}
       } else {
         await _enqueueSync(dateKey, queueType, serial, patientCnic, fullData, medicalData);
       }
@@ -3758,6 +3964,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
   @override
   Widget build(BuildContext context) {
     final isDark = _isDark;
+    final isVitalsOnly = widget.selectedPatientData?['isVitalsOnly'] == true ||
+        widget.selectedPatientData?['vitalsOnly'] == true;
     return LayoutBuilder(builder: (context, constraints) {
       final compact = constraints.maxWidth < 500;
 
@@ -3883,238 +4091,304 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                   contentPadding: const EdgeInsets.all(12), isDense: compact,
                 ),
               ),
-              SizedBox(height: compact ? 12 : 20),
+              SizedBox(height: compact ? 12 : 16),
 
-              // ── Days selector ─────────────────────────────────────────
-              _buildDaysSelector(compact),
-              SizedBox(height: compact ? 12 : 20),
-              const Divider(height: 1),
-              SizedBox(height: compact ? 12 : 20),
-
-              // ── Medicine search / picker ───────────────────────────────
-              _sectionHeader(
-                'Medicines',
-                FontAwesomeIcons.pills,
-                compact: compact,
-                action: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const FaIcon(FontAwesomeIcons.arrowsRotate, size: 14, color: _teal),
-                      tooltip: 'Refresh Inventory',
-                      onPressed: () async {
-                        await LocalStorageService.downloadInventory(widget.branchId);
-                        _loadInventory();
-                      },
-                    ),
-                    const SizedBox(width: 4),
-                    OutlinedButton.icon(
-                      onPressed: () => _addMedicineDialog(),
-                      icon: const Icon(Icons.add, size: 14),
-                      label: Text('Custom', style: TextStyle(fontSize: compact ? 11 : 12)),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: isDark ? const Color(0xFF2DD4BF) : _teal,
-                        side: BorderSide(color: isDark ? const Color(0xFF2DD4BF) : _teal, width: 1),
-                        padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 10, vertical: compact ? 4 : 6),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              Focus(
-                focusNode: _searchFocusNode,
-                onKeyEvent: (node, event) {
-                  if (event is KeyDownEvent &&
-                      (event.logicalKey == LogicalKeyboardKey.enter ||
-                       event.logicalKey == LogicalKeyboardKey.space)) {
-                    _showMedicineSelectionDialog();
-                    return KeyEventResult.handled;
-                  }
-                  return KeyEventResult.ignored;
-                },
-                child: Builder(
-                  builder: (fCtx) {
-                    final isFocused = Focus.of(fCtx).hasFocus;
-                    return InkWell(
-                      onTap: _showMedicineSelectionDialog,
-                      borderRadius: BorderRadius.circular(16),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 180),
-                        padding: EdgeInsets.symmetric(horizontal: 14, vertical: compact ? 10 : 12),
-                        decoration: BoxDecoration(
-                          color: isDark ? const Color(0xFF0F172A) : Colors.white,
-                          borderRadius: BorderRadius.circular(16),
-                          border: Border.all(
-                            color: isFocused ? _teal : (isDark ? const Color(0xFF334155) : _teal.withValues(alpha: 0.35)),
-                            width: isFocused ? 2 : 1.2,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: _teal.withValues(alpha: isFocused ? 0.15 : 0.05),
-                              blurRadius: isFocused ? 10 : 6,
-                              offset: const Offset(0, 2),
-                            ),
-                          ],
-                        ),
-                        child: Row(
-                          children: [
-                            Container(
-                              padding: const EdgeInsets.all(8),
-                              decoration: BoxDecoration(
-                                color: _teal.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: const Icon(Icons.search, color: _teal, size: 18),
-                            ),
-                            const SizedBox(width: 12),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    'Search & Select Medicines...',
-                                    style: TextStyle(
-                                      fontSize: compact ? 13 : 14,
-                                      fontWeight: FontWeight.w600,
-                                      color: isDark ? Colors.white : Colors.grey.shade800,
-                                    ),
-                                  ),
-                                  const SizedBox(height: 2),
-                                  Text(
-                                    'Click to search inventory by name, formula, or type',
-                                    style: TextStyle(
-                                      fontSize: compact ? 10.5 : 11.5,
-                                      color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade500,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                              decoration: BoxDecoration(
-                                color: _teal,
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: const Row(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Text(
-                                    'Browse',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 11.5,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  SizedBox(width: 4),
-                                  Icon(Icons.arrow_forward_ios_rounded, color: Colors.white, size: 10),
-                                ],
-                              ),
-                            ),
-                          ],
+              // ── For Vitals Only: Immediate Action & Optional Prescribing ───
+              if (isVitalsOnly) ...[
+                if (!_showMedicinesForVitalsOnly) ...[
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      focusNode: _saveButtonFocus,
+                      onPressed: widget.isSaving ? null : _savePrescriptionHiveFirst,
+                      icon: widget.isSaving
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            )
+                          : const Icon(Icons.check_circle_outline, color: Colors.white, size: 20),
+                      label: Text(
+                        widget.isSaving ? 'Saving...' : 'Save & Complete Vitals Inspection',
+                        style: TextStyle(
+                          fontSize: compact ? 13.5 : 15,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
-                    );
-                  },
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.purple.shade700,
+                        foregroundColor: Colors.white,
+                        padding: EdgeInsets.symmetric(
+                          horizontal: 20,
+                          vertical: compact ? 12 : 16,
+                        ),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        elevation: 4,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                ],
+                Center(
+                  child: TextButton.icon(
+                    onPressed: () => setState(() => _showMedicinesForVitalsOnly = !_showMedicinesForVitalsOnly),
+                    icon: Icon(
+                      _showMedicinesForVitalsOnly ? Icons.expand_less : Icons.add_circle_outline,
+                      size: 16,
+                      color: isDark ? const Color(0xFFC084FC) : Colors.purple.shade700,
+                    ),
+                    label: Text(
+                      _showMedicinesForVitalsOnly
+                          ? 'Hide Medicines & Lab Tests'
+                          : '＋ Prescribe Medicines or Labs (Optional)',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? const Color(0xFFC084FC) : Colors.purple.shade700,
+                      ),
+                    ),
+                  ),
                 ),
-              ),
-
-              const SizedBox(height: 12),
-
-              // ── Medicine chips ────────────────────────────────────────
-              _buildMedicineSection(
-                  'Inventory Medicines', FontAwesomeIcons.pills,
-                  widget.prescriptions.where((m) => m['inventoryId'] != null && !_isInjectionOrDrip(m)).toList(),
-                  _teal, compact: compact),
-              _buildMedicineSection(
-                  'Inventory Injectables', FontAwesomeIcons.syringe,
-                  widget.prescriptions.where((m) => m['inventoryId'] != null && _isInjectionOrDrip(m)).toList(),
-                  _orange, compact: compact),
-              _buildMedicineSection(
-                  'Custom Medicines', FontAwesomeIcons.prescriptionBottle,
-                  widget.prescriptions.where((m) => m['inventoryId'] == null && !_isInjectionOrDrip(m)).toList(),
-                  _blueGrey, compact: compact),
-              _buildMedicineSection(
-                  'Custom Injectables', FontAwesomeIcons.syringe,
-                  widget.prescriptions.where((m) => m['inventoryId'] == null && _isInjectionOrDrip(m)).toList(),
-                  _orange, compact: compact),
-
-              const Divider(height: 1),
-              SizedBox(height: compact ? 12 : 20),
-
-              // ── Lab tests ─────────────────────────────────────────────
-              _sectionHeader(widget.isPhysiotherapist ? 'Physiotherapies' : 'Lab Tests', widget.isPhysiotherapist ? FontAwesomeIcons.personWalking : FontAwesomeIcons.flask,
-                  compact: compact,
-                  action: IconButton(
-                    icon: Icon(Icons.add_circle_outline, color: _teal, size: compact ? 20 : 24),
-                    onPressed: _addCustomLabTest,
-                    padding: EdgeInsets.zero,
-                    constraints: const BoxConstraints(),
-                  )),
-
-              Wrap(
-                spacing: compact ? 6 : 10, runSpacing: compact ? 6 : 10,
-                children: _currentQuickList.map((t) {
-                  final selected = _selectedQuickTests.contains(t);
-                  return FilterChip(
-                    label: Text(t, style: TextStyle(fontSize: compact ? 11 : 13)),
-                    selected: selected,
-                    selectedColor: _teal,
-                    backgroundColor: isDark ? const Color(0xFF0F172A) : null,
-                    side: BorderSide(color: selected ? _teal : (isDark ? const Color(0xFF334155) : Colors.grey.shade300)),
-                    checkmarkColor: Colors.white,
-                    labelStyle: TextStyle(color: selected ? Colors.white : (isDark ? const Color(0xFFCBD5E1) : Colors.black87)),
-                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                    onSelected: (_) {
-                      setState(() {
-                        if (selected) {
-                          _selectedQuickTests.remove(t);
-                          widget.labResults.removeWhere((l) => l['name'] == t);
-                        } else {
-                          _selectedQuickTests.add(t);
-                          if (!widget.labResults.any((l) => l['name'] == t)) {
-                            widget.labResults.add({'name': t});
-                          }
-                        }
-                      });
-                    },
-                  );
-                }).toList(),
-              ),
-
-              if (widget.labResults.any((l) => !_currentQuickList.contains(l['name']))) ...[
-                const SizedBox(height: 12),
-                Text(widget.isPhysiotherapist ? 'Custom Physiotherapies' : 'Custom Tests',
-                    style: TextStyle(
-                        fontSize: compact ? 13 : 16, fontWeight: FontWeight.bold, color: _teal)),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 6, runSpacing: 6,
-                  children: widget.labResults
-                      .where((l) => !_currentQuickList.contains(l['name']))
-                      .map((l) => Chip(
-                            label: Text(l['name'], style: TextStyle(fontSize: compact ? 11 : 13)),
-                            backgroundColor: Colors.orange.shade600,
-                            labelStyle: const TextStyle(color: Colors.white),
-                            onDeleted: () => setState(() => widget.labResults.remove(l)),
-                            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                          ))
-                      .toList(),
-                ),
+                if (_showMedicinesForVitalsOnly) const SizedBox(height: 10),
               ],
 
-              SizedBox(height: compact ? 16 : 30),
-              const Divider(height: 1),
-              SizedBox(height: compact ? 16 : 30),
+              if (!isVitalsOnly || _showMedicinesForVitalsOnly) ...[
+                // ── Days selector ─────────────────────────────────────────
+                _buildDaysSelector(compact),
+                SizedBox(height: compact ? 12 : 20),
+                const Divider(height: 1),
+                SizedBox(height: compact ? 12 : 20),
 
-              // ── Save button ───────────────────────────────────────────
-              Builder(builder: (_) {
-                final isVitalsOnly = widget.selectedPatientData?['isVitalsOnly'] == true ||
-                    widget.selectedPatientData?['vitalsOnly'] == true;
-                return SizedBox(
+                // ── Medicine search / picker ───────────────────────────────
+                _sectionHeader(
+                  'Medicines',
+                  FontAwesomeIcons.pills,
+                  compact: compact,
+                  action: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const FaIcon(FontAwesomeIcons.arrowsRotate, size: 14, color: _teal),
+                        tooltip: 'Restore & Refresh Inventory from Cloud',
+                        onPressed: () async {
+                          await LocalStorageService.downloadInventory(widget.branchId, forceFull: true);
+                          await _loadInventory();
+                          if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                content: Text('✅ Medicines restored and synced from Cloud'),
+                                backgroundColor: Colors.green,
+                                duration: Duration(seconds: 2),
+                              ),
+                            );
+                          }
+                        },
+                      ),
+                      const SizedBox(width: 4),
+                      OutlinedButton.icon(
+                        onPressed: () => _addMedicineDialog(),
+                        icon: const Icon(Icons.add, size: 14),
+                        label: Text('Custom', style: TextStyle(fontSize: compact ? 11 : 12)),
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: isDark ? const Color(0xFF2DD4BF) : _teal,
+                          side: BorderSide(color: isDark ? const Color(0xFF2DD4BF) : _teal, width: 1),
+                          padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 10, vertical: compact ? 4 : 6),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                Focus(
+                  focusNode: _searchFocusNode,
+                  onKeyEvent: (node, event) {
+                    if (event is KeyDownEvent &&
+                        (event.logicalKey == LogicalKeyboardKey.enter ||
+                         event.logicalKey == LogicalKeyboardKey.space)) {
+                      _showMedicineSelectionDialog();
+                      return KeyEventResult.handled;
+                    }
+                    return KeyEventResult.ignored;
+                  },
+                  child: Builder(
+                    builder: (fCtx) {
+                      final isFocused = Focus.of(fCtx).hasFocus;
+                      return InkWell(
+                        onTap: _showMedicineSelectionDialog,
+                        borderRadius: BorderRadius.circular(16),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 180),
+                          padding: EdgeInsets.symmetric(horizontal: 14, vertical: compact ? 10 : 12),
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(
+                              color: isFocused ? _teal : (isDark ? const Color(0xFF334155) : _teal.withValues(alpha: 0.35)),
+                              width: isFocused ? 2 : 1.2,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: _teal.withValues(alpha: isFocused ? 0.15 : 0.05),
+                                blurRadius: isFocused ? 10 : 6,
+                                offset: const Offset(0, 2),
+                              ),
+                            ],
+                          ),
+                          child: Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: _teal.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Icon(Icons.search, color: _teal, size: 18),
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Search & Select Medicines...',
+                                      style: TextStyle(
+                                        fontSize: compact ? 13 : 14,
+                                        fontWeight: FontWeight.w600,
+                                        color: isDark ? Colors.white : Colors.grey.shade800,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      'Click to search inventory by name, formula, or type',
+                                      style: TextStyle(
+                                        fontSize: compact ? 10.5 : 11.5,
+                                        color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade500,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                decoration: BoxDecoration(
+                                  color: _teal,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      'Browse',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                    SizedBox(width: 4),
+                                    Icon(Icons.arrow_forward_ios_rounded, color: Colors.white, size: 10),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+
+                const SizedBox(height: 12),
+
+                // ── Medicine chips ────────────────────────────────────────
+                _buildMedicineSection(
+                    'Inventory Medicines', FontAwesomeIcons.pills,
+                    widget.prescriptions.where((m) => m['inventoryId'] != null && !_isInjectionOrDrip(m)).toList(),
+                    _teal, compact: compact),
+                _buildMedicineSection(
+                    'Inventory Injectables', FontAwesomeIcons.syringe,
+                    widget.prescriptions.where((m) => m['inventoryId'] != null && _isInjectionOrDrip(m)).toList(),
+                    _orange, compact: compact),
+                _buildMedicineSection(
+                    'Custom Medicines', FontAwesomeIcons.prescriptionBottle,
+                    widget.prescriptions.where((m) => m['inventoryId'] == null && !_isInjectionOrDrip(m)).toList(),
+                    _blueGrey, compact: compact),
+                _buildMedicineSection(
+                    'Custom Injectables', FontAwesomeIcons.syringe,
+                    widget.prescriptions.where((m) => m['inventoryId'] == null && _isInjectionOrDrip(m)).toList(),
+                    _orange, compact: compact),
+
+                const Divider(height: 1),
+                SizedBox(height: compact ? 12 : 20),
+
+                // ── Lab tests ─────────────────────────────────────────────
+                _sectionHeader(widget.isPhysiotherapist ? 'Physiotherapies' : 'Lab Tests', widget.isPhysiotherapist ? FontAwesomeIcons.personWalking : FontAwesomeIcons.flask,
+                    compact: compact,
+                    action: IconButton(
+                      icon: Icon(Icons.add_circle_outline, color: _teal, size: compact ? 20 : 24),
+                      onPressed: _addCustomLabTest,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                    )),
+
+                Wrap(
+                  spacing: compact ? 6 : 10, runSpacing: compact ? 6 : 10,
+                  children: _currentQuickList.map((t) {
+                    final selected = _selectedQuickTests.contains(t);
+                    return FilterChip(
+                      label: Text(t, style: TextStyle(fontSize: compact ? 11 : 13)),
+                      selected: selected,
+                      selectedColor: _teal,
+                      backgroundColor: isDark ? const Color(0xFF0F172A) : null,
+                      side: BorderSide(color: selected ? _teal : (isDark ? const Color(0xFF334155) : Colors.grey.shade300)),
+                      checkmarkColor: Colors.white,
+                      labelStyle: TextStyle(color: selected ? Colors.white : (isDark ? const Color(0xFFCBD5E1) : Colors.black87)),
+                      materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      onSelected: (_) {
+                        setState(() {
+                          if (selected) {
+                            _selectedQuickTests.remove(t);
+                            widget.labResults.removeWhere((l) => l['name'] == t);
+                          } else {
+                            _selectedQuickTests.add(t);
+                            if (!widget.labResults.any((l) => l['name'] == t)) {
+                              widget.labResults.add({'name': t});
+                            }
+                          }
+                        });
+                      },
+                    );
+                  }).toList(),
+                ),
+
+                if (widget.labResults.any((l) => !_currentQuickList.contains(l['name']))) ...[
+                  const SizedBox(height: 12),
+                  Text(widget.isPhysiotherapist ? 'Custom Physiotherapies' : 'Custom Tests',
+                      style: TextStyle(
+                          fontSize: compact ? 13 : 16, fontWeight: FontWeight.bold, color: _teal)),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6, runSpacing: 6,
+                    children: widget.labResults
+                        .where((l) => !_currentQuickList.contains(l['name']))
+                        .map((l) => Chip(
+                              label: Text(l['name'], style: TextStyle(fontSize: compact ? 11 : 13)),
+                              backgroundColor: Colors.orange.shade600,
+                              labelStyle: const TextStyle(color: Colors.white),
+                              onDeleted: () => setState(() => widget.labResults.remove(l)),
+                              materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ))
+                        .toList(),
+                  ),
+                ],
+
+                SizedBox(height: compact ? 16 : 30),
+                const Divider(height: 1),
+                SizedBox(height: compact ? 16 : 30),
+
+                // ── Save button ───────────────────────────────────────────
+                SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
                     focusNode: _saveButtonFocus,
@@ -4145,8 +4419,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                       elevation: 6,
                     ),
                   ),
-                );
-              }),
+                ),
+              ],
               const SizedBox(height: 20),
             ],
           ),

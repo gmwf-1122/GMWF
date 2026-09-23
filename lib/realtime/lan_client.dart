@@ -25,6 +25,7 @@ class LanClient {
 
   bool      _isConnecting       = false;
   bool      _isConnected        = false;
+  bool      _isIdentified       = false;
   bool      _isDisposed         = false;
   DateTime? _lastPongReceived;
   Timer?    _pingTimer;
@@ -87,6 +88,15 @@ class LanClient {
             return;
           }
 
+          // Item: Gate outbox drain until server confirms identification/auth
+          if (!_isIdentified &&
+              (trimmed.contains('"identified"') ||
+               trimmed.contains('"auth_ack"') ||
+               trimmed.contains('"status":"authenticated"'))) {
+            _isIdentified = true;
+            _drainOutbox();
+          }
+
           debugPrint('LanClient: Received message: '
               '${trimmed.length > 100 ? '${trimmed.substring(0, 100)}...' : trimmed}');
           _messageController.add(trimmed);
@@ -117,8 +127,13 @@ class LanClient {
         });
       }
 
-      // Drain any messages queued while offline
-      _drainOutbox();
+      // Safety fallback: if server is legacy without identified ack, drain outbox after 600ms
+      Timer(const Duration(milliseconds: 600), () {
+        if (_isConnected && !_isIdentified && !_isDisposed) {
+          _isIdentified = true;
+          _drainOutbox();
+        }
+      });
 
       _connectionController.add(true);
       debugPrint('LanClient: Connected successfully to $url');
@@ -186,6 +201,7 @@ class LanClient {
     _pingTimer?.cancel();
     _isConnected = false;
     _isConnecting = false;
+    _isIdentified = false;
 
     try {
       _channelSub?.cancel();

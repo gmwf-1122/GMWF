@@ -59,6 +59,7 @@ import '../services/user_theme_service.dart';
 import '../services/network_health_service.dart';
 import '../services/auto_update_service.dart';
 import '../widgets/update_dialog_widget.dart';
+import '../services/donations_local_storage.dart';
 import 'madrassa/utils/madrassa_local_storage.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -86,7 +87,7 @@ class ConnectedClient {
     this.clientId,
     this.username,
     this.deviceOs = 'Windows PC',
-    this.appVersion = 'v2.4.0',
+    this.appVersion = 'v${AutoUpdateService.currentVersion}',
     this.ipAddress = '192.168.1.x',
     this.currentActivity = 'Active on Network',
     required this.connectedAt,
@@ -237,9 +238,14 @@ class _ServerDashboardWithSyncState
       }
     });
 
-    _updateTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted && _isRunning) {
-        final newQueue = _syncManager?.queueSize ?? 0;
+    _updateTimer = Timer.periodic(const Duration(seconds: 2), (_) {
+      if (mounted) {
+        // Automatically optimize queue in background without requiring manual button press
+        if (_syncQueueSize > 25) {
+          _syncManager?.purgeInvalidQueue();
+        }
+        final newQueue = _syncManager?.queueSize ??
+            (Hive.isBoxOpen(LocalStorageService.syncBox) ? Hive.box(LocalStorageService.syncBox).length : 0);
         if (newQueue != _syncQueueSize) {
           setState(() {
             _syncQueueSize = newQueue;
@@ -373,6 +379,7 @@ class _ServerDashboardWithSyncState
       if (!Hive.isBoxOpen(LocalStorageService.syncBox)) {
         await Hive.openBox(LocalStorageService.syncBox);
       }
+      LocalStorageService.purgeBloatedSyncQueue();
     } catch (e) {
       debugPrint('Hive init error: $e');
     }
@@ -455,7 +462,7 @@ class _ServerDashboardWithSyncState
             username:    info['username'] as String?,
             deviceOs:    info['deviceOs'] as String? ?? info['platform'] as String? ?? (kIsWeb ? 'Chrome Web' : 'Windows PC'),
 
-            appVersion:  info['appVersion'] as String? ?? 'v2.4.0',
+            appVersion:  info['appVersion'] as String? ?? 'v${AutoUpdateService.currentVersion}',
             ipAddress:   info['ipAddress'] as String? ?? info['deviceIp'] as String? ?? '192.168.1.x',
             currentActivity: 'Connected to Branch Server',
             connectedAt: DateTime.now(),
@@ -3057,6 +3064,9 @@ class ServerSyncManager {
   }
 
   /// Purges no-op / heartbeat / invalid entries from the sync queue.
+  /// Also deduplicates biometric-device entries: keeps only the latest per
+  /// deviceId so an existing backlog of hundreds of duplicates is instantly
+  /// collapsed to one pending write per device.
   int purgeInvalidQueue() {
     try {
       LocalStorageService.purgeBloatedSyncQueue();
@@ -3080,10 +3090,48 @@ class ServerSyncManager {
         box.delete(k);
       }
 
-      if (keysToDelete.isNotEmpty) {
-        debugPrint('[SSM] 🧹 Purged ${keysToDelete.length} stale/no-op items from sync queue');
+      // [FIX] Collapse any duplicate save_biometric_device / delete_biometric_device
+      // entries that accumulated before the dedup-key fix was deployed.
+      // Keep only the most-recently-created entry per deviceId; delete all older ones.
+      int biomedDedupRemoved = 0;
+      const bioTypes = {'save_biometric_device', 'delete_biometric_device'};
+      final seenDeviceKey = <String, dynamic>{}; // deviceKey -> boxKey of best entry
+      final seenDeviceTs = <String, String>{};    // deviceKey -> createdAt of best entry
+
+      for (final key in box.keys) {
+        final val = box.get(key);
+        if (val is! Map) continue;
+        final t = (val['type'] ?? '').toString().toLowerCase().trim();
+        if (!bioTypes.contains(t)) continue;
+        final devId = (val['deviceId'] ??
+                (val['data'] is Map ? val['data']['deviceId'] : null) ??
+                '')
+            .toString()
+            .trim()
+            .toLowerCase();
+        if (devId.isEmpty) continue;
+        final deviceKey = '${t}_$devId';
+        final ts = (val['createdAt'] ?? '').toString();
+        if (!seenDeviceKey.containsKey(deviceKey) || ts.compareTo(seenDeviceTs[deviceKey]!) > 0) {
+          // This entry is newer — mark the previous winner for deletion
+          if (seenDeviceKey.containsKey(deviceKey)) {
+            box.delete(seenDeviceKey[deviceKey]);
+            biomedDedupRemoved++;
+          }
+          seenDeviceKey[deviceKey] = key;
+          seenDeviceTs[deviceKey] = ts;
+        } else {
+          // This entry is older — delete it
+          box.delete(key);
+          biomedDedupRemoved++;
+        }
       }
-      return keysToDelete.length;
+
+      final totalRemoved = keysToDelete.length + biomedDedupRemoved;
+      if (totalRemoved > 0) {
+        debugPrint('[SSM] 🧹 Purged ${keysToDelete.length} stale/no-op + $biomedDedupRemoved biometric-device duplicates from sync queue');
+      }
+      return totalRemoved;
     } catch (e) {
       debugPrint('[SSM] purgeInvalidQueue error: $e');
       return 0;
@@ -3118,6 +3166,7 @@ class ServerSyncManager {
   }
 
   DateTime? _lastTokenDownloadTime;
+  DateTime? _lastSweepTime;
 
   Future<void> _downloadTodayTokens({bool force = false}) async {
     final now = DateTime.now();
@@ -3140,6 +3189,10 @@ class ServerSyncManager {
 
     // Initial sync of today's tokens from Firestore into server local Hive
     _downloadTodayTokens().ignore();
+
+    // Auto-backfill any unsynced local tokens and donations from offline periods
+    unawaited(_enqueueMissingEntries());
+    unawaited(_enqueueMissingDonations());
 
     // ── Chain onClientConnected for catch-up push ────────────────────────────
     _prevOnClientConnected = server.onClientConnected;
@@ -3303,15 +3356,24 @@ class ServerSyncManager {
               if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
                 final eBox = Hive.box(LocalStorageService.entriesBox);
                 final normBranch = msgBranch.toLowerCase().trim();
-                final normSerial = serial.toLowerCase().trim();
-                final key = '$normBranch-$serial';
+                var cleanSerial = serial.trim();
+                if (cleanSerial.toLowerCase().startsWith('$normBranch-')) {
+                  cleanSerial = cleanSerial.substring(normBranch.length + 1).trim();
+                }
+                final normSerial = cleanSerial.toLowerCase();
+                final normSerialUpper = cleanSerial.toUpperCase();
+                final canonicalKey = '$normBranch-$normSerialUpper';
 
-                dynamic targetKey = key;
-                dynamic existing = eBox.get(key);
+                dynamic targetKey = canonicalKey;
+                dynamic existing = eBox.get(canonicalKey) ?? eBox.get('$normBranch-$cleanSerial');
                 if (existing == null) {
                   for (final k in eBox.keys) {
                     final kStr = k.toString().toLowerCase().trim();
-                    if (kStr == '$normBranch-$normSerial' || kStr == normSerial || kStr.endsWith('-$normSerial')) {
+                    if (kStr == canonicalKey.toLowerCase() ||
+                        kStr == '$normBranch-$normSerial' ||
+                        kStr == normSerial ||
+                        kStr.endsWith('-$normSerial') ||
+                        kStr.endsWith('-$normSerialUpper'.toLowerCase())) {
                       targetKey = k;
                       existing = eBox.get(k);
                       break;
@@ -3325,12 +3387,16 @@ class ServerSyncManager {
                   updated['status'] = 'completed';
                   updated['dispensedAt'] =
                       data['dispensedAt'] ?? DateTime.now().toIso8601String();
-                  updated['dispensedBy'] = data['dispensedBy'];
+                  updated['dispensedBy'] = data['dispensedBy'] ?? data['dispenserName'];
                   updated['completedAt'] =
                       data['completedAt'] ?? DateTime.now().toIso8601String();
                   eBox.put(targetKey, updated);
-                  debugPrint('[SSM] ✅ Dispense saved locally: $targetKey');
+                  if (targetKey != canonicalKey) {
+                    eBox.put(canonicalKey, updated);
+                  }
+                  debugPrint('[SSM] ✅ Dispense saved locally: $canonicalKey');
                 }
+                LocalStorageService.updateDispenseStatus(normBranch, normSerialUpper, 'dispensed');
               }
             } catch (_) {}
           }
@@ -3518,6 +3584,22 @@ class ServerSyncManager {
             }
           } catch (e) {
             debugPrint('[SSM] Madrassa student offboard error on server: $e');
+          }
+          break;
+
+        case 'save_biometric_device':
+          try {
+            final devId = (data['deviceId'] ?? data['id'] ?? '').toString().trim();
+            if (devId.isNotEmpty) {
+              if (!Hive.isBoxOpen(LocalStorageService.biometricDevicesBox)) {
+                await LocalStorageService.openBoxSafe(LocalStorageService.biometricDevicesBox);
+              }
+              final devBox = Hive.box(LocalStorageService.biometricDevicesBox);
+              await devBox.put(devId, data);
+              debugPrint('[SSM] ✅ Biometric device saved locally on server: $devId');
+            }
+          } catch (e) {
+            debugPrint('[SSM] save_biometric_device local error: $e');
           }
           break;
       }
@@ -4030,6 +4112,19 @@ class ServerSyncManager {
       } else if (mappedType == 'save_school_daily_log' || mappedType == 'save_school_teacher_log' || mappedType == 'save_madrassa_daily_log') {
         final dtKey = (message['dateKey'] ?? payloadData['date'] ?? payloadData['dateKey'] ?? DateFormat('yyyy-MM-dd').format(DateTime.now())).toString().trim();
         targetKey = 'sync_${bId}_${mappedType}_$dtKey';
+      } else if (mappedType == 'save_biometric_device' || mappedType == 'delete_biometric_device' || eventType == 'save_biometric_device' || eventType == 'delete_biometric_device') {
+        final devId = (payloadData['deviceId'] ?? payloadData['id'] ?? payloadData['deviceName'] ?? '').toString().trim().toLowerCase();
+        targetKey = 'sync_${bId}_biodev_$devId';
+
+        // Check if device is already identical in local storage or already pending in sync queue
+        if ((mappedType == 'save_biometric_device' || eventType == 'save_biometric_device') && Hive.isBoxOpen(LocalStorageService.biometricDevicesBox)) {
+          final devBox = Hive.box(LocalStorageService.biometricDevicesBox);
+          final existing = devBox.get(devId) ?? devBox.get(payloadData['deviceId']);
+          if (existing is Map && box.containsKey(targetKey)) {
+            // Already present in local storage and queued once — do not duplicate
+            return;
+          }
+        }
       } else {
         targetKey = key;
       }
@@ -4056,6 +4151,9 @@ class ServerSyncManager {
         'status':    'pending',
       });
       debugPrint('[SSM] Queued for sync: $mappedType | key: $targetKey | serial: $rawSerial (queue: ${box.length})');
+      if (box.length > 25) {
+        purgeInvalidQueue();
+      }
       unawaited(triggerSync());
     } catch (e) {
       debugPrint('[SSM] Error queuing message: $e');
@@ -4103,9 +4201,137 @@ class ServerSyncManager {
 
   String _todayKey() => CampSessionService.resolveShiftAndDateKey(null, branchId).dateKey;
 
+  /// Sweeps local_entries on the server for unsynced tokens and queues them for Firestore
+  Future<void> _enqueueMissingEntries() async {
+    try {
+      if (!Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+        await LocalStorageService.ensureBoxOpen(LocalStorageService.entriesBox);
+      }
+      if (!Hive.isBoxOpen(LocalStorageService.syncBox)) {
+        await LocalStorageService.ensureBoxOpen(LocalStorageService.syncBox);
+      }
+      final entriesBox = Hive.box(LocalStorageService.entriesBox);
+      final syncBox    = Hive.box(LocalStorageService.syncBox);
+
+      final alreadyQueued = syncBox.values
+          .where((v) => v is Map && (v['type'] == 'save_entry' || v['type'] == 'save_prescription'))
+          .map((v) => (v['serial'] ?? v['data']?['serial'])?.toString().trim().toUpperCase())
+          .whereType<String>()
+          .toSet();
+
+      int queued = 0;
+      for (final key in entriesBox.keys) {
+        final raw = entriesBox.get(key);
+        if (raw == null || raw is! Map) continue;
+
+        final data = Map<String, dynamic>.from(raw);
+        final isPending = data['pendingSync'] == true ||
+            data['synced'] == false ||
+            data['syncStatus'] == 'pending';
+        if (!isPending) continue;
+
+        final serial = (data['serial'] ?? key.toString().split('-').last).toString().trim().toUpperCase();
+        if (serial.isEmpty || alreadyQueued.contains(serial)) continue;
+
+        final dateKey = (data['dateKey'] ?? _todayKey()).toString();
+        final effectiveBranch = (data['branchId']?.toString().isNotEmpty == true)
+            ? data['branchId'].toString()
+            : branchId;
+        final queueType = _resolveQueueType(data['queueType']?.toString());
+
+        final targetKey = 'sync_${effectiveBranch}_${serial}_save_entry';
+        await syncBox.put(targetKey, {
+          'type':      'save_entry',
+          'branchId':  effectiveBranch,
+          'dateKey':   dateKey,
+          'queueType': queueType,
+          'serial':    serial,
+          'data':      data,
+          'createdAt': DateTime.now().toIso8601String(),
+          'attempts':  0,
+          'status':    'pending',
+        });
+        alreadyQueued.add(serial);
+        queued++;
+      }
+
+      if (queued > 0) {
+        debugPrint('[SSM] 📥 Backfill: queued $queued unsynced local tokens for Firestore upload');
+      }
+    } catch (e) {
+      debugPrint('[SSM] _enqueueMissingEntries error: $e');
+    }
+  }
+
+  /// Sweeps donations on the server for pending receipts and queues them for Firestore
+  Future<void> _enqueueMissingDonations() async {
+    try {
+      if (!Hive.isBoxOpen(DonationsLocalStorage.donationsBox)) {
+        await Hive.openBox(DonationsLocalStorage.donationsBox);
+      }
+      if (!Hive.isBoxOpen(LocalStorageService.syncBox)) {
+        await LocalStorageService.ensureBoxOpen(LocalStorageService.syncBox);
+      }
+      final donationsBox = Hive.box(DonationsLocalStorage.donationsBox);
+      final syncBox      = Hive.box(LocalStorageService.syncBox);
+
+      final alreadyQueued = syncBox.values
+          .where((v) => v is Map && (v['type'] == 'save_donation' || v['type'] == 'update_donation'))
+          .map((v) => (v['localId'] ?? v['data']?['id'] ?? v['data']?['receiptNumber'])?.toString())
+          .whereType<String>()
+          .toSet();
+
+      int queued = 0;
+      for (final key in donationsBox.keys) {
+        final raw = donationsBox.get(key);
+        if (raw == null || raw is! Map) continue;
+
+        final data = Map<String, dynamic>.from(raw);
+        if (data['syncStatus'] != 'pending') continue;
+
+        final localId = (data['localId'] ?? data['id'] ?? data['receiptNumber'])?.toString();
+        if (localId == null || localId.isEmpty || alreadyQueued.contains(localId)) continue;
+
+        final targetKey = 'sync_${branchId}_don_$localId';
+        await syncBox.put(targetKey, {
+          'type':      'save_donation',
+          'branchId':  branchId,
+          'localId':   localId,
+          'hiveKey':   key.toString(),
+          'data':      data,
+          'createdAt': DateTime.now().toIso8601String(),
+          'attempts':  0,
+          'status':    'pending',
+        });
+        alreadyQueued.add(localId);
+        queued++;
+      }
+
+      if (queued > 0) {
+        debugPrint('[SSM] 📥 Backfill: queued $queued pending donations for Firestore upload');
+      }
+    } catch (e) {
+      debugPrint('[SSM] _enqueueMissingDonations error: $e');
+    }
+  }
+
   /// Fast parallelized sync processor with auto-purging
   Future<void> triggerSync({bool force = false}) async {
     if (_isSyncing && !force) return;
+
+    // Periodic sweep for missing offline tokens and donations:
+    // Run on force OR every 3 minutes so offline entries are automatically backfilled
+    // into the sync queue without requiring a manual button click.
+    final now = DateTime.now();
+    final bool shouldSweep = force ||
+        _lastSweepTime == null ||
+        now.difference(_lastSweepTime!).inMinutes >= 3;
+    if (shouldSweep) {
+      _lastSweepTime = now;
+      await _enqueueMissingEntries();
+      await _enqueueMissingDonations();
+    }
+
     if (!Hive.isBoxOpen(LocalStorageService.syncBox)) return;
     final box = Hive.box(LocalStorageService.syncBox);
     if (box.isEmpty) return;
@@ -4117,11 +4343,13 @@ class ServerSyncManager {
       // First, purge invalid noise
       purgeInvalidQueue();
 
-      // Desktop-resilient online verification
+      // Desktop-resilient online verification:
+      // Only abort if the host is completely offline (no network interface).
+      // Even under degraded/unstable connectivity, attempt Firestore delta writes with timeouts.
       bool isOnline = true;
       try {
-        if (NetworkHealthService().isStableOnline) {
-          isOnline = true;
+        if (NetworkHealthService().isOffline) {
+          isOnline = false;
         } else if (!kIsWeb && (io.Platform.isAndroid || io.Platform.isIOS)) {
           final connectivity = await Connectivity().checkConnectivity();
           isOnline = connectivity.any((r) => r != ConnectivityResult.none);
@@ -4293,6 +4521,36 @@ class ServerSyncManager {
             .collection(qt).doc(s)
             .set(cleanData, SetOptions(merge: true));
         debugPrint('✅ save_entry → serials/$campDocKey/$qt/$s');
+
+        // Update local entry so pendingSync is cleared and marked synced on the server
+        try {
+          if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+            final eBox = Hive.box(LocalStorageService.entriesBox);
+            final normB = effectiveBranchId.toLowerCase().trim();
+            final normS = s.toUpperCase().trim();
+            final localKey = '$normB-$normS';
+            dynamic targetKey = localKey;
+            dynamic existing = eBox.get(localKey);
+            if (existing == null) {
+              for (final k in eBox.keys) {
+                final kStr = k.toString().toUpperCase().trim();
+                if (kStr == localKey.toUpperCase() || kStr == normS || kStr.endsWith('-$normS')) {
+                  targetKey = k;
+                  existing = eBox.get(k);
+                  break;
+                }
+              }
+            }
+            if (existing is Map) {
+              final updated = Map<String, dynamic>.from(existing);
+              updated['synced'] = true;
+              updated['pendingSync'] = false;
+              updated['syncStatus'] = 'synced';
+              updated['syncedAt'] = DateTime.now().toIso8601String();
+              await eBox.put(targetKey, updated);
+            }
+          }
+        } catch (_) {}
         break;
 
       // ── Prescription (Single Canonical Serials Write) ─────────────────────
@@ -4328,6 +4586,36 @@ class ServerSyncManager {
             .collection(effectiveQueueType).doc(s)
             .set(updateMap, SetOptions(merge: true));
         debugPrint('✅ save_prescription → serials/$campDocKey/$effectiveQueueType/$s');
+
+        // Update local entry so prescription status is synced on the server
+        try {
+          if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+            final eBox = Hive.box(LocalStorageService.entriesBox);
+            final normB = effectiveBranchId.toLowerCase().trim();
+            final normS = s.toUpperCase().trim();
+            final localKey = '$normB-$normS';
+            dynamic targetKey = localKey;
+            dynamic existing = eBox.get(localKey);
+            if (existing == null) {
+              for (final k in eBox.keys) {
+                final kStr = k.toString().toUpperCase().trim();
+                if (kStr == localKey.toUpperCase() || kStr == normS || kStr.endsWith('-$normS')) {
+                  targetKey = k;
+                  existing = eBox.get(k);
+                  break;
+                }
+              }
+            }
+            if (existing is Map) {
+              final updated = Map<String, dynamic>.from(existing);
+              updated['synced'] = true;
+              updated['pendingSync'] = false;
+              updated['prescriptionSynced'] = true;
+              updated['syncedAt'] = DateTime.now().toIso8601String();
+              await eBox.put(targetKey, updated);
+            }
+          }
+        } catch (_) {}
         break;
 
       // ── Patient ──────────────────────────────────────────────────────────
@@ -4397,6 +4685,39 @@ class ServerSyncManager {
             .collection(qt).doc(s)
             .set(statusPatch, SetOptions(merge: true));
         debugPrint('✅ update_serial_status → serials/$campDocKey/$qt/$s');
+
+        // Update local entry so dispenseStatus is synced on the server
+        try {
+          if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+            final eBox = Hive.box(LocalStorageService.entriesBox);
+            final normB = effectiveBranchId.toLowerCase().trim();
+            final normS = s.toUpperCase().trim();
+            final localKey = '$normB-$normS';
+            dynamic targetKey = localKey;
+            dynamic existing = eBox.get(localKey);
+            if (existing == null) {
+              for (final k in eBox.keys) {
+                final kStr = k.toString().toUpperCase().trim();
+                if (kStr == localKey.toUpperCase() || kStr == normS || kStr.endsWith('-$normS')) {
+                  targetKey = k;
+                  existing = eBox.get(k);
+                  break;
+                }
+              }
+            }
+            if (existing is Map) {
+              final updated = Map<String, dynamic>.from(existing);
+              updated['dispenseStatus'] = cleanData['dispenseStatus'] ?? 'dispensed';
+              updated['status'] = 'completed';
+              if (cleanData['dispensedAt'] != null) updated['dispensedAt'] = cleanData['dispensedAt'];
+              if (cleanData['dispensedBy'] != null) updated['dispensedBy'] = cleanData['dispensedBy'];
+              updated['synced'] = true;
+              updated['pendingSync'] = false;
+              updated['syncStatus'] = 'synced';
+              await eBox.put(targetKey, updated);
+            }
+          }
+        } catch (_) {}
         break;
       // ── Delete patient ───────────────────────────────────────────────────
       case 'delete_patient':
@@ -4527,6 +4848,24 @@ class ServerSyncManager {
         debugPrint('✅ save_attendance → branches/$effectiveBranchId/employee_attendance/$dtKey/records/$empId');
         break;
 
+      // ── Biometric Hardware Devices sync ───────────────────────────────────
+      case 'save_biometric_device':
+        final devId = (cleanData['deviceId'] ?? cleanData['id'] ?? '').toString().trim();
+        if (devId.isNotEmpty) {
+          cleanData['updatedAt'] = FieldValue.serverTimestamp();
+          await db.collection('branches').doc(effectiveBranchId).collection('biometric_devices').doc(devId).set(cleanData, SetOptions(merge: true));
+          debugPrint('✅ save_biometric_device → branches/$effectiveBranchId/biometric_devices/$devId');
+        }
+        break;
+
+      case 'delete_biometric_device':
+        final devId = (cleanData['deviceId'] ?? cleanData['id'] ?? '').toString().trim();
+        if (devId.isNotEmpty) {
+          await db.collection('branches').doc(effectiveBranchId).collection('biometric_devices').doc(devId).delete();
+          debugPrint('✅ delete_biometric_device → branches/$effectiveBranchId/biometric_devices/$devId');
+        }
+        break;
+
       // ── Donations Module sync ─────────────────────────────────────────────
       case 'save_donation':
       case 'update_donation':
@@ -4535,6 +4874,22 @@ class ServerSyncManager {
         await db.collection('donations').doc(donationId).set(cleanData, SetOptions(merge: true));
         await db.collection('branches').doc(effectiveBranchId).collection('donations').doc(donationId).set(cleanData, SetOptions(merge: true));
         debugPrint('✅ save_donation → donations/$donationId');
+
+        // Update local donation so syncStatus is synced on the server
+        try {
+          if (Hive.isBoxOpen(DonationsLocalStorage.donationsBox)) {
+            final dBox = Hive.box(DonationsLocalStorage.donationsBox);
+            for (final k in dBox.keys) {
+              final v = dBox.get(k);
+              if (v is Map && (v['localId'] == donationId || v['receiptNumber'] == donationId || v['id'] == donationId)) {
+                final upd = Map<String, dynamic>.from(v);
+                upd['syncStatus'] = 'synced';
+                await dBox.put(k, upd);
+                break;
+              }
+            }
+          }
+        } catch (_) {}
         break;
 
       case 'delete_donation':

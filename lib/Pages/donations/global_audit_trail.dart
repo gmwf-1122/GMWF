@@ -26,9 +26,15 @@ class _GlobalAuditTrailScreenState extends State<GlobalAuditTrailScreen> {
 
   Future<void> _loadLogs() async {
     try {
-      Query query = _db.collection('global_audit_logs').orderBy('timestamp', descending: true).limit(50);
+      Query query = _db.collection('global_audit_logs').orderBy('timestamp', descending: true).limit(100);
       if (_filterAction != 'all') {
-        query = query.where('action', isEqualTo: _filterAction);
+        if (_filterAction == 'delete') {
+          query = query.where('action', whereIn: ['delete', 'delete_donation']);
+        } else if (_filterAction == 'update') {
+          query = query.where('action', whereIn: ['update', 'edit']);
+        } else {
+          query = query.where('action', isEqualTo: _filterAction);
+        }
       }
       setState(() {
         _logsFuture = query.get();
@@ -371,17 +377,25 @@ class _AuditLogCard extends StatelessWidget {
                       width: 32,
                       height: 32,
                       decoration: const BoxDecoration(color: Color(0xFF0F172A), shape: BoxShape.circle),
-                      child: Center(child: Text(entry.username[0].toUpperCase(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+                      child: Center(
+                        child: Text(
+                          entry.username.trim().isNotEmpty ? entry.username.trim()[0].toUpperCase() : 'U',
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                        ),
+                      ),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(entry.username, style: const TextStyle(fontWeight: FontWeight.w900, color: Color(0xFF0F172A), fontSize: 15)),
+                          Text(
+                            entry.username.trim().isNotEmpty ? entry.username : 'System User',
+                            style: const TextStyle(fontWeight: FontWeight.w900, color: Color(0xFF0F172A), fontSize: 15),
+                          ),
                           Row(
                             children: [
-                              Text('User ID: ${entry.userId}', style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                              Text('User ID: ${entry.userId.trim().isNotEmpty ? entry.userId : 'system'}', style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
                               if (entry.branchName.isNotEmpty) ...[
                                 const Text(' • ', style: TextStyle(fontSize: 11, color: Color(0xFFCBD5E1))),
                                 Text(entry.branchName.toUpperCase(), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF6366F1), letterSpacing: 0.5)),
@@ -428,6 +442,7 @@ class _AuditLogCard extends StatelessWidget {
         icon = Icons.edit_note_rounded;
         break;
       case 'delete':
+      case 'delete_donation':
         color = const Color(0xFFEF4444);
         label = 'DELETED';
         icon = Icons.delete_outline_rounded;

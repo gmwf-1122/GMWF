@@ -94,6 +94,15 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
   double _downloadProgress = 0.0;
   String _statusMessage = '';
 
+  // ── GMWF Brand Identity Colors ──────────────────────────────────────────────
+  // Locked to organization teal regardless of user role, so the update dialog
+  // always presents consistent brand identity.
+  static const Color _brandTeal       = Color(0xFF0E6E63);
+  static const Color _brandTealLight  = Color(0xFF16897A);
+  static const Color _brandTealDark   = Color(0xFF0A4F47);
+  static const Color _brandTealMuted  = Color(0xFFD3EDEA);
+  static const Color _brandGold       = Color(0xFFB07C2C);
+
   Future<void> _startInAppDownload() async {
     if (_isDownloading) return;
 
@@ -115,24 +124,33 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
       },
     );
 
-    if (!success && mounted) {
-      setState(() {
-        _isDownloading = false;
-        if (_statusMessage.isEmpty ||
-            _statusMessage.startsWith('Downloading') ||
-            _statusMessage.startsWith('Connecting')) {
-          _statusMessage = 'Download failed. Please check your network connection or download via browser.';
-        }
-      });
-    }
+    if (mounted) {
+      if (success) {
+        // Always reset _isDownloading so the dialog is not stuck in "Installing..." state.
+        // The APK installer runs as a separate Android activity; our job is done.
+        setState(() {
+          _isDownloading = false;
+        });
 
-    if (mounted && success && !widget.updateInfo.forceUpdate) {
-      // Auto close dialog after installer launches if non-mandatory
-      Future.delayed(const Duration(seconds: 2), () {
-        if (mounted) {
-          Navigator.of(context, rootNavigator: true).maybePop();
+        if (!widget.updateInfo.forceUpdate) {
+          // Auto close dialog after installer launches if non-mandatory
+          Future.delayed(const Duration(seconds: 3), () {
+            if (mounted) {
+              Navigator.of(context, rootNavigator: true).maybePop();
+            }
+          });
         }
-      });
+      } else {
+        // Download or install failed — reset so the user can retry or dismiss
+        setState(() {
+          _isDownloading = false;
+          if (_statusMessage.isEmpty ||
+              _statusMessage.startsWith('Downloading') ||
+              _statusMessage.startsWith('Connecting')) {
+            _statusMessage = 'Download failed. Please check your network connection or download via browser.';
+          }
+        });
+      }
     }
   }
 
@@ -153,7 +171,6 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
   @override
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
-    final primaryColor = t.accent;
 
     final media = MediaQuery.sizeOf(context);
     final maxCardWidth = math.min(480.0, media.width * 0.92);
@@ -174,7 +191,7 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
           decoration: BoxDecoration(
             color: t.bgCard,
             borderRadius: BorderRadius.circular(24),
-            border: Border.all(color: primaryColor.withValues(alpha: 0.22), width: 1.5),
+            border: Border.all(color: _brandTeal.withValues(alpha: 0.28), width: 1.5),
             boxShadow: [
               BoxShadow(
                 color: Colors.black.withValues(alpha: 0.25),
@@ -183,7 +200,7 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
                 offset: const Offset(0, 14),
               ),
               BoxShadow(
-                color: primaryColor.withValues(alpha: 0.10),
+                color: _brandTeal.withValues(alpha: 0.12),
                 blurRadius: 42,
                 spreadRadius: 6,
               ),
@@ -194,8 +211,8 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              // 1. FIXED HEADER
-              _buildFixedHeader(t, primaryColor),
+              // 1. FIXED HEADER — GMWF Brand Identity
+              _buildFixedHeader(t),
 
               // 2. SCROLLABLE CONTENT BODY (Release notes + Status/Progress)
               Flexible(
@@ -214,13 +231,13 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
                             decoration: BoxDecoration(
-                              color: Colors.amber.shade900.withValues(alpha: 0.12),
+                              color: _brandGold.withValues(alpha: 0.10),
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: Colors.amber.shade700.withValues(alpha: 0.4)),
+                              border: Border.all(color: _brandGold.withValues(alpha: 0.35)),
                             ),
                             child: Row(
                               children: [
-                                Icon(Icons.warning_amber_rounded, size: 18, color: Colors.amber.shade800),
+                                Icon(Icons.warning_amber_rounded, size: 18, color: _brandGold),
                                 const SizedBox(width: 10),
                                 Expanded(
                                   child: Text(
@@ -228,7 +245,7 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
                                     style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600,
-                                      color: Colors.amber.shade900,
+                                      color: t.isDarkCanvas ? _brandGold : const Color(0xFF7A5A1E),
                                       height: 1.3,
                                     ),
                                   ),
@@ -244,19 +261,25 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
                           width: double.infinity,
                           padding: const EdgeInsets.all(15),
                           decoration: BoxDecoration(
-                            color: t.bg.withValues(alpha: 0.65),
+                            color: t.isDarkCanvas
+                                ? _brandTeal.withValues(alpha: 0.06)
+                                : _brandTealMuted.withValues(alpha: 0.35),
                             borderRadius: BorderRadius.circular(16),
-                            border: Border.all(color: t.bgRule.withValues(alpha: 0.7)),
+                            border: Border.all(
+                              color: t.isDarkCanvas
+                                  ? _brandTeal.withValues(alpha: 0.18)
+                                  : _brandTeal.withValues(alpha: 0.12),
+                            ),
                           ),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Row(
                                 children: [
-                                  Icon(
+                                  const Icon(
                                     Icons.auto_awesome_rounded,
                                     size: 16,
-                                    color: primaryColor,
+                                    color: _brandTeal,
                                   ),
                                   const SizedBox(width: 7),
                                   Text(
@@ -289,7 +312,7 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
                         // Progress bar or Error hints when active
                         if (_isDownloading || _statusMessage.isNotEmpty) ...[
                           const SizedBox(height: 16),
-                          _buildProgressOrErrorView(t, primaryColor),
+                          _buildProgressOrErrorView(t),
                         ],
                       ],
                     ),
@@ -298,7 +321,7 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
               ),
 
               // 3. FIXED BOTTOM ACTION BUTTONS FOOTER
-              _buildFixedFooter(t, primaryColor),
+              _buildFixedFooter(t),
             ],
           ),
         ),
@@ -306,87 +329,87 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
     );
   }
 
-  /// Fixed Top Header with app branding, title, and version transition pill.
-  Widget _buildFixedHeader(dynamic t, Color primaryColor) {
+  /// Fixed Top Header with GMWF brand identity, logo, title, and version transition pill.
+  Widget _buildFixedHeader(dynamic t) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(20, 20, 20, 14),
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            primaryColor.withValues(alpha: 0.12),
-            primaryColor.withValues(alpha: 0.03),
-            t.bgCard,
+            _brandTeal.withValues(alpha: 0.14),
+            _brandTealLight.withValues(alpha: 0.05),
+            t.bgCard as Color,
           ],
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
         ),
         border: Border(
-          bottom: BorderSide(color: t.bgRule.withValues(alpha: 0.4), width: 1),
+          bottom: BorderSide(color: _brandTeal.withValues(alpha: 0.15), width: 1),
         ),
       ),
       child: Column(
         children: [
-          // Logo Header with Pulsing Glow Ring
+          // Logo Header with Branded Glow Ring
           Stack(
             alignment: Alignment.center,
             clipBehavior: Clip.none,
             children: [
               Container(
-                width: 72,
-                height: 72,
+                width: 76,
+                height: 76,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
                   gradient: RadialGradient(
                     colors: [
-                      primaryColor.withValues(alpha: 0.25),
-                      primaryColor.withValues(alpha: 0.0),
+                      _brandTeal.withValues(alpha: 0.22),
+                      _brandTeal.withValues(alpha: 0.0),
                     ],
                   ),
                 ),
               ),
               Container(
-                width: 64,
-                height: 64,
-                padding: const EdgeInsets.all(10),
+                width: 66,
+                height: 66,
+                padding: const EdgeInsets.all(9),
                 decoration: BoxDecoration(
-                  color: t.bgCard,
+                  color: t.bgCard as Color,
                   shape: BoxShape.circle,
-                  border: Border.all(color: primaryColor.withValues(alpha: 0.35), width: 2),
+                  border: Border.all(color: _brandTeal.withValues(alpha: 0.40), width: 2.5),
                   boxShadow: [
                     BoxShadow(
-                      color: primaryColor.withValues(alpha: 0.18),
-                      blurRadius: 14,
-                      spreadRadius: 1,
+                      color: _brandTeal.withValues(alpha: 0.20),
+                      blurRadius: 16,
+                      spreadRadius: 2,
                     ),
                   ],
                 ),
                 child: Image.asset(
                   'assets/logo/gmwf-1.webp',
                   fit: BoxFit.contain,
-                  errorBuilder: (_, __, ___) => Icon(Icons.system_update_rounded, color: primaryColor, size: 30),
+                  errorBuilder: (_, e, s) => const Icon(Icons.system_update_rounded, color: _brandTeal, size: 30),
                 ),
               ),
               Positioned(
-                right: 0,
-                bottom: 0,
+                right: -2,
+                bottom: -2,
                 child: Container(
                   padding: const EdgeInsets.all(5),
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(
-                      colors: [primaryColor, primaryColor.withValues(alpha: 0.85)],
+                    gradient: const LinearGradient(
+                      colors: [_brandTeal, _brandTealLight],
                     ),
                     shape: BoxShape.circle,
-                    border: Border.all(color: t.bgCard, width: 2),
+                    border: Border.all(color: t.bgCard as Color, width: 2),
                     boxShadow: [
                       BoxShadow(
-                        color: primaryColor.withValues(alpha: 0.4),
+                        color: _brandTeal.withValues(alpha: 0.45),
                         blurRadius: 6,
                       ),
                     ],
                   ),
                   child: const Icon(
-                    Icons.auto_awesome_rounded,
+                    Icons.system_update_rounded,
                     color: Colors.white,
                     size: 13,
                   ),
@@ -394,7 +417,19 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
               ),
             ],
           ),
-          const SizedBox(height: 12),
+          const SizedBox(height: 10),
+
+          // GMWF Brand Name
+          Text(
+            'GMWF',
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w900,
+              letterSpacing: 3.5,
+              color: _brandTeal.withValues(alpha: t.isDarkCanvas ? 0.85 : 1.0),
+            ),
+          ),
+          const SizedBox(height: 4),
 
           // Title
           Text(
@@ -403,13 +438,13 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
               fontSize: 20,
               fontWeight: FontWeight.w800,
               letterSpacing: -0.3,
-              color: t.textPrimary,
+              color: t.textPrimary as Color,
             ),
             textAlign: TextAlign.center,
           ),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
 
-          // Version Transition Pill
+          // Version Transition Pill — teal branded
           FutureBuilder<String>(
             future: AutoUpdateService.getAppVersion(),
             builder: (context, snapshot) {
@@ -419,12 +454,12 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
-                      primaryColor.withValues(alpha: 0.12),
-                      primaryColor.withValues(alpha: 0.04),
+                      _brandTeal.withValues(alpha: 0.12),
+                      _brandTealLight.withValues(alpha: 0.06),
                     ],
                   ),
                   borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: primaryColor.withValues(alpha: 0.28), width: 1),
+                  border: Border.all(color: _brandTeal.withValues(alpha: 0.25), width: 1),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
@@ -434,23 +469,23 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: t.textSecondary,
+                        color: t.textSecondary as Color,
                       ),
                     ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 7),
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 7),
                       child: Icon(
                         Icons.east_rounded,
                         size: 13,
-                        color: primaryColor,
+                        color: _brandTeal,
                       ),
                     ),
                     Text(
                       'v${widget.updateInfo.latestVersion}',
-                      style: TextStyle(
+                      style: const TextStyle(
                         fontSize: 12.5,
                         fontWeight: FontWeight.w800,
-                        color: primaryColor,
+                        color: _brandTeal,
                       ),
                     ),
                   ],
@@ -463,15 +498,15 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
     );
   }
 
-  /// Live Download Progress or Error State View
-  Widget _buildProgressOrErrorView(dynamic t, Color primaryColor) {
+  /// Live Download Progress or Error State View — brand teal themed
+  Widget _buildProgressOrErrorView(dynamic t) {
     if (_isDownloading) {
       return Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: primaryColor.withValues(alpha: 0.06),
+          color: _brandTeal.withValues(alpha: 0.06),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: primaryColor.withValues(alpha: 0.2)),
+          border: Border.all(color: _brandTeal.withValues(alpha: 0.18)),
         ),
         child: Column(
           children: [
@@ -483,21 +518,21 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: t.textSecondary,
+                    color: t.textSecondary as Color,
                   ),
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
-                    color: primaryColor.withValues(alpha: 0.15),
+                    color: _brandTeal.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
                     '${(_downloadProgress * 100).toInt()}%',
-                    style: TextStyle(
+                    style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w800,
-                      color: primaryColor,
+                      color: _brandTeal,
                     ),
                   ),
                 ),
@@ -508,8 +543,8 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
               borderRadius: BorderRadius.circular(8),
               child: LinearProgressIndicator(
                 value: _downloadProgress > 0 ? _downloadProgress : null,
-                backgroundColor: primaryColor.withValues(alpha: 0.12),
-                color: primaryColor,
+                backgroundColor: _brandTeal.withValues(alpha: 0.12),
+                color: _brandTeal,
                 minHeight: 8,
               ),
             ),
@@ -519,7 +554,7 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
               style: TextStyle(
                 fontSize: 11.5,
                 fontWeight: FontWeight.w600,
-                color: primaryColor,
+                color: t.isDarkCanvas ? _brandTealLight : _brandTeal,
               ),
               textAlign: TextAlign.center,
             ),
@@ -529,55 +564,88 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
     } else if (_statusMessage.contains('Failed') ||
         _statusMessage.contains('Error') ||
         _statusMessage.contains('Denied') ||
-        _statusMessage.contains('Timeout')) {
+        _statusMessage.contains('Timeout') ||
+        _statusMessage.contains('Could not open installer')) {
       return Container(
         width: double.infinity,
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.red.shade900.withValues(alpha: 0.10),
+          color: const Color(0xFF7F1D1D).withValues(alpha: 0.10),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.red.shade600.withValues(alpha: 0.4), width: 1.0),
+          border: Border.all(color: const Color(0xFFDC2626).withValues(alpha: 0.35), width: 1.0),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Row(
               children: [
-                Icon(Icons.error_outline_rounded, color: Colors.redAccent, size: 17),
+                Icon(Icons.error_outline_rounded, color: Color(0xFFDC2626), size: 17),
                 SizedBox(width: 8),
                 Text(
                   'Installation Notice',
-                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Colors.redAccent),
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFFDC2626)),
                 ),
               ],
             ),
             const SizedBox(height: 6),
             Text(
               _statusMessage,
-              style: TextStyle(fontSize: 11.5, color: Colors.red.shade300, height: 1.35),
+              style: TextStyle(
+                fontSize: 11.5,
+                color: t.isDarkCanvas ? const Color(0xFFFCA5A5) : const Color(0xFF991B1B),
+                height: 1.35,
+              ),
             ),
             const SizedBox(height: 10),
-            InkWell(
-              onTap: () => AutoUpdateService.launchUpdateUrl(widget.updateInfo.downloadUrl),
-              borderRadius: BorderRadius.circular(8),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                decoration: BoxDecoration(
-                  color: Colors.red.shade800,
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                InkWell(
+                  onTap: _startInAppDownload,
                   borderRadius: BorderRadius.circular(8),
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.open_in_browser_rounded, color: Colors.white, size: 15),
-                    SizedBox(width: 6),
-                    Text(
-                      'Download File via Browser',
-                      style: TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.bold),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: _brandTeal,
+                      borderRadius: BorderRadius.circular(8),
                     ),
-                  ],
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.refresh_rounded, color: Colors.white, size: 15),
+                        SizedBox(width: 6),
+                        Text(
+                          'Retry',
+                          style: TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ),
                 ),
-              ),
+                InkWell(
+                  onTap: () => AutoUpdateService.launchUpdateUrl(widget.updateInfo.downloadUrl),
+                  borderRadius: BorderRadius.circular(8),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                    decoration: BoxDecoration(
+                      color: _brandTealDark,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.open_in_browser_rounded, color: Colors.white, size: 15),
+                        SizedBox(width: 6),
+                        Text(
+                          'Download via Browser',
+                          style: TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -588,22 +656,22 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
         style: TextStyle(
           fontSize: 12,
           fontWeight: FontWeight.w600,
-          color: primaryColor,
+          color: t.isDarkCanvas ? _brandTealLight : _brandTeal,
         ),
         textAlign: TextAlign.center,
       );
     }
   }
 
-  /// Fixed Bottom Footer with Action Buttons
-  Widget _buildFixedFooter(dynamic t, Color primaryColor) {
+  /// Fixed Bottom Footer with Action Buttons — brand teal themed
+  Widget _buildFixedFooter(dynamic t) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
       decoration: BoxDecoration(
-        color: t.bgCard,
+        color: t.bgCard as Color,
         border: Border(
-          top: BorderSide(color: t.bgRule.withValues(alpha: 0.5), width: 1),
+          top: BorderSide(color: _brandTeal.withValues(alpha: 0.12), width: 1),
         ),
       ),
       child: Row(
@@ -615,11 +683,11 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
                 style: OutlinedButton.styleFrom(
                   padding: const EdgeInsets.symmetric(vertical: 13),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  side: BorderSide(color: t.bgRule, width: 1.2),
+                  side: BorderSide(color: t.bgRule as Color, width: 1.2),
                 ),
                 child: Text(
                   'Remind Later',
-                  style: TextStyle(color: t.textSecondary, fontWeight: FontWeight.w600, fontSize: 13),
+                  style: TextStyle(color: t.textSecondary as Color, fontWeight: FontWeight.w600, fontSize: 13),
                 ),
               ),
             ),
@@ -633,17 +701,19 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
                     ? []
                     : [
                         BoxShadow(
-                          color: primaryColor.withValues(alpha: 0.3),
-                          blurRadius: 12,
-                          offset: const Offset(0, 3),
+                          color: _brandTeal.withValues(alpha: 0.35),
+                          blurRadius: 14,
+                          offset: const Offset(0, 4),
                         ),
                       ],
               ),
               child: ElevatedButton(
                 onPressed: _isDownloading ? null : _startInAppDownload,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: primaryColor,
+                  backgroundColor: _brandTeal,
                   foregroundColor: Colors.white,
+                  disabledBackgroundColor: _brandTeal.withValues(alpha: 0.5),
+                  disabledForegroundColor: Colors.white70,
                   padding: const EdgeInsets.symmetric(vertical: 13),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   elevation: 0,

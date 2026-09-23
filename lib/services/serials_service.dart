@@ -126,6 +126,7 @@ Future<Map<String, dynamic>> issueAtomicSerialTransaction({
     transaction.set(counterRef, {
       'lastSeq': newSeq,
       'dateKey': dateKey,
+      'session': session,
       'dispensaryTag': normTag,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
@@ -174,7 +175,7 @@ Future<Map<String, dynamic>> issueAtomicSerialTransaction({
     }
 
     return result;
-  });
+  }).timeout(const Duration(seconds: 8));
 }
 
 bool _matchesSubDispensary(Map<String, dynamic> data, String? subFilter, [String? docId]) {

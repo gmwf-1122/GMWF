@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import '../../../theme/role_theme_provider.dart';
 import '../../../theme/app_theme.dart';
+import '../../../design/design_system.dart';
 
 class SchoolAboutView extends StatelessWidget {
   final String branchId;
@@ -17,7 +18,7 @@ class SchoolAboutView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
-    final isMobile = MediaQuery.of(context).size.width < 700;
+    final isMobile = GBreakpoint.isMobile(context);
 
     return SingleChildScrollView(
       padding: EdgeInsets.all(isMobile ? 16 : 28),
@@ -370,7 +371,7 @@ class _FeatureTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width < 700;
+    final isMobile = GBreakpoint.isMobile(context);
     return Container(
       width: isMobile ? double.infinity : 280,
       padding: const EdgeInsets.all(16),

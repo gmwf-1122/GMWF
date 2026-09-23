@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../realtime/connection_manager.dart';
 import '../services/user_theme_service.dart';
+import '../design/tokens/breakpoints.dart';
 
 class GmwfAppBar extends StatelessWidget implements PreferredSizeWidget {
   final String title;
@@ -18,10 +19,14 @@ class GmwfAppBar extends StatelessWidget implements PreferredSizeWidget {
   final VoidCallback? onSync;
   final VoidCallback? onLogout;
   final bool isLoggingOut;
+  final VoidCallback? onInventory;
+  final VoidCallback? onUserSettings;
+  final bool useMenuButton;
   final List<Widget>? extraActions;
   final PreferredSizeWidget? bottom;
   final bool showThemeToggle;
   final double toolbarHeight;
+  final bool isFloating;
 
   const GmwfAppBar({
     super.key,
@@ -36,23 +41,26 @@ class GmwfAppBar extends StatelessWidget implements PreferredSizeWidget {
     this.onSync,
     this.onLogout,
     this.isLoggingOut = false,
+    this.onInventory,
+    this.onUserSettings,
+    this.useMenuButton = true,
     this.extraActions,
     this.bottom,
     this.showThemeToggle = true,
     this.toolbarHeight = 68,
+    this.isFloating = true,
   });
 
   @override
   Size get preferredSize {
-    final bottomHeight = bottom != null ? (bottom!.preferredSize.height + 6) : 0.0;
-    return Size.fromHeight(toolbarHeight + 14 + bottomHeight);
+    final bottomHeight = bottom != null ? (bottom!.preferredSize.height + (isFloating ? 6 : 0)) : 0.0;
+    return Size.fromHeight(toolbarHeight + (isFloating ? 14 : 0) + bottomHeight);
   }
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isMobile = screenWidth < 760;
-    final isCompact = screenWidth < 1050;
+    final isMobile  = GBreakpoint.isMobile(context);   // < 600
+    final isCompact = !GBreakpoint.isDesktop(context);  // < 900 (hides status pills on tablet/mobile)
 
     return ValueListenableBuilder<Box>(
       valueListenable:
@@ -60,34 +68,36 @@ class GmwfAppBar extends StatelessWidget implements PreferredSizeWidget {
       builder: (context, box, _) {
         final isDark = box.get('is_dark_mode', defaultValue: false) == true;
 
-        return Container(
-          color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F8F5),
-          padding: EdgeInsets.fromLTRB(isMobile ? 8 : 14, 6, isMobile ? 8 : 14, 4),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                height: toolbarHeight,
-                decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF1E293B) : Colors.white,
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(
+        final barContent = Container(
+          height: toolbarHeight,
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            borderRadius: isFloating ? BorderRadius.circular(18) : BorderRadius.zero,
+            border: isFloating
+                ? Border.all(
                     color: isDark
                         ? const Color(0xFF334155)
                         : const Color(0xFFE2E8F0),
                     width: 1.2,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color:
-                          Colors.black.withValues(alpha: isDark ? 0.25 : 0.04),
-                      blurRadius: 12,
-                      offset: const Offset(0, 3),
+                  )
+                : Border(
+                    bottom: BorderSide(
+                      color: isDark
+                          ? const Color(0xFF334155)
+                          : const Color(0xFFE2E8F0),
+                      width: 1.2,
                     ),
-                  ],
-                ),
-                clipBehavior: Clip.antiAlias,
-                child: Row(
+                  ),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.04),
+                blurRadius: isFloating ? 12 : 4,
+                offset: Offset(0, isFloating ? 3 : 2),
+              ),
+            ],
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: Row(
                   children: [
                     // Left Green Logo Block
                     _buildLogoBadge(isMobile),
@@ -192,72 +202,103 @@ class GmwfAppBar extends StatelessWidget implements PreferredSizeWidget {
                     ],
 
                     // Right Action Controls
-                    if (!isMobile) ...[
-                      const SizedBox(width: 6),
-                      _buildDivider(isDark),
-                      const SizedBox(width: 6),
-                    ] else
-                      const SizedBox(width: 4),
-
-                    // Sync Button (with standard circular sync icon)
-                    if (onSync != null) ...[
-                      _buildIconButton(
+                    if (useMenuButton) ...[
+                      const SizedBox(width: 8),
+                      _buildMenuButton(
+                        context: context,
                         isDark: isDark,
-                        tooltip: 'Force full sync',
-                        onTap: isSyncing ? null : onSync,
                         isMobile: isMobile,
-                        child: isSyncing
-                            ? SizedBox(
-                                width: isMobile ? 14 : 16,
-                                height: isMobile ? 14 : 16,
-                                child: const CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                  color: Color(0xFF0F5B46),
-                                ),
-                              )
-                            : Icon(
-                                Icons.sync_rounded,
-                                size: isMobile ? 17 : 20,
-                                color: isDark
-                                    ? const Color(0xFF38BDF8)
-                                    : const Color(0xFF0F5B46),
-                              ),
                       ),
-                      SizedBox(width: isMobile ? 4 : 6),
-                    ],
-
-                    // Theme Toggle Button
-                    if (showThemeToggle) ...[
-                      _buildIconButton(
-                        isDark: isDark,
-                        tooltip: isDark
-                            ? 'Switch to Light Mode'
-                            : 'Switch to Dark Mode',
-                        isMobile: isMobile,
-                        onTap: () async {
-                          await UserThemeService.setDarkMode(!isDark);
-                        },
-                        child: Icon(
-                          isDark
-                              ? Icons.dark_mode_outlined
-                              : Icons.wb_sunny_outlined,
-                          size: isMobile ? 16 : 18,
-                          color: isDark
-                              ? const Color(0xFFFBBF24)
-                              : const Color(0xFF0F5B46),
-                        ),
-                      ),
-                      SizedBox(width: isMobile ? 4 : 6),
-                    ],
-
-                    // Logout Button (for Dispensary screens)
-                    if (onLogout != null) ...[
-                      _buildLogoutButton(isDark, isMobile),
                       SizedBox(width: isMobile ? 4 : 8),
+                    ] else ...[
+                      if (!isMobile) ...[
+                        const SizedBox(width: 6),
+                        _buildDivider(isDark),
+                        const SizedBox(width: 6),
+                      ] else
+                        const SizedBox(width: 4),
+
+                      // Sync Button (with standard circular sync icon)
+                      if (onSync != null) ...[
+                        _buildIconButton(
+                          isDark: isDark,
+                          tooltip: 'Force full sync',
+                          onTap: isSyncing ? null : onSync,
+                          isMobile: isMobile,
+                          child: isSyncing
+                              ? SizedBox(
+                                  width: isMobile ? 14 : 16,
+                                  height: isMobile ? 14 : 16,
+                                  child: const CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Color(0xFF0F5B46),
+                                  ),
+                                )
+                              : Icon(
+                                  Icons.sync_rounded,
+                                  size: isMobile ? 17 : 20,
+                                  color: isDark
+                                      ? const Color(0xFF38BDF8)
+                                      : const Color(0xFF0F5B46),
+                                ),
+                        ),
+                        SizedBox(width: isMobile ? 4 : 6),
+                      ],
+
+                      // Theme Toggle Button
+                      if (showThemeToggle) ...[
+                        _buildIconButton(
+                          isDark: isDark,
+                          tooltip: isDark
+                              ? 'Switch to Light Mode'
+                              : 'Switch to Dark Mode',
+                          isMobile: isMobile,
+                          onTap: () async {
+                            await UserThemeService.setDarkMode(!isDark);
+                          },
+                          child: Icon(
+                            isDark
+                                ? Icons.dark_mode_outlined
+                                : Icons.wb_sunny_outlined,
+                            size: isMobile ? 16 : 18,
+                            color: isDark
+                                ? const Color(0xFFFBBF24)
+                                : const Color(0xFF0F5B46),
+                          ),
+                        ),
+                        SizedBox(width: isMobile ? 4 : 6),
+                      ],
+
+                      // Logout Button (for Dispensary screens)
+                      if (onLogout != null) ...[
+                        _buildLogoutButton(isDark, isMobile),
+                        SizedBox(width: isMobile ? 4 : 8),
+                      ],
                     ],
                   ],
                 ),
-              ),
+              );
+
+        if (!isFloating) {
+          return Container(
+            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                barContent,
+                if (bottom != null) bottom!,
+              ],
+            ),
+          );
+        }
+
+        return Container(
+          color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F8F5),
+          padding: EdgeInsets.fromLTRB(isMobile ? 8 : 14, 6, isMobile ? 8 : 14, 4),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              barContent,
               if (bottom != null) ...[
                 const SizedBox(height: 6),
                 bottom!,
@@ -583,6 +624,134 @@ class GmwfAppBar extends StatelessWidget implements PreferredSizeWidget {
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildMenuButton({
+    required BuildContext context,
+    required bool isDark,
+    required bool isMobile,
+  }) {
+    final menuBtn = Container(
+      height: isMobile ? 36 : 40,
+      width: isMobile ? 36 : 40,
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? const Color(0xFF475569) : const Color(0xFFCBD5E1),
+          width: 1,
+        ),
+      ),
+      child: Icon(
+        Icons.more_vert_rounded,
+        size: 20,
+        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF0F5B46),
+      ),
+    );
+
+    return PopupMenuButton<String>(
+      tooltip: 'Menu',
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      color: isDark ? const Color(0xFF1E293B) : Colors.white,
+      elevation: 8,
+      offset: const Offset(0, 46),
+      child: menuBtn,
+      onSelected: (val) async {
+        switch (val) {
+          case 'inventory':
+            onInventory?.call();
+            break;
+          case 'settings':
+            if (onUserSettings != null) {
+              onUserSettings!.call();
+            } else if (onTitleLongPress != null) {
+              onTitleLongPress!.call();
+            }
+            break;
+          case 'sync':
+            if (onSync != null && !isSyncing) onSync!.call();
+            break;
+          case 'theme':
+            await UserThemeService.setDarkMode(!isDark);
+            break;
+          case 'logout':
+            onLogout?.call();
+            break;
+        }
+      },
+      itemBuilder: (ctx) => [
+        if (onInventory != null)
+          PopupMenuItem(
+            value: 'inventory',
+            child: Row(
+              children: [
+                Icon(Icons.inventory_2_outlined, size: 18, color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0F5B46)),
+                const SizedBox(width: 10),
+                Text(
+                  'Medicine Inventory',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isDark ? Colors.white : const Color(0xFF1E293B)),
+                ),
+              ],
+            ),
+          ),
+        if (onUserSettings != null || onTitleLongPress != null)
+          PopupMenuItem(
+            value: 'settings',
+            child: Row(
+              children: [
+                Icon(Icons.manage_accounts_outlined, size: 18, color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0F5B46)),
+                const SizedBox(width: 10),
+                Text(
+                  'User Settings',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isDark ? Colors.white : const Color(0xFF1E293B)),
+                ),
+              ],
+            ),
+          ),
+        if (onSync != null)
+          PopupMenuItem(
+            value: 'sync',
+            child: Row(
+              children: [
+                Icon(Icons.sync_rounded, size: 18, color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0F5B46)),
+                const SizedBox(width: 10),
+                Text(
+                  isSyncing ? 'Syncing...' : 'Force Sync',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isDark ? Colors.white : const Color(0xFF1E293B)),
+                ),
+              ],
+            ),
+          ),
+        if (showThemeToggle)
+          PopupMenuItem(
+            value: 'theme',
+            child: Row(
+              children: [
+                Icon(isDark ? Icons.wb_sunny_outlined : Icons.dark_mode_outlined, size: 18, color: isDark ? const Color(0xFFFBBF24) : const Color(0xFF0F5B46)),
+                const SizedBox(width: 10),
+                Text(
+                  isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isDark ? Colors.white : const Color(0xFF1E293B)),
+                ),
+              ],
+            ),
+          ),
+        if (onLogout != null)
+          PopupMenuItem(
+            value: 'logout',
+            child: Row(
+              children: const [
+                Icon(Icons.logout_rounded, size: 18, color: Colors.redAccent),
+                SizedBox(width: 10),
+                Text(
+                  'Logout',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.redAccent),
+                ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }

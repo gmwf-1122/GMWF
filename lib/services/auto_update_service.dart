@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -33,7 +34,7 @@ class UpdateInfo {
 
 class AutoUpdateService {
   /// Default fallback version of the GMWF application if PackageInfo is unavailable.
-  static const String currentVersion = '1.5.0';
+  static const String currentVersion = '1.5.4';
   static const int protocolVersion = 2;
   static const String minSupportedVersion = '1.4.8';
 
@@ -57,6 +58,9 @@ class AutoUpdateService {
     }
     return currentVersion;
   }
+
+  /// Synchronous getter returning cached dynamic version if available, else static [currentVersion].
+  static String get resolvedVersion => _cachedVersion.isNotEmpty ? _cachedVersion : currentVersion;
 
   /// Compares two semver strings (e.g. "1.2.4" vs "1.2.5").
   /// Returns 1 if v2 > v1 (update available), -1 if v1 > v2, 0 if equal.
@@ -492,6 +496,50 @@ class AutoUpdateService {
     return null;
   }
 
+  /// Path to the last successfully downloaded APK, so users can locate it manually.
+  static String? lastDownloadedApkPath;
+
+  /// Returns the external Downloads directory for Android, falling back to external storage or temp.
+  static Future<String> _getAndroidDownloadDir() async {
+    try {
+      // Try /storage/emulated/0/Download first (visible in file managers)
+      final downloadsDir = Directory('/storage/emulated/0/Download');
+      if (await downloadsDir.exists()) {
+        return downloadsDir.path;
+      }
+    } catch (_) {}
+
+    try {
+      // Fallback to app external files dir (still accessible via file manager)
+      final extDirs = await getExternalStorageDirectories();
+      if (extDirs != null && extDirs.isNotEmpty) {
+        return extDirs.first.path;
+      }
+    } catch (_) {}
+
+    // Last resort: app cache (may not be accessible to package installer)
+    final tempDir = await getTemporaryDirectory();
+    return tempDir.path;
+  }
+
+  /// Attempts to install an APK using Android's native ACTION_INSTALL_PACKAGE intent
+  /// via a platform MethodChannel. This ensures proper FLAG_GRANT_READ_URI_PERMISSION
+  /// is set, which is required on Android 7+ (API 24+) for content:// URIs.
+  /// Returns true if the install intent was launched successfully.
+  static Future<bool> _installApkViaIntent(String filePath) async {
+    try {
+      const channel = MethodChannel('com.gmwf.app/install');
+      final result = await channel.invokeMethod<bool>('installApk', {'filePath': filePath});
+      return result == true;
+    } on MissingPluginException {
+      debugPrint('[AutoUpdateService] Native install channel not available, falling back to OpenFilex');
+      return false;
+    } catch (e) {
+      debugPrint('[AutoUpdateService] Native install intent failed: $e');
+      return false;
+    }
+  }
+
   /// Direct in-app stream download with progress callback and silent installer launch.
   static Future<bool> downloadAndInstallUpdate(
     String downloadUrl, {
@@ -521,8 +569,17 @@ class AutoUpdateService {
       fileName = 'GMWF_Update.dmg';
     }
 
-    final tempDir = await getTemporaryDirectory();
-    String filePath = path.join(tempDir.path, fileName);
+    // On Android, save to public Downloads folder so users can find the APK
+    // and the system package installer can access it reliably.
+    String targetDir;
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      targetDir = await _getAndroidDownloadDir();
+    } else {
+      final tempDir = await getTemporaryDirectory();
+      targetDir = tempDir.path;
+    }
+
+    String filePath = path.join(targetDir, fileName);
 
     // Safeguard: If previous installer is still locked by OS or antivirus, use timestamped file
     try {
@@ -534,7 +591,7 @@ class AutoUpdateService {
       final ts = DateTime.now().millisecondsSinceEpoch;
       final ext = path.extension(fileName);
       final base = path.basenameWithoutExtension(fileName);
-      filePath = path.join(tempDir.path, '${base}_$ts$ext');
+      filePath = path.join(targetDir, '${base}_$ts$ext');
     }
 
     final downloadedFile = await _downloadFileWithHttpClient(
@@ -546,6 +603,9 @@ class AutoUpdateService {
     if (downloadedFile == null || !await downloadedFile.exists()) {
       return false;
     }
+
+    // Store the path so the UI can show it to the user
+    lastDownloadedApkPath = filePath;
 
     onProgress(1.0, 'Installing update... Please wait.');
     await Future.delayed(const Duration(milliseconds: 800));
@@ -582,28 +642,45 @@ class AutoUpdateService {
         debugPrint('[AutoUpdateService] Launching Android Package Installer for: $filePath');
         onProgress(1.0, 'Launching Package Installer...');
 
-        final result = await OpenFilex.open(filePath, type: "application/vnd.android.package-archive");
-        debugPrint('[AutoUpdateService] OpenFilex result: ${result.type} - ${result.message}');
+        // Strategy 1: Try native intent with proper FLAG_GRANT_READ_URI_PERMISSION
+        bool installed = await _installApkViaIntent(filePath);
 
-        if (result.type == ResultType.done) {
-          onProgress(1.0, 'Package installer opened. Complete installation on your screen.');
+        // Strategy 2: Fallback to OpenFilex
+        if (!installed) {
+          debugPrint('[AutoUpdateService] Native intent unavailable, trying OpenFilex...');
+          final result = await OpenFilex.open(filePath, type: "application/vnd.android.package-archive");
+          debugPrint('[AutoUpdateService] OpenFilex result: ${result.type} - ${result.message}');
+          installed = result.type == ResultType.done;
+
+          if (!installed) {
+            if (result.type == ResultType.permissionDenied) {
+              onProgress(0.0, 'Permission Denied: Please enable "Install Unknown Apps" for GMWF in Android Settings.\n\nAPK saved to: $filePath');
+              try {
+                final uri = Uri.parse(effectiveUrl);
+                await launchUrl(uri, mode: LaunchMode.externalApplication);
+              } catch (_) {}
+              return false;
+            } else if (result.type == ResultType.fileNotFound) {
+              onProgress(0.0, 'File Error: Downloaded APK not found at $filePath.');
+              return false;
+            } else {
+              // Strategy 3: Try launching the file URI directly as a last resort
+              debugPrint('[AutoUpdateService] OpenFilex failed (${result.message}), trying url_launcher...');
+              try {
+                final fileUri = Uri.file(filePath);
+                installed = await launchUrl(fileUri, mode: LaunchMode.externalApplication);
+              } catch (e) {
+                debugPrint('[AutoUpdateService] url_launcher file URI failed: $e');
+              }
+            }
+          }
+        }
+
+        if (installed) {
+          onProgress(1.0, 'Package installer opened. Complete installation on your screen.\n\nAPK saved to: $filePath');
           return true;
-        } else if (result.type == ResultType.permissionDenied) {
-          onProgress(0.0, 'Permission Denied: Android blocked installation. Please enable "Install Unknown Apps" for GMWF in Android Settings.');
-          try {
-            final uri = Uri.parse(effectiveUrl);
-            await launchUrl(uri, mode: LaunchMode.externalApplication);
-          } catch (_) {}
-          return false;
-        } else if (result.type == ResultType.fileNotFound) {
-          onProgress(0.0, 'File Error: Downloaded APK file was not found at $filePath.');
-          return false;
         } else {
-          onProgress(0.0, 'Installation prompt could not open automatically: ${result.message}. Opening direct download...');
-          try {
-            final uri = Uri.parse(effectiveUrl);
-            await launchUrl(uri, mode: LaunchMode.externalApplication);
-          } catch (_) {}
+          onProgress(0.0, 'Could not open installer automatically.\n\nAPK saved to: $filePath\n\nPlease open your file manager, navigate to the Downloads folder, and tap GMWF_Update.apk to install.');
           return false;
         }
       } else {
@@ -616,7 +693,7 @@ class AutoUpdateService {
       }
     } catch (e) {
       debugPrint('[AutoUpdateService] Installation trigger error: $e');
-      onProgress(0.0, 'Installation System Error: $e');
+      onProgress(0.0, 'Installation Error: $e\n\nAPK saved to: $filePath');
       return false;
     }
   }

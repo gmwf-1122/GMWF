@@ -73,4 +73,5 @@ scripts/pending_punches.json
 scratch/
 build_output.txt
 debug_branches.txt
-
+.agents/
+tool/temp_emp_audit/

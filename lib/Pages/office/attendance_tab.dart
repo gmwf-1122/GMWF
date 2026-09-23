@@ -15,6 +15,7 @@ import '../settings/biometric_device_manager_page.dart';
 import 'bulk_attendance_dialog.dart';
 import 'shared_widgets.dart';
 import '../../services/user_theme_service.dart';
+import '../../design/design_system.dart';
 
 class AttendanceTab extends StatefulWidget {
   final String branchId;
@@ -308,10 +309,15 @@ class _AttendanceTabState extends State<AttendanceTab> {
                       ? cred!.biometricPin.trim() 
                       : (emp['biometricPin'] ?? emp['pin'] ?? '').toString().trim();
                   
-                  final dbRec = dbRecords.firstWhereOrNull((r) =>
-                      r['employeeId']?.toString() == empId ||
-                      (altId.isNotEmpty && r['employeeId']?.toString() == altId) ||
-                      (pin.isNotEmpty && (r['pin']?.toString() == pin || r['biometricPin']?.toString() == pin)));
+                  final dbRec = dbRecords.firstWhereOrNull((r) {
+                    final rEmpId = r['employeeId']?.toString();
+                    if (rEmpId == empId || (altId.isNotEmpty && rEmpId == altId)) return true;
+                    final canMatchFallback = rEmpId == null || rEmpId.isEmpty || rEmpId == empId || (altId.isNotEmpty && rEmpId == altId);
+                    if (canMatchFallback && pin.isNotEmpty && (r['pin']?.toString() == pin || r['biometricPin']?.toString() == pin)) {
+                      return true;
+                    }
+                    return false;
+                  });
 
                   final isHoliday = FinanceLocalStorage.isHoliday(
                     branchId: widget.branchId,
@@ -349,6 +355,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
                     record['leaveType'] = null;
                   }
 
+                  record['employeeId'] = empId;
                   record['name'] = emp['name']; // cache name for drawing card
                   record['role'] = emp['role'];
                   record['createdBy'] = emp['createdBy'];
@@ -1441,7 +1448,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
         boxShadow: const [BoxShadow(color: Color(0x04000000), blurRadius: 4, offset: Offset(0, 1))],
       ),
       child: LayoutBuilder(builder: (ctx, constraints) {
-        final isNarrow = constraints.maxWidth < 700;
+        final isNarrow = GBreakpoint.isMobileC(constraints);
 
         final statsPills = Wrap(
           spacing: 6,

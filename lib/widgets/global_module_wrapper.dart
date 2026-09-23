@@ -22,6 +22,7 @@ import 'app_back_button.dart';
 import '../services/user_module_access_service.dart';
 import '../services/auto_update_service.dart';
 import '../services/camp_session_service.dart';
+import '../design/design_system.dart';
 
 const String _kGlobalBranchId = 'all';
 
@@ -379,7 +380,7 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
   @override
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
-    final isMobile = MediaQuery.of(context).size.width < 600;
+    final isMobile = GBreakpoint.isMobile(context);
 
     final userId = (widget.userData['id'] ?? widget.userData['localId'] ?? widget.userData['username'] ?? '').toString();
     final role = (widget.userData['role'] ?? '').toString();
@@ -712,20 +713,38 @@ class _DesktopCampDropdown extends StatelessWidget {
       valueListenable: CampSessionService.activeCampNotifier,
       builder: (context, activeCamp, _) {
         final currentCamp = (activeCamp == null || activeCamp.isEmpty) ? 'all' : activeCamp;
-        final items = [
+        final branchId = (state._selectedBranchId ?? '').toLowerCase().trim();
+        final rawCamps = CampSessionService.getCampsForBranch(branchId, includeClosed: false);
+        final items = <DropdownMenuItem<String>>[
           const DropdownMenuItem<String>(
             value: 'all',
             child: Text('All Camps (Collective)'),
           ),
-          const DropdownMenuItem<String>(
-            value: 'haji_camp',
-            child: Text('Haji Camp Dispensary'),
-          ),
-          const DropdownMenuItem<String>(
-            value: 'saddar',
-            child: Text('Saddar Dispensary'),
-          ),
         ];
+
+        if (rawCamps.isNotEmpty) {
+          for (final c in rawCamps) {
+            final cId = (c['id'] ?? '').toString().trim().toLowerCase();
+            final cName = (c['name'] ?? c['id'] ?? '').toString().trim();
+            if (cId.isNotEmpty) {
+              items.add(DropdownMenuItem<String>(
+                value: cId,
+                child: Text(cName),
+              ));
+            }
+          }
+        } else if (branchId.contains('karachi') || branchId == 'all') {
+          items.addAll([
+            const DropdownMenuItem<String>(
+              value: 'haji_camp',
+              child: Text('Haji Camp Dispensary'),
+            ),
+            const DropdownMenuItem<String>(
+              value: 'saddar',
+              child: Text('Saddar Dispensary'),
+            ),
+          ]);
+        }
 
         final safeValue = items.any((it) => it.value == currentCamp)
             ? currentCamp
@@ -1318,6 +1337,7 @@ class _ModuleBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final contextualData = Map<String, dynamic>.from(state.widget.userData);
     contextualData['branchId'] = state._selectedBranchId;
+    contextualData['branchName'] = state._selectedBranchName;
 
     return _WrapperProvider(
       child: KeyedSubtree(

@@ -23,6 +23,7 @@ import '../services/user_module_access_service.dart';
 import '../services/device_info_service.dart';
 import '../services/finance_local_storage.dart';
 import '../services/staff_patient_link_service.dart';
+import '../services/sync_service.dart';
 
 class UsersScreen extends StatefulWidget {
   final bool isPatientMode;
@@ -253,17 +254,7 @@ class _UsersScreenState extends State<UsersScreen>
       if (widget.isPatientMode) {
         await _syncPatientsForBranch(bId);
       } else {
-        final snap = await _loadUsersSnapshot(bId);
-        if (Hive.isBoxOpen('local_users')) {
-          final box = Hive.box('local_users');
-          for (final doc in snap.docs) {
-            final Map<String, dynamic> u = {'id': doc.id, ...doc.data() as Map<String, dynamic>};
-            final cacheKey = u['email'] != null && (u['email'] as String).isNotEmpty
-                ? 'user:${(u['email'] as String).toLowerCase().trim()}'
-                : 'user:${doc.id}';
-            await box.put(cacheKey, u);
-          }
-        }
+        await _syncUsersForBranch(bId);
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -276,6 +267,79 @@ class _UsersScreenState extends State<UsersScreen>
           SnackBar(content: Text('Refresh failed: $e'), duration: const Duration(seconds: 2)),
         );
       }
+    }
+  }
+
+  Future<void> _syncUsersForBranch(String branchId) async {
+    try {
+      final List<DocumentSnapshot> allDocs = [];
+      try {
+        final rootSnap = await FirebaseFirestore.instance.collection('users').limit(300).get().timeout(const Duration(seconds: 6));
+        allDocs.addAll(rootSnap.docs);
+      } catch (_) {}
+
+      final normalizedBranch = branchId.trim().toLowerCase();
+      if (normalizedBranch.isNotEmpty && normalizedBranch != 'all' && normalizedBranch != 'global') {
+        try {
+          final branchSnap = await FirebaseFirestore.instance
+              .collection('branches')
+              .doc(normalizedBranch)
+              .collection('users')
+              .limit(300)
+              .get()
+              .timeout(const Duration(seconds: 6));
+          allDocs.addAll(branchSnap.docs);
+        } catch (_) {}
+      }
+
+      // Explicitly pull any pending access restore requests across the board
+      try {
+        final pendingSnap = await FirebaseFirestore.instance
+            .collection('users')
+            .where('restoreRequested', isEqualTo: true)
+            .get()
+            .timeout(const Duration(seconds: 5));
+        for (final pDoc in pendingSnap.docs) {
+          if (!allDocs.any((d) => d.id == pDoc.id)) {
+            allDocs.add(pDoc);
+          }
+        }
+      } catch (_) {}
+
+      if (Hive.isBoxOpen('local_users')) {
+        final box = Hive.box('local_users');
+        for (final doc in allDocs) {
+          final data = doc.data() as Map<String, dynamic>?;
+          if (data == null) continue;
+          final status = (data['status'] ?? data['accountStatus'] ?? '').toString().toLowerCase().trim();
+          final isDeleted = data['isDeleted'] == true || status == 'deleted';
+          final email = (data['email'] ?? '').toString().toLowerCase().trim();
+          final usernameLower = (data['usernameLower'] ?? data['username'] ?? '').toString().toLowerCase().trim();
+          final uid = doc.id.trim();
+
+          if (isDeleted) {
+            // Actively purge deleted record from local cache
+            if (email.isNotEmpty) await box.delete('user:$email');
+            if (usernameLower.isNotEmpty) await box.delete('user:$usernameLower');
+            if (uid.isNotEmpty) {
+              await box.delete('user:$uid');
+              await box.delete(uid);
+            }
+          } else {
+            final Map<String, dynamic> u = {'id': doc.id, 'uid': doc.id, ...data};
+            final sanitized = LocalStorageService.sanitize(u);
+            if (email.isNotEmpty) await box.put('user:$email', sanitized);
+            if (usernameLower.isNotEmpty) await box.put('user:$usernameLower', sanitized);
+            if (uid.isNotEmpty) {
+              await box.put('user:$uid', sanitized);
+              await box.put(uid, sanitized);
+            }
+          }
+        }
+        await box.flush();
+      }
+    } catch (e) {
+      debugPrint('[UsersScreen] _syncUsersForBranch error: $e');
     }
   }
 
@@ -462,19 +526,43 @@ class _UsersScreenState extends State<UsersScreen>
 
   Future<void> _syncPatientsForBranch(String branchId) async {
     try {
-      final snap = await FirebaseFirestore.instance
+      final localCount = LocalStorageService.getAllLocalPatients(branchId: branchId).length;
+      final syncKey = 'patients_sync_$branchId';
+      final lastSynced = LocalStorageService.getLastSyncedServerTimestamp(syncKey);
+
+      Query<Map<String, dynamic>> query = FirebaseFirestore.instance
           .collection('branches')
           .doc(branchId)
-          .collection('patients')
-          .get();
+          .collection('patients');
+
+      // Delta sync: If we already have local data, only query recently updated docs
+      if (localCount > 0 && lastSynced != null) {
+        query = query.where('updatedAt', isGreaterThan: lastSynced).limit(200);
+      } else if (localCount > 0) {
+        query = query.limit(50);
+      } else {
+        query = query.limit(100);
+      }
+
+      final snap = await query.get().timeout(const Duration(seconds: 10));
+      if (snap.docs.isEmpty) return;
+
+      String? maxTs = lastSynced;
       final List<Map<String, dynamic>> patientsToSave = [];
       for (final doc in snap.docs) {
         final d = doc.data();
         d['patientId'] = doc.id;
         d['branchId'] = branchId;
         patientsToSave.add(d);
+        final docTs = d['updatedAt']?.toString();
+        if (docTs != null && (maxTs == null || docTs.compareTo(maxTs) > 0)) {
+          maxTs = docTs;
+        }
       }
       await LocalStorageService.saveAllLocalPatients(patientsToSave);
+      if (maxTs != null) {
+        await LocalStorageService.setLastSyncedServerTimestamp(syncKey, maxTs);
+      }
     } catch (e) {
       debugPrint('Sync patients failed for branch $branchId: $e');
     }
@@ -560,17 +648,9 @@ class _UsersScreenState extends State<UsersScreen>
     return ValueListenableBuilder<Box>(
       valueListenable: Hive.box('local_users').listenable(),
       builder: (context, box, _) {
-        if (box.isEmpty && !_syncedBranches.contains('users_$branchId')) {
+        if (!_syncedBranches.contains('users_$branchId')) {
           _syncedBranches.add('users_$branchId');
-          _loadUsersSnapshot(branchId).then((snap) {
-            for (final doc in snap.docs) {
-              final Map<String, dynamic> u = {'id': doc.id, ...doc.data() as Map<String, dynamic>};
-              final cacheKey = u['email'] != null && (u['email'] as String).isNotEmpty
-                  ? 'user:${(u['email'] as String).toLowerCase().trim()}'
-                  : 'user:${doc.id}';
-              box.put(cacheKey, u);
-            }
-          }).catchError((_) {});
+          _syncUsersForBranch(branchId);
         }
 
         final Map<String, Map<String, dynamic>> mergedMap = {};
@@ -592,6 +672,9 @@ class _UsersScreenState extends State<UsersScreen>
           if (val is Map) {
             final Map<String, dynamic> u = Map<String, dynamic>.from(val);
             final uid = u['uid']?.toString() ?? u['id']?.toString() ?? '';
+            final status = (u['status'] ?? u['accountStatus'] ?? '').toString().toLowerCase().trim();
+            final isDeleted = u['isDeleted'] == true || status == 'deleted';
+            if (isDeleted) continue; // NEVER SHOW DELETED USERS
             if (uid.isNotEmpty) {
               mergedMap[getDedupKey(u, uid)] = u;
             }
@@ -604,6 +687,7 @@ class _UsersScreenState extends State<UsersScreen>
           final targetBranch = branchId.trim().toLowerCase();
           list = list.where((item) {
             final uBranch = (item['branchId'] ?? item['branch'] ?? '').toString().trim().toLowerCase();
+            final uBranchName = (item['branchName'] ?? '').toString().trim().toLowerCase();
             final uRole = (item['role'] ?? '').toString().trim().toLowerCase();
 
             // System & executive roles are ALWAYS visible across all branch views
@@ -617,7 +701,7 @@ class _UsersScreenState extends State<UsersScreen>
             if (isGlobalRole || uBranch.isEmpty || uBranch == 'all' || uBranch == 'global') {
               return true;
             }
-            return uBranch == targetBranch;
+            return uBranch == targetBranch || uBranchName == targetBranch || uBranch.contains(targetBranch) || targetBranch.contains(uBranch);
           }).toList();
         }
 
@@ -630,10 +714,18 @@ class _UsersScreenState extends State<UsersScreen>
           }).toList();
         }
 
+        bool isGuardianOrParentRole(Map<String, dynamic> item) {
+          final r = (item['role'] as String? ?? '').toLowerCase().trim();
+          return r == 'madrassa parent' ||
+              r == 'madrassa guardian' ||
+              r == 'school parent' ||
+              r == 'school guardian' ||
+              r.contains('guardian') ||
+              r.contains('student');
+        }
+
         if (widget.isGuardianMode) {
-          list = list.where((item) => (item['role'] as String? ?? '').toLowerCase() == 'madrassa parent').toList();
-        } else {
-          list = list.where((item) => (item['role'] as String? ?? '').toLowerCase() != 'madrassa parent').toList();
+          list = list.where((item) => isGuardianOrParentRole(item)).toList();
         }
 
         if (!widget.isGuardianMode && _roleFilter != null) {
@@ -1607,9 +1699,6 @@ class _UsersScreenState extends State<UsersScreen>
 
       if (!itemId.startsWith('local-')) {
         await FirebaseFirestore.instance.collection('users').doc(itemId).set(updates, SetOptions(merge: true));
-        if (branchId.isNotEmpty && branchId != 'all') {
-          await FirebaseFirestore.instance.collection('branches').doc(branchId).collection('users').doc(itemId).set(updates, SetOptions(merge: true));
-        }
       }
 
       if (mounted) {
@@ -1630,7 +1719,7 @@ class _UsersScreenState extends State<UsersScreen>
     }
   }
 
-  void _openDetail(String itemId, String branchId) {
+  Future<void> _openDetail(String itemId, String branchId) async {
     if (_localBox == null) return;
     String curRole = '';
     try {
@@ -1644,13 +1733,16 @@ class _UsersScreenState extends State<UsersScreen>
       )));
     } else {
       final roleData = RoleThemeScope.of(context);
-      Navigator.push(context, MaterialPageRoute(builder: (_) => RoleThemeScope(
+      await Navigator.push(context, MaterialPageRoute(builder: (_) => RoleThemeScope(
         role: roleData,
         child: UserDetailScreen(
           userId: itemId, branchId: branchId, localBox: _localBox!, isOnline: true,
           currentUserRole: curRole,
         ),
       )));
+      if (mounted) {
+        setState(() {});
+      }
     }
   }
 
@@ -1846,21 +1938,30 @@ class _UsersScreenState extends State<UsersScreen>
       }
 
       // Purge from local Hive storage boxes
-      for (final boxName in [LocalStorageService.usersBox, 'local_users', 'local']) {
-        if (Hive.isBoxOpen(boxName)) {
+      for (final boxName in [LocalStorageService.usersBox, 'local', 'app_settings']) {
+        try {
+          if (!Hive.isBoxOpen(boxName)) continue;
           final box = Hive.box(boxName);
-          if (targetUid.isNotEmpty) await box.delete(targetUid);
-          if (usernameLower.isNotEmpty) await box.delete(usernameLower);
-          if (email.isNotEmpty) await box.delete(email);
+          // Delete by all possible key formats
+          final directKeys = <String>{
+            if (targetUid.isNotEmpty) ...[targetUid, 'user:$targetUid'],
+            if (usernameLower.isNotEmpty) ...[usernameLower, 'user:$usernameLower'],
+            if (email.isNotEmpty) ...[email, 'user:$email'],
+          };
+          for (final dk in directKeys) {
+            if (box.containsKey(dk)) await box.delete(dk);
+          }
+          // Scan remaining entries for matching uid/email/username
           final keysToDelete = <dynamic>[];
           for (final key in box.keys) {
             final val = box.get(key);
             if (val is Map) {
-              final uidVal = (val['uid'] ?? val['id'] ?? '').toString();
-              final uNameVal = (val['username'] ?? '').toString().toLowerCase();
-              final emailVal = (val['email'] ?? '').toString().toLowerCase();
+              final uidVal = (val['uid'] ?? val['id'] ?? '').toString().trim();
+              final uNameVal = (val['username'] ?? '').toString().toLowerCase().trim();
+              final uNameLowerVal = (val['usernameLower'] ?? '').toString().toLowerCase().trim();
+              final emailVal = (val['email'] ?? '').toString().toLowerCase().trim();
               if ((targetUid.isNotEmpty && uidVal == targetUid) ||
-                  (usernameLower.isNotEmpty && uNameVal == usernameLower) ||
+                  (usernameLower.isNotEmpty && (uNameVal == usernameLower || uNameLowerVal == usernameLower)) ||
                   (email.isNotEmpty && emailVal == email)) {
                 keysToDelete.add(key);
               }
@@ -1869,8 +1970,18 @@ class _UsersScreenState extends State<UsersScreen>
           for (final k in keysToDelete) {
             await box.delete(k);
           }
+          await box.flush();
+        } catch (e) {
+          debugPrint('[UsersPage] Box purge notice for $boxName: $e');
         }
       }
+
+      // Clear offline credentials for all identifiers
+      try {
+        if (targetUid.isNotEmpty) await OfflineAuthService.clearCredentialsForUser(targetUid);
+        if (email.isNotEmpty) await OfflineAuthService.clearCredentialsForUser(email);
+        if (usernameLower.isNotEmpty) await OfflineAuthService.clearCredentialsForUser(usernameLower);
+      } catch (_) {}
 
       await LocalStorageService.deleteUserOffline(
         uid: targetUid,
@@ -1887,22 +1998,79 @@ class _UsersScreenState extends State<UsersScreen>
       );
       await FinanceLocalStorage.purgeEmployeeForDeletedUser(targetUid);
 
-      // Purge from Firestore
+      // Direct Online Purge from Firestore
       final firestore = FirebaseFirestore.instance;
+      final identifiers = <String>{
+        if (targetUid.isNotEmpty) targetUid,
+        if (usernameLower.isNotEmpty) usernameLower,
+        if (email.isNotEmpty) email,
+      };
+
+      final deletePayload = {
+        'isDeleted': true,
+        'status': 'deleted',
+        'accountStatus': 'deleted',
+        'deletedAt': FieldValue.serverTimestamp(),
+      };
+
+      for (final id in identifiers) {
+        await firestore.collection('users').doc(id).set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+        if (branchId.isNotEmpty && branchId != 'all') {
+          await firestore.collection('branches').doc(branchId).collection('users').doc(id).set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+        }
+      }
+
+      if (usernameLower.isNotEmpty) {
+        try {
+          final snap = await firestore.collection('users').where('usernameLower', isEqualTo: usernameLower).get();
+          for (final doc in snap.docs) {
+            await doc.reference.set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+          }
+        } catch (_) {}
+      }
+
+      if (email.isNotEmpty) {
+        try {
+          final snap = await firestore.collection('users').where('email', isEqualTo: email).get();
+          for (final doc in snap.docs) {
+            await doc.reference.set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+          }
+        } catch (_) {}
+      }
+
       if (targetUid.isNotEmpty) {
-        await firestore.collection('users').doc(targetUid).delete().catchError((_) {});
+        try {
+          final snap = await firestore.collection('users').where('uid', isEqualTo: targetUid).get();
+          for (final doc in snap.docs) {
+            await doc.reference.set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+          }
+        } catch (_) {}
       }
-      if (usernameLower.isNotEmpty && usernameLower != targetUid) {
-        await firestore.collection('users').doc(usernameLower).delete().catchError((_) {});
-      }
-      if (branchId.isNotEmpty && branchId != 'all') {
+
+      try {
         if (targetUid.isNotEmpty) {
-          await firestore.collection('branches').doc(branchId).collection('users').doc(targetUid).delete().catchError((_) {});
+          final gSnap = await firestore.collectionGroup('users').where('uid', isEqualTo: targetUid).get();
+          for (final doc in gSnap.docs) {
+            await doc.reference.set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+          }
         }
-        if (usernameLower.isNotEmpty && usernameLower != targetUid) {
-          await firestore.collection('branches').doc(branchId).collection('users').doc(usernameLower).delete().catchError((_) {});
+        if (email.isNotEmpty) {
+          final gSnap = await firestore.collectionGroup('users').where('email', isEqualTo: email).get();
+          for (final doc in gSnap.docs) {
+            await doc.reference.set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+          }
         }
-      }
+        if (usernameLower.isNotEmpty) {
+          final gSnap = await firestore.collectionGroup('users').where('usernameLower', isEqualTo: usernameLower).get();
+          for (final doc in gSnap.docs) {
+            await doc.reference.set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+          }
+        }
+      } catch (_) {}
+
+      try {
+        SyncService().triggerUpload(force: true);
+      } catch (_) {}
 
       final deleteMessage = authDeleted
           ? 'Account "$userName" has been permanently deleted.'
@@ -2242,13 +2410,6 @@ class _UsersScreenState extends State<UsersScreen>
           ...updates,
           'revokedAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true)).timeout(const Duration(seconds: 4));
-
-        if (branch.isNotEmpty && branch != 'all' && branch != 'global') {
-          await FirebaseFirestore.instance.collection('branches').doc(branch).collection('users').doc(uid).set({
-            ...updates,
-            'revokedAt': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true)).timeout(const Duration(seconds: 3));
-        }
       } catch (_) {}
     }
 
@@ -2352,23 +2513,64 @@ class _UsersScreenState extends State<UsersScreen>
     // Update in local Hive
     if (Hive.isBoxOpen('local_users')) {
       final box = Hive.box('local_users');
-      for (final key in [uid, email]) {
-        if (key.isEmpty) continue;
-        final raw = box.get(key);
+      final cleanEmail = email.trim().toLowerCase();
+      if (cleanEmail.isNotEmpty) {
+        final raw = box.get('user:$cleanEmail') ?? box.get(cleanEmail);
         if (raw is Map) {
           final u = Map<String, dynamic>.from(raw)..addAll(updates);
-          await box.put(key, u);
+          await box.put('user:$cleanEmail', u);
+        }
+      }
+      if (uid.isNotEmpty) {
+        final raw = box.get('user:$uid') ?? box.get(uid);
+        if (raw is Map) {
+          final u = Map<String, dynamic>.from(raw)..addAll(updates);
+          await box.put('user:$uid', u);
+          await box.put(uid, u);
         }
       }
       for (final k in box.keys) {
         final val = box.get(k);
-        if (val is Map && (val['uid'] == uid || val['id'] == uid)) {
-          final u = Map<String, dynamic>.from(val)..addAll(updates);
-          await box.put(k, u);
+        if (val is Map) {
+          final vUid = (val['uid'] ?? val['id'] ?? '').toString();
+          final vEmail = (val['email'] ?? '').toString().trim().toLowerCase();
+          if ((uid.isNotEmpty && vUid == uid) ||
+              (cleanEmail.isNotEmpty && vEmail == cleanEmail)) {
+            final u = Map<String, dynamic>.from(val)..addAll(updates);
+            await box.put(k, u);
+          }
         }
       }
       await box.flush();
     }
+
+    // Also unrevoke linked employee in local_employees if present
+    try {
+      if (Hive.isBoxOpen(LocalStorageService.employeesBox)) {
+        final empBox = Hive.box(LocalStorageService.employeesBox);
+        final empId = (data['linkedEmployeeId'] ?? data['localId'] ?? '').toString();
+        final cnic = (data['cnic'] ?? data['identification'] ?? '').toString().replaceAll(RegExp(r'\D'), '');
+        final cleanEmail = email.trim().toLowerCase();
+        for (final k in empBox.keys) {
+          final val = empBox.get(k);
+          if (val is Map) {
+            final eId = (val['localId'] ?? val['id'] ?? '').toString();
+            final eCnic = (val['cnic'] ?? '').toString().replaceAll(RegExp(r'\D'), '');
+            final eEmail = (val['email'] ?? '').toString().trim().toLowerCase();
+            if ((empId.isNotEmpty && eId == empId) ||
+                (cnic.isNotEmpty && eCnic == cnic) ||
+                (cleanEmail.isNotEmpty && eEmail == cleanEmail)) {
+              final updatedEmp = Map<String, dynamic>.from(val)
+                ..['isActive'] = true
+                ..['status'] = 'active'
+                ..['employeeStatus'] = 'active';
+              await empBox.put(k, updatedEmp);
+            }
+          }
+        }
+        await empBox.flush();
+      }
+    } catch (_) {}
 
     // Update in Firestore
     if (uid.isNotEmpty) {
@@ -2377,15 +2579,24 @@ class _UsersScreenState extends State<UsersScreen>
           ...updates,
           'restoredAt': FieldValue.serverTimestamp(),
         }, SetOptions(merge: true)).timeout(const Duration(seconds: 4));
-
-        if (branch.isNotEmpty && branch != 'all' && branch != 'global') {
-          await FirebaseFirestore.instance.collection('branches').doc(branch).collection('users').doc(uid).set({
-            ...updates,
-            'restoredAt': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true)).timeout(const Duration(seconds: 3));
-        }
       } catch (_) {}
     }
+
+    await LocalStorageService.enqueueSync({
+      'type': 'save_user',
+      'branchId': branch,
+      'uid': uid,
+      'data': {
+        ...data,
+        ...updates,
+        'uid': uid,
+        'branchId': branch,
+      },
+    });
+
+    try {
+      SyncService().triggerUpload(force: true);
+    } catch (_) {}
 
     // Send confirmation notification to user
     try {

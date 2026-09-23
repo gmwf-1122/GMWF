@@ -274,7 +274,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                 if (_branchFilter != 'All') {
                   final String empBranch = (emp['branchId']?.toString() ?? '').toLowerCase();
                   final String selectedB = _branchFilter.toLowerCase();
-                  final allowed = emp['allowedBranches'] ?? emp['branches'];
+                  final allowed = emp['allowedBranches'] ?? emp['branches'] ?? emp['camps'];
                   bool matchAllowed = false;
                   if (allowed is List) {
                     matchAllowed = allowed.any((b) => b.toString().toLowerCase().contains(selectedB) || b.toString().toLowerCase() == 'all');
@@ -282,8 +282,11 @@ class _EmployeesTabState extends State<EmployeesTab> {
                     matchAllowed = allowed.toLowerCase().contains(selectedB) || allowed.toLowerCase() == 'all';
                   }
 
-                  if (selectedB.contains('karachi')) {
-                    if (!empBranch.contains('karachi') && empBranch != 'all' && empBranch != 'global' && !matchAllowed) return false;
+                  final isKarachiFamily = selectedB.contains('karachi') || selectedB.contains('saddar') || selectedB.contains('haji');
+                  final isEmpKarachiFamily = empBranch.contains('karachi') || empBranch.contains('saddar') || empBranch.contains('haji');
+
+                  if (isKarachiFamily) {
+                    if (!isEmpKarachiFamily && empBranch != 'all' && empBranch != 'global' && !matchAllowed) return false;
                   } else {
                     if (emp['branchId'] != _branchFilter && empBranch != 'all' && empBranch != 'global' && !matchAllowed) return false;
                   }
@@ -1163,6 +1166,15 @@ class _EmployeesTabState extends State<EmployeesTab> {
     final rawPhone = emp['phone']?.toString().trim() ?? '';
     final hasPhone = rawPhone.isNotEmpty && rawPhone != '-' && rawPhone != 'N/A';
 
+    final rawCamps = emp['camps'] is List
+        ? (emp['camps'] as List)
+        : (emp['camp'] != null ? [emp['camp']] : []);
+    final camps = rawCamps.map((c) => c.toString().trim()).where((c) => c.isNotEmpty).toList();
+
+    final sessions = emp['sessions'] is List
+        ? (emp['sessions'] as List).whereType<Map>().toList()
+        : <Map>[];
+
     final statusColor = isActive
         ? (status == 'Temporary Leave' ? const Color(0xFFF59E0B) : const Color(0xFF10B981))
         : const Color(0xFFEF4444);
@@ -1476,6 +1488,54 @@ class _EmployeesTabState extends State<EmployeesTab> {
                           ],
                         ),
                       ),
+                    // Camps Badges (e.g. Saddar Camp, Haji Camp)
+                    if (camps.isNotEmpty)
+                      ...camps.map((campName) => Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF10B981).withValues(alpha: isDark ? 0.2 : 0.1),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: const Color(0xFF10B981).withValues(alpha: isDark ? 0.4 : 0.25)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const Icon(Icons.holiday_village_outlined, size: 11, color: Color(0xFF10B981)),
+                                const SizedBox(width: 4),
+                                Text(
+                                  campName,
+                                  style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF10B981)),
+                                ),
+                              ],
+                            ),
+                          )),
+                    // Per-Camp Session Schedule (e.g. Saddar Morning (09:00 AM - 01:00 PM))
+                    if (sessions.isNotEmpty)
+                      ...sessions.map((sess) {
+                        final sCamp = sess['camp']?.toString() ?? '';
+                        final sTime = '${sess['startTime'] ?? ''} - ${sess['endTime'] ?? ''}';
+                        final sName = sess['session']?.toString() ?? '';
+                        final label = sName.isNotEmpty ? '$sCamp $sName: $sTime' : '$sCamp: $sTime';
+                        return Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF6366F1).withValues(alpha: isDark ? 0.18 : 0.1),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: const Color(0xFF6366F1).withValues(alpha: isDark ? 0.4 : 0.25)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.schedule_rounded, size: 11, color: Color(0xFF818CF8)),
+                              const SizedBox(width: 4),
+                              Text(
+                                label,
+                                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF818CF8)),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
                     if (hasCnic)
                       InkWell(
                         onTap: () {

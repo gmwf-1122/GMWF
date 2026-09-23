@@ -59,6 +59,46 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
     final uid = (widget.userData?['uid'] ?? widget.userData?['id'] ?? '').toString();
     if (uid.isEmpty) return;
 
+    // 1. Check if already reverted or active in Firestore
+    try {
+      final doc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(uid)
+          .get()
+          .timeout(const Duration(seconds: 4));
+      if (doc.exists && doc.data() != null) {
+        final d = doc.data()!;
+        final status = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
+        final isActive = d['isActive'] == true;
+        final isRevoked = d['isRevoked'] == true || d['accessRevoked'] == true;
+        if ((status == 'active' || isActive) && !isRevoked) {
+          final restoredUserData = Map<String, dynamic>.from(widget.userData ?? {})..addAll(d);
+          restoredUserData['status'] = 'active';
+          restoredUserData['accountStatus'] = 'active';
+          restoredUserData['isActive'] = true;
+          restoredUserData['isRevoked'] = false;
+          restoredUserData['accessRevoked'] = false;
+          await LocalStorageService.saveLocalUser(restoredUserData);
+          if (mounted) {
+            setState(() {
+              _accessRestored = true;
+              _restoreRequestPending = false;
+            });
+            _showSnack('🎉 Your access is active! Returning to login...', success: true);
+            await Future.delayed(const Duration(seconds: 2));
+            if (mounted) {
+              Navigator.of(context).pushAndRemoveUntil(
+                MaterialPageRoute(builder: (_) => const LoginPage()),
+                (route) => false,
+              );
+            }
+          }
+          return;
+        }
+      }
+    } catch (_) {}
+
+    // 2. Check local pending request status
     try {
       if (Hive.isBoxOpen('local_users')) {
         final box = Hive.box('local_users');
@@ -446,10 +486,28 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
       if (mounted) {
         setState(() => _checkingStatus = false);
         if (isNowActive) {
+          final restoredUserData = Map<String, dynamic>.from(widget.userData ?? {});
+          restoredUserData['status'] = 'active';
+          restoredUserData['accountStatus'] = 'active';
+          restoredUserData['isActive'] = true;
+          restoredUserData['isRevoked'] = false;
+          restoredUserData['accessRevoked'] = false;
+          restoredUserData['restoreRequested'] = false;
+          restoredUserData['restoreRequestStatus'] = 'approved';
+          await LocalStorageService.saveLocalUser(restoredUserData);
+
           setState(() => _accessRestored = true);
           _showSnack('🎉 Your access has been approved and restored! Logging in...', success: true);
           await Future.delayed(const Duration(seconds: 2));
-          if (mounted) _handleLogout(context);
+          if (!mounted || !context.mounted) return;
+          try {
+            await FirebaseAuth.instance.signOut();
+          } catch (_) {}
+          if (!context.mounted) return;
+          Navigator.of(context).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => const LoginPage()),
+            (route) => false,
+          );
         } else {
           _showSnack('⏳ Request is still pending approval from the HQ Manager.');
         }

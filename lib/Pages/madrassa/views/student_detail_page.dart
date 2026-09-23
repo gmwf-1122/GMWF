@@ -9,7 +9,6 @@ import '../../../services/user_theme_service.dart';
 import '../../../services/local_storage_service.dart';
 import '../utils/madrassa_local_storage.dart';
 import '../dialogs/enrollment_dialog.dart';
-import '../madrassa_strings.dart';
 import '../widgets/madrassa_status_menu.dart';
 
 class StudentDetailPage extends StatefulWidget {
@@ -34,6 +33,23 @@ class StudentDetailPage extends StatefulWidget {
 
 class _StudentDetailPageState extends State<StudentDetailPage> {
   late Map<String, dynamic> _data;
+
+  bool get _effectiveIsAdmin {
+    final r = widget.role.toLowerCase().trim();
+    return widget.isAdmin ||
+        r.contains('admin') ||
+        r.contains('chairman') ||
+        r.contains('hq') ||
+        r.contains('hq manager') ||
+        r.contains('hqmanager') ||
+        r.contains('hq_manager') ||
+        r.contains('ceo') ||
+        r.contains('principal') ||
+        r.contains('manager') ||
+        r.contains('director') ||
+        r.contains('supervisor') ||
+        r.contains('global');
+  }
 
   @override
   void initState() {
@@ -127,10 +143,16 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
         final status = _data['status'] ?? 'active';
 
         final currentLines = int.tryParse(_data['currentLines']?.toString() ?? '0') ?? 0;
-        final prevLines = int.tryParse(_data['prevHifzLines']?.toString() ?? '0') ?? 0;
+        final isNazra = (_data['isNazra'] == true) ||
+            (_data['program']?.toString().toLowerCase() == 'nazra') ||
+            (_data['class']?.toString().toLowerCase() == 'nazra') ||
+            LocalStorageService.isMadrassaNazraOnly(widget.branchId);
+        final prevLines = isNazra ? 0 : (int.tryParse(_data['prevHifzLines']?.toString() ?? '0') ?? 0);
         final totalLines = currentLines + prevLines;
         const maxLines = 8640;
         final pct = ((totalLines / maxLines) * 100).clamp(0.0, 100.0).toStringAsFixed(1);
+        final isQaidaComp = _data['qaidaCompleted'] == true || _data['qaidaSabak'] == 'completed';
+        final qaidaLesson = int.tryParse(_data['qaidaSabak']?.toString() ?? '1') ?? 1;
 
         final String? bFormUrl = _data['bFormUrl'] ?? _data['bFormBase64'];
         final String? guardianCnicUrl = _data['guardianCnicUrl'] ?? _data['guardianCnicBase64'];
@@ -148,6 +170,7 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
             backgroundColor: cardBg,
             elevation: 0,
             scrolledUnderElevation: 0,
+            shape: Border(bottom: BorderSide(color: borderColor, width: 1)),
             leading: IconButton(
               icon: Icon(Icons.arrow_back_rounded, color: textPrimary),
               onPressed: () => Navigator.pop(context),
@@ -164,7 +187,7 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
               StatusActionMenu(
                 student: _data,
                 branchId: widget.branchId,
-                isAdmin: widget.isAdmin,
+                isAdmin: _effectiveIsAdmin,
                 t: RoleThemeScope.dataOf(context),
                 username: widget.username,
                 role: widget.role,
@@ -293,62 +316,137 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                     Container(
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: cardBg,
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                        border: Border.all(color: borderColor),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              const Text(
-                                'Memorization Progress',
-                                style: TextStyle(
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF1E293B),
+                          if (isNazra) ...[
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Row(
+                                  children: [
+                                    Text(
+                                      'Qaida & Nazra Progress',
+                                      style: TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.bold,
+                                        color: textPrimary,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: isQaidaComp
+                                            ? Colors.green.withValues(alpha: 0.15)
+                                            : Colors.teal.withValues(alpha: 0.15),
+                                        borderRadius: BorderRadius.circular(6),
+                                        border: Border.all(
+                                          color: isQaidaComp
+                                              ? Colors.green.withValues(alpha: 0.4)
+                                              : Colors.teal.withValues(alpha: 0.4),
+                                        ),
+                                      ),
+                                      child: Text(
+                                        isQaidaComp ? 'قاعدہ مکمل ✅' : 'سبق نمبر $qaidaLesson / ۲۱',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                          color: isQaidaComp ? Colors.green : (isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080)),
+                                        ),
+                                      ),
+                                    ),
+                                  ],
                                 ),
-                              ),
-                              Text(
-                                '$pct%',
-                                style: const TextStyle(
-                                  fontSize: 16,
-                                  fontWeight: FontWeight.bold,
-                                  color: Color(0xFF008080),
+                                Text(
+                                  isQaidaComp ? '100%' : '${((qaidaLesson / 21) * 100).clamp(0, 100).toStringAsFixed(0)}%',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: isQaidaComp ? Colors.green : (isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080)),
+                                  ),
                                 ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 10),
-                          ClipRRect(
-                            borderRadius: BorderRadius.circular(6),
-                            child: LinearProgressIndicator(
-                              value: (totalLines / maxLines).clamp(0.0, 1.0),
-                              backgroundColor: const Color(0xFFF1F5F9),
-                              valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF008080)),
-                              minHeight: 10,
+                              ],
                             ),
-                          ),
-                          const SizedBox(height: 12),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Text(
-                                'Current: $currentLines lines',
-                                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                            const SizedBox(height: 10),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(6),
+                              child: LinearProgressIndicator(
+                                value: isQaidaComp ? 1.0 : (qaidaLesson / 21).clamp(0.0, 1.0),
+                                backgroundColor: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
+                                valueColor: AlwaysStoppedAnimation<Color>(isQaidaComp ? Colors.green : const Color(0xFF008080)),
+                                minHeight: 10,
                               ),
-                              Text(
-                                'Prior Hifz: $prevLines lines',
-                                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Qaida Status: ${isQaidaComp ? "Completed / مکمل ✅" : "Lesson $qaidaLesson of 21"}',
+                                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                ),
+                                Text(
+                                  'Nazra Sabak: $currentLines lines',
+                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textPrimary),
+                                ),
+                              ],
+                            ),
+                          ] else ...[
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Memorization Progress',
+                                  style: TextStyle(
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                    color: textPrimary,
+                                  ),
+                                ),
+                                Text(
+                                  '$pct%',
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                    color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            ClipRRect(
+                              borderRadius: BorderRadius.circular(6),
+                              child: LinearProgressIndicator(
+                                value: (totalLines / maxLines).clamp(0.0, 1.0),
+                                backgroundColor: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
+                                valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF008080)),
+                                minHeight: 10,
                               ),
-                              Text(
-                                'Total: $totalLines / $maxLines',
-                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
-                              ),
-                            ],
-                          ),
+                            ),
+                            const SizedBox(height: 12),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  'Current: $currentLines lines',
+                                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                ),
+                                Text(
+                                  'Prior Hifz: $prevLines lines',
+                                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                ),
+                                Text(
+                                  'Total: $totalLines / $maxLines',
+                                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: textPrimary),
+                                ),
+                              ],
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -387,11 +485,32 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                             _data['studentCnic']?.toString().isNotEmpty == true ? _data['studentCnic'] : 'Not Provided',
                           ),
                           _buildDetailRow(
+                            Icons.category_rounded,
+                            'Program / Class',
+                            isNazra ? 'Nazra (ناظرہ قرآن)' : 'Hifz (حفظ قرآن)',
+                          ),
+                          _buildDetailRow(
+                            Icons.schedule_rounded,
+                            'Shift / Session',
+                            (_data['session']?.toString().toLowerCase() == 'evening')
+                                ? '🌅 Evening Shift'
+                                : (_data['session']?.toString().toLowerCase() == 'night')
+                                    ? '🌙 Night Shift'
+                                    : '☀️ Morning Shift',
+                          ),
+                          _buildDetailRow(
+                            Icons.person_rounded,
+                            'Gender',
+                            (_data['gender']?.toString().toLowerCase() == 'female' || _data['gender']?.toString().toLowerCase() == 'girl')
+                                ? '👧 Girl (Female)'
+                                : '👦 Boy (Male)',
+                          ),
+                          _buildDetailRow(
                             Icons.calendar_today_rounded,
                             'Join Date',
                             _data['joinDate'] != null ? DateFormat('dd MMMM yyyy').format(_parseDate(_data['joinDate'])) : 'Not Provided',
                           ),
-                          if (_data['hasPrevMadrassa'] == true) ...[
+                          if (_data['hasPrevMadrassa'] == true && !isNazra) ...[
                             _buildDetailRow(
                               Icons.school_outlined,
                               'Previous Madrassa',

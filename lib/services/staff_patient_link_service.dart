@@ -18,12 +18,67 @@ class StaffPatientLinkService {
     return name.toLowerCase().replaceAll(RegExp(r'[^a-z0-9\s]'), '').trim();
   }
 
+  /// High-level method that safely inspects a patient object map.
+  /// Rule: Children cannot be staff members; only adults can be staff.
+  static Map<String, dynamic>? getStaffInfoFromPatientMap(Map<String, dynamic>? patient) {
+    if (patient == null) return null;
+
+    // 1. Explicit child / adult flags
+    if (patient['isAdult'] == false) return null;
+    if (patient['isChild'] == true) return null;
+
+    // 2. Age check: minors under 18 cannot be staff
+    final rawAge = patient['age'] ?? patient['calculatedAge'];
+    final parsedAge = rawAge is num ? rawAge.toInt() : int.tryParse(rawAge?.toString() ?? '');
+    if (parsedAge != null && parsedAge > 0 && parsedAge < 18) {
+      return null;
+    }
+
+    // 3. Child identity markers (e.g. relation or child ID)
+    final rel = (patient['relation'] ?? patient['relationship'] ?? '').toString().trim().toLowerCase();
+    if (rel == 'child' || rel == 'son' || rel == 'daughter' || rel == 'infant' || rel == 'kid') {
+      return null;
+    }
+
+    final pId = (patient['id'] ?? patient['patientId'] ?? '').toString().toLowerCase();
+    if (pId.contains('_child_')) return null;
+
+    // 4. Guardian CNIC without personal adult CNIC implies a dependent child
+    final gCnic = normalizeCnic(patient['guardianCnic']?.toString() ?? patient['parentCnic']?.toString());
+    final pCnic = normalizeCnic(patient['cnic']?.toString() ?? patient['patientCnic']?.toString());
+    if (gCnic.isNotEmpty && pCnic.isEmpty && patient['isAdult'] != true) {
+      return null;
+    }
+
+    final effectiveCnic = pCnic.isNotEmpty ? pCnic : (patient['isAdult'] == true ? gCnic : null);
+    final effectiveName = (patient['name'] ?? patient['patientName'])?.toString();
+
+    return getStaffInfoForPatient(
+      cnic: effectiveCnic,
+      name: effectiveName,
+      isAdult: patient['isAdult'],
+      age: parsedAge,
+    );
+  }
+
   /// Looks up whether a patient with [cnic] or [name] is a registered staff member/employee.
   /// Returns a map with staff role, designation, branch, and name, or null if not staff.
   static Map<String, dynamic>? getStaffInfoForPatient({
     String? cnic,
     String? name,
+    bool? isAdult,
+    dynamic age,
+    dynamic isChild,
   }) {
+    // A child cannot be an employee or staff member
+    if (isAdult == false || isChild == true) return null;
+    if (age != null) {
+      final parsedAge = age is num ? age.toInt() : int.tryParse(age.toString().trim());
+      if (parsedAge != null && parsedAge > 0 && parsedAge < 18) {
+        return null;
+      }
+    }
+
     final cleanCnic = normalizeCnic(cnic);
     final cleanName = normalizeName(name);
 

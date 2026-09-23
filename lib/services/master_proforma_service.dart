@@ -97,6 +97,24 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'code': 'MED-PSE-CPM-DXM-SYR',
+      'name': 'Pseudoephedrine + CPM + Dextromethorphan (Coldrex)',
+      'formula': 'Pseudoephedrine + CPM + Dextromethorphan (Coldrex)',
+      'type': 'Syrup',
+      'dose': '120 ml',
+      'defaultPrice': 115.00,
+      'isProformaMaster': true,
+    },
+    {
+      'code': 'MED-PSE-CPM-DXM-TAB',
+      'name': 'Pseudoephedrine + CPM + Dextromethorphan (Coldrex)',
+      'formula': 'Pseudoephedrine + CPM + Dextromethorphan (Coldrex)',
+      'type': 'Tablet',
+      'dose': '30 mg / 2 mg / 10 mg',
+      'defaultPrice': 6.00,
+      'isProformaMaster': true,
+    },
+    {
       'code': 'MED-PARA-SYR',
       'name': 'Paracetamol (Panadol)',
       'formula': 'Paracetamol (Panadol)',
@@ -1744,6 +1762,44 @@ class MasterProformaService {
     return [];
   }
 
+  /// Parses an expiry date string (supporting YYYY-MM, MM-YYYY, YYYY-MM-DD, DD-MM-YYYY, etc.)
+  /// or extracts a date pattern from doc ID as fallback. Returns DateTime(3000) if null/empty/invalid.
+  static DateTime parseExpiryDate(dynamic s, [String? id]) {
+    if (s is DateTime) return s;
+    String str = (s ?? '').toString().trim();
+    if (str.isEmpty || str == 'null') {
+      if (id != null && id.isNotEmpty) {
+        final reg = RegExp(r'(\d{4}[-/.]\d{1,2}(?:[-/.]\d{1,2})?)');
+        final match = reg.firstMatch(id);
+        if (match != null) {
+          str = match.group(1)!;
+        }
+      }
+    }
+    if (str.isEmpty || str == 'null') return DateTime(3000);
+    try {
+      final clean = str.replaceAll('/', '-').replaceAll('.', '-').trim();
+      final p = clean.split('-');
+      if (p.length == 2) {
+        if (p[0].length == 4) {
+          return DateTime(int.parse(p[0]), int.parse(p[1]), 15);
+        } else {
+          return DateTime(int.parse(p[1]), int.parse(p[0]), 15);
+        }
+      }
+      if (p.length == 3) {
+        if (p[0].length == 4) {
+          return DateTime(int.parse(p[0]), int.parse(p[1]), int.parse(p[2]));
+        } else {
+          return DateTime(int.parse(p[2]), int.parse(p[1]), int.parse(p[0]));
+        }
+      }
+      final parsed = DateTime.tryParse(str);
+      if (parsed != null) return parsed;
+    } catch (_) {}
+    return DateTime(3000);
+  }
+
   /// Converts any commercial brand name into its generic formula with brand name in brackets
   /// Converts any medicine name or brand into its standard canonical representation: Generic Formula (Popular Brand)
   static String cleanBrandToFormula(String input) {
@@ -1773,6 +1829,9 @@ class MasterProformaService {
     }
     if ((lower.contains('paracetamol') || lower.contains('panadol')) && (lower.contains('dextromethorphan') || lower.contains('dextromethor') || lower.contains('chlorpheramine') || lower.contains('chlorpheniramine') || lower.contains('cf') || lower.contains('t-day') || lower.contains('tday'))) {
       return 'Paracetamol + Chlorpheniramine + Dextromethorphan (Panadol CF / T-Day)';
+    }
+    if (lower.contains('coldrex') || (lower.contains('pseudoephedrine') && (lower.contains('dextromethorphan') || lower.contains('dextromethor') || lower.contains('chlorpheramine') || lower.contains('chlorpheniramine') || lower.contains('cpm')))) {
+      return 'Pseudoephedrine + CPM + Dextromethorphan (Coldrex)';
     }
     if (lower.contains('paracetamol') || lower.contains('panadol') || lower.contains('calpol') || lower.contains('febrol') || lower.contains('disprol')) {
       if (lower.contains('caffeine') || lower.contains('extra')) {
@@ -1819,7 +1878,7 @@ class MasterProformaService {
     if (lower.contains('prochlorperazine') || lower.contains('stemetil')) {
       return 'Prochlorperazine (Stemetil)';
     }
-    if (lower.contains('serratiopeptidase') || lower.contains('danzen')) {
+    if (lower.contains('serratiopeptidase') || lower.contains('danzen') || lower.contains('danzan')) {
       return 'Serratiopeptidase (Danzen DS)';
     }
     if (lower.contains('metoclopramide') || lower.contains('metoclone') || lower.contains('maxolon')) {

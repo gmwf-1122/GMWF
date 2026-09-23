@@ -19,6 +19,8 @@ import '../../../utils/formatters.dart';
 import '../utils/madrassa_local_storage.dart';
 import '../../../services/user_theme_service.dart';
 import '../../../../services/sync_service.dart';
+import '../../../../services/camp_session_service.dart';
+import '../../../widgets/app_feedback.dart';
 
 void showAddStudentDialog(
   BuildContext context,
@@ -36,6 +38,35 @@ void showAddStudentDialog(
   final studentId = isEdit 
       ? (student is DocumentSnapshot ? student.id : (student as Map)['id']?.toString() ?? '')
       : '';
+
+  final programMode = LocalStorageService.getMadrassaProgramMode(branchId);
+  final isNazraOnly = programMode == 'nazra_only';
+  final isHifzOnly = programMode == 'hifz_only';
+  final isBothPrograms = programMode == 'both';
+
+  String gender = (studentData?['gender']?.toString().toLowerCase().trim() == 'female') ? 'female' : 'male';
+  final branchSessions = CampSessionService.getMadrassaSessions(branchId);
+  String selectedSession = studentData?['session']?.toString().toLowerCase().trim() ??
+      (branchSessions.isNotEmpty ? branchSessions.first : 'morning');
+  if (!branchSessions.contains(selectedSession) && branchSessions.isNotEmpty) {
+    selectedSession = branchSessions.first;
+  }
+  String selectedProgram;
+  if (isNazraOnly) {
+    selectedProgram = 'nazra';
+  } else if (isHifzOnly) {
+    selectedProgram = 'hifz';
+  } else {
+    // Both programs available in this branch
+    if (studentData?['isNazra'] == true ||
+        studentData?['program']?.toString().toLowerCase() == 'nazra' ||
+        studentData?['class']?.toString().toLowerCase() == 'nazra') {
+      selectedProgram = 'nazra';
+    } else {
+      selectedProgram = 'hifz';
+    }
+  }
+  bool qaidaCompleted = studentData?['qaidaCompleted'] == true;
 
   final nameCtrl = TextEditingController(text: studentData?['name']);
   final rollCtrl = TextEditingController(text: studentData?['rollNumber']);
@@ -370,6 +401,364 @@ void showAddStudentDialog(
                 
                 sectionLabel(context.l.studentInformation),
                 const SizedBox(height: 10),
+                if (isNazraOnly) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFF0D9488).withValues(alpha: 0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.menu_book_rounded, color: Color(0xFF0D9488), size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            context.isUrdu
+                                ? 'صرف ناظرہ سسٹم: اس شاخ میں صرف حاضری اور سبق ریکارڈ ہوگا۔ فیس، یونیفارم اور سبقی/منزل غیر فعال ہیں۔'
+                                : 'Only Nazra System: Attendance and Sabak are tracked. Fees, Uniform, and Sabqi/Manzil are disabled.',
+                            style: context.urduStyle(
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0D9488)),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ] else if (isBothPrograms) ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0F766E).withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: const Color(0xFF0F766E).withValues(alpha: 0.25)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.auto_stories_rounded, color: Color(0xFF0F766E), size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            context.isUrdu
+                                ? 'مشترکہ کیمپس: اس شاخ میں حفظ اور ناظرہ دونوں موجود ہیں۔ نیچے طالب علم کی کلاس منتخب کریں۔'
+                                : 'Dual Program Campus: This branch offers both Hifz and Nazra. Select the student\'s program below.',
+                            style: context.urduStyle(
+                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+                // Program / Class Selection (Nazra vs Hifz)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      context.isUrdu ? 'کلاس / پروگرام کی قسم (Program)' : 'Enrolled Program / Class',
+                      style: context.urduStyle(
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF475569)),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    if (isNazraOnly)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFF0D9488).withValues(alpha: 0.3)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.menu_book_rounded, color: Color(0xFF0D9488), size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                context.isUrdu ? 'صرف ناظرہ سسٹم (اس برانچ میں تمام طلبہ ناظرہ پڑھتے ہیں)' : 'Only Nazra System (Branch locked to Nazra only)',
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    else if (isHifzOnly)
+                      Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF7C3AED).withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFF7C3AED).withValues(alpha: 0.3)),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.mosque_rounded, color: Color(0xFF7C3AED), size: 18),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                context.isUrdu ? 'صرف حفظ سسٹم (اس برانچ میں تمام طلبہ حفظ قرآن پڑھتے ہیں)' : 'Only Hifz System (Branch locked to Hifz only)',
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF7C3AED)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    else
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Expanded(
+                                child: InkWell(
+                                  onTap: () => setDs(() => selectedProgram = 'nazra'),
+                                  borderRadius: BorderRadius.circular(10),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 8),
+                                    decoration: BoxDecoration(
+                                      color: selectedProgram == 'nazra' ? const Color(0xFF0D9488).withValues(alpha: 0.12) : Colors.transparent,
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(
+                                        color: selectedProgram == 'nazra' ? const Color(0xFF0D9488) : Colors.grey.shade300,
+                                        width: selectedProgram == 'nazra' ? 1.8 : 1,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          selectedProgram == 'nazra' ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
+                                          size: 16,
+                                          color: selectedProgram == 'nazra' ? const Color(0xFF0D9488) : Colors.grey,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          context.isUrdu ? '📖 ناظرہ (Nazra)' : '📖 Nazra Program',
+                                          style: TextStyle(
+                                            fontSize: 12.5,
+                                            fontWeight: FontWeight.bold,
+                                            color: selectedProgram == 'nazra' ? const Color(0xFF0D9488) : Colors.black87,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: InkWell(
+                                  onTap: () => setDs(() => selectedProgram = 'hifz'),
+                                  borderRadius: BorderRadius.circular(10),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 8),
+                                    decoration: BoxDecoration(
+                                      color: selectedProgram == 'hifz' ? const Color(0xFF7C3AED).withValues(alpha: 0.12) : Colors.transparent,
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(
+                                        color: selectedProgram == 'hifz' ? const Color(0xFF7C3AED) : Colors.grey.shade300,
+                                        width: selectedProgram == 'hifz' ? 1.8 : 1,
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Icon(
+                                          selectedProgram == 'hifz' ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
+                                          size: 16,
+                                          color: selectedProgram == 'hifz' ? const Color(0xFF7C3AED) : Colors.grey,
+                                        ),
+                                        const SizedBox(width: 6),
+                                        Text(
+                                          context.isUrdu ? '🕋 حفظ (Hifz)' : '🕋 Hifz Program',
+                                          style: TextStyle(
+                                            fontSize: 12.5,
+                                            fontWeight: FontWeight.bold,
+                                            color: selectedProgram == 'hifz' ? const Color(0xFF7C3AED) : Colors.black87,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            context.isUrdu
+                                ? 'یہ شاخ ناظرہ اور حفظ دونوں پیش کرتی ہے۔ طالب علم کا متعلقہ پروگرام منتخب کریں۔'
+                                : 'This branch offers both programs. Select where this student fits in.',
+                            style: const TextStyle(fontSize: 10.5, color: Color(0xFF64748B)),
+                          ),
+                        ],
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                // Gender Selection (Boy / Girl)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          context.isUrdu ? 'طالب علم کی جنس (Gender)' : 'Student Gender',
+                          style: context.urduStyle(
+                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF475569)),
+                          ),
+                        ),
+                        if (selectedProgram == 'nazra') ...[
+                          const SizedBox(width: 6),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0D9488).withValues(alpha: 0.12),
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            child: const Text(
+                              'NAZRA ENROLLMENT',
+                              style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF0D9488)),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: InkWell(
+                            onTap: () => setDs(() => gender = 'male'),
+                            borderRadius: BorderRadius.circular(10),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 8),
+                              decoration: BoxDecoration(
+                                color: gender == 'male' ? const Color(0xFF0284C7).withValues(alpha: 0.12) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: gender == 'male' ? const Color(0xFF0284C7) : Colors.grey.shade300,
+                                  width: gender == 'male' ? 1.8 : 1,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    gender == 'male' ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
+                                    size: 16,
+                                    color: gender == 'male' ? const Color(0xFF0284C7) : Colors.grey,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    context.isUrdu ? '👦 لڑکا (Boy)' : '👦 Boy (Male)',
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.bold,
+                                      color: gender == 'male' ? const Color(0xFF0284C7) : Colors.black87,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: InkWell(
+                            onTap: () => setDs(() => gender = 'female'),
+                            borderRadius: BorderRadius.circular(10),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 8),
+                              decoration: BoxDecoration(
+                                color: gender == 'female' ? const Color(0xFFEC4899).withValues(alpha: 0.12) : Colors.transparent,
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: gender == 'female' ? const Color(0xFFEC4899) : Colors.grey.shade300,
+                                  width: gender == 'female' ? 1.8 : 1,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    gender == 'female' ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
+                                    size: 16,
+                                    color: gender == 'female' ? const Color(0xFFEC4899) : Colors.grey,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    context.isUrdu ? '👧 لڑکی (Girl)' : '👧 Girl (Female)',
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.bold,
+                                      color: gender == 'female' ? const Color(0xFFEC4899) : Colors.black87,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                // Session Shift Selection
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      context.isUrdu ? 'شفٹ / سیشن کے اوقات (Shift)' : 'Class Session / Shift',
+                      style: context.urduStyle(
+                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF475569)),
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: (branchSessions.isNotEmpty ? branchSessions : ['morning', 'evening', 'night']).map((s) {
+                        final isSelected = selectedSession == s;
+                        final icon = s == 'morning'
+                            ? Icons.wb_sunny_rounded
+                            : (s == 'evening' ? Icons.wb_twilight_rounded : Icons.nights_stay_rounded);
+                        final label = s == 'morning'
+                            ? (context.isUrdu ? 'صبح کا سیشن' : 'Morning Shift')
+                            : (s == 'evening'
+                                ? (context.isUrdu ? 'شام کا سیشن' : 'Evening Shift')
+                                : (context.isUrdu ? 'رات کا سیشن' : 'Night Shift'));
+                        final color = s == 'morning'
+                            ? const Color(0xFFF59E0B)
+                            : (s == 'evening' ? const Color(0xFFEA580C) : const Color(0xFF6366F1));
+
+                        return ChoiceChip(
+                          selected: isSelected,
+                          avatar: Icon(icon, size: 14, color: isSelected ? Colors.white : color),
+                          label: Text(label),
+                          labelStyle: TextStyle(
+                            fontSize: 11.5,
+                            fontWeight: FontWeight.bold,
+                            color: isSelected ? Colors.white : Colors.black87,
+                          ),
+                          selectedColor: color,
+                          backgroundColor: Colors.grey.shade100,
+                          onSelected: (val) {
+                            if (val) setDs(() => selectedSession = s);
+                          },
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
                 buildTf(
                   nameCtrl,
                   context.l.studentFullName,
@@ -437,17 +826,46 @@ void showAddStudentDialog(
                     ),
                   ),
                 ),
-                const SizedBox(height: 10),
-                buildTf(prevHifzCtrl, context.l.hifzBeforeJoining, Icons.auto_stories_outlined, context, inputType: TextInputType.number),
-                const SizedBox(height: 16),
-                SwitchListTile(
-                  title: Text(context.l.previousMadrassa,
-                      style: context.urduStyle(style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold))),
-                  value: hasPrevMadrassa,
-                  onChanged: (v) => setDs(() => hasPrevMadrassa = v),
-                ),
-                if (hasPrevMadrassa) ...[
-                  buildTf(prevMadrassaCtrl, context.l.previousMadrassaName, Icons.school_outlined, context),
+                if (selectedProgram == 'nazra') ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    decoration: BoxDecoration(
+                      color: qaidaCompleted ? const Color(0xFF10B981).withValues(alpha: 0.08) : Colors.transparent,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: qaidaCompleted ? const Color(0xFF10B981).withValues(alpha: 0.3) : Colors.grey.shade300),
+                    ),
+                    child: SwitchListTile(
+                      activeColor: const Color(0xFF10B981),
+                      secondary: Icon(
+                        qaidaCompleted ? Icons.check_circle_rounded : Icons.menu_book_rounded,
+                        color: qaidaCompleted ? const Color(0xFF10B981) : Colors.grey,
+                      ),
+                      title: Text(
+                        context.isUrdu ? 'قاعدہ مکمل ہو چکا ہے؟' : 'Qaida Completed?',
+                        style: context.urduStyle(style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold)),
+                      ),
+                      subtitle: Text(
+                        context.isUrdu ? 'اگر طالب علم نے نورانی قاعدہ مکمل کر لیا ہے تو اسے آن کریں۔' : 'Enable if student has already completed Noorani Qaida.',
+                        style: const TextStyle(fontSize: 11, color: Colors.grey),
+                      ),
+                      value: qaidaCompleted,
+                      onChanged: (v) => setDs(() => qaidaCompleted = v),
+                    ),
+                  ),
+                ],
+                if (selectedProgram != 'nazra') ...[
+                  const SizedBox(height: 10),
+                  buildTf(prevHifzCtrl, context.l.hifzBeforeJoining, Icons.auto_stories_outlined, context, inputType: TextInputType.number),
+                  const SizedBox(height: 16),
+                  SwitchListTile(
+                    title: Text(context.l.previousMadrassa,
+                        style: context.urduStyle(style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold))),
+                    value: hasPrevMadrassa,
+                    onChanged: (v) => setDs(() => hasPrevMadrassa = v),
+                  ),
+                  if (hasPrevMadrassa) ...[
+                    buildTf(prevMadrassaCtrl, context.l.previousMadrassaName, Icons.school_outlined, context),
+                  ],
                 ],
                 const SizedBox(height: 20),
                 sectionLabel(context.l.guardianInformation),
@@ -891,11 +1309,10 @@ void showAddStudentDialog(
                   final targetEntityId = isEdit ? studentId : '';
                   final conflict = ZkTecoNetworkService.findPinConflict(enteredPin, excludeEntityId: targetEntityId.isNotEmpty ? targetEntityId : null);
                   if (conflict != null) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text('❌ PIN $enteredPin is already assigned to "${conflict.entityName}" (${conflict.branchId.toUpperCase()} • ${conflict.entityType.toUpperCase()}). Please choose a unique PIN.'),
-                        backgroundColor: Colors.red,
-                      ),
+                    AppFeedback.showWarning(
+                      context,
+                      'PIN $enteredPin is already assigned to "${conflict.entityName}" (${conflict.branchId.toUpperCase()} • ${conflict.entityType.toUpperCase()})',
+                      subtitle: 'Please choose a unique PIN for this student.',
                     );
                     return;
                   }
@@ -903,14 +1320,9 @@ void showAddStudentDialog(
 
                 if (!isValid) {
                   setDs(() {});
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        context.t('Please correct all validation errors to continue'),
-                        style: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null),
-                      ),
-                      backgroundColor: Colors.red,
-                    ),
+                  AppFeedback.showWarning(
+                    context,
+                    context.t('Please correct all validation errors to continue'),
                   );
                   return;
                 }
@@ -1072,14 +1484,23 @@ void showAddStudentDialog(
                     'name': nameCtrl.text.trim(),
                     'rollNumber': rollCtrl.text.trim(),
                     'studentCnic': studentCnicCtrl.text.trim(),
+                    'gender': gender,
+                    'session': selectedSession,
+                    'program': selectedProgram,
+                    'isNazra': selectedProgram == 'nazra',
+                    'class': selectedProgram == 'nazra' ? 'Nazra' : 'Hifz',
+                    'qaidaCompleted': selectedProgram == 'nazra' ? qaidaCompleted : false,
+                    if (selectedProgram == 'nazra' && qaidaCompleted) ...{
+                      'qaidaSabak': 'completed',
+                    },
                     'biometricPin': enteredPin,
                     'guardianName': guardianNameCtrl.text.trim(),
                     'guardianCnic': guardianCnicCtrl.text.trim(),
                     'contactPhone': contactCtrl.text.trim(),
                     'joinDate': Timestamp.fromDate(joinDate),
-                    'hasPrevMadrassa': hasPrevMadrassa,
-                    'prevMadrassaName': prevMadrassaCtrl.text.trim(),
-                    'prevHifzLines': int.tryParse(prevHifzCtrl.text.trim()) ?? 0,
+                    'hasPrevMadrassa': selectedProgram == 'nazra' ? false : hasPrevMadrassa,
+                    'prevMadrassaName': selectedProgram == 'nazra' ? '' : prevMadrassaCtrl.text.trim(),
+                    'prevHifzLines': selectedProgram == 'nazra' ? 0 : (int.tryParse(prevHifzCtrl.text.trim()) ?? 0),
                     'photoUrl': photoUrl,
                     'photoBase64': photoUrl,
                     'studentPhotoBase64': photoUrl,
@@ -1190,26 +1611,20 @@ void showAddStudentDialog(
                     }
                   }
                   
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(successMessage, style: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null)),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
-                  });
+                  AppFeedback.showSuccess(
+                    context,
+                    successMessage,
+                    subtitle: 'Student and guardian record synchronized locally.',
+                  );
                   nav.pop();
                 } catch (e) {
                   setDs(() => isSaving = false);
                   final msg = e.toString();
-                  WidgetsBinding.instance.addPostFrameCallback((_) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                        content: Text(msg, style: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null)),
-                        backgroundColor: Colors.red,
-                      ),
-                    );
-                  });
+                  AppFeedback.showError(
+                    context,
+                    'Failed to save student',
+                    subtitle: msg,
+                  );
                 }
               },
               style: ElevatedButton.styleFrom(

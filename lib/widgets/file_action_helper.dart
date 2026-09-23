@@ -259,16 +259,30 @@ class FileActionHelper {
           await Process.run('powershell', ['-NoProfile', '-Command', 'Set-Clipboard -Path "$winPath"']);
         } catch (_) {}
 
-        // 2. Open WhatsApp (Windows Native App or Web) directly to the patient's phone & prefilled greeting
+        // 2. Open WhatsApp (Windows Native Desktop App or Web)
         final encodedText = Uri.encodeComponent(text);
         bool launchedNative = false;
-        if (cleanPhone != null && cleanPhone.isNotEmpty) {
+
+        final nativeUriStr = (cleanPhone != null && cleanPhone.isNotEmpty)
+            ? 'whatsapp://send?phone=$cleanPhone&text=$encodedText'
+            : 'whatsapp://send?text=$encodedText';
+
+        try {
+          final nativeAppUri = Uri.parse(nativeUriStr);
+          launchedNative = await launchUrl(nativeAppUri, mode: LaunchMode.externalApplication);
+        } catch (_) {}
+
+        if (!launchedNative) {
           try {
-            final nativeAppUri = Uri.parse('whatsapp://send/?phone=$cleanPhone&text=$encodedText');
-            launchedNative = await launchUrl(nativeAppUri, mode: LaunchMode.externalApplication);
+            // Also attempt cmd start protocol handler on Windows
+            final res = await Process.run('cmd.exe', ['/c', 'start', '', nativeUriStr]);
+            if (res.exitCode == 0) {
+              launchedNative = true;
+            }
           } catch (_) {}
         }
 
+        // Fallback to WhatsApp Web only if Desktop protocol is not available
         if (!launchedNative) {
           final waUrlStr = (cleanPhone != null && cleanPhone.isNotEmpty)
               ? 'https://web.whatsapp.com/send?phone=$cleanPhone&text=$encodedText'
@@ -285,7 +299,7 @@ class FileActionHelper {
           }
         }
 
-        // 3. Open Explorer with the exact PDF pre-selected for drag-and-drop
+        // 3. Highlight PDF in Explorer for drag-and-drop fallback
         try {
           await Process.run('explorer.exe', ['/select,$winPath']);
         } catch (_) {

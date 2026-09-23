@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import '../../../services/image_upload_service.dart';
+import '../madrassa_strings.dart';
 
 class StudentProgressDialog extends StatefulWidget {
   final String studentName;
@@ -16,6 +17,11 @@ class StudentProgressDialog extends StatefulWidget {
   final String percentage;
   final int? estimatedDays;
   final double? recentDailyRate;
+  final bool? isNazra;
+  final bool? qaidaCompleted;
+  final String? qaidaSabak;
+  final int? rukuPara;
+  final dynamic ruku;
 
   const StudentProgressDialog({
     Key? key,
@@ -30,6 +36,11 @@ class StudentProgressDialog extends StatefulWidget {
     required this.percentage,
     this.estimatedDays,
     this.recentDailyRate,
+    this.isNazra,
+    this.qaidaCompleted,
+    this.qaidaSabak,
+    this.rukuPara,
+    this.ruku,
   }) : super(key: key);
 
   @override
@@ -49,12 +60,24 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
       vsync: this,
       duration: const Duration(milliseconds: 900),
     );
-    // Total memorized = lines here + prior hifz
-    final totalMemorized = widget.currentLines + widget.prevHifzLines;
-    final pct = widget.totalLines > 0
-        ? (totalMemorized / widget.totalLines * 100).clamp(0.0, 100.0)
-        : 0.0;
-    _progressAnim = Tween<double>(begin: 0, end: pct / 100).animate(
+
+    final isNazra = widget.isNazra == true ||
+        widget.className.toLowerCase().contains('nazra') ||
+        widget.className.contains('ناظرہ');
+    final isQComp = widget.qaidaCompleted == true || widget.qaidaSabak == 'completed';
+    final int qLessonNum = int.tryParse(widget.qaidaSabak ?? '1') ?? 1;
+
+    double progressVal = 0.0;
+    if (isNazra) {
+      progressVal = isQComp ? 1.0 : (qLessonNum / 21).clamp(0.0, 1.0);
+    } else {
+      final totalMemorized = widget.currentLines + widget.prevHifzLines;
+      progressVal = widget.totalLines > 0
+          ? (totalMemorized / widget.totalLines).clamp(0.0, 1.0)
+          : 0.0;
+    }
+
+    _progressAnim = Tween<double>(begin: 0, end: progressVal).animate(
       CurvedAnimation(parent: _controller, curve: Curves.easeOutCubic),
     );
     _fadeAnim = CurvedAnimation(parent: _controller, curve: Curves.easeIn);
@@ -115,8 +138,17 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
     const tealLight = Color(0xFFE0F2F1);
     const cardBg = Color(0xFFF8FFFE);
 
-    final isHifz = widget.className.toLowerCase().contains('hifz') ||
-                   widget.className.contains('حفظ');
+    final isNazra = widget.isNazra == true ||
+        widget.className.toLowerCase().contains('nazra') ||
+        widget.className.contains('ناظرہ');
+    final isQComp = widget.qaidaCompleted == true || widget.qaidaSabak == 'completed';
+    final qLesson = widget.qaidaSabak ?? '1';
+    final int qLessonNum = int.tryParse(qLesson) ?? 1;
+    final double qaidaPct = isQComp ? 100.0 : ((qLessonNum / 21) * 100).clamp(0.0, 100.0);
+
+    final isHifz = !isNazra && (widget.className.toLowerCase().contains('hifz') ||
+                   widget.className.contains('حفظ') ||
+                   widget.className.isEmpty);
     final daysSinceJoin = widget.joinDate != null
         ? DateTime.now().difference(widget.joinDate!).inDays
         : 0;
@@ -220,12 +252,20 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                 ),
                               ),
                               const SizedBox(height: 4),
-                              Row(
+                              Wrap(
+                                spacing: 8,
+                                runSpacing: 4,
                                 children: [
-                                  _chip(Icons.school_outlined,
-                                      widget.className),
-                                  const SizedBox(width: 8),
+                                  _chip(
+                                    isNazra ? Icons.auto_stories : Icons.school_outlined,
+                                    isNazra ? (context.isUrdu ? 'ناظرہ' : 'Nazra') : widget.className,
+                                  ),
                                   _chip(Icons.tag, 'Roll ${widget.rollNumber}'),
+                                  if (isNazra)
+                                    _chip(
+                                      Icons.auto_stories_rounded,
+                                      isQComp ? 'قاعدہ مکمل ✅' : 'قاعدہ سبق $qLessonNum/21',
+                                    ),
                                 ],
                               ),
                               if (widget.joinDate != null) ...[
@@ -261,16 +301,18 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                 child: CustomPaint(
                                   painter: _ArcPainter(
                                     progress: _progressAnim.value,
-                                    color: teal,
+                                    color: isNazra && isQComp ? const Color(0xFF10B981) : teal,
                                     bg: tealLight,
                                   ),
                                   child: Center(
                                     child: Text(
-                                      '${(pct).toStringAsFixed(1)}%',
-                                      style: const TextStyle(
+                                      isNazra
+                                          ? (isQComp ? '100%' : '${qaidaPct.toStringAsFixed(0)}%')
+                                          : '${(pct).toStringAsFixed(1)}%',
+                                      style: TextStyle(
                                         fontSize: 14,
                                         fontWeight: FontWeight.bold,
-                                        color: teal,
+                                        color: isNazra && isQComp ? const Color(0xFF10B981) : teal,
                                       ),
                                     ),
                                   ),
@@ -282,9 +324,11 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  const Text(
-                                    'Memorization Progress',
-                                    style: TextStyle(
+                                  Text(
+                                    isNazra
+                                        ? (context.isUrdu ? 'قاعدہ کی پیش رفت' : 'Qaida Progress')
+                                        : 'Memorization Progress',
+                                    style: const TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600,
                                       color: Color(0xFF6B7280),
@@ -300,8 +344,9 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                         value: _progressAnim.value,
                                         minHeight: 10,
                                         backgroundColor: tealLight,
-                                        valueColor:
-                                            const AlwaysStoppedAnimation(teal),
+                                        valueColor: AlwaysStoppedAnimation(
+                                          isNazra && isQComp ? const Color(0xFF10B981) : teal,
+                                        ),
                                       ),
                                     ),
                                   ),
@@ -311,8 +356,11 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                         MainAxisAlignment.spaceBetween,
                                     children: [
                                       Text(
-                                        '$totalMemorized lines memorized',
-                                        // ignore: dead_code
+                                        isNazra
+                                            ? (isQComp
+                                                ? (context.isUrdu ? 'قاعدہ مکمل (21 اسباق)' : 'Qaida Completed (21 Lessons)')
+                                                : (context.isUrdu ? 'سبق نمبر $qLessonNum / ۲۱ زیرِ تعلیم' : 'Lesson $qLessonNum of 21 in progress'))
+                                            : '$totalMemorized lines memorized',
                                         style: const TextStyle(
                                           fontSize: 12,
                                           color: Color(0xFF374151),
@@ -320,7 +368,11 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                         ),
                                       ),
                                       Text(
-                                        '$remaining left',
+                                        isNazra
+                                            ? (isQComp
+                                                ? '✅ 100%'
+                                                : (context.isUrdu ? '${21 - qLessonNum} اسباق باقی' : '${21 - qLessonNum} left'))
+                                            : '$remaining left',
                                         style: const TextStyle(
                                           fontSize: 11,
                                           color: Color(0xFF9CA3AF),
@@ -337,47 +389,150 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                         const SizedBox(height: 20),
 
                         // ── Stat cards row ──
-                        Row(
-                          children: [
-                            _statCard(
-                              icon: Icons.menu_book_rounded,
-                              label: 'Total Verses',
-                              value: '${widget.totalLines}',
-                              color: const Color(0xFF6366F1),
-                              bg: const Color(0xFFEEF2FF),
-                            ),
-                            const SizedBox(width: 10),
-                            _statCard(
-                              icon: Icons.check_circle_outline,
-                              label: 'Memorized',
-                              value: '$totalMemorized',
-                              color: teal,
-                              bg: tealLight,
-                            ),
-                            const SizedBox(width: 10),
-                            _statCard(
-                              icon: Icons.timelapse_rounded,
-                              label: 'Time with Org',
-                              value: _timeWithOrg(),
-                              color: const Color(0xFFF59E0B),
-                              bg: const Color(0xFFFFFBEB),
-                            ),
-                          ],
-                        ),
+                        if (isNazra) ...[
+                          Row(
+                            children: [
+                              _statCard(
+                                icon: Icons.auto_stories_rounded,
+                                label: context.isUrdu ? 'قاعدہ اسباق' : 'Qaida Lessons',
+                                value: isQComp ? '21 / 21 ✅' : '$qLessonNum / 21',
+                                color: isQComp ? const Color(0xFF059669) : teal,
+                                bg: isQComp ? const Color(0xFFECFDF5) : tealLight,
+                              ),
+                              const SizedBox(width: 10),
+                              _statCard(
+                                icon: Icons.bookmark_added_rounded,
+                                label: context.isUrdu ? 'ناظرہ کیفیت' : 'Nazra Status',
+                                value: isQComp
+                                    ? (context.isUrdu ? 'ناظرہ قرآن' : 'Nazra Quran')
+                                    : (context.isUrdu ? 'قاعدہ جاری' : 'Qaida Active'),
+                                color: const Color(0xFF6366F1),
+                                bg: const Color(0xFFEEF2FF),
+                              ),
+                              const SizedBox(width: 10),
+                              _statCard(
+                                icon: Icons.timelapse_rounded,
+                                label: 'Time with Org',
+                                value: _timeWithOrg(),
+                                color: const Color(0xFFF59E0B),
+                                bg: const Color(0xFFFFFBEB),
+                              ),
+                            ],
+                          ),
+                        ] else ...[
+                          Row(
+                            children: [
+                              _statCard(
+                                icon: Icons.menu_book_rounded,
+                                label: 'Total Verses',
+                                value: '${widget.totalLines}',
+                                color: const Color(0xFF6366F1),
+                                bg: const Color(0xFFEEF2FF),
+                              ),
+                              const SizedBox(width: 10),
+                              _statCard(
+                                icon: Icons.check_circle_outline,
+                                label: 'Memorized',
+                                value: '$totalMemorized',
+                                color: teal,
+                                bg: tealLight,
+                              ),
+                              const SizedBox(width: 10),
+                              _statCard(
+                                icon: Icons.timelapse_rounded,
+                                label: 'Time with Org',
+                                value: _timeWithOrg(),
+                                color: const Color(0xFFF59E0B),
+                                bg: const Color(0xFFFFFBEB),
+                              ),
+                            ],
+                          ),
+                        ],
 
                         const SizedBox(height: 16),
 
-                        // ── Estimate banner ──
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: widget.estimatedDays != null
-                                ? cardBg
-                                : const Color(0xFFFFF7ED),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
+                        // ── Estimate / Detail banner ──
+                        if (isNazra) ...[
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
+                              color: isQComp ? const Color(0xFFF0FDF4) : const Color(0xFFF0FDFA),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: isQComp ? const Color(0xFFBBF7D0) : const Color(0xFFCCFBF1),
+                              ),
+                            ),
+                            child: Row(
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(8),
+                                  decoration: BoxDecoration(
+                                    color: isQComp ? const Color(0xFFDCFCE7) : const Color(0xFFCCFBF1),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Icon(
+                                    isQComp ? Icons.verified_rounded : Icons.auto_stories_rounded,
+                                    color: isQComp ? const Color(0xFF16A34A) : teal,
+                                    size: 20,
+                                  ),
+                                ),
+                                const SizedBox(width: 14),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        isQComp
+                                            ? (context.isUrdu ? 'قاعدہ مرحلہ: مکمل ✅' : 'Qaida Stage: Completed ✅')
+                                            : (context.isUrdu ? 'قاعدہ مرحلہ: جاری' : 'Qaida Stage: In Progress'),
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: isQComp ? const Color(0xFF15803D) : const Color(0xFF0F766E),
+                                          fontWeight: FontWeight.w700,
+                                          letterSpacing: 0.4,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        isQComp
+                                            ? (context.isUrdu ? 'قاعدہ مکمل — ناظرہ قرآن پاک جاری' : 'Qaida Completed — Reading Nazra Quran')
+                                            : (context.isUrdu ? 'سبق نمبر $qLessonNum / ۲۱ زیرِ تعلیم' : 'Lesson $qLessonNum of 21 active'),
+                                        style: TextStyle(
+                                          fontSize: 15,
+                                          fontWeight: FontWeight.bold,
+                                          color: isQComp ? const Color(0xFF166534) : const Color(0xFF115E59),
+                                        ),
+                                      ),
+                                      const SizedBox(height: 3),
+                                      Text(
+                                        isQComp
+                                            ? (widget.ruku != null && widget.ruku.toString().isNotEmpty && widget.ruku.toString() != '-'
+                                                ? (context.isUrdu ? 'موجودہ رُكوع: پارہ ${widget.rukuPara ?? 1} • ${widget.ruku} رُكوع' : 'Current Ruku: Para ${widget.rukuPara ?? 1} • Ruku ${widget.ruku}')
+                                                : (context.isUrdu ? 'طالب علم ناظرہ قرآن کی تلاوت کر رہا ہے' : 'Student has advanced to Nazra Quran reading.'))
+                                            : (context.isUrdu ? 'باقی اسباق: ${21 - qLessonNum} (کل 21 اسباق)' : '${21 - qLessonNum} lessons remaining out of 21'),
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          color: isQComp ? const Color(0xFF15803D) : Colors.grey[700],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ] else ...[
+                          Container(
+                            width: double.infinity,
+                            padding: const EdgeInsets.all(16),
+                            decoration: BoxDecoration(
                               color: widget.estimatedDays != null
+                                  ? cardBg
+                                  : const Color(0xFFFFF7ED),
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(
+                                color: widget.estimatedDays != null
                                   ? tealLight
                                   : const Color(0xFFFED7AA),
                             ),
@@ -441,6 +596,7 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                             ],
                           ),
                         ),
+                      ],
 
                         if (isHifz) ...[
                           const SizedBox(height: 12),

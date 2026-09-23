@@ -9,10 +9,11 @@ import '../madrassa_strings.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/madrassa_providers.dart';
 import '../utils/madrassa_local_storage.dart';
+import '../../../design/design_system.dart';
 
 // Breakpoints for responsive dashboard sizing
-const double kMobileBreakpoint = 600.0;
-const double kTabletBreakpoint = 900.0;
+const double kMobileBreakpoint = GBreakpoint.mobile;
+const double kTabletBreakpoint = GBreakpoint.tablet;
 
 class MadrassaOverviewView extends ConsumerWidget {
   final String branchId;
@@ -1086,6 +1087,7 @@ class MadrassaOverviewView extends ConsumerWidget {
      // Determine grid layout
      return LayoutBuilder(
        builder: (context, constraints) {
+         final bool isNazraOnly = LocalStorageService.isMadrassaNazraOnly(branchId);
          final bool isFeeEnabled = LocalStorageService.isMadrassaFeeEnabled(branchId);
          final width = constraints.maxWidth;
          final int crossAxisCount;
@@ -1098,7 +1100,7 @@ class MadrassaOverviewView extends ConsumerWidget {
            crossAxisCount = 3;
            childAspectRatio = 1.3;
          } else {
-           crossAxisCount = isFeeEnabled ? 4 : 3;
+           crossAxisCount = (isFeeEnabled || isNazraOnly) ? 4 : 3;
            childAspectRatio = 1.25;
          }
 
@@ -1207,7 +1209,7 @@ class MadrassaOverviewView extends ConsumerWidget {
                  );
                },
              ),
-             // 4. Fees Card -> Navigates to Monthly Report tab
+             // 4. Fees Card (if fee enabled) OR Nazra-only summary card
              if (isFeeEnabled)
                configAsync.when(
                  loading: () => placeholderCard(context.l.baseFeeLabel),
@@ -1218,7 +1220,7 @@ class MadrassaOverviewView extends ConsumerWidget {
                    Icons.account_balance_wallet_rounded,
                    35,
                    badge: 'Base',
-                   onTap: () => onAction?.call(isAdmin ? 4 : 3),
+                   onTap: () => onAction?.call(isAdmin ? 6 : 4),
                  ),
                  data: (config) => _statCard(
                    context,
@@ -1227,8 +1229,48 @@ class MadrassaOverviewView extends ConsumerWidget {
                    Icons.account_balance_wallet_rounded,
                    35,
                    badge: 'Per Student',
-                   onTap: () => onAction?.call(isAdmin ? 4 : 3),
+                   onTap: () => onAction?.call(isAdmin ? 6 : 4),
                  ),
+               )
+             else if (isNazraOnly)
+               studentsAsync.when(
+                 loading: () => placeholderCard(context.isUrdu ? 'صرف ناظرہ' : 'Only Nazra'),
+                 error: (_, __) => _statCard(
+                   context,
+                   context.isUrdu ? 'صرف ناظرہ سسٹم' : 'Only Nazra System',
+                   'ناظرہ',
+                   Icons.menu_book_rounded,
+                   35,
+                   badge: 'No Fees',
+                   onTap: () => onAction?.call(isAdmin ? 2 : 1),
+                 ),
+                 data: (students) {
+                   final activeList = students.where((d) {
+                     final statusVal = d['status'];
+                     return (statusVal == null || statusVal == '')
+                         ? (d['active'] == true)
+                         : (statusVal == 'active');
+                   }).toList();
+                   int girls = 0;
+                   int boys = 0;
+                   for (final s in activeList) {
+                     final g = (s['gender'] ?? 'male').toString().toLowerCase();
+                     if (g == 'female' || g == 'girl') {
+                       girls++;
+                     } else {
+                       boys++;
+                     }
+                   }
+                   return _statCard(
+                     context,
+                     context.isUrdu ? 'صرف ناظرہ سسٹم' : 'Only Nazra System',
+                     context.isUrdu ? '$boys لڑکے • $girls لڑکیاں' : '$boys Boys • $girls Girls',
+                     Icons.menu_book_rounded,
+                     35,
+                     badge: 'Attendance + Sabak',
+                     onTap: () => onAction?.call(isAdmin ? 2 : 1),
+                   );
+                 },
                ),
            ],
          );
@@ -1247,7 +1289,7 @@ class MadrassaOverviewView extends ConsumerWidget {
   }) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final isMobile = MediaQuery.of(context).size.width < kMobileBreakpoint;
+    final isMobile = GBreakpoint.isMobile(context);
 
     // Derived HSL colors
     final accentColor = HSLColor.fromAHSL(1.0, hue, 0.75, 0.46).toColor();
@@ -1407,7 +1449,17 @@ class MadrassaOverviewView extends ConsumerWidget {
         onTap: () => onAction?.call(1),
       ),
       if (isAdmin) ...[
-        // 2. Monthly Report -> analytical summary/exports (index 3)
+        // 2. Teachers -> attendance & directory (index 3)
+        _QuickActionItem(
+          title: context.isUrdu ? "اساتذہ پورٹل" : "Faculty & Teachers",
+          subtitle: context.isUrdu
+              ? "اساتذہ کی روزانہ حاضری اور پروفائل کی تفصیلات"
+              : "Teacher daily attendance, schedules & directory",
+          icon: Icons.school_rounded,
+          hue: 160, // Emerald
+          onTap: () => onAction?.call(3),
+        ),
+        // 3. Monthly Report -> analytical summary/exports (index 5)
         _QuickActionItem(
           title: context.l.monthlyReport,
           subtitle: context.isUrdu
@@ -1415,9 +1467,9 @@ class MadrassaOverviewView extends ConsumerWidget {
               : "Analyze monthly metrics and export PDF/Excel files",
           icon: Icons.analytics_rounded,
           hue: 170, // Teal
-          onTap: () => onAction?.call(3),
+          onTap: () => onAction?.call(5),
         ),
-        // 3. Configuration -> settings parameters (index 4)
+        // 4. Configuration -> settings parameters (index 6)
         _QuickActionItem(
           title: context.l.config,
           subtitle: context.isUrdu
@@ -1425,7 +1477,7 @@ class MadrassaOverviewView extends ConsumerWidget {
               : "Manage base fees, holiday dates, and PTM timings",
           icon: Icons.settings_suggest_rounded,
           hue: 35, // Orange/Gold
-          onTap: () => onAction?.call(4),
+          onTap: () => onAction?.call(6),
         ),
       ],
     ];

@@ -67,6 +67,31 @@ class DonationsLocalStorage {
       await _cleanAllBranchGarbage();
       await flags.put('all_branch_garbage_cleaned', true);
     }
+
+    // Migrate any legacy donations with invalid branchId to the active valid branch
+    try {
+      final box = Hive.box(donationsBox);
+      final fallbackBranch = LocalStorageService.sanitizeBranchId(null);
+      for (final key in box.keys) {
+        final raw = box.get(key);
+        if (raw is Map) {
+          final b = raw['branchId']?.toString();
+          if (!LocalStorageService.isValidBranchId(b)) {
+            final updated = Map<String, dynamic>.from(raw)
+              ..['branchId'] = fallbackBranch
+              ..['syncStatus'] = 'pending';
+            await box.put(key, updated);
+            await LocalStorageService.enqueueSync({
+              'type': 'save_donation',
+              'branchId': fallbackBranch,
+              'localId': updated['localId'] ?? key.toString(),
+              'hiveKey': key.toString(),
+              'data': updated,
+            });
+          }
+        }
+      }
+    } catch (_) {}
   }
 
   static Future<void> _cleanAllBranchGarbage() async {
@@ -259,7 +284,7 @@ class DonationsLocalStorage {
     required String branchId,
     required Map<String, dynamic> data,
   }) async {
-    final branchIdNorm = branchId.toLowerCase().trim();
+    final branchIdNorm = LocalStorageService.sanitizeBranchId(branchId);
     final localId  = (data['localId'] as String?)?.isNotEmpty == true
         ? data['localId'] as String
         : _newLocalId();
@@ -571,7 +596,8 @@ class DonationsLocalStorage {
     if (raw == null) return;
     final updated = Map<String, dynamic>.from(raw as Map)
       ..['firestoreId'] = firestoreId
-      ..['syncStatus']  = 'synced';
+      ..['syncStatus']  = 'synced'
+      ..['synced']      = true;
     await box.put(hiveKey, updated);
     await box.flush();
     debugPrint('[DonationsLS] Synced → $hiveKey → $firestoreId');
@@ -584,6 +610,13 @@ class DonationsLocalStorage {
   ) async {
     final box = Hive.box(donationsBox);
     final existing = box.get(hiveKey);
+    if (existing != null && existing is Map) {
+      if (existing['syncStatus'] == 'deleted' ||
+          existing['isDeleted'] == true ||
+          existing['status'] == 'deleted') {
+        return; // Retain local deletion tombstone
+      }
+    }
     final Map<String, dynamic> merged = existing != null
         ? Map<String, dynamic>.from(existing as Map)
         : <String, dynamic>{};
@@ -642,7 +675,9 @@ class DonationsLocalStorage {
             final raw = box.get(k);
             if (raw == null) return null;
             final m = Map<String, dynamic>.from(raw as Map);
-            // DO NOT filter tombstones here; they are needed for LWW merge in the dashboard
+            if (m['syncStatus'] == 'deleted' || m['isDeleted'] == true || m['status'] == 'deleted') {
+              return null;
+            }
             return DonationRecord.fromMap(m, k.toString());
           } catch (e) {
             debugPrint('[DonationsLS] Skipping corrupted record $k: $e');
@@ -673,7 +708,9 @@ class DonationsLocalStorage {
             final raw = box.get(k);
             if (raw == null) return null;
             final m = Map<String, dynamic>.from(raw as Map);
-            // DO NOT filter tombstones here; they are needed for LWW merge in the dashboard
+            if (m['syncStatus'] == 'deleted' || m['isDeleted'] == true || m['status'] == 'deleted') {
+              return null;
+            }
             return DonationRecord.fromMap(m, k.toString());
           } catch (e) {
             debugPrint('[DonationsLS] Skipping corrupted record $k: $e');
@@ -961,8 +998,9 @@ class DonationsLocalStorage {
   // FIRESTORE → HIVE  (called by SyncService after upload)
   // ══════════════════════════════════════════════════════════════════════════
 
-  static Future<void> downloadAllDonations(String branchId,
-      {int days = 90, bool force = false}) async {
+  static Future<int> downloadAllDonations(String branchId,
+      {int days = 90, bool force = false, bool allTime = false}) async {
+    int saved = 0;
     try {
       final normBranch = branchId.toLowerCase().trim();
       final syncKey = 'donations_$normBranch';
@@ -994,6 +1032,9 @@ class DonationsLocalStorage {
 
           if (lastSyncedTs != null) {
             query = query.where('updatedAt', isGreaterThan: lastSyncedTs).orderBy('updatedAt', descending: false).limit(500);
+          } else if (allTime) {
+            // Full historical sync without any cutoff
+            query = query.orderBy('date', descending: false).limit(500);
           } else {
             query = query.where('date', isGreaterThanOrEqualTo: cutoffStr).orderBy('date', descending: false).limit(500);
           }
@@ -1014,8 +1055,20 @@ class DonationsLocalStorage {
       }
 
       final box = Hive.box(donationsBox);
-      int saved = 0;
       final Map<String, dynamic> updates = {};
+
+      final tombstoneIds = <String>{};
+      final tombstoneReceipts = <String>{};
+      for (final v in box.values) {
+        if (v is Map && (v['syncStatus'] == 'deleted' || v['isDeleted'] == true || v['status'] == 'deleted')) {
+          final fsId = v['firestoreId']?.toString();
+          if (fsId != null && fsId.isNotEmpty) tombstoneIds.add(fsId);
+          final lId = v['localId']?.toString();
+          if (lId != null && lId.isNotEmpty) tombstoneIds.add(lId);
+          final cleanRcpt = v['receiptNoClean']?.toString() ?? cleanReceiptNumber(v['receiptNo']?.toString() ?? '');
+          if (cleanRcpt.isNotEmpty) tombstoneReceipts.add(cleanRcpt);
+        }
+      }
 
       for (final doc in docs) {
         if (doc.id == 'credit_ledger') continue;
@@ -1028,6 +1081,15 @@ class DonationsLocalStorage {
         final date = (d['date'] as String?) ?? _today();
         final localId = (d['localId'] as String?) ?? doc.id;
         final key = _donationKey(docBranch, date, localId);
+        final cleanRcpt = cleanReceiptNumber(d['receiptNo']?.toString() ?? '');
+
+        // If this document was deleted locally, purge it from Firestore and do NOT revive
+        if (tombstoneIds.contains(doc.id) ||
+            tombstoneIds.contains(localId) ||
+            (cleanRcpt.isNotEmpty && tombstoneReceipts.contains(cleanRcpt))) {
+          doc.reference.delete().catchError((_) {});
+          continue;
+        }
 
         final docUpdatedAt = d['updatedAt']?.toString();
         if (docUpdatedAt != null) {
@@ -1037,6 +1099,14 @@ class DonationsLocalStorage {
         }
 
         final existing = box.get(key);
+        if (existing != null) {
+          final ex = Map<String, dynamic>.from(existing as Map);
+          if (ex['syncStatus'] == 'deleted' || ex['isDeleted'] == true || ex['status'] == 'deleted') {
+            doc.reference.delete().catchError((_) {});
+            continue;
+          }
+        }
+
         if (existing == null) {
           updates[key] = _sanitize({
             ...d,
@@ -1089,6 +1159,132 @@ class DonationsLocalStorage {
     } catch (e) {
       debugPrint('[DonationsLS] downloadAllDonations error: $e');
     }
+    return saved;
+  }
+
+  /// Downloads donations collected by a specific user/collector and saves them locally forever.
+  static Future<int> downloadUserDonations({
+    required String branchId,
+    required String username,
+    required String userId,
+  }) async {
+    int saved = 0;
+    try {
+      final normBranch = branchId.toLowerCase().trim();
+      final List<QueryDocumentSnapshot<Map<String, dynamic>>> docs = [];
+
+      final branchesToQuery = <String>[];
+      if (normBranch == 'all' || normBranch.isEmpty) {
+        final branchesSnap = await FirebaseFirestore.instance.collection('branches').get();
+        branchesToQuery.addAll(branchesSnap.docs.map((d) => d.id));
+      } else {
+        branchesToQuery.add(normBranch);
+      }
+
+      final seenDocIds = <String>{};
+
+      for (final bId in branchesToQuery) {
+        final col = FirebaseFirestore.instance.collection('branches').doc(bId).collection('donations');
+
+        // Query by recordedBy (username)
+        if (username.isNotEmpty) {
+          try {
+            final snap = await col.where('recordedBy', isEqualTo: username).get();
+            for (final d in snap.docs) {
+              if (seenDocIds.add(d.id)) docs.add(d);
+            }
+          } catch (e) {
+            debugPrint('[DonationsLS] recordedBy query on $bId failed: $e');
+          }
+        }
+
+        // Query by collectorId (userId)
+        if (userId.isNotEmpty && userId != username) {
+          try {
+            final snap = await col.where('collectorId', isEqualTo: userId).get();
+            for (final d in snap.docs) {
+              if (seenDocIds.add(d.id)) docs.add(d);
+            }
+          } catch (e) {
+            debugPrint('[DonationsLS] collectorId query on $bId failed: $e');
+          }
+        }
+      }
+
+      final box = Hive.box(donationsBox);
+      final Map<String, dynamic> updates = {};
+
+      final tombstoneIds = <String>{};
+      final tombstoneReceipts = <String>{};
+      for (final v in box.values) {
+        if (v is Map && (v['syncStatus'] == 'deleted' || v['isDeleted'] == true || v['status'] == 'deleted')) {
+          final fsId = v['firestoreId']?.toString();
+          if (fsId != null && fsId.isNotEmpty) tombstoneIds.add(fsId);
+          final lId = v['localId']?.toString();
+          if (lId != null && lId.isNotEmpty) tombstoneIds.add(lId);
+          final cleanRcpt = v['receiptNoClean']?.toString() ?? cleanReceiptNumber(v['receiptNo']?.toString() ?? '');
+          if (cleanRcpt.isNotEmpty) tombstoneReceipts.add(cleanRcpt);
+        }
+      }
+
+      for (final doc in docs) {
+        if (doc.id == 'credit_ledger') continue;
+        final d = doc.data();
+
+        final String? rawBranch = d['branchId'] as String?;
+        final docBranch = (rawBranch != null && rawBranch.isNotEmpty)
+            ? rawBranch.toLowerCase().trim()
+            : (doc.reference.parent.parent?.id ?? normBranch).toLowerCase().trim();
+        final date = (d['date'] as String?) ?? _today();
+        final localId = (d['localId'] as String?) ?? doc.id;
+        final key = _donationKey(docBranch, date, localId);
+        final cleanRcpt = cleanReceiptNumber(d['receiptNo']?.toString() ?? '');
+
+        if (tombstoneIds.contains(doc.id) ||
+            tombstoneIds.contains(localId) ||
+            (cleanRcpt.isNotEmpty && tombstoneReceipts.contains(cleanRcpt))) {
+          doc.reference.delete().catchError((_) {});
+          continue;
+        }
+
+        final existing = box.get(key);
+        if (existing != null) {
+          final ex = Map<String, dynamic>.from(existing as Map);
+          if (ex['syncStatus'] == 'deleted' || ex['isDeleted'] == true || ex['status'] == 'deleted') {
+            doc.reference.delete().catchError((_) {});
+            continue;
+          }
+        }
+
+        if (existing == null) {
+          updates[key] = _sanitize({
+            ...d,
+            'firestoreId': doc.id,
+            'localId': localId,
+            'hiveKey': key,
+            'syncStatus': 'synced',
+          });
+          saved++;
+        } else {
+          final ex = Map<String, dynamic>.from(existing as Map);
+          ex['firestoreId'] = doc.id;
+          ex['syncStatus']  = 'synced';
+          ex.addAll(_sanitize({...d, 'firestoreId': doc.id, 'syncStatus': 'synced'}));
+          updates[key] = ex;
+          saved++;
+        }
+      }
+
+      if (updates.isNotEmpty) {
+        await box.putAll(updates);
+      }
+      await _syncReceiptSequence();
+      await box.flush();
+      debugPrint('[DonationsLS] downloadUserDonations saved $saved records for $username / $userId');
+    } catch (e) {
+      debugPrint('[DonationsLS] downloadUserDonations error: $e');
+    }
+    return saved;
   }
 
   static Future<void> downloadTodayDonations(String branchId) =>
@@ -1278,12 +1474,15 @@ class DonationsLocalStorage {
     final data = Map<String, dynamic>.from(raw as Map);
     final now  = DateTime.now().toUtc().toIso8601String();
 
-    // 1. Tombstone locally (Instant UI removal via getAllDonations filter)
+    // 1. Tombstone locally with multiple flags to ensure absolute local exclusion
     final updated = {
       ...data,
       'syncStatus': 'deleted',
+      'isDeleted': true,
+      'status': 'deleted',
       'lastUpdatedAt': now,
       'isEdited': true,
+      'deleteReason': reason,
     };
     await box.put(hiveKey, updated);
     await box.flush();
@@ -1296,29 +1495,72 @@ class DonationsLocalStorage {
       branchId: branchId,
       collection: 'donations',
       documentId: resolvedDocId,
-      action: 'delete_donation',
-      userId: userId,
-      username: username,
+      action: 'delete',
+      userId: userId.trim().isNotEmpty ? userId : 'system',
+      username: username.trim().isNotEmpty ? username : 'System User',
       oldData: data,
       newData: {'status': 'deleted', 'deletedAt': now, 'reason': reason},
       reason: reason,
     );
 
-    // 3. Queue for Firestore removal (Enqueue all possible ID candidates to ensure complete deletion)
+    // 3. Resolve all target branch candidates
+    final targetBranches = <String>{};
+    final docBranch = data['branchId']?.toString().toLowerCase().trim();
+    if (docBranch != null && docBranch.isNotEmpty && docBranch != 'all') {
+      targetBranches.add(docBranch);
+    }
+    final collectedBranch = data['collectedAtBranch']?.toString().toLowerCase().trim();
+    if (collectedBranch != null && collectedBranch.isNotEmpty && collectedBranch != 'all') {
+      targetBranches.add(collectedBranch);
+    }
+    final cleanB = branchId.toLowerCase().trim();
+    if (cleanB.isNotEmpty && cleanB != 'all') {
+      targetBranches.add(cleanB);
+    }
+    if (targetBranches.isEmpty) {
+      targetBranches.addAll(['gujrat', 'karachi', 'dasterkhwaan', 'headquarters']);
+    }
+
+    // 4. Resolve all possible ID candidates
     final candidates = <String>{};
     if (fsId != null && fsId.isNotEmpty) candidates.add(fsId);
     if (data['localId']?.toString().isNotEmpty == true) candidates.add(data['localId'].toString());
+    final cleanRcpt = data['receiptNoClean']?.toString() ?? cleanReceiptNumber(data['receiptNo']?.toString() ?? '');
+    if (cleanRcpt.isNotEmpty) {
+      candidates.add(cleanRcpt);
+      if (data['localId'] != null) candidates.add('${cleanRcpt}_${data['localId']}');
+    }
     final lastSegment = hiveKey.split('__').last;
     candidates.add(lastSegment);
-    candidates.add(hiveKey); // In case it was uploaded as full key string
 
-    for (final id in candidates) {
-      await LocalStorageService.enqueueSync({
-        'type': 'delete_donation',
-        'branchId': branchId,
-        'firestoreId': id,
-      });
+    // 5. Direct asynchronous deletion in Firestore across target branches
+    for (final b in targetBranches) {
+      for (final id in candidates) {
+        FirebaseFirestore.instance
+            .collection('branches')
+            .doc(b)
+            .collection('donations')
+            .doc(id)
+            .delete()
+            .catchError((_) {});
+      }
     }
+
+    // 6. Queue for reliable background retry in SyncService
+    for (final b in targetBranches) {
+      for (final id in candidates) {
+        await LocalStorageService.enqueueSync({
+          'type': 'delete_donation',
+          'branchId': b,
+          'firestoreId': id,
+        });
+      }
+    }
+
+    // 7. Trigger cloud upload immediately
+    try {
+      SyncService().triggerUpload(force: true);
+    } catch (_) {}
     
     debugPrint('[DonationsLS] Transaction tombstoned and deletion enqueued: $hiveKey');
   }

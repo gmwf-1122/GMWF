@@ -110,6 +110,18 @@ class ZkTecoNetworkService {
     }
   }
 
+  /// Canonical second-precision deduplication key to eliminate microsecond variance duplicates
+  static String buildCanonicalDedupKey(String pin, DateTime timestamp, [String deviceIp = '']) {
+    final y = timestamp.year.toString();
+    final m = timestamp.month.toString().padLeft(2, '0');
+    final d = timestamp.day.toString().padLeft(2, '0');
+    final h = timestamp.hour.toString().padLeft(2, '0');
+    final min = timestamp.minute.toString().padLeft(2, '0');
+    final s = timestamp.second.toString().padLeft(2, '0');
+    final dev = deviceIp.isNotEmpty ? '${deviceIp}_' : '';
+    return '${dev}${pin}_${y}${m}${d}_${h}${min}${s}';
+  }
+
   /// Feature Flag: Per-device map controlling whether Flutter app actively polls hardware devices over UDP/TCP.
   /// Defaults to true for all devices.
   static Map<String, bool> enableDartPollingByDevice = {};
@@ -390,11 +402,11 @@ class ZkTecoNetworkService {
           continue;
         }
 
-        final dedupKey = '${clientIp}_${cleanPin}_${timestamp.toIso8601String()}';
-        if (isPunchDuplicate(dedupKey)) {
+        final dedupKey = buildCanonicalDedupKey(cleanPin, timestamp, clientIp);
+        if (isPunchDuplicate(dedupKey, pin: cleanPin, deviceIp: clientIp, timestamp: timestamp)) {
           continue;
         }
-        recordPunchDedupKey(dedupKey);
+        recordPunchDedupKey(dedupKey, pin: cleanPin, deviceIp: clientIp, timestamp: timestamp);
 
         processIncomingPunch(
           pin: cleanPin,
@@ -419,10 +431,12 @@ class ZkTecoNetworkService {
     bool enqueueForSync = true,
     bool broadcastLan = true,
   }) async {
-    final dedupKey = '${deviceIp}_${pin}_${timestamp.toIso8601String()}';
-    if (!isPunchDuplicate(dedupKey)) {
-      recordPunchDedupKey(dedupKey);
+    final dedupKey = buildCanonicalDedupKey(pin, timestamp, deviceIp);
+    if (isPunchDuplicate(dedupKey, pin: pin, deviceIp: deviceIp, timestamp: timestamp)) {
+      debugPrint('[ZkTecoNetworkService] Skipping duplicate/debounced punch for PIN $pin at $timestamp ($deviceIp)');
+      return;
     }
+    recordPunchDedupKey(dedupKey, pin: pin, deviceIp: deviceIp, timestamp: timestamp);
 
     final bool isFromCloud = (source == 'firestore_sync' || source == 'firestore_listener');
     final bool shouldEnqueue = enqueueForSync && !isFromCloud;
@@ -503,8 +517,8 @@ class ZkTecoNetworkService {
     }
 
     if (isCrossBranch) {
-      // Cross-branch punch detected -> Create Pending HQ Authorization Record
-      final pendingRecord = {
+      // Cross-branch punch detected -> Auto-approve and log for audit
+      final crossBranchRecord = {
         'id': _uuid.v4(),
         'punchId': punchRecord['id'],
         'pin': pin,
@@ -520,20 +534,33 @@ class ZkTecoNetworkService {
         'deviceName': device?.deviceName ?? 'ZKTeco Device ($deviceIp)',
         'buildingLocation': buildingLocation,
         'timestamp': timestamp.toIso8601String(),
-        'status': 'pending', // 'pending' | 'approved' | 'rejected'
-        'reviewedBy': null,
-        'reviewedAt': null,
+        'status': 'approved',
+        'reviewedBy': 'Auto-Approved (Policy)',
+        'reviewedAt': DateTime.now().toIso8601String(),
         'rejectReason': null,
         'source': source,
       };
-      await _saveCrossBranchPendingPunch(pendingRecord);
-      punchRecord['crossBranchInfo'] = pendingRecord;
+      await _saveCrossBranchPendingPunch(crossBranchRecord);
+      punchRecord['crossBranchInfo'] = crossBranchRecord;
+
+      // Auto-route to attendance module immediately without requiring manual approval
+      final punchBranchName = LocalStorageService.getBranchName(deviceBranch);
+      final locationNote = '$buildingLocation ($punchBranchName - Auto-Approved)';
+      await _routePunchToModule(
+        credential,
+        timestamp,
+        locationNote,
+        source,
+        deviceBranch: deviceBranch,
+        deviceSn: deviceSn,
+        enqueueForSync: shouldEnqueue,
+      );
 
       if (shouldBroadcast) {
         try {
           RealtimeManager().sendMessage({
             'event_type': 'cross_branch_punch_alert',
-            'data': pendingRecord,
+            'data': crossBranchRecord,
           });
         } catch (e) {
           debugPrint('[ZkTecoNetworkService] Realtime alert broadcast error: $e');
@@ -1184,12 +1211,38 @@ class ZkTecoNetworkService {
     return result;
   }
 
-  static Future<void> saveDeviceConfig(BiometricDeviceConfig config, {String? oldBranchId}) async {
+  static Future<void> saveDeviceConfig(BiometricDeviceConfig config, {String? oldBranchId, bool localOnly = false}) async {
     if (!Hive.isBoxOpen(LocalStorageService.biometricDevicesBox)) {
       await LocalStorageService.openBoxSafe(LocalStorageService.biometricDevicesBox);
     }
     final box = Hive.box(LocalStorageService.biometricDevicesBox);
+
+    final existing = box.get(config.deviceId);
+    bool hasChanged = true;
+    if (existing is Map) {
+      final oldIp = existing['ipAddress']?.toString().trim();
+      final oldPort = existing['port']?.toString().trim();
+      final oldBranch = existing['branchId']?.toString().trim();
+      final oldName = existing['deviceName']?.toString().trim();
+      final oldEnabled = existing['enabled'];
+      final oldLoc = existing['buildingLocation']?.toString().trim();
+
+      if (oldIp == config.ipAddress.trim() &&
+          oldPort == config.port.toString().trim() &&
+          oldBranch == config.branchId.trim() &&
+          oldName == config.deviceName.trim() &&
+          oldEnabled == config.enabled &&
+          oldLoc == config.buildingLocation.trim()) {
+        hasChanged = false;
+      }
+    }
+
     await box.put(config.deviceId, config.toMap());
+
+    if (localOnly || !hasChanged) {
+      // Configuration is already current in local storage — do not bloat queue or spam network
+      return;
+    }
 
     // Clear from tombstone if previously deleted
     await removeDeletedDeviceTombstone(config.deviceId);
@@ -1505,22 +1558,29 @@ class ZkTecoNetworkService {
     return false;
   }
 
+  /// Updates the online/heartbeat status locally in Hive only.
+  /// Does NOT enqueue a cloud sync — status flips are ephemeral and would
+  /// flood the sync queue if cloud-synced on every 5-minute ping cycle.
   static Future<void> _updateDeviceOnlineStatus(String ipAddress) async {
-    final devices = getAllDevices();
-    for (final dev in devices) {
+    if (!Hive.isBoxOpen(LocalStorageService.biometricDevicesBox)) return;
+    final box = Hive.box(LocalStorageService.biometricDevicesBox);
+    for (final dev in getAllDevices()) {
       if (dev.ipAddress == ipAddress) {
         final updated = dev.copyWith(
           lastHeartbeat: DateTime.now(),
           status: 'Online',
         );
-        await saveDeviceConfig(updated);
+        await box.put(updated.deviceId, updated.toMap());
+        debugPrint('[ZkTecoNetworkService] [Local] Status → Online for ${updated.deviceName} ($ipAddress)');
       }
     }
   }
 
+  /// Marks device offline locally in Hive only (no cloud sync enqueue).
   static Future<void> _markDeviceOffline(String ipAddress) async {
-    final devices = getAllDevices();
-    for (final dev in devices) {
+    if (!Hive.isBoxOpen(LocalStorageService.biometricDevicesBox)) return;
+    final box = Hive.box(LocalStorageService.biometricDevicesBox);
+    for (final dev in getAllDevices()) {
       if (dev.ipAddress == ipAddress) {
         // If the device had a heartbeat via ADMS push in the last 90 seconds, do not override it to Offline.
         if (dev.lastHeartbeat != null &&
@@ -1528,10 +1588,9 @@ class ZkTecoNetworkService {
           debugPrint('[ZkTecoNetworkService] Retaining ONLINE status for $ipAddress (ADMS push is active)');
           continue;
         }
-        final updated = dev.copyWith(
-          status: 'Offline',
-        );
-        await saveDeviceConfig(updated);
+        final updated = dev.copyWith(status: 'Offline');
+        await box.put(updated.deviceId, updated.toMap());
+        debugPrint('[ZkTecoNetworkService] [Local] Status → Offline for ${updated.deviceName} ($ipAddress)');
       }
     }
   }
@@ -1706,8 +1765,8 @@ class ZkTecoNetworkService {
   /// and pulls new attendance log records using the ZK UDP protocol.
   static void _startActivePolling() {
     _activePollingTimer?.cancel();
-    // Poll every 15 seconds
-    _activePollingTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+    // Poll every 5 minutes (Live events are pushed in real-time via UDP/HTTP; polling is for background reconciliation)
+    _activePollingTimer = Timer.periodic(const Duration(minutes: 5), (_) {
       syncAllDevices();
     });
     // Also do an immediate first poll
@@ -1977,18 +2036,26 @@ class ZkTecoNetworkService {
           final timeStr = parts[1].trim();
           final timestamp = DateTime.tryParse(timeStr) ?? DateTime.now();
 
+          // Cutoff: Only process records from the last 24h to avoid flooding queues with stale historical dumps
+          if (DateTime.now().difference(timestamp).inHours.abs() > 24) {
+            continue;
+          }
+
           if (cleanPin.isNotEmpty && !cleanPin.startsWith('PP')) {
-            final dedupKey = '${deviceIp}_${cleanPin}_$timeStr';
-            if (!isPunchDuplicate(dedupKey)) {
-              recordPunchDedupKey(dedupKey);
-              processIncomingPunch(
-                pin: cleanPin,
-                timestamp: timestamp,
-                deviceIp: deviceIp,
-                deviceSn: deviceSn,
-                source: 'zkteco_pull',
-              );
+            final dedupKey = buildCanonicalDedupKey(cleanPin, timestamp, deviceIp);
+            if (isPunchDuplicate(dedupKey, pin: cleanPin, deviceIp: deviceIp, timestamp: timestamp)) {
+              continue;
             }
+            recordPunchDedupKey(dedupKey, pin: cleanPin, deviceIp: deviceIp, timestamp: timestamp);
+            processIncomingPunch(
+              pin: cleanPin,
+              timestamp: timestamp,
+              deviceIp: deviceIp,
+              deviceSn: deviceSn,
+              source: 'zkteco_pull',
+              broadcastLan: false,
+              enqueueForSync: false,
+            );
           }
         }
       }
@@ -2019,18 +2086,26 @@ class ZkTecoNetworkService {
 
             final timestamp = _decodeZkTime(timeEncoded);
 
+            // Cutoff: Only process records from the last 24h to avoid flooding queues on memory dumps
+            if (DateTime.now().difference(timestamp).inHours.abs() > 24) {
+              continue;
+            }
+
             if (cleanPin.isNotEmpty && !cleanPin.startsWith('PP')) {
-              final dedupKey = '${deviceIp}_${cleanPin}_${timestamp.toIso8601String()}';
-              if (!isPunchDuplicate(dedupKey)) {
-                recordPunchDedupKey(dedupKey);
-                processIncomingPunch(
-                  pin: cleanPin,
-                  timestamp: timestamp,
-                  deviceIp: deviceIp,
-                  deviceSn: deviceSn,
-                  source: 'zkteco_pull',
-                );
+              final dedupKey = buildCanonicalDedupKey(cleanPin, timestamp, deviceIp);
+              if (isPunchDuplicate(dedupKey, pin: cleanPin, deviceIp: deviceIp, timestamp: timestamp)) {
+                continue;
               }
+              recordPunchDedupKey(dedupKey, pin: cleanPin, deviceIp: deviceIp, timestamp: timestamp);
+              processIncomingPunch(
+                pin: cleanPin,
+                timestamp: timestamp,
+                deviceIp: deviceIp,
+                deviceSn: deviceSn,
+                source: 'zkteco_pull',
+                broadcastLan: false,
+                enqueueForSync: false,
+              );
             }
           }
         } catch (e) {
@@ -2056,20 +2131,29 @@ class ZkTecoNetworkService {
               (data[offset + 5] << 24);
 
           final timestamp = _decodeZkTime(timeEncoded);
+
+          // Cutoff: Only process records from the last 24h to avoid flooding queues on memory dumps
+          if (DateTime.now().difference(timestamp).inHours.abs() > 24) {
+            continue;
+          }
+
           final cleanPin = pinNum > 0 && pinNum < 65535 ? pinNum.toString() : '';
 
           if (cleanPin.isNotEmpty && !cleanPin.startsWith('PP')) {
-            final dedupKey = '${deviceIp}_${cleanPin}_${timestamp.toIso8601String()}';
-            if (!isPunchDuplicate(dedupKey)) {
-              recordPunchDedupKey(dedupKey);
-              processIncomingPunch(
-                pin: cleanPin,
-                timestamp: timestamp,
-                deviceIp: deviceIp,
-                deviceSn: deviceSn,
-                source: 'zkteco_pull',
-              );
+            final dedupKey = buildCanonicalDedupKey(cleanPin, timestamp, deviceIp);
+            if (isPunchDuplicate(dedupKey, pin: cleanPin, deviceIp: deviceIp, timestamp: timestamp)) {
+              continue;
             }
+            recordPunchDedupKey(dedupKey, pin: cleanPin, deviceIp: deviceIp, timestamp: timestamp);
+            processIncomingPunch(
+              pin: cleanPin,
+              timestamp: timestamp,
+              deviceIp: deviceIp,
+              deviceSn: deviceSn,
+              source: 'zkteco_pull',
+              broadcastLan: false,
+              enqueueForSync: false,
+            );
           }
         } catch (e) {
           debugPrint('[ZkTecoNetworkService] Error parsing 24-byte record $i: $e');
@@ -2412,7 +2496,17 @@ class ZkTecoNetworkService {
             if (eId == entityId) {
               map['biometricPin'] = cleanPin;
               map['pin'] = cleanPin;
+              map['updatedAt'] = DateTime.now().toUtc().toIso8601String();
+              map['syncStatus'] = 'pending';
               await empBox.put(key, map);
+              await empBox.flush();
+
+              await LocalStorageService.enqueueSync({
+                'type': 'save_employee',
+                'branchId': map['branchId']?.toString() ?? branchId,
+                'localId': eId,
+                'data': map,
+              });
               break;
             }
           }
@@ -2427,7 +2521,11 @@ class ZkTecoNetworkService {
             .doc(targetBranch)
             .collection('employees')
             .doc(entityId)
-            .set({'biometricPin': cleanPin, 'pin': cleanPin}, SetOptions(merge: true))
+            .set({
+              'biometricPin': cleanPin,
+              'pin': cleanPin,
+              'updatedAt': FieldValue.serverTimestamp(),
+            }, SetOptions(merge: true))
             .catchError((_) {});
       } catch (_) {}
     }
@@ -2852,6 +2950,56 @@ class ZkTecoNetworkService {
     );
 
     await registerBiometricCredential(cred);
+
+    // Synchronize to employeesBox and Cloud Firestore so PIN is permanently saved across all devices & syncs
+    final lowerType = entityType.toLowerCase();
+    if (lowerType == 'employee' || lowerType == 'teacher' || lowerType == 'staff') {
+      try {
+        if (Hive.isBoxOpen(LocalStorageService.employeesBox)) {
+          final empBox = Hive.box(LocalStorageService.employeesBox);
+          for (final key in empBox.keys) {
+            final raw = empBox.get(key);
+            if (raw is Map) {
+              final map = Map<String, dynamic>.from(raw);
+              final eId = (map['localId'] ?? map['id'] ?? key).toString().trim();
+              if (eId == entityId.trim()) {
+                map['biometricPin'] = finalPin;
+                map['pin'] = finalPin;
+                map['updatedAt'] = DateTime.now().toUtc().toIso8601String();
+                map['syncStatus'] = 'pending';
+                await empBox.put(key, map);
+                await empBox.flush();
+
+                await LocalStorageService.enqueueSync({
+                  'type': 'save_employee',
+                  'branchId': map['branchId']?.toString() ?? branchId,
+                  'localId': eId,
+                  'data': map,
+                });
+                break;
+              }
+            }
+          }
+        }
+
+        // Direct Cloud Firestore write to branch employee document
+        final targetBranch = LocalStorageService.sanitizeBranchId(branchId, fallback: 'karachi');
+        FirebaseFirestore.instance
+            .collection('branches')
+            .doc(targetBranch)
+            .collection('employees')
+            .doc(entityId.trim())
+            .set({
+              'biometricPin': finalPin,
+              'pin': finalPin,
+              'updatedAt': FieldValue.serverTimestamp(),
+            }, SetOptions(merge: true))
+            .catchError((_) {});
+      } catch (e) {
+        debugPrint('[ZkTecoNetworkService] Employee PIN sync notice: $e');
+      }
+    }
+
     unawaited(processPendingUnmappedPunches().catchError((e) {
       debugPrint('[ZkTecoNetworkService] Background unmapped punches notice: $e');
       return 0;

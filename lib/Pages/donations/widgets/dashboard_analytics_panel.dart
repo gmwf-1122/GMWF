@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:fl_chart/fl_chart.dart';
 import '../../../constants/colors.dart';
 import '../../../models/donation_models.dart';
+import '../../../design/design_system.dart';
 import '../donations_shared.dart';
 
 enum TrendPeriod { day, week, month, year }
@@ -208,7 +209,7 @@ class _AnalyticsInsightsDialogState extends State<AnalyticsInsightsDialog> {
     }
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final isMobile = MediaQuery.of(context).size.width < 800;
+    final isMobile = GBreakpoint.isCompact(context);
 
     return Dialog(
       backgroundColor: Colors.transparent,

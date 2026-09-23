@@ -15,6 +15,7 @@ import '../models/school_student.dart';
 import '../utils/school_local_storage.dart';
 import '../utils/school_admission_pdf_service.dart';
 import '../constants/school_constants.dart';
+import '../../../widgets/app_feedback.dart';
 
 class SchoolEnrollmentDialog extends StatefulWidget {
   final String branchId;
@@ -393,6 +394,11 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
     if (mounted) {
       setState(() => _isSaving = false);
       Navigator.of(context).pop(true);
+      AppFeedback.showSuccess(
+        context,
+        widget.studentToEdit != null ? 'Student profile updated successfully!' : 'Student enrolled successfully!',
+        subtitle: 'Saved locally • Syncing to cloud',
+      );
     }
   }
 
@@ -477,6 +483,11 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
     if (mounted) {
       setState(() => _isSaving = false);
       Navigator.of(context).pop(true);
+      AppFeedback.showSuccess(
+        context,
+        widget.studentToEdit != null ? 'Student profile updated successfully!' : 'Student enrolled successfully!',
+        subtitle: 'Saved locally • Admission slip ready to print',
+      );
     }
 
     // Trigger PDF Print & Download Layout

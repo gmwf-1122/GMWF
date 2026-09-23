@@ -20,6 +20,7 @@ import 'notification_screen.dart';
 import '../widgets/global_module_wrapper.dart';
 import '../widgets/home_snapshot_widgets.dart';
 import '../services/sync_service.dart';
+import '../design/design_system.dart';
 import 'admin/data_cleanup_screen.dart';
 import '../services/role_simulator_service.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -579,7 +580,7 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
           child: Builder(builder: (ctx) {
             RoleThemeData t = RoleThemeData.of(roleTheme, customColor);
             t = isDark ? t.toDarkMode() : t.toLightMode();
-            final isDesktop = MediaQuery.of(ctx).size.width >= 900;
+            final isDesktop = GBreakpoint.isDesktop(ctx);
 
             // ── SUPERVISOR DEDICATED LAYOUT: Bottom NavBar + Module Navigation Home Hub ──
             if (_isSupervisor) {
@@ -3848,7 +3849,7 @@ class _SearchBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width < 600;
+    final isMobile = GBreakpoint.isMobile(context);
     if (isMobile && !state._searchOpen) return const SizedBox.shrink();
 
     return SizeTransition(

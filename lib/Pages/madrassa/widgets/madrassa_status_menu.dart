@@ -52,6 +52,8 @@ class StatusActionMenu extends StatelessWidget {
       statusLabelEn = context.l.statusArchived;
     } else if (newStatus == 'hifz_completed') {
       statusLabelEn = context.l.statusHifzCompleted;
+    } else if (newStatus == 'nazra_completed') {
+      statusLabelEn = context.l.statusNazraCompleted;
     } else if (newStatus == 'left') {
       statusLabelEn = context.l.statusLeft;
     } else if (newStatus == 'dropped') {
@@ -62,6 +64,7 @@ class StatusActionMenu extends StatelessWidget {
     const dateFieldForStatus = {
       'archived': 'archivedDate',
       'hifz_completed': 'hifzCompletionDate',
+      'nazra_completed': 'nazraCompletionDate',
       'left': 'leftDate',
       'dropped': 'droppedDate',
     };
@@ -74,6 +77,8 @@ class StatusActionMenu extends StatelessWidget {
       dialogTitle = context.l.unarchiveStudent;
     } else if (newStatus == 'hifz_completed') {
       dialogTitle = context.isUrdu ? 'حفظ کی تکمیل' : 'Mark Hifz Completed';
+    } else if (newStatus == 'nazra_completed') {
+      dialogTitle = context.l.markNazraCompleted;
     } else if (newStatus == 'left') {
       dialogTitle = context.isUrdu ? 'طالب علم چھوڑ گیا' : 'Mark as Left';
     } else if (newStatus == 'dropped') {
@@ -87,6 +92,8 @@ class StatusActionMenu extends StatelessWidget {
       confirmColor = Colors.green;
     } else if (newStatus == 'hifz_completed') {
       confirmColor = const Color(0xFF4C4DDC);
+    } else if (newStatus == 'nazra_completed') {
+      confirmColor = const Color(0xFF0D9488);
     } else if (newStatus == 'left') {
       confirmColor = Colors.redAccent;
     } else if (newStatus == 'dropped') {
@@ -99,6 +106,7 @@ class StatusActionMenu extends StatelessWidget {
     // Required statuses default to today; unarchive starts empty (optional, opt-in)
     DateTime? selectedDate = requiresDate ? DateTime.now() : null;
     String? hifzCertBase64 = sData['hifzCertificateUrl'] ?? sData['hifzCertificateBase64'];
+    String? nazraCertBase64 = sData['nazraCertificateUrl'] ?? sData['nazraCertificateBase64'];
 
     final confirm = await showDialog<bool>(
       context: context,
@@ -190,6 +198,16 @@ class StatusActionMenu extends StatelessWidget {
                       onChanged: (val) => setDs(() => hifzCertBase64 = val),
                     ),
                   ],
+                  if (newStatus == 'nazra_completed') ...[
+                    const SizedBox(height: 16),
+                    MediaUploadTile(
+                      label: context.l.nazraCertificate,
+                      icon: Icons.menu_book_rounded,
+                      initialValue: nazraCertBase64,
+                      isDocument: true,
+                      onChanged: (val) => setDs(() => nazraCertBase64 = val),
+                    ),
+                  ],
                   const SizedBox(height: 20),
                   buildTf(
                     reasonCtrl,
@@ -236,6 +254,10 @@ class StatusActionMenu extends StatelessWidget {
           'hifzCertificateUrl': hifzCertBase64,
           'hifzCertificateBase64': hifzCertBase64,
         },
+        if (newStatus == 'nazra_completed' && nazraCertBase64 != null) ...{
+          'nazraCertificateUrl': nazraCertBase64,
+          'nazraCertificateBase64': nazraCertBase64,
+        },
         'auditLog': FieldValue.arrayUnion([
           {
             'status': newStatus,
@@ -263,13 +285,17 @@ class StatusActionMenu extends StatelessWidget {
           effectiveDate: selectedDate,
         );
       } else {
-        // Active or Hifz completed: instant local Hive cache update & flush
+        // Active, Hifz completed, or Nazra completed: instant local Hive cache update & flush
         final studentCache = MadrassaLocalStorage.getStudentCached(branchId, studentId) ?? Map<String, dynamic>.from(sData);
         studentCache['status'] = newStatus;
         studentCache['batch'] = newStatus;
         if (newStatus == 'hifz_completed' && hifzCertBase64 != null) {
           studentCache['hifzCertificateUrl'] = hifzCertBase64;
           studentCache['hifzCertificateBase64'] = hifzCertBase64;
+        }
+        if (newStatus == 'nazra_completed' && nazraCertBase64 != null) {
+          studentCache['nazraCertificateUrl'] = nazraCertBase64;
+          studentCache['nazraCertificateBase64'] = nazraCertBase64;
         }
         if (requiresDate && dateFieldName != null && selectedDate != null) {
           studentCache[dateFieldName] = selectedDate!.toIso8601String();
@@ -525,10 +551,104 @@ class StatusActionMenu extends StatelessWidget {
     );
   }
 
+  bool get _isHQManager {
+    final r = role.toLowerCase().trim();
+    return r.contains('hqmanager') ||
+        r.contains('hq manager') ||
+        r.contains('hq_manager') ||
+        r == 'hq' ||
+        r.contains('chairman');
+  }
+
+  Future<void> _confirmDeleteStudent(BuildContext context) async {
+    final sData = _getStudentData();
+    final studentName = sData['name'] ?? 'Student';
+    final studentId = student is DocumentSnapshot ? (student as DocumentSnapshot).id : (student as Map)['id'].toString();
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.delete_forever, color: Colors.red, size: 24),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              ctx.isUrdu ? 'طالب علم ڈیلیٹ کریں؟' : 'Delete Student?',
+              style: ctx.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+        content: Text(
+          ctx.isUrdu
+              ? 'کیا آپ واقعی $studentName کو مستقل طور پر ڈیلیٹ کرنا چاہتے ہیں؟ یہ عمل واپس نہیں لیا جا سکتا۔'
+              : 'Are you sure you want to permanently delete $studentName? This action cannot be undone and will permanently remove all student records.',
+          style: ctx.urduStyle(style: const TextStyle(fontSize: 14)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(ctx.isUrdu ? 'منسوخ کریں' : 'Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(ctx.isUrdu ? 'ڈیلیٹ کریں' : 'Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await MadrassaLocalStorage.permanentlyDeleteStudent(
+        branchId: branchId,
+        studentId: studentId,
+      );
+      await MadrassaAuditService.logAction(
+        branchId: branchId,
+        editor: username,
+        role: role,
+        type: 'delete_student',
+        message: 'Student $studentName permanently deleted by $username ($role).',
+        studentId: studentId,
+        studentName: studentName,
+      );
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$studentName deleted successfully'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
+  bool _isNazraStudent(Map<String, dynamic> sData) {
+    return (sData['isNazra'] == true) ||
+        (sData['program']?.toString().toLowerCase() == 'nazra') ||
+        (sData['class']?.toString().toLowerCase() == 'nazra') ||
+        (sData['course']?.toString().toLowerCase() == 'nazra') ||
+        (sData['category']?.toString().toLowerCase() == 'nazra') ||
+        LocalStorageService.isMadrassaNazraOnly(branchId);
+  }
+
   @override
   Widget build(BuildContext context) {
     final sData = _getStudentData();
     final status = sData['status'] ?? 'active';
+    final isNazra = _isNazraStudent(sData);
 
     return PopupMenuButton<String>(
       icon: Icon(Icons.more_vert, color: t.textTertiary),
@@ -544,6 +664,8 @@ class StatusActionMenu extends StatelessWidget {
           );
         } else if (val == 'history') {
           _showHistoryDialog(context);
+        } else if (val == 'delete_student') {
+          _confirmDeleteStudent(context);
         } else {
           _updateStatus(context, val);
         }
@@ -589,23 +711,42 @@ class StatusActionMenu extends StatelessWidget {
             ),
           ),
         if (status == 'active') ...[
-          PopupMenuItem(
-            value: 'hifz_completed',
-            child: Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF4C4DDC).withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
+          if (!isNazra)
+            PopupMenuItem(
+              value: 'hifz_completed',
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF4C4DDC).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.workspace_premium_rounded, size: 16, color: Color(0xFF4C4DDC)),
                   ),
-                  child: const Icon(Icons.workspace_premium_rounded, size: 16, color: Color(0xFF4C4DDC)),
-                ),
-                const SizedBox(width: 10),
-                Text(context.l.statusHifzCompleted, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
-              ],
+                  const SizedBox(width: 10),
+                  Text(context.l.statusHifzCompleted, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                ],
+              ),
             ),
-          ),
+          if (isNazra)
+            PopupMenuItem(
+              value: 'nazra_completed',
+              child: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0D9488).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Icon(Icons.menu_book_rounded, size: 16, color: Color(0xFF0D9488)),
+                  ),
+                  const SizedBox(width: 10),
+                  Text(context.l.statusNazraCompleted, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
+                ],
+              ),
+            ),
           PopupMenuItem(
             value: 'left',
             child: Row(
@@ -676,6 +817,31 @@ class StatusActionMenu extends StatelessWidget {
             ],
           ),
         ),
+        if (_isHQManager) ...[
+          const PopupMenuDivider(),
+          PopupMenuItem(
+            value: 'delete_student',
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.red.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: const Icon(Icons.delete_forever_rounded, size: 16, color: Colors.red),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  context.isUrdu ? 'طالب علم ڈیلیٹ کریں' : 'Delete Student',
+                  style: context.urduStyle(
+                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ],
     );
   }

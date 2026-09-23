@@ -165,6 +165,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
   String _selectedDeptFilter = 'all';
   String _searchQuery = '';
   String _statusFilter = 'all';
+  bool _isViewingOffboarded = false;
   StreamSubscription? _punchSubscription;
 
   // Calendar filter state
@@ -179,6 +180,11 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
 
     // Realtime punch listener
     _punchSubscription = ZkTecoNetworkService.punchStream.listen((punch) {
+      if (mounted) setState(() {});
+    });
+
+    // Ensure all finance & employee Hive boxes are open before reading/rendering
+    FinanceLocalStorage.ensureBoxesOpen().then((_) {
       if (mounted) setState(() {});
     });
 
@@ -326,6 +332,15 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
     final dateStr = DateFormat('yyyy-MM-dd').format(widget.date);
     final monthKey = DateFormat('yyyy-MM').format(widget.date);
 
+    if (!Hive.isBoxOpen(LocalStorageService.employeesBox) || !Hive.isBoxOpen(LocalStorageService.attendanceBox)) {
+      return const Scaffold(
+        backgroundColor: ExecTokens.canvasBg,
+        body: Center(
+          child: CircularProgressIndicator(color: ExecTokens.primaryCTA),
+        ),
+      );
+    }
+
     return Scaffold(
       backgroundColor: ExecTokens.canvasBg,
       body: ValueListenableBuilder(
@@ -374,10 +389,14 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                     ? cred!.biometricPin.trim()
                     : (emp['biometricPin'] ?? emp['pin'] ?? '').toString().trim();
 
-                final dbRec = dbRecords.firstWhereOrNull((r) =>
-                    r['employeeId']?.toString() == empId ||
-                    (altId.isNotEmpty && r['employeeId']?.toString() == altId) ||
-                    (pin.isNotEmpty && (r['pin']?.toString() == pin || r['biometricPin']?.toString() == pin)));
+                final dbRec = dbRecords.firstWhereOrNull((r) {
+                  final rEmpId = r['employeeId']?.toString();
+                  if (rEmpId == empId || (altId.isNotEmpty && rEmpId == altId)) return true;
+                  if (pin.isNotEmpty && (r['pin']?.toString() == pin || r['biometricPin']?.toString() == pin || r['employeeId']?.toString() == pin)) {
+                    return true;
+                  }
+                  return false;
+                });
 
                 final isHoliday = FinanceLocalStorage.isHoliday(
                   branchId: widget.branchId,
@@ -412,11 +431,17 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                   record['status'] = 'present';
                 }
 
+                record['employeeId'] = empId;
                 record['name'] = emp['name'] ?? 'Employee';
                 record['role'] = emp['role'] ?? emp['designation'] ?? 'Staff';
                 record['department'] = empDept;
                 record['pin'] = pin;
                 record['shiftHours'] = emp['shiftHours'] ?? emp['workingHours'] ?? '09:00 - 17:00';
+                record['camps'] = emp['camps'] ?? (emp['camp'] != null ? [emp['camp']] : null);
+                record['sessions'] = emp['sessions'];
+                if (dbRec != null && dbRec['shifts'] != null) {
+                  record['shifts'] = dbRec['shifts'];
+                }
                 return record;
               }).toList();
 
@@ -460,35 +485,61 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                 return true;
               }).toList();
 
+              final offboardedEmployees = FinanceLocalStorage.getOffboardedEmployees(widget.branchId);
+              final filteredOffboarded = offboardedEmployees.where((emp) {
+                if (_selectedDeptFilter != 'all') {
+                  final dept = (emp['department'] ?? 'Other').toString().trim();
+                  if (dept.toLowerCase() != _selectedDeptFilter.toLowerCase()) return false;
+                }
+                if (_searchQuery.isNotEmpty) {
+                  final q = _searchQuery.toLowerCase();
+                  final name = (emp['name'] ?? '').toString().toLowerCase();
+                  final role = (emp['role'] ?? emp['designation'] ?? '').toString().toLowerCase();
+                  final dept = (emp['department'] ?? '').toString().toLowerCase();
+                  final pin = (emp['pin'] ?? emp['biometricPin'] ?? '').toString().toLowerCase();
+                  if (!name.contains(q) && !role.contains(q) && !dept.contains(q) && !pin.contains(q)) {
+                    return false;
+                  }
+                }
+                return true;
+              }).toList();
+
               return Column(
                 children: [
-                  _buildHeaderToolbar(allEmployees.length),
-                  if (_isCalendarExpanded)
-                    _buildInteractiveCalendarFilter(
-                      monthKey: monthKey,
-                      totalStaff: allEmployees.length,
-                      present: presentCount,
-                      late: lateCount,
-                      leave: leaveCount,
-                      absent: absentCount,
-                      holiday: holidayCount,
-                      isSunday: isSunday,
-                    )
-                  else
-                    _buildCompactDateAndKPIStrip(
-                      totalStaff: allEmployees.length,
-                      present: presentCount,
-                      late: lateCount,
-                      leave: leaveCount,
-                      absent: absentCount,
-                      holiday: holidayCount,
-                      isSunday: isSunday,
+                  _buildHeaderToolbar(allEmployees.length, offboardedEmployees.length),
+                  if (_isViewingOffboarded) ...[
+                    _buildOffboardedBanner(filteredOffboarded.length),
+                    Expanded(
+                      child: _buildOffboardedList(filteredOffboarded),
                     ),
-                  _buildCrossBranchBanner(dateStr),
-                  _buildUnmappedPunchesBanner(),
-                  Expanded(
-                    child: _buildRosterList(visibleRecords, monthKey, isSunday),
-                  ),
+                  ] else ...[
+                    if (_isCalendarExpanded)
+                      _buildInteractiveCalendarFilter(
+                        monthKey: monthKey,
+                        totalStaff: allEmployees.length,
+                        present: presentCount,
+                        late: lateCount,
+                        leave: leaveCount,
+                        absent: absentCount,
+                        holiday: holidayCount,
+                        isSunday: isSunday,
+                      )
+                    else
+                      _buildCompactDateAndKPIStrip(
+                        totalStaff: allEmployees.length,
+                        present: presentCount,
+                        late: lateCount,
+                        leave: leaveCount,
+                        absent: absentCount,
+                        holiday: holidayCount,
+                        isSunday: isSunday,
+                      ),
+                    _buildCrossBranchBanner(dateStr),
+                    _buildUnmappedPunchesBanner(),
+                    Expanded(
+                      child: _buildRosterList(visibleRecords, monthKey, isSunday),
+                    ),
+                  ],
                 ],
               );
             },
@@ -499,7 +550,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
   }
 
   // ── Header Toolbar ────────────────────────────────────────────────────────
-  Widget _buildHeaderToolbar(int totalStaffCount) {
+  Widget _buildHeaderToolbar(int totalStaffCount, int offboardedCount) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
       decoration: const BoxDecoration(
@@ -512,9 +563,88 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
         final searchAndCalendarToggle = Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // Category Segmented Pill (Active vs Offboarded)
+            Container(
+              decoration: BoxDecoration(
+                color: ExecTokens.canvasBg,
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: ExecTokens.borderMuted),
+              ),
+              padding: const EdgeInsets.all(2),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  InkWell(
+                    borderRadius: BorderRadius.circular(4),
+                    onTap: () => setState(() => _isViewingOffboarded = false),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: !_isViewingOffboarded ? ExecTokens.cardSurface : Colors.transparent,
+                        borderRadius: BorderRadius.circular(4),
+                        boxShadow: !_isViewingOffboarded ? [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 2)] : null,
+                      ),
+                      child: Text(
+                        'Active Staff ($totalStaffCount)',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: !_isViewingOffboarded ? FontWeight.bold : FontWeight.normal,
+                          color: !_isViewingOffboarded ? ExecTokens.primaryCTA : ExecTokens.textSecondary,
+                        ),
+                      ),
+                    ),
+                  ),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(4),
+                    onTap: () => setState(() => _isViewingOffboarded = true),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: _isViewingOffboarded ? ExecTokens.cardSurface : Colors.transparent,
+                        borderRadius: BorderRadius.circular(4),
+                        boxShadow: _isViewingOffboarded ? [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 2)] : null,
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'Offboarded',
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: _isViewingOffboarded ? FontWeight.bold : FontWeight.normal,
+                              color: _isViewingOffboarded ? ExecTokens.absentDot : ExecTokens.textSecondary,
+                            ),
+                          ),
+                          if (offboardedCount > 0) ...[
+                            const SizedBox(width: 4),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                              decoration: BoxDecoration(
+                                color: _isViewingOffboarded ? ExecTokens.absentBg : ExecTokens.borderMuted,
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                '$offboardedCount',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: _isViewingOffboarded ? ExecTokens.absentDot : ExecTokens.textMuted,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+
             // Search Input
             Container(
-              width: 250,
+              width: 230,
               height: 36,
               decoration: BoxDecoration(
                 color: ExecTokens.canvasBg,
@@ -548,29 +678,30 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
             ),
             const SizedBox(width: 8),
 
-            // Calendar Expand/Collapse Filter Button
-            OutlinedButton.icon(
-              onPressed: () => setState(() => _isCalendarExpanded = !_isCalendarExpanded),
-              icon: Icon(
-                _isCalendarExpanded ? Icons.calendar_month_rounded : Icons.calendar_today_outlined,
-                size: 15,
-                color: _isCalendarExpanded ? ExecTokens.primaryCTA : ExecTokens.textSecondary,
-              ),
-              label: Text(
-                _isCalendarExpanded ? 'Hide Calendar' : 'Calendar Filter',
-                style: TextStyle(
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
+            // Calendar Expand/Collapse Filter Button (only for active attendance)
+            if (!_isViewingOffboarded)
+              OutlinedButton.icon(
+                onPressed: () => setState(() => _isCalendarExpanded = !_isCalendarExpanded),
+                icon: Icon(
+                  _isCalendarExpanded ? Icons.calendar_month_rounded : Icons.calendar_today_outlined,
+                  size: 15,
                   color: _isCalendarExpanded ? ExecTokens.primaryCTA : ExecTokens.textSecondary,
                 ),
+                label: Text(
+                  _isCalendarExpanded ? 'Hide Calendar' : 'Calendar Filter',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: _isCalendarExpanded ? ExecTokens.primaryCTA : ExecTokens.textSecondary,
+                  ),
+                ),
+                style: OutlinedButton.styleFrom(
+                  backgroundColor: _isCalendarExpanded ? ExecTokens.rowSelected : ExecTokens.secBtnSurface,
+                  side: BorderSide(color: _isCalendarExpanded ? ExecTokens.primaryRing : ExecTokens.secBtnBorder),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                ),
               ),
-              style: OutlinedButton.styleFrom(
-                backgroundColor: _isCalendarExpanded ? ExecTokens.rowSelected : ExecTokens.secBtnSurface,
-                side: BorderSide(color: _isCalendarExpanded ? ExecTokens.primaryRing : ExecTokens.secBtnBorder),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-              ),
-            ),
           ],
         );
 
@@ -1397,6 +1528,297 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
     );
   }
 
+  Widget _buildOffboardedBanner(int count) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: ExecTokens.absentBg.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: ExecTokens.absentBorder.withValues(alpha: 0.6)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.archive_outlined, size: 20, color: ExecTokens.absentDot),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              'Offboarded Staff Archive ($count) · Historical attendance, profile records, and payroll settlements are preserved here permanently.',
+              style: const TextStyle(fontSize: 12.5, color: ExecTokens.textPrimary, fontWeight: FontWeight.w500),
+            ),
+          ),
+          OutlinedButton.icon(
+            onPressed: () => setState(() => _isViewingOffboarded = false),
+            icon: const Icon(Icons.arrow_back_rounded, size: 14, color: ExecTokens.primaryCTA),
+            label: const Text('Back to Active Staff', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ExecTokens.primaryCTA)),
+            style: OutlinedButton.styleFrom(
+              backgroundColor: ExecTokens.cardSurface,
+              side: const BorderSide(color: ExecTokens.borderMuted),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildOffboardedList(List<Map<String, dynamic>> employees) {
+    if (employees.isEmpty) {
+      return Container(
+        margin: const EdgeInsets.fromLTRB(24, 12, 24, 16),
+        decoration: BoxDecoration(
+          color: ExecTokens.cardSurface,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: ExecTokens.borderMuted),
+        ),
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 40),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: const BoxDecoration(color: ExecTokens.rowHover, shape: BoxShape.circle),
+                  child: const Icon(Icons.people_outline_rounded, size: 28, color: ExecTokens.textMuted),
+                ),
+                const SizedBox(height: 10),
+                const Text('No offboarded staff found', style: ExecTokens.pageTitle),
+                const SizedBox(height: 4),
+                const Text('Employees moved to offboarded status will appear in this category.', style: ExecTokens.rowSecondary),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(24, 12, 24, 16),
+      decoration: BoxDecoration(
+        color: ExecTokens.cardSurface,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: ExecTokens.borderMuted),
+      ),
+      child: Column(
+        children: [
+          // Table Header
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            decoration: const BoxDecoration(
+              color: ExecTokens.canvasBg,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
+              border: Border(bottom: BorderSide(color: ExecTokens.borderMuted)),
+            ),
+            child: const Row(
+              children: [
+                SizedBox(width: 36), // avatar
+                SizedBox(width: 12),
+                Expanded(flex: 3, child: Text('EMPLOYEE', style: ExecTokens.tableHeader)),
+                Expanded(flex: 2, child: Text('DEPARTMENT', style: ExecTokens.tableHeader)),
+                Expanded(flex: 2, child: Text('OFFBOARDED DATE', style: ExecTokens.tableHeader)),
+                Expanded(flex: 3, child: Text('REASON / STATUS', style: ExecTokens.tableHeader)),
+                Expanded(flex: 2, child: Text('ADVANCE BALANCE', style: ExecTokens.tableHeader)),
+                SizedBox(width: 140, child: Text('ACTIONS', style: ExecTokens.tableHeader, textAlign: TextAlign.right)),
+              ],
+            ),
+          ),
+          // List of Rows
+          Expanded(
+            child: ListView.separated(
+              itemCount: employees.length,
+              separatorBuilder: (c, i) => const Divider(color: ExecTokens.borderDivider, height: 1, thickness: 0.5),
+              itemBuilder: (ctx, idx) {
+                final emp = employees[idx];
+                final empId = (emp['localId'] ?? emp['id'] ?? '').toString();
+                final name = emp['name']?.toString() ?? 'Employee';
+                final role = emp['role'] ?? emp['designation'] ?? 'Staff';
+                final dept = emp['department']?.toString() ?? 'Office';
+                final pin = (emp['pin'] ?? emp['biometricPin'] ?? '').toString();
+
+                final details = emp['offboardingDetails'] is Map ? emp['offboardingDetails'] as Map : null;
+                final reason = details?['reason'] ?? emp['offboardingStatus'] ?? emp['status'] ?? 'Offboarded';
+                final detailedReason = details?['detailedReason']?.toString() ?? '';
+                final offboardedAtStr = details?['offboardedAt']?.toString() ?? emp['updatedAt']?.toString();
+                String formattedDate = 'Archived';
+                if (offboardedAtStr != null && offboardedAtStr.isNotEmpty) {
+                  final dt = DateTime.tryParse(offboardedAtStr);
+                  if (dt != null) formattedDate = DateFormat('dd MMM yyyy').format(dt);
+                }
+
+                final advance = (emp['currentAdvanceBalance'] as num?)?.toDouble() ?? 0.0;
+
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                  child: Row(
+                    children: [
+                      // Avatar
+                      CircleAvatar(
+                        radius: 17,
+                        backgroundColor: ExecTokens.absentBg,
+                        child: Text(
+                          name.isNotEmpty ? name[0].toUpperCase() : '?',
+                          style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: ExecTokens.absentDot),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      // Name, Role, Pin
+                      Expanded(
+                        flex: 3,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(name, style: ExecTokens.rowPrimary),
+                            const SizedBox(height: 2),
+                            Row(
+                              children: [
+                                Text(role, style: ExecTokens.rowSecondary),
+                                if (pin.isNotEmpty) ...[
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                    decoration: BoxDecoration(
+                                      color: ExecTokens.borderMuted,
+                                      borderRadius: BorderRadius.circular(3),
+                                    ),
+                                    child: Text('PIN $pin', style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: ExecTokens.textMuted)),
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Department
+                      Expanded(
+                        flex: 2,
+                        child: Text(dept, style: ExecTokens.rowSecondary),
+                      ),
+                      // Offboarded Date
+                      Expanded(
+                        flex: 2,
+                        child: Text(formattedDate, style: ExecTokens.rowSecondary),
+                      ),
+                      // Reason & Details
+                      Expanded(
+                        flex: 3,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: ExecTokens.absentBg,
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(color: ExecTokens.absentBorder, width: 0.8),
+                              ),
+                              child: Text(
+                                reason.toString().toUpperCase(),
+                                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: ExecTokens.absentText),
+                              ),
+                            ),
+                            if (detailedReason.isNotEmpty) ...[
+                              const SizedBox(height: 2),
+                              Text(detailedReason, style: const TextStyle(fontSize: 11, color: ExecTokens.textMuted), maxLines: 1, overflow: TextOverflow.ellipsis),
+                            ],
+                          ],
+                        ),
+                      ),
+                      // Advance Balance
+                      Expanded(
+                        flex: 2,
+                        child: Text(
+                          advance > 0 ? 'Rs ${advance.toStringAsFixed(0)}' : 'Cleared',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: advance > 0 ? ExecTokens.absentDot : ExecTokens.presentText,
+                          ),
+                        ),
+                      ),
+                      // Actions
+                      SizedBox(
+                        width: 140,
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.end,
+                          children: [
+                            IconButton(
+                              tooltip: 'View Profile & History',
+                              icon: const Icon(Icons.visibility_outlined, size: 18, color: ExecTokens.textSecondary),
+                              onPressed: () => _openEmployeeProfile(empId),
+                            ),
+                            const SizedBox(width: 4),
+                            ElevatedButton.icon(
+                              onPressed: () => _confirmReinstateEmployee(empId, name),
+                              icon: const Icon(Icons.restore_rounded, size: 14),
+                              label: const Text('Reinstate', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: ExecTokens.primaryCTA,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _confirmReinstateEmployee(String empId, String name) {
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: ExecTokens.cardSurface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        title: Row(
+          children: [
+            const Icon(Icons.restore_rounded, color: ExecTokens.primaryCTA, size: 22),
+            const SizedBox(width: 8),
+            Text('Reinstate $name', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: ExecTokens.textPrimary)),
+          ],
+        ),
+        content: Text(
+          'Are you sure you want to reinstate $name back to Active Staff?\n\nThis will restore their profile in daily attendance and payroll rosters.',
+          style: const TextStyle(fontSize: 13, color: ExecTokens.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: ExecTokens.textMuted)),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              Navigator.pop(ctx);
+              await FinanceLocalStorage.reinstateEmployee(empId, performedBy: LocalStorageService.getActiveUsername());
+              if (mounted) {
+                setState(() {});
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('$name has been reinstated to Active Staff.'),
+                    backgroundColor: ExecTokens.primaryCTA,
+                  ),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: ExecTokens.primaryCTA, foregroundColor: Colors.white),
+            child: const Text('Reinstate'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildEmployeeRow(Map<String, dynamic> record, String monthKey, bool isSunday) {
     final empId = record['employeeId']?.toString() ?? '';
     final name = record['name']?.toString() ?? 'Employee';
@@ -1409,15 +1831,11 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
     final status = (record['status']?.toString() ?? 'absent').toLowerCase();
     final note = record['note']?.toString() ?? '';
 
-    // Calculate duration
-    String duration = '0h';
-    if (inTime != null && inTime.isNotEmpty && inTime != '--:--') {
-      if (outTime != null && outTime.isNotEmpty && outTime != '--:--') {
-        duration = _computeDuration(inTime, outTime);
-      } else {
-        duration = 'Running';
-      }
-    }
+    final shifts = record['shifts'] is Map ? (record['shifts'] as Map) : null;
+    final camps = record['camps'] is List ? (record['camps'] as List) : null;
+
+    // Calculate duration across single or multiple shifts/camps
+    String duration = _computeTotalDuration(inTime, outTime, shifts);
 
     // Monthly stats
     final stats = _computeEmployeeMonthStats(empId, monthKey);
@@ -1492,54 +1910,114 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
               child: Text(dept, style: ExecTokens.rowSecondary),
             ),
 
-            // Working Hours (Shift)
+            // Working Hours (Shift) + Camp tags
             Expanded(
               flex: 2,
-              child: Text(shiftHours, style: ExecTokens.monoData),
-            ),
-
-            // Clock In / Clock Out
-            Expanded(
-              flex: 2,
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  // Check In
-                  InkWell(
-                    onTap: () => _pickTime(context, (t) async {
-                      record['checkInTime'] = t;
-                      record['arrivalTime'] = t;
-                      await _saveRecordInstantly(empId, record);
-                    }),
-                    child: Text(
-                      inTime != null && inTime.isNotEmpty ? inTime : '-- : --',
-                      style: ExecTokens.monoData.copyWith(
-                        color: (inTime != null && inTime.isNotEmpty && inTime != '--:--')
-                            ? ExecTokens.presentText
-                            : ExecTokens.textMuted,
-                        fontWeight: FontWeight.w600,
+                  Text(shiftHours, style: ExecTokens.monoData),
+                  if (camps != null && camps.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        camps.map((c) => c.toString()).join(' • '),
+                        style: const TextStyle(fontSize: 9.5, color: ExecTokens.primaryCTA, fontWeight: FontWeight.bold),
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                  ),
-                  const Text('  ', style: TextStyle(color: ExecTokens.textMuted)),
-                  // Check Out
-                  InkWell(
-                    onTap: () => _pickTime(context, (t) async {
-                      record['checkOutTime'] = t;
-                      record['departureTime'] = t;
-                      await _saveRecordInstantly(empId, record);
-                    }),
-                    child: Text(
-                      outTime != null && outTime.isNotEmpty ? outTime : '-- : --',
-                      style: ExecTokens.monoData.copyWith(
-                        color: (outTime != null && outTime.isNotEmpty && outTime != '--:--')
-                            ? ExecTokens.primaryCTA
-                            : ExecTokens.textMuted,
-                      ),
-                    ),
-                  ),
                 ],
               ),
+            ),
+
+            // Clock In / Clock Out (Supports multi-session / multi-camp punches)
+            Expanded(
+              flex: (shifts != null && shifts.length > 1) ? 3 : 2,
+              child: (shifts != null && shifts.length > 1)
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: shifts.entries.map((entry) {
+                        final sData = entry.value is Map ? entry.value as Map : {};
+                        final campLabel = (sData['camp'] ?? entry.key).toString().toUpperCase();
+                        final sIn = sData['checkIn']?.toString() ?? '--:--';
+                        final sOut = sData['checkOut']?.toString() ?? '--:--';
+                        final sDur = sData['duration']?.toString() ?? '';
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                                decoration: BoxDecoration(
+                                  color: ExecTokens.rowSelected,
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(color: ExecTokens.leaveBorder, width: 0.6),
+                                ),
+                                child: Text(
+                                  campLabel.length > 9 ? campLabel.substring(0, 9) : campLabel,
+                                  style: const TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: ExecTokens.primaryCTA),
+                                ),
+                              ),
+                              const SizedBox(width: 4),
+                              Text(
+                                '$sIn → $sOut',
+                                style: ExecTokens.monoData.copyWith(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w600,
+                                  color: (sIn != '--:--' && sIn.isNotEmpty) ? ExecTokens.presentText : ExecTokens.textMuted,
+                                ),
+                              ),
+                              if (sDur.isNotEmpty) ...[
+                                const SizedBox(width: 4),
+                                Text('($sDur)', style: const TextStyle(fontSize: 9.5, color: ExecTokens.textMuted)),
+                              ],
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    )
+                  : Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Check In
+                        InkWell(
+                          onTap: () => _pickTime(context, (t) async {
+                            record['checkInTime'] = t;
+                            record['arrivalTime'] = t;
+                            await _saveRecordInstantly(empId, record);
+                          }),
+                          child: Text(
+                            inTime != null && inTime.isNotEmpty ? inTime : '-- : --',
+                            style: ExecTokens.monoData.copyWith(
+                              color: (inTime != null && inTime.isNotEmpty && inTime != '--:--')
+                                  ? ExecTokens.presentText
+                                  : ExecTokens.textMuted,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        const Text('  ', style: TextStyle(color: ExecTokens.textMuted)),
+                        // Check Out
+                        InkWell(
+                          onTap: () => _pickTime(context, (t) async {
+                            record['checkOutTime'] = t;
+                            record['departureTime'] = t;
+                            await _saveRecordInstantly(empId, record);
+                          }),
+                          child: Text(
+                            outTime != null && outTime.isNotEmpty ? outTime : '-- : --',
+                            style: ExecTokens.monoData.copyWith(
+                              color: (outTime != null && outTime.isNotEmpty && outTime != '--:--')
+                                  ? ExecTokens.primaryCTA
+                                  : ExecTokens.textMuted,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
             ),
 
             // Work Duration
@@ -2085,5 +2563,49 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
     } catch (_) {
       return '0h';
     }
+  }
+
+  String _computeTotalDuration(String? inTime, String? outTime, Map? shifts) {
+    if (shifts != null && shifts.isNotEmpty) {
+      int totalMinutes = 0;
+      bool hasRunning = false;
+      final format = DateFormat('hh:mm a');
+      for (final entry in shifts.values) {
+        if (entry is Map) {
+          final sIn = entry['checkIn']?.toString();
+          final sOut = entry['checkOut']?.toString();
+          if (sIn != null && sIn.isNotEmpty && sIn != '--:--') {
+            if (sOut != null && sOut.isNotEmpty && sOut != '--:--') {
+              try {
+                final inDt = format.parse(sIn);
+                final outDt = format.parse(sOut);
+                final diff = outDt.difference(inDt);
+                if (!diff.isNegative) {
+                  totalMinutes += diff.inMinutes;
+                }
+              } catch (_) {}
+            } else {
+              hasRunning = true;
+            }
+          }
+        }
+      }
+      if (totalMinutes > 0) {
+        final hours = totalMinutes ~/ 60;
+        final mins = totalMinutes % 60;
+        final durStr = '${hours}h ${mins}m';
+        return hasRunning ? '$durStr (+Run)' : durStr;
+      }
+      if (hasRunning) return 'Running';
+    }
+
+    if (inTime != null && inTime.isNotEmpty && inTime != '--:--') {
+      if (outTime != null && outTime.isNotEmpty && outTime != '--:--') {
+        return _computeDuration(inTime, outTime);
+      } else {
+        return 'Running';
+      }
+    }
+    return '0h';
   }
 }

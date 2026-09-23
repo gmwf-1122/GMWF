@@ -593,6 +593,11 @@ class RoleThemeData {
       case 'madrassa teacher':
       case 'madrassa guardian':
       case 'madrassa':        return RoleTheme.madrassa;
+      case 'school principal':
+      case 'principal':
+      case 'school admin':
+      case 'school teacher':
+      case 'school':          return RoleTheme.madrassa;
       case 'admin':
       case 'global admin':
       default:                return RoleTheme.admin;
@@ -848,10 +853,10 @@ class PatientTypeCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: t.bgCard,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: color.withValues(alpha: 0.25), width: 1),
       ),
       child: Row(children: [
@@ -875,7 +880,7 @@ class PatientTypeCard extends StatelessWidget {
                         color: t.textSecondary,
                         fontSize: 13,
                         fontWeight: FontWeight.w500)),
-                const SizedBox(height: 3),
+                const SizedBox(height: 4),
                 Text('$count',
                     style: TextStyle(
                         color: t.textPrimary,
@@ -917,15 +922,15 @@ class RatioBar extends StatelessWidget {
     final gp = total > 0 ? (gmwf / total * 100).round() : 0;
 
     return Container(
-      padding: const EdgeInsets.all(18),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: t.bgCard,
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(16),
         border: Border.all(color: t.accentMuted.withValues(alpha: 0.3)),
       ),
       child: Column(children: [
         ClipRRect(
-          borderRadius: BorderRadius.circular(6),
+          borderRadius: BorderRadius.circular(8),
           child: Row(children: [
             if (zakat > 0)
               Expanded(

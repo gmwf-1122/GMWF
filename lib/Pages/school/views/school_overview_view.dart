@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 import '../utils/school_local_storage.dart';
 import '../../../theme/role_theme_provider.dart';
 import '../../../theme/app_theme.dart';
+import '../../../design/design_system.dart';
 
 class SchoolOverviewView extends StatelessWidget {
   final String branchId;
@@ -217,8 +218,8 @@ class SchoolOverviewView extends StatelessWidget {
                                       // ── Comprehensive Metric Cards ─────────────────────────
                                       LayoutBuilder(
                                         builder: (context, constraints) {
-                                          final isMobile = constraints.maxWidth < 700;
-                                          final isTablet = constraints.maxWidth < 1100;
+                                          final isMobile = GBreakpoint.isMobileC(constraints);
+                                          final isTablet = GBreakpoint.isTabletC(constraints);
                                           final cols = isMobile ? 2 : (isTablet ? 3 : 4);
 
                                           return GridView.count(

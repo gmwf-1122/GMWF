@@ -12,6 +12,7 @@ import 'package:gmwf/services/camp_session_service.dart';
 import 'package:gmwf/services/serials_service.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
+import 'package:gmwf/design/design_system.dart';
 
 class PatientList extends StatefulWidget {
   final String branchId;
@@ -60,6 +61,7 @@ class _PatientListState extends State<PatientList> {
   String _selectedCampFilter = 'all';
   bool get _hasMultiCamps => CampSessionService.hasCampsForBranch(widget.branchId);
   bool _sortNewestFirst = false;
+  bool _isSyncingQueue = false;
   String _dispenseFilter = 'all'; // 'all', 'pending', 'dispensed'
 
   bool _isEffectivelyToday(Map<String, dynamic> e, String currentTodayKey, String todayIso) {
@@ -123,6 +125,7 @@ class _PatientListState extends State<PatientList> {
   }
 
   StreamSubscription<Map<String, dynamic>>? _realtimeSub;
+  StreamSubscription<BoxEvent>? _entriesBoxSub;
   Timer? _debounceRebuildTimer;
 
   @override
@@ -136,6 +139,12 @@ class _PatientListState extends State<PatientList> {
       }
     }
     CampSessionService.activeCampNotifier.addListener(_onActiveCampChanged);
+
+    if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+      _entriesBoxSub = Hive.box(LocalStorageService.entriesBox).watch().listen((_) {
+        _debouncedRebuild();
+      });
+    }
 
     _realtimeSub = RealtimeManager().messageStream.listen((event) async {
       final type = event['event_type'] as String?;
@@ -278,6 +287,7 @@ class _PatientListState extends State<PatientList> {
     _scroll.dispose();
     _searchCtrl.dispose();
     _realtimeSub?.cancel();
+    _entriesBoxSub?.cancel();
     CampSessionService.activeCampNotifier.removeListener(_onActiveCampChanged);
     super.dispose();
   }
@@ -712,8 +722,7 @@ class _PatientListState extends State<PatientList> {
   }
 
   Widget _buildListContent(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isMobile    = screenWidth < 700;
+    final isMobile = GBreakpoint.isMobile(context);
 
     final allPatients = _getSortedQueue(filterOverride: 'all');
 
@@ -852,16 +861,40 @@ class _PatientListState extends State<PatientList> {
                                 tooltip: _sortNewestFirst ? 'Sort: Oldest First' : 'Sort: Newest First',
                               ),
                               IconButton(
-                                icon: Icon(
-                                  Icons.refresh_rounded,
-                                  color: _isDark ? const Color(0xFF38BDF8) : _teal,
-                                  size: 22,
-                                ),
-                                onPressed: () {
-                                  setState(() {});
-                                  WidgetsBinding.instance.addPostFrameCallback((_) => _tryAutoSelectSmallestPending());
-                                },
-                                tooltip: 'Refresh queue',
+                                icon: _isSyncingQueue
+                                    ? SizedBox(
+                                        width: 18,
+                                        height: 18,
+                                        child: CircularProgressIndicator(
+                                          color: _isDark ? const Color(0xFF38BDF8) : _teal,
+                                          strokeWidth: 2,
+                                        ),
+                                      )
+                                    : Icon(
+                                        Icons.refresh_rounded,
+                                        color: _isDark ? const Color(0xFF38BDF8) : _teal,
+                                        size: 22,
+                                      ),
+                                onPressed: _isSyncingQueue
+                                    ? null
+                                    : () async {
+                                        setState(() => _isSyncingQueue = true);
+                                        try {
+                                          // 1. Force immediate LAN catch-up sweep from LAN Server
+                                          await RealtimeManager().forceFlushAndCatchUp();
+                                          // 2. Fetch today's tokens from Cloud Firestore fallback
+                                          await LocalStorageService.downloadTodayTokens(widget.branchId);
+                                        } catch (e) {
+                                          debugPrint('[PatientList] Manual refresh error: $e');
+                                        } finally {
+                                          if (mounted) {
+                                            setState(() => _isSyncingQueue = false);
+                                            WidgetsBinding.instance.addPostFrameCallback(
+                                                (_) => _tryAutoSelectSmallestPending());
+                                          }
+                                        }
+                                      },
+                                tooltip: 'Refresh & Fetch Missing Tokens from Server',
                               ),
                             ],
                           ),

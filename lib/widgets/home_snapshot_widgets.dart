@@ -24,10 +24,10 @@ import 'package:hive_flutter/hive_flutter.dart';
 import '../services/local_storage_service.dart';
 import '../pages/school/utils/school_local_storage.dart';
 import '../pages/school/school_dashboard.dart';
+import '../pages/madrassa/utils/madrassa_local_storage.dart';
 import '../pages/users.dart';
 import '../providers/branches_providers.dart';
 import 'app_skeleton.dart';
-import 'firestore_quota_monitor_widget.dart';
 
 // ════════════════════════════════════════════════════════════════════════
 // 1. Compact stat tile w/ "vs yesterday" delta
@@ -2612,6 +2612,21 @@ class QuickActionsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    int todayFoodTokens = 0;
+    try {
+      if (Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)) {
+        final box = Hive.box(LocalStorageService.dasterkhwaanTokensBox);
+        final todayYmd = DateFormat('yyyy-MM-dd').format(DateTime.now());
+        final todayDmyy = DateFormat('ddMMyy').format(DateTime.now());
+        for (final raw in box.values) {
+          if (raw is Map) {
+            final dk = raw['dateKey']?.toString() ?? '';
+            if (dk == todayYmd || dk == todayDmyy) todayFoodTokens++;
+          }
+        }
+      }
+    } catch (_) {}
+
     final List<Map<String, dynamic>> targetActions = [
       {'id': 'branches', 'label': 'Branches', 'icon': Icons.store_outlined, 'color': const Color(0xFF0D9488)},
       {'id': 'employees', 'label': 'Staff Attendance', 'icon': Icons.badge_outlined, 'color': const Color(0xFF6366F1)},
@@ -2619,7 +2634,7 @@ class QuickActionsRow extends StatelessWidget {
       {'id': 'madrassa_students', 'label': 'Madrassa Students', 'icon': Icons.groups_rounded, 'color': const Color(0xFF14B8A6)},
       {'id': 'school_attendance', 'label': 'School Students', 'icon': Icons.school_rounded, 'color': const Color(0xFF10B981)},
       {'id': 'school_teacher_attendance', 'label': 'School Faculty', 'icon': Icons.co_present_rounded, 'color': const Color(0xFF8B5CF6)},
-      {'id': 'office_boy', 'label': 'Food Tokens', 'icon': Icons.room_service_rounded, 'color': const Color(0xFFF59E0B)},
+      {'id': 'office_boy', 'label': todayFoodTokens > 0 ? 'Food Tokens ($todayFoodTokens)' : 'Food Tokens', 'icon': Icons.room_service_rounded, 'color': const Color(0xFFF59E0B)},
       {'id': 'dasterkhwaan_inventory', 'label': 'Dasterkhwaan', 'icon': Icons.inventory_2_outlined, 'color': const Color(0xFFD97706)},
       {'id': 'inventory', 'label': 'Med Inventory', 'icon': Icons.medication_liquid_rounded, 'color': const Color(0xFF0284C7)},
       {'id': 'finance', 'label': 'Finance & HR', 'icon': Icons.monetization_on_rounded, 'color': const Color(0xFFEF4444)},
@@ -2736,14 +2751,36 @@ class QuickActionsRow extends StatelessWidget {
                           );
                         },
                       );
+                    } else if (action['id'] == 'madrassa_teachers') {
+                      module = baseModule.copyWith(
+                        title: 'Madrassa Teachers',
+                        builder: (context, data) {
+                          final branchId = data['branchId'] ?? 'unknown';
+                          final username = data['name'] ?? data['username'] ?? 'User';
+                          final role = (data['role'] as String? ?? 'madrassa admin').toLowerCase();
+                          final isAdmin = role.contains('admin') ||
+                              role.contains('chairman') ||
+                              role.contains('ceo') ||
+                              role.contains('hq') ||
+                              role.contains('principal') ||
+                              role.contains('manager');
+                          return MadrassaDashboard(
+                            branchId: branchId,
+                            username: username,
+                            role: role,
+                            isAdmin: isAdmin,
+                            initialIndex: 3,
+                          );
+                        },
+                      );
                     } else if (action['id'] == 'school_attendance') {
                       module = baseModule.copyWith(
                         title: 'School Student Attendance',
                         builder: (context, data) => SchoolDashboard(
                           branchId: data['branchId'] ?? 'all',
-                          username: data['name'] ?? data['username'] ?? 'User',
-                          role: data['role'] ?? 'School Admin',
-                          initialTabIndex: 1,
+                          username: data['name'] ?? data['username'] ?? LocalStorageService.getActiveUsername(),
+                          role: data['role'] ?? LocalStorageService.getActiveUserRole(),
+                          initialTabIndex: 2,
                         ),
                       );
                     } else if (action['id'] == 'school_teacher_attendance') {
@@ -2751,9 +2788,9 @@ class QuickActionsRow extends StatelessWidget {
                         title: 'School Faculty Attendance',
                         builder: (context, data) => SchoolDashboard(
                           branchId: data['branchId'] ?? 'all',
-                          username: data['name'] ?? data['username'] ?? 'User',
-                          role: data['role'] ?? 'School Admin',
-                          initialTabIndex: 2,
+                          username: data['name'] ?? data['username'] ?? LocalStorageService.getActiveUsername(),
+                          role: data['role'] ?? LocalStorageService.getActiveUserRole(),
+                          initialTabIndex: 3,
                         ),
                       );
                     }
@@ -3285,6 +3322,16 @@ Map<String, int> _computeLocalDashboardAuxCounts({String? branchId}) {
     }
   } catch (_) {}
 
+  int madrassaPresentCount = 0;
+  int madrassaYesterdayPresentCount = 0;
+  try {
+    if (Hive.isBoxOpen(LocalStorageService.madrassaLogsBox)) {
+      final yestDateKey = DateFormat('yyyy-MM-dd').format(DateTime.now().subtract(const Duration(days: 1)));
+      madrassaPresentCount = MadrassaLocalStorage.getPresentStudentsCount(normB ?? 'all', todayDateKey);
+      madrassaYesterdayPresentCount = MadrassaLocalStorage.getPresentStudentsCount(normB ?? 'all', yestDateKey);
+    }
+  } catch (_) {}
+
   int onlineUsersCount = 1;
   try {
     if (Hive.isBoxOpen(LocalStorageService.usersBox)) {
@@ -3316,6 +3363,8 @@ Map<String, int> _computeLocalDashboardAuxCounts({String? branchId}) {
     'emp': empPresentCount,
     'students': studentPresentCount,
     'teachers': teacherPresentCount,
+    'madrassa': madrassaPresentCount,
+    'madrassa_yesterday': madrassaYesterdayPresentCount,
     'online': onlineUsersCount,
   };
 }
@@ -3329,6 +3378,8 @@ class SnapshotDashboardData {
   final int empPresentCount;
   final int studentPresentCount;
   final int teacherPresentCount;
+  final int madrassaPresentCount;
+  final int madrassaYesterdayPresentCount;
   final int onlineUsersCount;
 
   SnapshotDashboardData({
@@ -3340,6 +3391,8 @@ class SnapshotDashboardData {
     this.empPresentCount = 0,
     this.studentPresentCount = 0,
     this.teacherPresentCount = 0,
+    this.madrassaPresentCount = 0,
+    this.madrassaYesterdayPresentCount = 0,
     this.onlineUsersCount = 1,
   });
 }
@@ -3414,6 +3467,8 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
           prescribed: value.today.prescribed,
           dispensaryRevenue: karachiCamps.kapayaRevenue,
           donations: value.today.donations,
+          dasterkhwaan: value.today.dasterkhwaan,
+          dasterkhwaanServed: value.today.dasterkhwaanServed,
         );
 
         branchRows.add(HomeBranchRow(
@@ -3468,6 +3523,8 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
       empPresentCount: auxCounts['emp'] ?? 0,
       studentPresentCount: auxCounts['students'] ?? 0,
       teacherPresentCount: auxCounts['teachers'] ?? 0,
+      madrassaPresentCount: auxCounts['madrassa'] ?? 0,
+      madrassaYesterdayPresentCount: auxCounts['madrassa_yesterday'] ?? 0,
       onlineUsersCount: auxCounts['online'] ?? 1,
     );
   } else {
@@ -3508,6 +3565,8 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
           prescribed: todayStats.prescribed,
           dispensaryRevenue: karachiCamps.kapayaRevenue,
           donations: todayStats.donations,
+          dasterkhwaan: todayStats.dasterkhwaan,
+          dasterkhwaanServed: todayStats.dasterkhwaanServed,
         ),
         yesterday: yesterdayStats,
         weeklyPatients: weeklyPatients[branchId] ?? 0,
@@ -3533,12 +3592,19 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
         ? combineBranchStats(branchRows.map((r) => r.today).toList()) 
         : todayStats;
 
+    final auxCounts = _computeLocalDashboardAuxCounts(branchId: branchId);
     return SnapshotDashboardData(
       todayCombined: todayCombined,
       yesterdayCombined: yesterdayStats,
       branchRows: branchRows,
       chartPoints: chartPoints,
       recentActivities: recentActivities,
+      empPresentCount: auxCounts['emp'] ?? 0,
+      studentPresentCount: auxCounts['students'] ?? 0,
+      teacherPresentCount: auxCounts['teachers'] ?? 0,
+      madrassaPresentCount: auxCounts['madrassa'] ?? 0,
+      madrassaYesterdayPresentCount: auxCounts['madrassa_yesterday'] ?? 0,
+      onlineUsersCount: auxCounts['online'] ?? 1,
     );
   }
 }
@@ -3647,6 +3713,8 @@ Future<SnapshotDashboardData> buildLocalSnapshotDashboardData(Map<String, dynami
           prescribed: value.today.prescribed,
           dispensaryRevenue: karachiCamps.kapayaRevenue,
           donations: value.today.donations,
+          dasterkhwaan: value.today.dasterkhwaan,
+          dasterkhwaanServed: value.today.dasterkhwaanServed,
         );
 
         final karachiWeekly = weeklyPatients['karachi'] ?? 0;
@@ -3701,6 +3769,8 @@ Future<SnapshotDashboardData> buildLocalSnapshotDashboardData(Map<String, dynami
       empPresentCount: auxCounts['emp'] ?? 0,
       studentPresentCount: auxCounts['students'] ?? 0,
       teacherPresentCount: auxCounts['teachers'] ?? 0,
+      madrassaPresentCount: auxCounts['madrassa'] ?? 0,
+      madrassaYesterdayPresentCount: auxCounts['madrassa_yesterday'] ?? 0,
       onlineUsersCount: auxCounts['online'] ?? 1,
     );
   } else {
@@ -3723,6 +3793,8 @@ Future<SnapshotDashboardData> buildLocalSnapshotDashboardData(Map<String, dynami
           prescribed: todayStats.prescribed,
           dispensaryRevenue: karachiCamps.kapayaRevenue,
           donations: todayStats.donations,
+          dasterkhwaan: todayStats.dasterkhwaan,
+          dasterkhwaanServed: todayStats.dasterkhwaanServed,
         ),
         yesterday: yesterdayStats,
         weeklyPatients: weeklyPatients[branchId] ?? 0,
@@ -3771,6 +3843,8 @@ Future<SnapshotDashboardData> buildLocalSnapshotDashboardData(Map<String, dynami
       empPresentCount: auxCounts['emp'] ?? 0,
       studentPresentCount: auxCounts['students'] ?? 0,
       teacherPresentCount: auxCounts['teachers'] ?? 0,
+      madrassaPresentCount: auxCounts['madrassa'] ?? 0,
+      madrassaYesterdayPresentCount: auxCounts['madrassa_yesterday'] ?? 0,
       onlineUsersCount: auxCounts['online'] ?? 1,
     );
   }
@@ -4114,14 +4188,25 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                 initialIndex: 2,
               ),
             );
+          } else if (id == 'madrassa_teachers') {
+            module = baseModule.copyWith(
+              title: 'Madrassa Teachers',
+              builder: (context, data) => MadrassaDashboard(
+                branchId: data['branchId'] ?? 'all',
+                username: data['name'] ?? data['username'] ?? 'User',
+                role: data['role'] ?? 'Admin',
+                isAdmin: true,
+                initialIndex: 3,
+              ),
+            );
           } else if (id == 'school_attendance') {
             module = baseModule.copyWith(
               title: 'School Student Attendance',
               builder: (context, data) => SchoolDashboard(
                 branchId: data['branchId'] ?? 'all',
-                username: data['name'] ?? data['username'] ?? 'User',
-                role: data['role'] ?? 'School Admin',
-                initialTabIndex: 1,
+                username: data['name'] ?? data['username'] ?? LocalStorageService.getActiveUsername(),
+                role: data['role'] ?? LocalStorageService.getActiveUserRole(),
+                initialTabIndex: 2,
               ),
             );
           } else if (id == 'school_teacher_attendance') {
@@ -4129,9 +4214,9 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
               title: 'School Faculty Attendance',
               builder: (context, data) => SchoolDashboard(
                 branchId: data['branchId'] ?? 'all',
-                username: data['name'] ?? data['username'] ?? 'User',
-                role: data['role'] ?? 'School Admin',
-                initialTabIndex: 2,
+                username: data['name'] ?? data['username'] ?? LocalStorageService.getActiveUsername(),
+                role: data['role'] ?? LocalStorageService.getActiveUserRole(),
+                initialTabIndex: 3,
               ),
             );
           } else if (id == 'users') {
@@ -4259,10 +4344,12 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
 
         final madrassaTile = HomeStatTile(
           label: 'Madrassa Attendance',
-          value: fmtNum(today.prescribed),
+          value: fmtNum(data.madrassaPresentCount),
           icon: Icons.menu_book_rounded,
           color: const Color(0xFF0D9488),
-          deltaPct: yesterday.prescribed == 0 ? null : ((today.prescribed - yesterday.prescribed) / yesterday.prescribed) * 100,
+          deltaPct: data.madrassaYesterdayPresentCount == 0
+              ? null
+              : (((data.madrassaPresentCount - data.madrassaYesterdayPresentCount) / data.madrassaYesterdayPresentCount) * 100),
           onTap: () => tryOpenModule('madrassa_attendance'),
         );
 
@@ -4308,10 +4395,20 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
         );
 
         final dasterkhwaanTokensTile = HomeStatTile(
-          label: 'Dasterkhawaan Tokens',
-          value: 'Tokens',
+          label: 'Food Tokens',
+          value: fmtNum(today.dasterkhwaan),
           icon: Icons.room_service_rounded,
           color: const Color(0xFFF59E0B),
+          deltaPct: yesterday.dasterkhwaan == 0 ? null : ((today.dasterkhwaan - yesterday.dasterkhwaan) / yesterday.dasterkhwaan) * 100,
+          onTap: () => tryOpenModule('office_boy'),
+        );
+
+        final dasterkhwaanServedTile = HomeStatTile(
+          label: 'Food Tokens Served',
+          value: fmtNum(today.dasterkhwaanServed),
+          icon: Icons.restaurant_rounded,
+          color: const Color(0xFF10B981),
+          deltaPct: yesterday.dasterkhwaanServed == 0 ? null : ((today.dasterkhwaanServed - yesterday.dasterkhwaanServed) / yesterday.dasterkhwaanServed) * 100,
           onTap: () => tryOpenModule('office_boy'),
         );
 
@@ -4332,6 +4429,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           schoolStudentsTile,
           schoolTeachersTile,
           dasterkhwaanTokensTile,
+          if (today.dasterkhwaanServed > 0) dasterkhwaanServedTile,
           dasterkhwaanStockTile,
         ];
 
@@ -4643,8 +4741,6 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                               children: [
                                 HomeStatTileRow(tiles: multiTiles),
                                 const SizedBox(height: DS.s3),
-                                const FirestoreQuotaMonitorWidget(),
-                                const SizedBox(height: DS.s3),
                                 filteredRow3,
                                 const SizedBox(height: DS.s3),
                                 row2,
@@ -4699,8 +4795,6 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                   if (widget.isDesktop) ...[
                 HomeStatTileRow(tiles: statTiles),
                 const SizedBox(height: DS.s3),
-                const FirestoreQuotaMonitorWidget(),
-                const SizedBox(height: DS.s3),
                 row3,
                 const SizedBox(height: DS.s3),
                 if (!isGlobalExecutive) ...[
@@ -4725,8 +4819,6 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                 ),
                 const SizedBox(height: DS.s2),
                 HomeStatTileRow(tiles: statTiles),
-                const SizedBox(height: DS.s2),
-                const FirestoreQuotaMonitorWidget(),
                 const SizedBox(height: DS.s2),
                 if (!isGlobalExecutive) ...[
                   KarachiCampSnapshotWidget(t: widget.t),

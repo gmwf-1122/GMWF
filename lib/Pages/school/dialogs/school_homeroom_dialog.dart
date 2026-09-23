@@ -5,6 +5,7 @@ import '../models/school_teacher.dart';
 import '../theme/school_theme.dart';
 import '../utils/school_local_storage.dart';
 import '../constants/school_constants.dart';
+import '../../../widgets/app_feedback.dart';
 
 class SchoolHomeroomDialog extends StatefulWidget {
   final String branchId;
@@ -288,23 +289,18 @@ class _SchoolHomeroomDialogState extends State<SchoolHomeroomDialog> {
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              remove
-                  ? 'Homeroom teacher assignment removed for $_selectedGrade - Section $_selectedSection.'
-                  : 'Successfully assigned ${_selectedTeacher?.name} as Homeroom Teacher for $_selectedGrade - Section $_selectedSection.',
-            ),
-            backgroundColor: remove ? const Color(0xFFEF4444) : const Color(0xFF10B981),
-          ),
-        );
         Navigator.pop(context, true);
+        AppFeedback.showSuccess(
+          context,
+          remove
+              ? 'Homeroom teacher assignment removed for $_selectedGrade - Section $_selectedSection.'
+              : 'Successfully assigned ${_selectedTeacher?.name} as Homeroom Teacher for $_selectedGrade - Section $_selectedSection.',
+          subtitle: 'Saved locally • Syncing to cloud',
+        );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error saving homeroom assignment: $e'), backgroundColor: Colors.red),
-        );
+        AppFeedback.showError(context, 'Error saving homeroom assignment: $e');
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);

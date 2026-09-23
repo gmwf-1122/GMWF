@@ -16,6 +16,7 @@ import '../utils/islamic_calendar_helper.dart';
 import '../../../services/image_upload_service.dart';
 import '../../../services/sync_service.dart';
 import '../../../services/local_storage_service.dart';
+import '../../../services/camp_session_service.dart';
 import '../../../realtime/realtime_manager.dart';
 import '../../../realtime/realtime_events.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -23,6 +24,7 @@ import '../providers/madrassa_providers.dart';
 import 'dart:async';
 
 import '../madrassa_strings.dart';
+import '../../../design/design_system.dart';
 import '../../../services/user_theme_service.dart';
 
 bool _isGlobalLevelUser(String role) {
@@ -55,6 +57,8 @@ class DailyLogView extends ConsumerStatefulWidget {
 
 class _DailyLogViewState extends ConsumerState<DailyLogView> {
   DateTime _selectedDate = DateTime.now();
+  String _selectedSessionFilter = 'all';
+  String _selectedProgramFilter = 'all'; // 'all', 'hifz', 'nazra'
   Map<String, Map<String, dynamic>> _localChanges = {};
   bool _isSaving = false;
   final Map<String, PhotoUploadStatus> _uploadStates = {};
@@ -234,6 +238,25 @@ class _DailyLogViewState extends ConsumerState<DailyLogView> {
         setState(() => _isSaving = false);
         return;
       }
+
+      // Ruku validation
+      final int rukuPara = data['rukuPara'] is int ? data['rukuPara'] : (int.tryParse(data['rukuPara']?.toString() ?? '') ?? 0);
+      final String? rukuVal = data['ruku']?.toString();
+      final bool hasRuku = rukuVal != null && rukuVal.isNotEmpty && rukuVal != '-';
+      if (hasRuku && rukuVal != 'nahi_sunaya' && rukuPara == 0) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ruku: Para must be selected for $rukuVal Ruku.')),
+        );
+        setState(() => _isSaving = false);
+        return;
+      }
+      if (rukuPara > 0 && !hasRuku) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Ruku: Please select Ruku count for Para $rukuPara.')),
+        );
+        setState(() => _isSaving = false);
+        return;
+      }
     }
 
     try {
@@ -247,6 +270,26 @@ class _DailyLogViewState extends ConsumerState<DailyLogView> {
         editorName: widget.editorName,
         editorRole: widget.editorRole,
       );
+
+      // If any Nazra student had Qaida completed, ensure student profile is updated
+      for (var entry in _localChanges.entries) {
+        final sId = entry.key;
+        final data = entry.value;
+        if (data['qaidaSabak'] == 'completed' || data['qaidaCompleted'] == true) {
+          final cached = MadrassaLocalStorage.getStudentCached(widget.branchId, sId);
+          if (cached != null && cached['qaidaCompleted'] != true) {
+            cached['qaidaCompleted'] = true;
+            cached['qaidaSabak'] = 'completed';
+            await MadrassaLocalStorage.cacheStudent(widget.branchId, sId, cached);
+            await LocalStorageService.enqueueSync({
+              'type': 'save_madrassa_student',
+              'branchId': widget.branchId,
+              'studentId': sId,
+              'data': cached,
+            });
+          }
+        }
+      }
 
       // Write audit log entry in background
       unawaited(MadrassaAuditService.logAction(
@@ -460,7 +503,7 @@ _changeNotifier.value++;
 
   @override
   Widget build(BuildContext context) {
-    final isDesktop = MediaQuery.of(context).size.width > 900;
+    final isDesktop = GBreakpoint.isDesktop(context);
     
     final configAsyncValue = ref.watch(madrassaConfigProvider(widget.branchId));
     final holidaysAsyncValue = ref.watch(madrassaHolidaysProvider(widget.branchId));
@@ -859,7 +902,32 @@ _changeNotifier.value++;
                         child: Center(child: Text('Error: $e')),
                       ),
                       data: (logData) {
-                        final double paddingVal = MediaQuery.of(context).size.width < 600 ? 16 : 24;
+                        final double paddingVal = GBreakpoint.isMobile(context) ? Gsp.s16 : Gsp.s24;
+                        final isNazraOnly = LocalStorageService.isMadrassaNazraOnly(widget.branchId);
+                        final branchSessions = CampSessionService.getMadrassaSessions(widget.branchId);
+
+                        final displayedStudents = students.where((s) {
+                          if (_selectedSessionFilter != 'all') {
+                            final sSess = (s['session'] ?? 'morning').toString().toLowerCase().trim();
+                            if (sSess != _selectedSessionFilter) return false;
+                          }
+                          final isStudentNazra = isNazraOnly ||
+                              (s['isNazra'] == true) ||
+                              (s['program']?.toString().toLowerCase() == 'nazra') ||
+                              (s['class']?.toString().toLowerCase() == 'nazra');
+                          if (_selectedProgramFilter == 'hifz') {
+                            if (isStudentNazra) return false;
+                          } else if (_selectedProgramFilter == 'nazra') {
+                            if (!isStudentNazra) return false;
+                          }
+                          return true;
+                        }).toList();
+
+                        final nazraCount = students.where((s) => isNazraOnly ||
+                            (s['isNazra'] == true) ||
+                            (s['program']?.toString().toLowerCase() == 'nazra') ||
+                            (s['class']?.toString().toLowerCase() == 'nazra')).length;
+                        final hifzCount = students.length - nazraCount;
 
                         return SliverPadding(
                           padding: EdgeInsets.symmetric(horizontal: paddingVal),
@@ -870,6 +938,180 @@ _changeNotifier.value++;
                                 if (index == 0) {
                                   return Column(
                                     children: [
+                                      if (isNazraOnly)
+                                        Container(
+                                          margin: const EdgeInsets.only(bottom: 8),
+                                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                          decoration: BoxDecoration(
+                                            color: const Color(0xFF0D9488).withValues(alpha: 0.12),
+                                            borderRadius: BorderRadius.circular(10),
+                                            border: Border.all(color: const Color(0xFF0D9488).withValues(alpha: 0.3)),
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              const Icon(Icons.menu_book_rounded, color: Color(0xFF0D9488), size: 18),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: Text(
+                                                  context.isUrdu
+                                                      ? 'صرف ناظرہ سسٹم: صرف حاضری اور سبق لاگ ہوتے ہیں۔ فیس، یونیفارم اور سبقی/منزل سسٹم بند ہے۔'
+                                                      : 'Only Nazra System Active: Tracking Attendance & Sabak only. Uniform & Sabqi/Manzil disabled.',
+                                                  style: context.urduStyle(
+                                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0D9488)),
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      // Program Filter Bar (Hifz / Nazra)
+                                      if (!isNazraOnly)
+                                        Container(
+                                          margin: const EdgeInsets.only(bottom: 8),
+                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                          decoration: BoxDecoration(
+                                            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                                            borderRadius: BorderRadius.circular(12),
+                                            border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.category_rounded, size: 16, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                context.isUrdu ? 'پروگرام / کلاس:' : 'Program:',
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: isDark ? Colors.white70 : const Color(0xFF475569),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: SingleChildScrollView(
+                                                  scrollDirection: Axis.horizontal,
+                                                  child: Row(
+                                                    children: [
+                                                      ChoiceChip(
+                                                        label: Text('All (${students.length})'),
+                                                        selected: _selectedProgramFilter == 'all',
+                                                        onSelected: (val) {
+                                                          if (val) setState(() => _selectedProgramFilter = 'all');
+                                                        },
+                                                        selectedColor: const Color(0xFF0F766E),
+                                                        labelStyle: TextStyle(
+                                                          fontSize: 11,
+                                                          fontWeight: FontWeight.bold,
+                                                          color: _selectedProgramFilter == 'all' ? Colors.white : null,
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 6),
+                                                      ChoiceChip(
+                                                        label: Text('🕋 Hifz ($hifzCount)'),
+                                                        selected: _selectedProgramFilter == 'hifz',
+                                                        onSelected: (val) {
+                                                          if (val) setState(() => _selectedProgramFilter = 'hifz');
+                                                        },
+                                                        selectedColor: const Color(0xFF7C3AED),
+                                                        labelStyle: TextStyle(
+                                                          fontSize: 11,
+                                                          fontWeight: FontWeight.bold,
+                                                          color: _selectedProgramFilter == 'hifz' ? Colors.white : null,
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 6),
+                                                      ChoiceChip(
+                                                        label: Text('📖 Nazra ($nazraCount)'),
+                                                        selected: _selectedProgramFilter == 'nazra',
+                                                        onSelected: (val) {
+                                                          if (val) setState(() => _selectedProgramFilter = 'nazra');
+                                                        },
+                                                        selectedColor: const Color(0xFF0D9488),
+                                                        labelStyle: TextStyle(
+                                                          fontSize: 11,
+                                                          fontWeight: FontWeight.bold,
+                                                          color: _selectedProgramFilter == 'nazra' ? Colors.white : null,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      // Session Filter Bar
+                                      if (branchSessions.length > 1 || students.any((st) => st['session'] != null))
+                                        Container(
+                                          margin: const EdgeInsets.only(bottom: 10),
+                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                          decoration: BoxDecoration(
+                                            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                                            borderRadius: BorderRadius.circular(12),
+                                            border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.filter_list_rounded, size: 16, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                                              const SizedBox(width: 8),
+                                              Text(
+                                                context.isUrdu ? 'شفٹ / سیشن:' : 'Session:',
+                                                style: TextStyle(
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.bold,
+                                                  color: isDark ? Colors.white70 : const Color(0xFF475569),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: SingleChildScrollView(
+                                                  scrollDirection: Axis.horizontal,
+                                                  child: Row(
+                                                    children: [
+                                                      ChoiceChip(
+                                                        label: Text('All (${students.length})'),
+                                                        selected: _selectedSessionFilter == 'all',
+                                                        onSelected: (val) {
+                                                          if (val) setState(() => _selectedSessionFilter = 'all');
+                                                        },
+                                                        selectedColor: const Color(0xFF0F766E),
+                                                        labelStyle: TextStyle(
+                                                          fontSize: 11,
+                                                          fontWeight: FontWeight.bold,
+                                                          color: _selectedSessionFilter == 'all' ? Colors.white : null,
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 6),
+                                                      ...['morning', 'evening', 'night'].where((s) => branchSessions.contains(s) || students.any((st) => (st['session'] ?? 'morning') == s)).map((s) {
+                                                        final count = students.where((st) => (st['session'] ?? 'morning') == s).length;
+                                                        final label = s == 'morning'
+                                                            ? '☀️ Morning ($count)'
+                                                            : (s == 'evening' ? '🌅 Evening ($count)' : '🌙 Night ($count)');
+                                                        final isSelected = _selectedSessionFilter == s;
+                                                        return Padding(
+                                                          padding: const EdgeInsets.only(right: 6),
+                                                          child: ChoiceChip(
+                                                            label: Text(label),
+                                                            selected: isSelected,
+                                                            onSelected: (val) {
+                                                              if (val) setState(() => _selectedSessionFilter = s);
+                                                            },
+                                                            selectedColor: const Color(0xFF0F766E),
+                                                            labelStyle: TextStyle(
+                                                              fontSize: 11,
+                                                              fontWeight: FontWeight.bold,
+                                                              color: isSelected ? Colors.white : null,
+                                                            ),
+                                                          ),
+                                                        );
+                                                      }),
+                                                    ],
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
                                       if (isReadOnly)
                                         Container(
                                           margin: const EdgeInsets.only(bottom: 8),
@@ -889,12 +1131,12 @@ _changeNotifier.value++;
                                       ValueListenableBuilder<int>(
                                         valueListenable: _changeNotifier,
                                         builder: (context, _, __) =>
-                                            _buildStatusLegend(context, config, students, logData),
+                                            _buildStatusLegend(context, config, displayedStudents, logData),
                                       ),
                                     ],
                                   );
                                 }
-                                final s = students[index - 1];
+                                final s = displayedStudents[index - 1];
                                 final sId = s['id'] ?? '';
                                 final sLog = _localChanges[sId] ?? _safeMap(logData[sId]);
                                 final notifier = _studentNotifiers.putIfAbsent(
@@ -918,7 +1160,7 @@ _changeNotifier.value++;
                                   buildRatioDropdown: _buildRatioDropdown,
                                 );
                               },
-                              childCount: students.length + 1,
+                              childCount: displayedStudents.length + 1,
                             ),
                           ),
                         );
@@ -947,7 +1189,7 @@ _changeNotifier.value++;
   Widget _buildHeader(MadrassaConfig config) {
     final ptmDate = getPtmDateFor(_selectedDate.year, _selectedDate.month, config);
     final workingDays = MadrassaFeeLogic.getWorkingDaysCount(_selectedDate.year, _selectedDate.month);
-    final isMobile = MediaQuery.of(context).size.width < 600;
+    final isMobile = GBreakpoint.isMobile(context);
     final effectiveAllowLeave = _localAllowStudentLeave ?? config.allowStudentLeave;
     final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.editorName);
 
@@ -1447,8 +1689,8 @@ _changeNotifier.value++;
   }
 
   Widget _buildStatusLegend(BuildContext context, MadrassaConfig config, List<Map<String, dynamic>> students, Map<String, dynamic> logData) {
-    final isDesktop = MediaQuery.of(context).size.width > 900;
-    final isMobile = MediaQuery.of(context).size.width < 600;
+    final isDesktop = GBreakpoint.isDesktop(context);
+    final isMobile = GBreakpoint.isMobile(context);
     final isReadOnly = !_canSaveData();
     int present = 0, leave = 0, absent = 0, replied = 0;
     for (var s in students) {
@@ -2049,6 +2291,19 @@ _changeNotifier.value++;
     final studentName = studentData['name'] ?? '—';
     final rollNumber = studentData['rollNumber'] ?? '?';
 
+    // Check student program
+    final isNazraOnly = LocalStorageService.isMadrassaNazraOnly(widget.branchId);
+    final isStudentNazra = isNazraOnly ||
+        (studentData['isNazra'] == true) ||
+        (studentData['program']?.toString().toLowerCase() == 'nazra') ||
+        (studentData['class']?.toString().toLowerCase() == 'nazra');
+    final isQaidaCompleted = studentData['qaidaCompleted'] == true ||
+        currentLog['qaidaCompleted'] == true ||
+        currentLog['qaidaSabak'] == 'completed';
+    final int rukuParaVal = currentLog['rukuPara'] is int ? currentLog['rukuPara'] as int : (int.tryParse(currentLog['rukuPara']?.toString() ?? '') ?? 0);
+    final rukuVal = currentLog['ruku']?.toString();
+    final qaidaVal = currentLog['qaidaSabak']?.toString();
+
     // Format Sabak/Sabki/Manzil strings for message
     String sabakMsg = 'Lines: $lines';
     
@@ -2066,7 +2321,28 @@ _changeNotifier.value++;
       manzilMsg = 'نہیں سنایا';
     }
 
+    String rukuMsg = 'No test today';
+    if (rukuVal != null && rukuVal.isNotEmpty && rukuVal != '-') {
+      if (rukuVal == 'nahi_sunaya') {
+        rukuMsg = 'نہیں سنایا';
+      } else if (rukuParaVal > 0) {
+        rukuMsg = 'Para $rukuParaVal ($rukuVal Ruku) / پارہ $rukuParaVal ($rukuVal رُكوع)';
+      } else {
+        rukuMsg = '$rukuVal Ruku / رُكوع';
+      }
+    }
+
+    String qaidaMsg = isQaidaCompleted
+        ? 'Completed / مکمل ✅'
+        : ((qaidaVal != null && qaidaVal.isNotEmpty && qaidaVal != '-')
+            ? (qaidaVal == 'completed' ? 'Completed / مکمل ✅' : 'Lesson $qaidaVal / سبق $qaidaVal')
+            : 'No lesson recorded');
+
     final String uniformMsg = uni ? 'Clean / صاف' : 'Incomplete / Not Clean / نامکمل یا صاف نہیں';
+
+    final String progressContent = isStudentNazra
+        ? '• *Sabak:* $sabakMsg\n• *Ruku / رُكوع:* $rukuMsg\n• *Qaida / قاعدہ:* $qaidaMsg\n'
+        : '• *Sabak:* $sabakMsg\n• *Sabki:* $sabkiMsg\n• *Manzil:* $manzilMsg\n';
 
     final String message = 
         '*Gulzar Madina Welfare Foundation (Madrassa)*\n'
@@ -2077,10 +2353,7 @@ _changeNotifier.value++;
         '*Attendance / حاضری:*     $attTextEn / $attTextUr\n'
         '${att == 'present' ? '*Uniform / لباس:*               $uniformMsg\n' : ''}'
         '\n'
-        '${att == 'present' ? '*Daily Progress / روزانہ کارکردگی:*\n'
-        '• *Sabak:* $sabakMsg\n'
-        '• *Sabki:* $sabkiMsg\n'
-        '• *Manzil:* $manzilMsg\n' : ''}'
+        '${att == 'present' ? '*Daily Progress / روزانہ کارکردگی:*\n$progressContent' : ''}'
         '--------------------------------------------\n'
         'JazakAllah Khair! / جزاک اللہ خیر!';
 
@@ -2126,6 +2399,12 @@ _changeNotifier.value++;
       final name = s['name'] ?? '—';
       final roll = s['rollNumber'] ?? '?';
 
+      final isNazraOnly = LocalStorageService.isMadrassaNazraOnly(widget.branchId);
+      final isNazraStudent = isNazraOnly ||
+          (s['isNazra'] == true) ||
+          (s['program']?.toString().toLowerCase() == 'nazra') ||
+          (s['class']?.toString().toLowerCase() == 'nazra');
+
       String attText = 'Absent / غیر حاضر';
       if (att == 'present') {
         present++;
@@ -2155,15 +2434,36 @@ _changeNotifier.value++;
         if (lines > 0) {
           progressParts.add('Sabak: $lines lines');
         }
-        if (sabkiParaVal > 0 && sabkiRatioVal != null && sabkiRatioVal.isNotEmpty && sabkiRatioVal != '-') {
-          progressParts.add('Sabki: Para $sabkiParaVal (${formatRatio(sabkiRatioVal)})');
-        } else if (sabkiRatioVal == 'nahi_sunaya') {
-          progressParts.add('Sabki: نہیں سنایا');
-        }
-        if (manzilParaVal > 0 && manzilRatioVal != null && manzilRatioVal.isNotEmpty && manzilRatioVal != '-') {
-          progressParts.add('Manzil: Para $manzilParaVal (${formatRatio(manzilRatioVal)})');
-        } else if (manzilRatioVal == 'nahi_sunaya') {
-          progressParts.add('Manzil: نہیں سنایا');
+
+        if (isNazraStudent) {
+          final int rukuPara = log['rukuPara'] is int ? log['rukuPara'] as int : (int.tryParse(log['rukuPara']?.toString() ?? '') ?? 0);
+          final ruku = log['ruku']?.toString();
+          if (ruku != null && ruku.isNotEmpty && ruku != '-') {
+            if (ruku == 'nahi_sunaya') {
+              progressParts.add('Ruku: نہیں سنایا');
+            } else if (rukuPara > 0) {
+              progressParts.add('Ruku: Para $rukuPara ($ruku)');
+            } else {
+              progressParts.add('Ruku: $ruku');
+            }
+          }
+          final bool isQComp = s['qaidaCompleted'] == true || log['qaidaCompleted'] == true || log['qaidaSabak'] == 'completed';
+          if (isQComp) {
+            progressParts.add('Qaida: Completed / مکمل ✅');
+          } else if (log['qaidaSabak'] != null && log['qaidaSabak'].toString().isNotEmpty && log['qaidaSabak'].toString() != '-') {
+            progressParts.add('Qaida: Lesson ${log['qaidaSabak']}');
+          }
+        } else {
+          if (sabkiParaVal > 0 && sabkiRatioVal != null && sabkiRatioVal.isNotEmpty && sabkiRatioVal != '-') {
+            progressParts.add('Sabki: Para $sabkiParaVal (${formatRatio(sabkiRatioVal)})');
+          } else if (sabkiRatioVal == 'nahi_sunaya') {
+            progressParts.add('Sabki: نہیں سنایا');
+          }
+          if (manzilParaVal > 0 && manzilRatioVal != null && manzilRatioVal.isNotEmpty && manzilRatioVal != '-') {
+            progressParts.add('Manzil: Para $manzilParaVal (${formatRatio(manzilRatioVal)})');
+          } else if (manzilRatioVal == 'nahi_sunaya') {
+            progressParts.add('Manzil: نہیں سنایا');
+          }
         }
 
         final progressStr = progressParts.isNotEmpty ? ' | ' + progressParts.join(' | ') : '';
@@ -2721,6 +3021,235 @@ class _StudentLogCard extends StatelessWidget {
     );
   }
 
+  Widget _buildRukuField(BuildContext context, String sId, int rukuPara, dynamic currentRuku, {bool isDark = false}) {
+    final rukuStr = (currentRuku == null || currentRuku.toString() == '0' || currentRuku.toString() == '-')
+        ? null
+        : currentRuku.toString();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          context.isUrdu ? 'رُكوع (پارہ / رُكوع)' : 'Ruku (Para / Ruku)',
+          style: context.urduStyle(
+            style: TextStyle(
+              fontSize: 11,
+              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF495057),
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Row(
+          children: [
+            Expanded(
+              flex: 5,
+              child: buildParaDropdown(context, rukuPara, !isReadOnly, isReadOnly ? null : (val) {
+                onUpdateLocal(sId, 'rukuPara', val ?? 0);
+              }),
+            ),
+            const SizedBox(width: 6),
+            Expanded(
+              flex: 6,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6),
+                height: 36,
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                  border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7)),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: DropdownButtonHideUnderline(
+                  child: DropdownButton<String>(
+                    value: rukuStr,
+                    hint: Text(
+                      '-',
+                      style: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey.shade400, fontSize: 12),
+                    ),
+                    icon: const Icon(Icons.arrow_drop_down, size: 16, color: Color(0xFF008080)),
+                    isDense: true,
+                    isExpanded: true,
+                    dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                    style: TextStyle(fontSize: 12, color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.bold),
+                    items: [
+                      DropdownMenuItem<String>(
+                        value: null,
+                        child: Text(
+                          '-',
+                          style: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey),
+                        ),
+                      ),
+                      DropdownMenuItem<String>(
+                        value: 'nahi_sunaya',
+                        child: Text(
+                          context.isUrdu ? 'نہیں سنایا' : 'Nahi Sunaya',
+                          style: const TextStyle(color: Color(0xFFE53935)),
+                        ),
+                      ),
+                      for (int i = 1; i <= 40; i++)
+                        DropdownMenuItem<String>(
+                          value: '$i',
+                          child: Text(
+                            context.isUrdu ? '$i رُكوع' : '$i Ruku',
+                            style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : const Color(0xFF0F172A)),
+                          ),
+                        ),
+                    ],
+                    onChanged: isReadOnly
+                        ? null
+                        : (val) {
+                            onUpdateLocal(sId, 'ruku', val ?? '-');
+                          },
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildQaidaField(BuildContext context, String sId, bool isQaidaCompleted, dynamic currentQaidaSabak, {bool isDark = false}) {
+    if (isQaidaCompleted) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            context.isUrdu ? 'قاعدہ سبق' : 'Qaida Sabak',
+            style: context.urduStyle(
+              style: TextStyle(
+                fontSize: 11,
+                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF495057),
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Container(
+            height: 36,
+            padding: const EdgeInsets.symmetric(horizontal: 10),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF064E3B).withValues(alpha: 0.3) : const Color(0xFFECFDF5),
+              borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.5)),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 16),
+                const SizedBox(width: 6),
+                Text(
+                  context.isUrdu ? 'قاعدہ مکمل ✅' : 'Qaida Completed ✅',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                    color: Color(0xFF059669),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      );
+    }
+
+    final currentVal = (currentQaidaSabak == null || currentQaidaSabak.toString() == '0' || currentQaidaSabak.toString() == '-')
+        ? null
+        : currentQaidaSabak.toString();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          context.isUrdu ? 'قاعدہ سبق (تختی ۱ تا ۲۱)' : 'Qaida Sabak (1–21)',
+          style: context.urduStyle(
+            style: TextStyle(
+              fontSize: 11,
+              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF495057),
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ),
+        const SizedBox(height: 4),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          height: 36,
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF0F172A) : Colors.white,
+            border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7)),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: (currentVal == 'completed') ? null : currentVal,
+              hint: Text(
+                context.isUrdu ? 'سبق منتخب کریں' : 'Select Lesson',
+                style: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey.shade400, fontSize: 12),
+              ),
+              icon: const Icon(Icons.arrow_drop_down, size: 16, color: Color(0xFF008080)),
+              isDense: true,
+              isExpanded: true,
+              dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+              style: TextStyle(fontSize: 12, color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.bold),
+              items: [
+                DropdownMenuItem<String>(
+                  value: null,
+                  child: Text(
+                    context.isUrdu ? '— کوئی سبق نہیں —' : '— No Lesson —',
+                    style: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey),
+                  ),
+                ),
+                for (int i = 1; i <= 21; i++)
+                  DropdownMenuItem<String>(
+                    value: '$i',
+                    child: Text(
+                      context.isUrdu ? 'سبق $i (تختی $i)' : 'Lesson $i',
+                      style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : const Color(0xFF0F172A)),
+                    ),
+                  ),
+                DropdownMenuItem<String>(
+                  value: 'completed',
+                  child: Row(
+                    children: [
+                      const Icon(Icons.verified_rounded, color: Color(0xFF10B981), size: 16),
+                      const SizedBox(width: 6),
+                      Text(
+                        context.isUrdu ? '🏆 مکمل (Completed)' : '🏆 Completed',
+                        style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF059669)),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+              onChanged: isReadOnly ? null : (val) {
+                if (val == 'completed') {
+                  onUpdateLocal(sId, 'qaidaSabak', 'completed');
+                  onUpdateLocal(sId, 'qaidaCompleted', true);
+                  final cached = MadrassaLocalStorage.getStudentCached(branchId, sId);
+                  if (cached != null) {
+                    cached['qaidaCompleted'] = true;
+                    cached['qaidaSabak'] = 'completed';
+                    MadrassaLocalStorage.cacheStudent(branchId, sId, cached);
+                    LocalStorageService.enqueueSync({
+                      'type': 'save_madrassa_student',
+                      'branchId': branchId,
+                      'studentId': sId,
+                      'data': cached,
+                    });
+                    unawaited(SyncService().triggerUpload());
+                  }
+                  student['qaidaCompleted'] = true;
+                } else {
+                  onUpdateLocal(sId, 'qaidaSabak', val ?? '-');
+                }
+              },
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _buildLogAvatarFallback(String name) {
     return Container(
       width: 32,
@@ -2739,7 +3268,7 @@ class _StudentLogCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width < 600;
+    final isMobile = GBreakpoint.isMobile(context);
 
     return ValueListenableBuilder<Map<String, dynamic>>(
       valueListenable: logNotifier,
@@ -2779,6 +3308,12 @@ class _StudentLogCard extends StatelessWidget {
         final String? sabkiRatio = log['sabkiRatio']?.toString();
         final int manzilPara = log['manzilPara'] is int ? log['manzilPara'] as int : (int.tryParse(log['manzilPara']?.toString() ?? '') ?? 0);
         final String? manzilRatio = log['manzilRatio']?.toString();
+        final int rukuPara = log['rukuPara'] is int ? log['rukuPara'] as int : (int.tryParse(log['rukuPara']?.toString() ?? '') ?? 0);
+        final dynamic rukuVal = log['ruku'];
+        final dynamic qaidaSabakVal = log['qaidaSabak'] ?? studentData['qaidaSabak'];
+        final bool isQaidaCompleted = studentData['qaidaCompleted'] == true ||
+            log['qaidaCompleted'] == true ||
+            log['qaidaSabak'] == 'completed';
 
         Widget avatarWidget;
         if (uploadStatus == PhotoUploadStatus.uploading) {
@@ -2917,6 +3452,92 @@ class _StudentLogCard extends StatelessWidget {
           );
         }
 
+        final isNazraOnly = LocalStorageService.isMadrassaNazraOnly(branchId);
+        final isStudentNazra = isNazraOnly ||
+            (student['isNazra'] == true) ||
+            (student['program']?.toString().toLowerCase() == 'nazra') ||
+            (student['class']?.toString().toLowerCase() == 'nazra');
+        final genderStr = (student['gender'] ?? '').toString().toLowerCase().trim();
+        final isFemale = genderStr == 'female' || genderStr == 'girl';
+        final sessionStr = (student['session'] ?? 'morning').toString().toLowerCase().trim();
+
+        Widget genderSessionBadges = Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1.5),
+              decoration: BoxDecoration(
+                color: isFemale ? Colors.pink.withValues(alpha: 0.12) : Colors.blue.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                isFemale ? '👧 Girl' : '👦 Boy',
+                style: TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.bold,
+                  color: isFemale ? Colors.pink.shade700 : Colors.blue.shade700,
+                ),
+              ),
+            ),
+            const SizedBox(width: 4),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1.5),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F766E).withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                sessionStr == 'morning'
+                    ? '☀️ M'
+                    : (sessionStr == 'evening' ? '🌅 E' : '🌙 N'),
+                style: const TextStyle(
+                  fontSize: 9,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFF0F766E),
+                ),
+              ),
+            ),
+            if (!isNazraOnly) ...[
+              const SizedBox(width: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1.5),
+                decoration: BoxDecoration(
+                  color: isStudentNazra
+                      ? const Color(0xFF0D9488).withValues(alpha: 0.12)
+                      : const Color(0xFF7C3AED).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  isStudentNazra ? '📖 Nazra' : '🕋 Hifz',
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    color: isStudentNazra ? const Color(0xFF0D9488) : const Color(0xFF7C3AED),
+                  ),
+                ),
+              ),
+            ],
+            if (isStudentNazra && isQaidaCompleted) ...[
+              const SizedBox(width: 4),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1.5),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: const Text(
+                  '✅ قاعدہ مکمل',
+                  style: TextStyle(
+                    fontSize: 9,
+                    fontWeight: FontWeight.bold,
+                    color: Color(0xFF059669),
+                  ),
+                ),
+              ),
+            ],
+          ],
+        );
+
         Widget topRow = Row(
           children: [
             SizedBox(
@@ -2938,7 +3559,9 @@ class _StudentLogCard extends StatelessWidget {
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  if (hifzBadge != null) hifzBadge,
+                  const SizedBox(width: 4),
+                  genderSessionBadges,
+                  if (hifzBadge != null && !isStudentNazra) hifzBadge,
                 ],
               ),
             ),
@@ -3020,13 +3643,14 @@ class _StudentLogCard extends StatelessWidget {
                 },
                 showLabel: false,
               ),
-              _switchCol(
-                context,
-                context.l.uniform,
-                (att == 'leave' || uni == true || uni == 'leave'),
-                (att == 'present' && !isReadOnly) ? (v) => onUpdateLocal(sId, 'uniform', v) : null,
-                isDark: isDark,
-              ),
+              if (!isStudentNazra)
+                _switchCol(
+                  context,
+                  context.l.uniform,
+                  (att == 'leave' || uni == true || uni == 'leave'),
+                  (att == 'present' && !isReadOnly) ? (v) => onUpdateLocal(sId, 'uniform', v) : null,
+                  isDark: isDark,
+                ),
               _switchCol(
                 context,
                 context.l.parentReplied,
@@ -3064,7 +3688,9 @@ class _StudentLogCard extends StatelessWidget {
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      if (hifzBadge != null) hifzBadge,
+                      const SizedBox(width: 6),
+                      genderSessionBadges,
+                      if (hifzBadge != null && !isStudentNazra) hifzBadge,
                     ],
                   ),
                   if ((isParentRequested || att == 'leave_requested') && leaveStatus == 'pending')
@@ -3292,13 +3918,15 @@ class _StudentLogCard extends StatelessWidget {
                 },
                 showLabel: true,
               ),
-            const SizedBox(width: 24),
-            _switchCol(
-              context,
-              context.l.uniform,
-              (att == 'leave' || uni == true || uni == 'leave'),
-              (att == 'present' && !isReadOnly) ? (v) => onUpdateLocal(sId, 'uniform', v) : null,
-            ),
+            if (!isStudentNazra) ...[
+              const SizedBox(width: 24),
+              _switchCol(
+                context,
+                context.l.uniform,
+                (att == 'leave' || uni == true || uni == 'leave'),
+                (att == 'present' && !isReadOnly) ? (v) => onUpdateLocal(sId, 'uniform', v) : null,
+              ),
+            ],
             const SizedBox(width: 24),
             _switchCol(
               context,
@@ -3353,21 +3981,38 @@ class _StudentLogCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       _buildSabakField(context, sId, lines, isDark: isDark),
-                      const SizedBox(height: 12),
-                      _buildSabkiField(context, sabkiPara, sabkiRatio, isDark: isDark),
-                      const SizedBox(height: 12),
-                      _buildManzilField(context, manzilPara, manzilRatio, isDark: isDark),
+                      if (!isStudentNazra) ...[
+                        const SizedBox(height: 12),
+                        _buildSabkiField(context, sabkiPara, sabkiRatio, isDark: isDark),
+                        const SizedBox(height: 12),
+                        _buildManzilField(context, manzilPara, manzilRatio, isDark: isDark),
+                      ] else ...[
+                        const SizedBox(height: 12),
+                        _buildRukuField(context, sId, rukuPara, rukuVal, isDark: isDark),
+                        const SizedBox(height: 12),
+                        _buildQaidaField(context, sId, isQaidaCompleted, qaidaSabakVal, isDark: isDark),
+                      ],
                     ],
                   )
-                : Row(
-                    children: [
-                      Expanded(child: _buildSabakField(context, sId, lines, isDark: isDark)),
-                      const SizedBox(width: 16),
-                      Expanded(child: _buildSabkiField(context, sabkiPara, sabkiRatio, isDark: isDark)),
-                      const SizedBox(width: 16),
-                      Expanded(child: _buildManzilField(context, manzilPara, manzilRatio, isDark: isDark)),
-                    ],
-                  ),
+                : (isStudentNazra
+                    ? Row(
+                        children: [
+                          Expanded(child: _buildSabakField(context, sId, lines, isDark: isDark)),
+                          const SizedBox(width: 16),
+                          Expanded(child: _buildRukuField(context, sId, rukuPara, rukuVal, isDark: isDark)),
+                          const SizedBox(width: 16),
+                          Expanded(child: _buildQaidaField(context, sId, isQaidaCompleted, qaidaSabakVal, isDark: isDark)),
+                        ],
+                      )
+                    : Row(
+                        children: [
+                          Expanded(child: _buildSabakField(context, sId, lines, isDark: isDark)),
+                          const SizedBox(width: 16),
+                          Expanded(child: _buildSabkiField(context, sabkiPara, sabkiRatio, isDark: isDark)),
+                          const SizedBox(width: 16),
+                          Expanded(child: _buildManzilField(context, manzilPara, manzilRatio, isDark: isDark)),
+                        ],
+                      )),
           );
         }
 

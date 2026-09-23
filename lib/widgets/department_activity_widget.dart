@@ -5,6 +5,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../services/local_storage_service.dart';
+import '../services/auto_update_service.dart';
 
 class DepartmentActivityWidget extends StatefulWidget {
   final String branchId;
@@ -59,10 +60,50 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
     },
   ];
 
+  late Future<List<Map<String, dynamic>>> _usersFuture;
+
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: _departments.length, vsync: this);
+    _usersFuture = _loadUsers();
+    if (!Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+      LocalStorageService.ensureBoxOpen(LocalStorageService.entriesBox).then((_) {
+        if (mounted) setState(() {});
+      });
+    }
+  }
+
+  @override
+  void didUpdateWidget(DepartmentActivityWidget oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.branchId != widget.branchId) {
+      _usersFuture = _loadUsers();
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _loadUsers() async {
+    final local = LocalStorageService.getAllLocalUsers();
+    if (local.isNotEmpty) {
+      return local;
+    }
+    try {
+      final normalizedBranch = widget.branchId.trim().toLowerCase();
+      QuerySnapshot snap;
+      if (normalizedBranch.isEmpty || normalizedBranch == 'all' || normalizedBranch == 'global') {
+        snap = await FirebaseFirestore.instance.collection('users').limit(100).get(const GetOptions(source: Source.serverAndCache));
+      } else {
+        snap = await FirebaseFirestore.instance
+            .collection('branches')
+            .doc(normalizedBranch)
+            .collection('users')
+            .limit(100)
+            .get(const GetOptions(source: Source.serverAndCache));
+      }
+      return snap.docs.map((d) => d.data() as Map<String, dynamic>).toList();
+    } catch (_) {
+      return LocalStorageService.getAllLocalUsers();
+    }
   }
 
   @override
@@ -96,18 +137,28 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Column(
       children: [
         // Department Selection TabBar
         Container(
-          color: const Color(0xFF1F2937),
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF0F172A) : Colors.white,
+            border: Border(
+              bottom: BorderSide(
+                color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                width: 1,
+              ),
+            ),
+          ),
           child: TabBar(
             controller: _tabController,
             isScrollable: true,
-            indicatorColor: Colors.blueAccent,
+            indicatorColor: const Color(0xFF10B981),
             indicatorWeight: 3,
-            labelColor: Colors.white,
-            unselectedLabelColor: Colors.white54,
+            labelColor: isDark ? Colors.white : const Color(0xFF0F172A),
+            unselectedLabelColor: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
             labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
             tabs: _departments.map((dept) {
               return Tab(
@@ -125,9 +176,13 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
 
         // Tab Views for Each Department
         Expanded(
-          child: ValueListenableBuilder(
-            valueListenable: Hive.box(LocalStorageService.entriesBox).listenable(),
-            builder: (context, Box box, _) {
+          child: !Hive.isBoxOpen(LocalStorageService.entriesBox)
+              ? const Center(
+                  child: CircularProgressIndicator(color: Color(0xFF10B981)),
+                )
+              : ValueListenableBuilder(
+                  valueListenable: Hive.box(LocalStorageService.entriesBox).listenable(),
+                  builder: (context, Box box, _) {
               return TabBarView(
                 controller: _tabController,
                 children: _departments.map((dept) {
@@ -135,21 +190,10 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                   final deptColor = dept['color'] as Color;
                   final deptEntries = _getDepartmentEntries(deptId);
 
-                  return FutureBuilder<QuerySnapshot>(
-                    future: () {
-                      final normalizedBranch = widget.branchId.trim().toLowerCase();
-                      if (normalizedBranch.isEmpty || normalizedBranch == 'all' || normalizedBranch == 'global') {
-                        return FirebaseFirestore.instance.collection('users').limit(200).get();
-                      }
-                      return FirebaseFirestore.instance
-                          .collection('branches')
-                          .doc(normalizedBranch)
-                          .collection('users')
-                          .limit(200)
-                          .get();
-                    }(),
+                  return FutureBuilder<List<Map<String, dynamic>>>(
+                    future: _usersFuture,
                     builder: (context, snapshot) {
-                      final allUsers = snapshot.data?.docs.map((d) => d.data() as Map<String, dynamic>).toList() ?? [];
+                      final allUsers = snapshot.data ?? [];
 
                       final deptRoles = (dept['roles'] as List<String>).map((r) => r.toLowerCase()).toList();
                       final deptUsers = allUsers.where((u) {
@@ -181,9 +225,16 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                             Container(
                               padding: const EdgeInsets.all(20),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF1F2937).withValues(alpha: 0.8),
-                                borderRadius: BorderRadius.circular(20),
-                                border: Border.all(color: deptColor.withValues(alpha: 0.3)),
+                                color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: isDark ? deptColor.withValues(alpha: 0.3) : const Color(0xFFE2E8F0)),
+                                boxShadow: isDark ? [] : [
+                                  BoxShadow(
+                                    color: Colors.black.withOpacity(0.04),
+                                    blurRadius: 10,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
                               ),
                               child: Row(
                                 children: [
@@ -202,29 +253,40 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                                       children: [
                                         Text(
                                           dept['title'] as String,
-                                          style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                                          style: TextStyle(
+                                            color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                            fontSize: 18,
+                                            fontWeight: FontWeight.bold,
+                                          ),
                                         ),
                                         const SizedBox(height: 4),
                                         Text(
                                           'Active Department Staff & Data Routing Log',
-                                          style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 12),
+                                          style: TextStyle(
+                                            color: isDark ? Colors.white60 : const Color(0xFF64748B),
+                                            fontSize: 12,
+                                          ),
                                         ),
                                       ],
                                     ),
                                   ),
                                   // Metric Pills
-                                  _metricPill('Active Staff', '$activeUsersCount / ${deptUsers.length}', Colors.blueAccent),
+                                  _metricPill('Active Staff', '$activeUsersCount / ${deptUsers.length}', Colors.blueAccent, isDark),
                                   const SizedBox(width: 12),
-                                  _metricPill('Total Actions', '$totalTransactions', deptColor),
+                                  _metricPill('Total Actions', '$totalTransactions', deptColor, isDark),
                                 ],
                               ),
                             ),
                             const SizedBox(height: 24),
 
                             // Section Title
-                            const Text(
+                            Text(
                               'Department Staff Members & Progress Timeline',
-                              style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+                              style: TextStyle(
+                                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                             const SizedBox(height: 12),
 
@@ -233,13 +295,17 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                                 width: double.infinity,
                                 padding: const EdgeInsets.all(32),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF1F2937).withValues(alpha: 0.4),
+                                  color: isDark ? const Color(0xFF1E293B).withValues(alpha: 0.5) : Colors.white,
                                   borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
                                 ),
-                                child: const Center(
+                                child: Center(
                                   child: Text(
                                     'No staff members or data logged for this department yet.',
-                                    style: TextStyle(color: Colors.white54, fontSize: 14),
+                                    style: TextStyle(
+                                      color: isDark ? Colors.white54 : const Color(0xFF94A3B8),
+                                      fontSize: 14,
+                                    ),
                                   ),
                                 ),
                               )
@@ -250,23 +316,26 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                                 itemCount: deptUsers.isNotEmpty ? deptUsers.length : 1,
                                 itemBuilder: (context, idx) {
                                   if (deptUsers.isEmpty) {
-                                    return _buildUnassignedEntriesCard(deptEntries, deptColor);
+                                    return _buildUnassignedEntriesCard(deptEntries, deptColor, isDark);
                                   }
 
                                   final u = deptUsers[idx];
                                   final uid = u['uid'] ?? '';
-                                  final name = u['name'] ?? u['username'] ?? u['email'] ?? 'Staff User';
+                                  final name = (u['name'] ?? u['username'] ?? u['email'] ?? 'Staff User').toString();
                                   final role = (u['role'] ?? 'Staff').toString().toUpperCase();
                                   final isOnline = u['isOnline'] == true;
-                                  final devInfo = u['lastDeviceInfo'] as Map<String, dynamic>?;
-                                  final deviceSummary = devInfo?['deviceSummary'] ?? devInfo?['deviceName'] ?? 'Windows Workstation';
-                                  final appVer = u['appVersion'] ?? devInfo?['appVersion'] ?? 'v1.2.9';
+                                  
+                                  // Safe extraction of lastDeviceInfo map
+                                  final rawDevInfo = u['lastDeviceInfo'];
+                                  final devInfo = rawDevInfo is Map ? Map<String, dynamic>.from(rawDevInfo) : null;
+                                  final deviceSummary = (devInfo?['deviceSummary'] ?? devInfo?['deviceName'] ?? 'Windows Workstation').toString();
+                                  final appVer = (u['appVersion'] ?? devInfo?['appVersion'] ?? 'v${AutoUpdateService.currentVersion}').toString();
 
                                   // Filter user's specific actions from local entries
                                   final userActions = deptEntries.where((e) {
                                     final by = (e['performedBy'] ?? '').toString().toLowerCase();
                                     final uidInEntry = (e['userId'] ?? e['performedByUid'] ?? '').toString();
-                                    return uidInEntry == uid || by.contains(name.toString().toLowerCase());
+                                    return uidInEntry == uid || by.contains(name.toLowerCase());
                                   }).toList();
 
                                   userActions.sort((a, b) => (b['createdAt'] ?? '').toString().compareTo((a['createdAt'] ?? '').toString()));
@@ -274,7 +343,7 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                                   final isChairman = role.toLowerCase().trim() == 'chairman';
 
                                   return Container(
-                                    margin: const EdgeInsets.only(bottom: 16),
+                                    margin: const EdgeInsets.only(bottom: 14),
                                     decoration: BoxDecoration(
                                       gradient: isChairman
                                           ? const LinearGradient(
@@ -283,23 +352,29 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                                               end: Alignment.bottomRight,
                                             )
                                           : null,
-                                      color: isChairman ? null : const Color(0xFF1F2937).withValues(alpha: 0.8),
-                                      borderRadius: BorderRadius.circular(16),
+                                      color: isChairman ? null : (isDark ? const Color(0xFF1E293B) : Colors.white),
+                                      borderRadius: BorderRadius.circular(14),
                                       border: Border.all(
                                         color: isChairman
                                             ? const Color(0xFFFBBF24)
-                                            : (isOnline ? Colors.greenAccent.withValues(alpha: 0.3) : Colors.white10),
+                                            : (isDark ? (isOnline ? Colors.greenAccent.withValues(alpha: 0.3) : const Color(0xFF334155)) : const Color(0xFFE2E8F0)),
                                         width: isChairman ? 2.0 : 1.0,
                                       ),
                                       boxShadow: isChairman
                                           ? [
-                                              BoxShadow(
-                                                color: const Color(0xFFF59E0B).withValues(alpha: 0.40),
+                                              const BoxShadow(
+                                                color: Color(0x66F59E0B),
                                                 blurRadius: 18,
                                                 spreadRadius: 1.5,
                                               )
                                             ]
-                                          : null,
+                                          : (isDark ? [] : [
+                                              BoxShadow(
+                                                color: Colors.black.withOpacity(0.03),
+                                                blurRadius: 8,
+                                                offset: const Offset(0, 2),
+                                              ),
+                                            ]),
                                     ),
                                     child: ExpansionTile(
                                       shape: Border.all(color: Colors.transparent),
@@ -318,9 +393,9 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                                             child: Text(
                                               name,
                                               style: TextStyle(
-                                                color: isChairman ? const Color(0xFFFFFBEB) : Colors.white,
-                                                fontWeight: FontWeight.w900,
-                                                fontSize: 16,
+                                                color: isChairman ? const Color(0xFFFFFBEB) : (isDark ? Colors.white : const Color(0xFF0F172A)),
+                                                fontWeight: FontWeight.bold,
+                                                fontSize: 15,
                                                 letterSpacing: isChairman ? 0.3 : 0,
                                               ),
                                             ),
@@ -328,17 +403,25 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                                           Container(
                                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                             decoration: BoxDecoration(
-                                              color: isOnline ? Colors.greenAccent.withValues(alpha: 0.15) : Colors.grey.withValues(alpha: 0.2),
+                                              color: isOnline
+                                                  ? (isDark ? Colors.greenAccent.withValues(alpha: 0.15) : const Color(0xFFECFDF5))
+                                                  : (isDark ? Colors.grey.withValues(alpha: 0.2) : const Color(0xFFF1F5F9)),
                                               borderRadius: BorderRadius.circular(8),
-                                              border: Border.all(color: isOnline ? Colors.greenAccent : Colors.grey),
+                                              border: Border.all(
+                                                color: isOnline ? const Color(0xFF10B981) : (isDark ? Colors.grey : const Color(0xFFCBD5E1)),
+                                              ),
                                             ),
                                             child: Row(
                                               children: [
-                                                Icon(Icons.circle, size: 8, color: isOnline ? Colors.greenAccent : Colors.grey),
+                                                Icon(Icons.circle, size: 7, color: isOnline ? const Color(0xFF10B981) : const Color(0xFF94A3B8)),
                                                 const SizedBox(width: 4),
                                                 Text(
                                                   isOnline ? 'ONLINE' : 'OFFLINE',
-                                                  style: TextStyle(color: isOnline ? Colors.greenAccent : Colors.white54, fontSize: 10, fontWeight: FontWeight.bold),
+                                                  style: TextStyle(
+                                                    color: isOnline ? (isDark ? const Color(0xFF34D399) : const Color(0xFF065F46)) : (isDark ? Colors.white54 : const Color(0xFF64748B)),
+                                                    fontSize: 9.5,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
                                                 ),
                                               ],
                                             ),
@@ -351,19 +434,26 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                                           isChairman
                                               ? '👑 CHAIRMAN · SUPREME AUTHORITY • $deviceSummary • App $appVer'
                                               : '$role • $deviceSummary • App $appVer • (${userActions.length} Actions Saved)',
-                                          style: TextStyle(color: isChairman ? const Color(0xFFFDE68A) : Colors.white54, fontSize: 11.5, fontWeight: isChairman ? FontWeight.bold : FontWeight.normal),
+                                          style: TextStyle(
+                                            color: isChairman ? const Color(0xFFFDE68A) : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                                            fontSize: 11.5,
+                                            fontWeight: isChairman ? FontWeight.bold : FontWeight.normal,
+                                          ),
                                         ),
                                       ),
                                       children: [
-                                        const Divider(color: Colors.white10, height: 1),
+                                        Divider(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0), height: 1),
                                         Padding(
                                           padding: const EdgeInsets.all(16),
                                           child: userActions.isEmpty
-                                              ? const Text('No data actions recorded for this user today.', style: TextStyle(color: Colors.white38, fontSize: 13))
+                                              ? Text('No data actions recorded for this user today.', style: TextStyle(color: isDark ? Colors.white38 : const Color(0xFF94A3B8), fontSize: 13))
                                               : Column(
                                                   crossAxisAlignment: CrossAxisAlignment.start,
                                                   children: [
-                                                    const Text('USER ACTION HISTORY TIMELINE:', style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.bold)),
+                                                    Text(
+                                                      'USER ACTION HISTORY TIMELINE:',
+                                                      style: TextStyle(color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B), fontSize: 11, fontWeight: FontWeight.bold),
+                                                    ),
                                                     const SizedBox(height: 8),
                                                     ListView.builder(
                                                       shrinkWrap: true,
@@ -372,7 +462,7 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                                                       itemBuilder: (ctx, actionIdx) {
                                                         final action = userActions[actionIdx];
                                                         final serial = action['serial']?.toString() ?? 'N/A';
-                                                        final patient = action['patientName'] ?? action['name'] ?? action['title'] ?? 'Entry Payload';
+                                                        final patient = (action['patientName'] ?? action['name'] ?? action['title'] ?? 'Entry Payload').toString();
                                                         final status = (action['status'] ?? 'completed').toString();
                                                         final timeStr = action['createdAt']?.toString() ?? '';
 
@@ -387,20 +477,27 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                                                           padding: const EdgeInsets.symmetric(vertical: 4),
                                                           child: Row(
                                                             children: [
-                                                              const Icon(Icons.check_circle_outline_rounded, size: 14, color: Colors.greenAccent),
+                                                              const Icon(Icons.check_circle_outline_rounded, size: 14, color: Color(0xFF10B981)),
                                                               const SizedBox(width: 8),
-                                                              Text('#$serial', style: const TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold, fontSize: 12)),
+                                                              Text('#$serial', style: const TextStyle(color: Color(0xFF0284C7), fontWeight: FontWeight.bold, fontSize: 12)),
                                                               const SizedBox(width: 8),
                                                               Expanded(
                                                                 child: Text(
                                                                   patient,
-                                                                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                                                                  style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A), fontSize: 13),
                                                                   overflow: TextOverflow.ellipsis,
                                                                 ),
                                                               ),
-                                                              Text(status.toUpperCase(), style: TextStyle(color: status == 'completed' ? Colors.greenAccent : Colors.orangeAccent, fontSize: 10, fontWeight: FontWeight.bold)),
+                                                              Text(
+                                                                status.toUpperCase(),
+                                                                style: TextStyle(
+                                                                  color: status == 'completed' ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                                                                  fontSize: 10,
+                                                                  fontWeight: FontWeight.bold,
+                                                                ),
+                                                              ),
                                                               const SizedBox(width: 12),
-                                                              Text(timeDisplay, style: const TextStyle(color: Colors.white38, fontSize: 11)),
+                                                              Text(timeDisplay, style: TextStyle(color: isDark ? Colors.white38 : const Color(0xFF94A3B8), fontSize: 11)),
                                                             ],
                                                           ),
                                                         );
@@ -428,31 +525,44 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
     );
   }
 
-  Widget _buildUnassignedEntriesCard(List<Map<String, dynamic>> entries, Color color) {
+  Widget _buildUnassignedEntriesCard(List<Map<String, dynamic>> entries, Color color, bool isDark) {
     return Card(
-      color: const Color(0xFF1F2937).withValues(alpha: 0.8),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+      color: isDark ? const Color(0xFF1E293B) : Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+      ),
       child: Padding(
         padding: const EdgeInsets.all(16),
-        child: Text('${entries.length} department records processed.', style: const TextStyle(color: Colors.white70)),
+        child: Text(
+          '${entries.length} department records processed.',
+          style: TextStyle(color: isDark ? Colors.white70 : const Color(0xFF0F172A)),
+        ),
       ),
     );
   }
 
-  Widget _metricPill(String title, String value, Color color) {
+  Widget _metricPill(String title, String value, Color color, bool isDark) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
+        color: color.withValues(alpha: isDark ? 0.12 : 0.08),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
+        border: Border.all(color: color.withValues(alpha: isDark ? 0.35 : 0.25)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(title, style: TextStyle(color: color.withValues(alpha: 0.8), fontSize: 10, fontWeight: FontWeight.bold)),
+          Text(title, style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold)),
           const SizedBox(height: 2),
-          Text(value, style: TextStyle(color: color, fontSize: 15, fontWeight: FontWeight.bold)),
+          Text(
+            value,
+            style: TextStyle(
+              color: isDark ? Colors.white : const Color(0xFF0F172A),
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
         ],
       ),
     );

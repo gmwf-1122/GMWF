@@ -6,6 +6,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../services/user_theme_service.dart';
 import '../providers/madrassa_providers.dart';
 import '../madrassa_strings.dart';
+import '../../../design/design_system.dart';
 
 class MadrassaProgressView extends ConsumerStatefulWidget {
   final String branchId;
@@ -241,7 +242,7 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isMobile = MediaQuery.of(context).size.width < 600;
+        final isMobile = constraints.maxWidth < GBreakpoint.mobile;
 
         final title = Text(
           context.isUrdu ? 'طالب علموں کی کارکردگی' : 'Student Progress Insights',

@@ -13,6 +13,7 @@ import '../../../services/cloud_messaging_service.dart';
 import '../../../theme/app_theme.dart';
 import '../../../theme/role_theme_provider.dart';
 import '../../../utils/keyboard_focus_utils.dart';
+import '../../../design/design_system.dart';
 import '../donations_shared.dart';
 
 enum DonorType { walkIn, registered, box }
@@ -114,6 +115,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
   }
 
   void _resetForNewReceipt() {
+    final preservedDate = _selectedDate;
     setState(() {
       _currentStep = 0;
       _completedRecord = null;
@@ -126,7 +128,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
       _bookReceiptNoCtrl.clear();
       _notesCtrl.clear();
       _probableAmountCtrl.clear();
-      _selectedDate = DateTime.now();
+      _selectedDate = preservedDate;
       _paymentMethod = 'Cash';
       _category = DonationCategory.gmwf;
       _gmwfSub = GmwfSubCategory.dasterkhwaan;
@@ -491,7 +493,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
   @override
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
-    final isMobile = MediaQuery.of(context).size.width < 600;
+    final isMobile = GBreakpoint.isMobile(context);
 
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -567,6 +569,11 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
   // ───────────────────────────────────────────────────────────────────────────
 
   Widget _buildHeader(RoleThemeData t) {
+    final now = DateTime.now();
+    final isBackdated = _selectedDate.year != now.year ||
+        _selectedDate.month != now.month ||
+        _selectedDate.day != now.day;
+
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
       decoration: BoxDecoration(
@@ -604,6 +611,63 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
               ],
             ),
           ),
+          // Date Chip (Supports selecting previous dates anytime)
+          InkWell(
+            onTap: () async {
+              final picked = await showDatePicker(
+                context: context,
+                initialDate: _selectedDate,
+                firstDate: DateTime(2020),
+                lastDate: DateTime.now(),
+              );
+              if (picked != null) setState(() => _selectedDate = picked);
+            },
+            borderRadius: BorderRadius.circular(10),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+              decoration: BoxDecoration(
+                color: isBackdated ? const Color(0xFFF59E0B).withValues(alpha: 0.12) : t.accent.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: isBackdated ? const Color(0xFFF59E0B).withValues(alpha: 0.5) : t.accent.withValues(alpha: 0.25),
+                ),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.calendar_month_rounded,
+                    size: 14,
+                    color: isBackdated ? const Color(0xFFD97706) : t.accent,
+                  ),
+                  const SizedBox(width: 5),
+                  Text(
+                    DateFormat('dd MMM yyyy').format(_selectedDate),
+                    style: TextStyle(
+                      fontSize: 11.5,
+                      fontWeight: FontWeight.bold,
+                      color: isBackdated ? const Color(0xFFD97706) : t.textPrimary,
+                    ),
+                  ),
+                  if (isBackdated) ...[
+                    const SizedBox(width: 4),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFD97706),
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Text(
+                        'Past',
+                        style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Colors.white),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 8),
           IconButton(
             onPressed: () => Navigator.pop(context),
             icon: Icon(Icons.close_rounded, color: t.textSecondary, size: 20),
@@ -715,12 +779,62 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
   // ───────────────────────────────────────────────────────────────────────────
 
   Widget _buildStep1Donor(RoleThemeData t, bool isMobile) {
+    final now = DateTime.now();
+    final isBackdated = _selectedDate.year != now.year ||
+        _selectedDate.month != now.month ||
+        _selectedDate.day != now.day;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'Step 1: Who is making this donation?',
-          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: t.textPrimary),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(
+              'Step 1: Who is making this donation?',
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: t.textPrimary),
+            ),
+            InkWell(
+              onTap: () async {
+                final picked = await showDatePicker(
+                  context: context,
+                  initialDate: _selectedDate,
+                  firstDate: DateTime(2020),
+                  lastDate: DateTime.now(),
+                );
+                if (picked != null) setState(() => _selectedDate = picked);
+              },
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isBackdated ? const Color(0xFFF59E0B).withValues(alpha: 0.12) : t.accent.withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isBackdated ? const Color(0xFFF59E0B) : t.accent.withValues(alpha: 0.25),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.calendar_today_rounded,
+                      size: 13,
+                      color: isBackdated ? const Color(0xFFD97706) : t.accent,
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      isBackdated ? 'Backdated: ${DateFormat('dd MMM').format(_selectedDate)}' : DateFormat('dd MMM yyyy').format(_selectedDate),
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.bold,
+                        color: isBackdated ? const Color(0xFFD97706) : t.textPrimary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: 12),
 

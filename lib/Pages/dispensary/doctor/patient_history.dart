@@ -22,9 +22,14 @@ class _IdHelper {
   static Set<String> variants(String id) {
     final clean = id.trim();
     if (clean.isEmpty) return {};
-    final noHyphens  = clean.replaceAll('-', '');
+    final noHyphens  = clean.replaceAll('-', '').replaceAll(' ', '');
     final digitsOnly = clean.replaceAll(RegExp(r'\D'), '');
-    return {clean, noHyphens, if (digitsOnly.isNotEmpty) digitsOnly};
+    final set = <String>{clean, noHyphens, if (digitsOnly.isNotEmpty) digitsOnly};
+    // If standard 13-digit Pakistani CNIC, also generate the hyphenated form XXXXX-XXXXXXX-X
+    if (digitsOnly.length == 13) {
+      set.add('${digitsOnly.substring(0, 5)}-${digitsOnly.substring(5, 12)}-${digitsOnly.substring(12)}');
+    }
+    return set;
   }
 
   static List<String> expand(Iterable<String> ids) {
@@ -44,7 +49,6 @@ class _IdHelper {
     }
     return false;
   }
-
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -149,9 +153,19 @@ class _PatientIdentity {
     final docResolvedPid = LocalStorageService.resolveIndividualPatientId(doc).trim();
     final docGuardian = (doc['guardianCnic'] ?? '').toString().trim();
     final docAge = (doc['age'] is num) ? (doc['age'] as num).toInt() : (int.tryParse(doc['age']?.toString() ?? '') ?? 0);
+    final docCnic = (doc['cnic'] ?? doc['patientCnic'] ?? '').toString().replaceAll(RegExp(r'[-\s]'), '').trim();
+
+    // If both are adults and CNIC matches, this is definitively their record
+    if (isAdult && cnic.isNotEmpty && docCnic.isNotEmpty && cnic == docCnic) {
+      // Ensure it's not explicitly flagged as a child's record under this guardian
+      if (!docPid.contains('_child_') && !docResolvedPid.contains('_child_')) {
+        return true;
+      }
+    }
+
     final docIsAdult = doc['isAdult'] is bool
         ? doc['isAdult'] as bool
-        : (!docPid.contains('_child_') && !docResolvedPid.contains('_child_') && docGuardian.isEmpty && (docAge == 0 || docAge >= 20));
+        : (!docPid.contains('_child_') && !docResolvedPid.contains('_child_') && docGuardian.isEmpty && (docAge == 0 || docAge >= 18));
 
     // Rule 0: Never mix adult and child history
     if (isAdult != docIsAdult) return false;
@@ -172,7 +186,15 @@ class _PatientIdentity {
     final myName = name.replaceAll(RegExp(r'[^a-z0-9]'), '');
 
     if (name.isNotEmpty && docName.isNotEmpty) {
-      return docName == myName || docName.contains(myName) || myName.contains(docName);
+      if (docName == myName || docName.contains(myName) || myName.contains(docName)) {
+        return true;
+      }
+      // Tokenized word matching (e.g. "Muhammad Usman" vs "Usman", "M Ali" vs "Muhammad Ali")
+      final myWords = name.split(RegExp(r'[\s_]+')).where((w) => w.length > 2).toSet();
+      final docWords = (doc['patientName'] ?? doc['name'] ?? '').toString().toLowerCase().split(RegExp(r'[\s_]+')).where((w) => w.length > 2).toSet();
+      if (myWords.isNotEmpty && docWords.isNotEmpty && myWords.intersection(docWords).isNotEmpty) {
+        return true;
+      }
     }
     return true;
   }
@@ -271,7 +293,35 @@ class _PatientHistoryPanelState extends State<PatientHistoryPanel> {
     final Set<String> seen = {};
     final searchIds = identity.searchIds;
 
-    // ── Step 1: Instant Local Hive Scan (entries, dispensary, prescriptions) ──
+    final todayKey = DateFormat('ddMMyy').format(DateTime.now());
+    final todayIso = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final currentSerial = (widget.patientData?['serial'] ?? widget.patientData?['id'])?.toString().trim().toUpperCase();
+
+    bool isTodayVisit(Map<String, dynamic> data, String canonicalSerial) {
+      if (currentSerial != null && currentSerial.isNotEmpty && canonicalSerial == currentSerial) {
+        return true;
+      }
+      final dk = (data['dateKey'] ?? '').toString().trim();
+      if (dk == todayKey) return true;
+      if (canonicalSerial.startsWith(todayKey)) return true;
+      final parsedDk = CampSessionService.getDateKeyFromSerial(canonicalSerial);
+      if (parsedDk == todayKey) return true;
+      final rawTime = data['createdAt'] ?? data['completedAt'] ?? data['timestamp'] ?? data['date'];
+      if (rawTime != null) {
+        final str = rawTime.toString();
+        if (str.startsWith(todayIso)) return true;
+        final dt = DateTime.tryParse(str);
+        if (dt != null) {
+          final now = DateTime.now();
+          if (dt.year == now.year && dt.month == now.month && dt.day == now.day) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    // ── Step 1: Instant Comprehensive Local Hive Scan ─────────────────────────
     void scanLocalBox(String boxName, String sourceLabel) {
       try {
         if (!Hive.isBoxOpen(boxName)) return;
@@ -280,6 +330,14 @@ class _PatientHistoryPanelState extends State<PatientHistoryPanel> {
           final raw = box.get(key);
           if (raw is! Map) continue;
           final data = Map<String, dynamic>.from(raw);
+
+          // Unpack nested prescription map first so all fields are available
+          if (data['prescription'] is Map) {
+            final nested = Map<String, dynamic>.from(data['prescription'] as Map);
+            for (final k in nested.keys) {
+              data.putIfAbsent(k, () => nested[k]);
+            }
+          }
 
           // Must have clinical, prescription, or vitals content
           final hasData = data['medicines'] != null ||
@@ -290,11 +348,16 @@ class _PatientHistoryPanelState extends State<PatientHistoryPanel> {
               data['diagnosis'] != null ||
               data['vitals'] != null ||
               data['receptionistVitals'] != null ||
-              data['bp'] != null;
+              data['bp'] != null ||
+              data['tests'] != null ||
+              data['labResults'] != null;
           if (!hasData) continue;
 
           bool belongs = false;
-          for (final field in ['patientId', 'id', 'cnic', 'patientCnic', 'guardianCnic']) {
+          for (final field in [
+            'patientCnic', 'cnic', 'guardianCnic', 'patientId', 'id',
+            'tokenCnic', 'patient_cnic', 'guardian_cnic', 'patient_id'
+          ]) {
             final v = data[field]?.toString().trim() ?? '';
             if (v.isNotEmpty && _IdHelper.matches(v, searchIds)) {
               belongs = true;
@@ -316,69 +379,80 @@ class _PatientHistoryPanelState extends State<PatientHistoryPanel> {
           }
           if (!belongs || !identity.docBelongsToThisPatient(data)) continue;
 
-          if (data['prescription'] is Map) {
-            final nested = Map<String, dynamic>.from(data['prescription'] as Map);
-            for (final k in nested.keys) {
-              data.putIfAbsent(k, () => nested[k]);
-            }
-          }
-
           final rawSer = (data['serial'] ?? data['id'] ?? key.toString()).toString().trim();
-          final serialMatch = RegExp(r'(\d{6}-[A-Za-z0-9]+-\d{3,})').firstMatch(rawSer);
+          final serialMatch = RegExp(r'(\d{6}-[A-Za-z0-9-]+-\d{2,})').firstMatch(rawSer);
           final canonicalSerial = serialMatch != null ? serialMatch.group(1)!.toUpperCase() : rawSer.toUpperCase();
           data['serial'] = canonicalSerial;
 
+          // Today's tokens are part of current consultation, NOT history!
+          if (isTodayVisit(data, canonicalSerial)) continue;
+
           final entry = _HistoryEntry.fromMap(data, source: sourceLabel);
-          if (entry != null && seen.add(canonicalSerial)) found.add(entry);
+          if (entry != null) {
+            final existingIdx = found.indexWhere((e) => e.serial == canonicalSerial);
+            if (existingIdx >= 0) {
+              // Clinical Priority: Merge data so nothing is lost!
+              final existing = found[existingIdx];
+              final mergedMeds = List<_MedEntry>.from(existing.medicines);
+              for (final m in entry.medicines) {
+                if (!mergedMeds.any((x) => x.name.toLowerCase() == m.name.toLowerCase())) {
+                  mergedMeds.add(m);
+                }
+              }
+              final mergedDiagnosis = existing.diagnosis.isNotEmpty ? existing.diagnosis : entry.diagnosis;
+              final mergedComplaint = existing.complaint.isNotEmpty ? existing.complaint : entry.complaint;
+              final mergedDoctor = existing.doctorName.isNotEmpty ? existing.doctorName : entry.doctorName;
+              final mergedVitals = {...existing.vitals, ...entry.vitals};
+              final mergedLabs = {...existing.labTests, ...entry.labTests}.toList();
+
+              found[existingIdx] = _HistoryEntry(
+                serial: canonicalSerial,
+                date: existing.date.year > 2000 ? existing.date : entry.date,
+                diagnosis: mergedDiagnosis,
+                complaint: mergedComplaint,
+                doctorName: mergedDoctor,
+                medicines: mergedMeds,
+                labTests: mergedLabs,
+                vitals: mergedVitals,
+                raw: {...existing.raw, ...entry.raw},
+                source: existing.medicines.isNotEmpty ? existing.source : entry.source,
+                days: existing.days > 1 ? existing.days : entry.days,
+                campId: existing.campId.isNotEmpty ? existing.campId : entry.campId,
+                campName: existing.campName.isNotEmpty ? existing.campName : entry.campName,
+                isVitalsOnly: existing.isVitalsOnly && entry.isVitalsOnly,
+              );
+            } else if (seen.add(canonicalSerial)) {
+              found.add(entry);
+            }
+          }
         }
       } catch (e) {
         debugPrint('[PatientHistory] $boxName scan error: $e');
       }
     }
 
+    // Scan all local Hive caches
     scanLocalBox(LocalStorageService.prescriptionsBox, 'Prescriptions');
     scanLocalBox(LocalStorageService.entriesBox, 'Token History');
     scanLocalBox(LocalStorageService.dispensaryBox, 'Dispensary');
+    scanLocalBox(LocalStorageService.reportsCacheBox, 'Reports Cache');
 
-    // Show cached entries immediately without waiting for network!
+    // Local-First: If local data exists, show it immediately and avoid remote queries
     if (found.isNotEmpty && mounted && _loadToken == token) {
       found.sort((a, b) => b.date.compareTo(a.date));
       setState(() {
         _entries = List.from(found);
         _isLoading = false;
       });
+      return;
     }
 
-    // ── Step 2: Parallel Remote Fetches ──────────────────────────────────────
+    // ── Step 2: One-Time Targeted Remote Fallback (Only if local data empty) ──
     try {
-      // 1. Patient Doc Enrichment in background
-      Map<String, dynamic>? firestorePatient;
-      for (final variant in _IdHelper.variants(
-          identity.patientId.isNotEmpty ? identity.patientId : identity.cnic)) {
-        if (variant.isEmpty) continue;
-        try {
-          final doc = await FirebaseFirestore.instance
-              .collection('branches')
-              .doc(widget.branchId.toLowerCase())
-              .collection('patients')
-              .doc(variant)
-              .get()
-              .timeout(const Duration(seconds: 4));
-          if (doc.exists) { firestorePatient = doc.data(); break; }
-        } catch (_) {}
-      }
-
-      final enriched = _PatientIdentity.fromMap({
-        ...?widget.patientData,
-        ...?firestorePatient,
-      }, widget.patientCnic);
-      final allSearchIds = enriched.searchIds;
-
-      if (_loadToken != token) return;
-
-      // 2. Parallel Prescriptions queries
+      final allSearchIds = identity.searchIds;
       final prescFutures = allSearchIds.where((id) => id.isNotEmpty).map((id) async {
         try {
+          // Query current prescriptions path
           final query = await FirebaseFirestore.instance
               .collection('branches')
               .doc(widget.branchId.toLowerCase())
@@ -388,21 +462,29 @@ class _PatientHistoryPanelState extends State<PatientHistoryPanel> {
               .orderBy('createdAt', descending: true)
               .limit(15)
               .get()
-              .timeout(const Duration(seconds: 4));
+              .timeout(const Duration(seconds: 6));
 
           for (final doc in query.docs) {
             if (_loadToken != token) return;
             final data = Map<String, dynamic>.from(doc.data());
             data['serial'] ??= doc.id;
-            if (!enriched.docBelongsToThisChild(data)) continue;
+            if (!identity.docBelongsToThisChild(data)) continue;
+
+            final rawSer = (data['serial'] ?? data['id'] ?? doc.id).toString().trim();
+            final serialMatch = RegExp(r'(\d{6}-[A-Za-z0-9-]+-\d{2,})').firstMatch(rawSer);
+            final canonicalSerial = serialMatch != null ? serialMatch.group(1)!.toUpperCase() : rawSer.toUpperCase();
+            data['serial'] = canonicalSerial;
+
+            // Today's tokens are part of current consultation, NOT history!
+            if (isTodayVisit(data, canonicalSerial)) continue;
 
             final entry = _HistoryEntry.fromMap(data, source: 'Prescriptions');
             if (entry != null && seen.add(entry.serial)) {
               found.add(entry);
+              // Save to local cache so subsequent loads are 100% local
               try {
-                if (Hive.isBoxOpen(LocalStorageService.reportsCacheBox)) {
-                  Hive.box(LocalStorageService.reportsCacheBox)
-                      .put('legacy_${id}_${entry.serial}', data);
+                if (Hive.isBoxOpen(LocalStorageService.prescriptionsBox)) {
+                  await LocalStorageService.saveLocalPrescription(data);
                 }
               } catch (_) {}
             }
@@ -410,89 +492,9 @@ class _PatientHistoryPanelState extends State<PatientHistoryPanel> {
         } catch (_) {}
       });
 
-      // 3. Local dispensary cache check (instant, 0 Firestore reads)
-      try {
-        if (Hive.isBoxOpen(LocalStorageService.dispensaryBox)) {
-          final dBox = Hive.box(LocalStorageService.dispensaryBox);
-          for (final key in dBox.keys) {
-            final raw = dBox.get(key);
-            if (raw is Map) {
-              final d = Map<String, dynamic>.from(raw);
-              final pCnic = (d['patientCnic'] ?? d['cnic'] ?? '').toString().trim();
-              final pId = (d['patientId'] ?? '').toString().trim();
-              if (allSearchIds.contains(pCnic) || allSearchIds.contains(pId)) {
-                if (d['prescription'] is Map) {
-                  final nested = Map<String, dynamic>.from(d['prescription'] as Map);
-                  for (final k in nested.keys) {
-                    d.putIfAbsent(k, () => nested[k]);
-                  }
-                }
-                d['serial'] ??= d['id'] ?? key.toString();
-                if (enriched.docBelongsToThisChild(d)) {
-                  final entry = _HistoryEntry.fromMap(d, source: 'Dispensary');
-                  if (entry != null && !seen.contains(entry.key)) {
-                    seen.add(entry.key);
-                    found.add(entry);
-                  }
-                }
-              }
-            }
-          }
-        }
-      } catch (_) {}
-
-      // 4. Local serial / queue entries fallback (same source as token status)
-      try {
-        if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
-          final eBox = Hive.box(LocalStorageService.entriesBox);
-          for (final key in eBox.keys) {
-            final raw = eBox.get(key);
-            if (raw is! Map) continue;
-            final d = Map<String, dynamic>.from(raw);
-            final pCnic = (d['patientCnic'] ?? d['cnic'] ?? '').toString().trim();
-            final pId = (d['patientId'] ?? '').toString().trim();
-            if ((allSearchIds.contains(pCnic) || allSearchIds.contains(pId)) && enriched.docBelongsToThisChild(d)) {
-              d['serial'] ??= d['id'] ?? key.toString();
-              final entry = _HistoryEntry.fromMap(d, source: 'Serials');
-              if (entry != null && !seen.contains(entry.key)) {
-                seen.add(entry.key);
-                found.add(entry);
-              }
-            }
-          }
-        }
-      } catch (_) {}
-
-      // 5. Remote serials lookup (only when needed, final safety net)
-      try {
-        final serialRoot = FirebaseFirestore.instance
-            .collection('branches')
-            .doc(widget.branchId.toLowerCase())
-            .collection('serials');
-        final serialDates = await serialRoot.get().timeout(const Duration(seconds: 4));
-        for (final dayDoc in serialDates.docs) {
-          for (final queue in ['zakat', 'non-zakat', 'gmwf']) {
-            final queueSnap = await dayDoc.reference.collection(queue).get().timeout(const Duration(seconds: 3));
-            for (final doc in queueSnap.docs) {
-              final data = Map<String, dynamic>.from(doc.data());
-              data['serial'] ??= doc.id;
-              final pCnic = (data['patientCnic'] ?? data['cnic'] ?? '').toString().trim();
-              final pId = (data['patientId'] ?? '').toString().trim();
-              if ((allSearchIds.contains(pCnic) || allSearchIds.contains(pId)) && enriched.docBelongsToThisChild(data)) {
-                final entry = _HistoryEntry.fromMap(data, source: 'Serials');
-                if (entry != null && !seen.contains(entry.key)) {
-                  seen.add(entry.key);
-                  found.add(entry);
-                }
-              }
-            }
-          }
-        }
-      } catch (_) {}
-
       await Future.wait(prescFutures);
     } catch (e) {
-      debugPrint('[PatientHistory] Parallel fetch error: $e');
+      debugPrint('[PatientHistory] Remote fallback error: $e');
     }
 
     if (_loadToken != token) return;
@@ -583,7 +585,7 @@ class _PatientHistoryPanelState extends State<PatientHistoryPanel> {
                       itemBuilder: (_, i) => _HistoryCard(
                         entry: _entries[i],
                         isLatest: i == 0,
-                        onRepeatLast: null,
+                        onRepeatLast: widget.onRepeatLast,
                       ),
                     ),
         ),
@@ -646,10 +648,7 @@ class _PatientHistoryPanelState extends State<PatientHistoryPanel> {
             )
           else
             _CompactLatestCard(
-              entry: _entries.firstWhere(
-                (e) => e.medicines.isNotEmpty || e.diagnosis.isNotEmpty || e.complaint.isNotEmpty,
-                orElse: () => _entries.first,
-              ),
+              entry: _entries.first,
               onRepeat: widget.onRepeatLast,
             ),
         ],
@@ -702,29 +701,57 @@ class _PatientHistoryPageState extends State<PatientHistoryPage> {
       return;
     }
 
-    // Enrich from Firestore
+    // Check local patientsBox first to enrich identity without Firestore network delay
     Map<String, dynamic>? fsPatient;
-    for (final variant in _IdHelper.variants(
-        identity.patientId.isNotEmpty ? identity.patientId : identity.cnic)) {
-      if (variant.isEmpty) continue;
-      try {
-        final doc = await FirebaseFirestore.instance
-            .collection('branches')
-            .doc(widget.branchId.toLowerCase())
-            .collection('patients')
-            .doc(variant)
-            .get()
-            .timeout(const Duration(seconds: 8));
-        if (doc.exists) { fsPatient = doc.data(); break; }
-      } catch (_) {}
-    }
+    try {
+      if (Hive.isBoxOpen(LocalStorageService.patientsBox)) {
+        final pBox = Hive.box(LocalStorageService.patientsBox);
+        for (final variant in _IdHelper.variants(
+            identity.patientId.isNotEmpty ? identity.patientId : identity.cnic)) {
+          if (variant.isEmpty) continue;
+          final localP = pBox.get(variant) ?? pBox.get(variant.toLowerCase());
+          if (localP is Map) {
+            fsPatient = Map<String, dynamic>.from(localP);
+            break;
+          }
+        }
+      }
+    } catch (_) {}
 
     final enriched    = _PatientIdentity.fromMap({...widget.patientData, ...?fsPatient}, null);
     final searchIds   = enriched.searchIds;
     final List<_HistoryEntry> found = [];
     final Set<String> seen = {};
 
-    // Instant Local Hive Scan (entries, dispensary, prescriptions)
+    final todayKey = DateFormat('ddMMyy').format(DateTime.now());
+    final todayIso = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    final currentSerial = (widget.patientData['serial'] ?? widget.patientData['id'])?.toString().trim().toUpperCase();
+
+    bool isTodayVisit(Map<String, dynamic> data, String canonicalSerial) {
+      if (currentSerial != null && currentSerial.isNotEmpty && canonicalSerial == currentSerial) {
+        return true;
+      }
+      final dk = (data['dateKey'] ?? '').toString().trim();
+      if (dk == todayKey) return true;
+      if (canonicalSerial.startsWith(todayKey)) return true;
+      final parsedDk = CampSessionService.getDateKeyFromSerial(canonicalSerial);
+      if (parsedDk == todayKey) return true;
+      final rawTime = data['createdAt'] ?? data['completedAt'] ?? data['timestamp'] ?? data['date'];
+      if (rawTime != null) {
+        final str = rawTime.toString();
+        if (str.startsWith(todayIso)) return true;
+        final dt = DateTime.tryParse(str);
+        if (dt != null) {
+          final now = DateTime.now();
+          if (dt.year == now.year && dt.month == now.month && dt.day == now.day) {
+            return true;
+          }
+        }
+      }
+      return false;
+    }
+
+    // ── Instant Local Hive Scan (prescriptions, entries, dispensary, reportsCache) ──
     void scanLocalBox(String boxName, String sourceLabel) {
       try {
         if (!Hive.isBoxOpen(boxName)) return;
@@ -733,6 +760,15 @@ class _PatientHistoryPageState extends State<PatientHistoryPage> {
           final raw = box.get(key);
           if (raw is! Map) continue;
           final data = Map<String, dynamic>.from(raw);
+
+          // Unpack nested prescription map first so all fields and CNICs are available
+          if (data['prescription'] is Map) {
+            final nested = Map<String, dynamic>.from(data['prescription'] as Map);
+            for (final k in nested.keys) {
+              data.putIfAbsent(k, () => nested[k]);
+            }
+          }
+
           final hasData = data['medicines'] != null ||
               data['prescriptions'] != null ||
               data['prescription'] != null ||
@@ -741,11 +777,16 @@ class _PatientHistoryPageState extends State<PatientHistoryPage> {
               data['diagnosis'] != null ||
               data['vitals'] != null ||
               data['receptionistVitals'] != null ||
-              data['bp'] != null;
+              data['bp'] != null ||
+              data['tests'] != null ||
+              data['labResults'] != null;
           if (!hasData) continue;
 
           bool belongs = false;
-          for (final field in ['patientId', 'id', 'cnic', 'patientCnic', 'guardianCnic']) {
+          for (final field in [
+            'patientCnic', 'cnic', 'guardianCnic', 'patientId', 'id',
+            'tokenCnic', 'patient_cnic', 'guardian_cnic', 'patient_id'
+          ]) {
             final v = data[field]?.toString().trim() ?? '';
             if (v.isNotEmpty && _IdHelper.matches(v, searchIds)) { belongs = true; break; }
           }
@@ -764,16 +805,52 @@ class _PatientHistoryPageState extends State<PatientHistoryPage> {
           }
           if (!belongs || !enriched.docBelongsToThisChild(data)) continue;
 
-          if (data['prescription'] is Map) {
-            final nested = Map<String, dynamic>.from(data['prescription'] as Map);
-            for (final k in nested.keys) {
-              data.putIfAbsent(k, () => nested[k]);
+          final rawSer = (data['serial'] ?? data['id'] ?? key.toString()).toString().trim();
+          final serialMatch = RegExp(r'(\d{6}-[A-Za-z0-9-]+-\d{2,})').firstMatch(rawSer);
+          final canonicalSerial = serialMatch != null ? serialMatch.group(1)!.toUpperCase() : rawSer.toUpperCase();
+          data['serial'] = canonicalSerial;
+
+          // Today's tokens are part of current consultation, NOT history!
+          if (isTodayVisit(data, canonicalSerial)) continue;
+
+          final entry = _HistoryEntry.fromMap(data, source: sourceLabel);
+          if (entry != null) {
+            final existingIdx = found.indexWhere((e) => e.serial == canonicalSerial);
+            if (existingIdx >= 0) {
+              // Clinical Priority: Merge data so nothing is lost!
+              final existing = found[existingIdx];
+              final mergedMeds = List<_MedEntry>.from(existing.medicines);
+              for (final m in entry.medicines) {
+                if (!mergedMeds.any((x) => x.name.toLowerCase() == m.name.toLowerCase())) {
+                  mergedMeds.add(m);
+                }
+              }
+              final mergedDiagnosis = existing.diagnosis.isNotEmpty ? existing.diagnosis : entry.diagnosis;
+              final mergedComplaint = existing.complaint.isNotEmpty ? existing.complaint : entry.complaint;
+              final mergedDoctor = existing.doctorName.isNotEmpty ? existing.doctorName : entry.doctorName;
+              final mergedVitals = {...existing.vitals, ...entry.vitals};
+              final mergedLabs = {...existing.labTests, ...entry.labTests}.toList();
+
+              found[existingIdx] = _HistoryEntry(
+                serial: canonicalSerial,
+                date: existing.date.year > 2000 ? existing.date : entry.date,
+                diagnosis: mergedDiagnosis,
+                complaint: mergedComplaint,
+                doctorName: mergedDoctor,
+                medicines: mergedMeds,
+                labTests: mergedLabs,
+                vitals: mergedVitals,
+                raw: {...existing.raw, ...entry.raw},
+                source: existing.medicines.isNotEmpty ? existing.source : entry.source,
+                days: existing.days > 1 ? existing.days : entry.days,
+                campId: existing.campId.isNotEmpty ? existing.campId : entry.campId,
+                campName: existing.campName.isNotEmpty ? existing.campName : entry.campName,
+                isVitalsOnly: existing.isVitalsOnly && entry.isVitalsOnly,
+              );
+            } else if (seen.add(canonicalSerial)) {
+              found.add(entry);
             }
           }
-
-          data['serial'] ??= data['id'] ?? key.toString();
-          final entry = _HistoryEntry.fromMap(data, source: sourceLabel);
-          if (entry != null && seen.add(entry.serial)) found.add(entry);
         }
       } catch (e) {
         debugPrint('[PatientHistoryPage] $boxName scan error: $e');
@@ -783,43 +860,60 @@ class _PatientHistoryPageState extends State<PatientHistoryPage> {
     scanLocalBox(LocalStorageService.prescriptionsBox, 'Prescriptions');
     scanLocalBox(LocalStorageService.entriesBox, 'Token History');
     scanLocalBox(LocalStorageService.dispensaryBox, 'Dispensary');
+    scanLocalBox(LocalStorageService.reportsCacheBox, 'Reports Cache');
 
+    // 100% Local-First: If local records exist, render immediately and return!
     if (found.isNotEmpty && mounted && _loadToken == token) {
       found.sort((a, b) => b.date.compareTo(a.date));
       setState(() { _entries = List.from(found); _isLoading = false; });
+      return;
     }
 
     if (_loadToken != token) return;
 
-    // Legacy prescriptions path
-    for (final id in searchIds) {
-      if (id.isEmpty) continue;
-      try {
-        final query = await FirebaseFirestore.instance
-            .collection('branches')
-            .doc(widget.branchId.toLowerCase())
-            .collection('prescriptions')
-            .doc(id)
-            .collection('prescriptions')
-            .orderBy('createdAt', descending: true)
-            .get()
-            .timeout(const Duration(seconds: 4));
-        for (final doc in query.docs) {
-          if (_loadToken != token) return;
-          final data = Map<String, dynamic>.from(doc.data());
-          data['serial'] ??= doc.id;
-          if (!enriched.docBelongsToThisChild(data)) continue;
-          final entry = _HistoryEntry.fromMap(data, source: 'Prescriptions');
-          if (entry != null && seen.add(entry.serial)) {
-            found.add(entry);
-            try {
-              if (Hive.isBoxOpen(LocalStorageService.reportsCacheBox)) {
-                Hive.box(LocalStorageService.reportsCacheBox).put('legacy_${id}_${entry.serial}', data);
-              }
-            } catch (_) {}
+    // Remote fallback: Only executed if zero local records were found
+    try {
+      final prescFutures = searchIds.where((id) => id.isNotEmpty).map((id) async {
+        try {
+          final query = await FirebaseFirestore.instance
+              .collection('branches')
+              .doc(widget.branchId.toLowerCase())
+              .collection('prescriptions')
+              .doc(id)
+              .collection('prescriptions')
+              .orderBy('createdAt', descending: true)
+              .limit(15)
+              .get()
+              .timeout(const Duration(seconds: 4));
+          for (final doc in query.docs) {
+            if (_loadToken != token) return;
+            final data = Map<String, dynamic>.from(doc.data());
+            data['serial'] ??= doc.id;
+            if (!enriched.docBelongsToThisChild(data)) continue;
+
+            final rawSer = (data['serial'] ?? data['id'] ?? doc.id).toString().trim();
+            final serialMatch = RegExp(r'(\d{6}-[A-Za-z0-9-]+-\d{2,})').firstMatch(rawSer);
+            final canonicalSerial = serialMatch != null ? serialMatch.group(1)!.toUpperCase() : rawSer.toUpperCase();
+            data['serial'] = canonicalSerial;
+
+            // Today's tokens are part of current consultation, NOT history!
+            if (isTodayVisit(data, canonicalSerial)) continue;
+
+            final entry = _HistoryEntry.fromMap(data, source: 'Prescriptions');
+            if (entry != null && seen.add(entry.serial)) {
+              found.add(entry);
+              try {
+                if (Hive.isBoxOpen(LocalStorageService.reportsCacheBox)) {
+                  Hive.box(LocalStorageService.reportsCacheBox).put('legacy_${id}_${entry.serial}', data);
+                }
+              } catch (_) {}
+            }
           }
-        }
-      } catch (e) { debugPrint('[PatientHistoryPage] $id error: $e'); }
+        } catch (e) { debugPrint('[PatientHistoryPage] $id error: $e'); }
+      });
+      await Future.wait(prescFutures);
+    } catch (e) {
+      debugPrint('[PatientHistoryPage] Remote fallback error: $e');
     }
 
     if (_loadToken != token) return;
@@ -833,8 +927,11 @@ class _PatientHistoryPageState extends State<PatientHistoryPage> {
     final name = widget.patientData['name']?.toString() ?? 'Patient';
     final id   = _PatientIdentity.fromMap(widget.patientData, null).key;
 
+    final isDark = Theme.of(context).brightness == Brightness.dark ||
+        (Hive.isBoxOpen('app_settings') && Hive.box('app_settings').get('is_dark_mode', defaultValue: false) == true);
+
     return Scaffold(
-      backgroundColor: const Color(0xFFF1F8E9),
+      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F8E9),
       appBar: AppBar(
         backgroundColor: _teal,
         foregroundColor: Colors.white,
@@ -845,10 +942,7 @@ class _PatientHistoryPageState extends State<PatientHistoryPage> {
               children: [
                 Text(name, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 Builder(builder: (_) {
-                  final staffInfo = StaffPatientLinkService.getStaffInfoForPatient(
-                    cnic: widget.patientData['cnic'] ?? widget.patientData['patientCnic'] ?? widget.patientData['guardianCnic'],
-                    name: name,
-                  );
+                  final staffInfo = StaffPatientLinkService.getStaffInfoFromPatientMap(widget.patientData);
                   if (staffInfo != null) {
                     return Padding(
                       padding: const EdgeInsets.only(left: 8),
@@ -888,7 +982,7 @@ class _PatientHistoryPageState extends State<PatientHistoryPage> {
                   itemBuilder: (_, i) => _HistoryCard(
                     entry: _entries[i],
                     isLatest: i == 0,
-                    onRepeatLast: (i == 0 && widget.onRepeatLast != null)
+                    onRepeatLast: widget.onRepeatLast != null
                         ? (raw) { widget.onRepeatLast!(raw); Navigator.pop(context); }
                         : null,
                   ),
@@ -935,6 +1029,7 @@ class _CompactLatestCard extends StatelessWidget {
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Container(
+          width: double.infinity,
           padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
           decoration: const BoxDecoration(
             color: _teal,
@@ -1780,7 +1875,7 @@ class _HistoryEntry {
       if (list is! List) return;
       for (final m in list) {
         if (m is! Map) continue;
-        final name = (m['name'] ?? m['displayName'] ?? m['medicineName'] ?? '').toString().trim();
+        final name = (m['name'] ?? m['displayName'] ?? m['medicineName'] ?? m['medName'] ?? m['title'] ?? '').toString().trim();
         if (name.isEmpty) continue;
         if (meds.any((existing) => existing.name.toLowerCase() == name.toLowerCase())) continue;
         meds.add(_MedEntry(
@@ -1793,6 +1888,11 @@ class _HistoryEntry {
           frequency: m['frequency']?.toString() ?? '',
         ));
       }
+    }
+
+    if (data['data'] is Map) {
+      final inner = Map<String, dynamic>.from(data['data'] as Map);
+      inner.forEach((k, v) => data.putIfAbsent(k, () => v));
     }
 
     addMedList(data['prescriptions']);
@@ -1843,9 +1943,36 @@ class _HistoryEntry {
     // Cross-box fallback lookup if medicines or diagnosis missing on this record
     if (meds.isEmpty || extractedDiagnosis.isEmpty) {
       try {
+        final lp = LocalStorageService.getLocalPrescription(serial);
+        if (lp != null) {
+          addMedList(lp['medicines']);
+          addMedList(lp['prescriptions']);
+          addMedList(lp['oralMedicines']);
+          addMedList(lp['injectables']);
+          if (lp['prescription'] is Map) {
+            final lpp = lp['prescription'] as Map;
+            addMedList(lpp['medicines']);
+            addMedList(lpp['prescriptions']);
+            if (extractedDiagnosis.isEmpty) extractedDiagnosis = (lpp['diagnosis'] ?? '').toString().trim();
+            if (extractedComplaint.isEmpty) extractedComplaint = (lpp['complaint'] ?? lpp['condition'] ?? '').toString().trim();
+            if (extractedDoctor.isEmpty) extractedDoctor = (lpp['doctorName'] ?? lpp['prescribedBy'] ?? '').toString().trim();
+          }
+          if (extractedDiagnosis.isEmpty) extractedDiagnosis = (lp['diagnosis'] ?? '').toString().trim();
+          if (extractedComplaint.isEmpty) extractedComplaint = (lp['complaint'] ?? lp['condition'] ?? '').toString().trim();
+          if (extractedDoctor.isEmpty) extractedDoctor = (lp['doctorName'] ?? lp['prescribedBy'] ?? '').toString().trim();
+        }
+
         if (Hive.isBoxOpen(LocalStorageService.dispensaryBox)) {
           final dBox = Hive.box(LocalStorageService.dispensaryBox);
-          final dRaw = dBox.get(serial) ?? dBox.get(serial.toLowerCase()) ?? dBox.get(serial.toUpperCase());
+          var dRaw = dBox.get(serial) ?? dBox.get(serial.toLowerCase()) ?? dBox.get(serial.toUpperCase());
+          if (dRaw == null) {
+            for (final k in dBox.keys) {
+              if (k.toString().toLowerCase().contains(serial.toLowerCase())) {
+                dRaw = dBox.get(k);
+                break;
+              }
+            }
+          }
           if (dRaw is Map) {
             addMedList(dRaw['medicines']);
             addMedList(dRaw['prescriptions']);
@@ -1854,25 +1981,96 @@ class _HistoryEntry {
             if (dRaw['prescription'] is Map) {
               addMedList(dRaw['prescription']['medicines']);
               addMedList(dRaw['prescription']['prescriptions']);
-              if (extractedDiagnosis.isEmpty) extractedDiagnosis = (dRaw['prescription']['diagnosis'] ?? '').toString();
-              if (extractedComplaint.isEmpty) extractedComplaint = (dRaw['prescription']['complaint'] ?? dRaw['prescription']['condition'] ?? '').toString();
+              addMedList(dRaw['prescription']['oralMedicines']);
+              addMedList(dRaw['prescription']['injectables']);
+              if (extractedDiagnosis.isEmpty) extractedDiagnosis = (dRaw['prescription']['diagnosis'] ?? dRaw['prescription']['finalDiagnosis'] ?? dRaw['prescription']['patientDiagnosis'] ?? '').toString().trim();
+              if (extractedComplaint.isEmpty) extractedComplaint = (dRaw['prescription']['complaint'] ?? dRaw['prescription']['condition'] ?? dRaw['prescription']['patientCondition'] ?? '').toString().trim();
             }
-            if (extractedDiagnosis.isEmpty) extractedDiagnosis = (dRaw['diagnosis'] ?? '').toString();
-            if (extractedDoctor.isEmpty) extractedDoctor = (dRaw['doctorName'] ?? dRaw['prescribedBy'] ?? '').toString();
+            if (extractedDiagnosis.isEmpty) extractedDiagnosis = (dRaw['diagnosis'] ?? dRaw['finalDiagnosis'] ?? dRaw['patientDiagnosis'] ?? '').toString().trim();
+            if (extractedComplaint.isEmpty) extractedComplaint = (dRaw['complaint'] ?? dRaw['condition'] ?? dRaw['patientCondition'] ?? '').toString().trim();
+            if (extractedDoctor.isEmpty) extractedDoctor = (dRaw['doctorName'] ?? dRaw['prescribedBy'] ?? '').toString().trim();
           }
         }
-        if (meds.isEmpty && Hive.isBoxOpen(LocalStorageService.prescriptionsBox)) {
+        if ((meds.isEmpty || extractedDiagnosis.isEmpty) && Hive.isBoxOpen(LocalStorageService.prescriptionsBox)) {
           final prBox = Hive.box(LocalStorageService.prescriptionsBox);
-          final prRaw = prBox.get(serial) ?? prBox.get(serial.toLowerCase()) ?? prBox.get(serial.toUpperCase());
+          var prRaw = prBox.get(serial) ?? prBox.get(serial.toLowerCase()) ?? prBox.get(serial.toUpperCase());
+          if (prRaw == null) {
+            for (final k in prBox.keys) {
+              if (k.toString().toLowerCase().contains(serial.toLowerCase())) {
+                prRaw = prBox.get(k);
+                break;
+              }
+            }
+          }
           if (prRaw is Map) {
             addMedList(prRaw['medicines']);
             addMedList(prRaw['prescriptions']);
+            addMedList(prRaw['oralMedicines']);
+            addMedList(prRaw['injectables']);
             if (prRaw['prescription'] is Map) {
               addMedList(prRaw['prescription']['medicines']);
               addMedList(prRaw['prescription']['prescriptions']);
+              addMedList(prRaw['prescription']['oralMedicines']);
+              addMedList(prRaw['prescription']['injectables']);
+              if (extractedDiagnosis.isEmpty) extractedDiagnosis = (prRaw['prescription']['diagnosis'] ?? prRaw['prescription']['finalDiagnosis'] ?? prRaw['prescription']['patientDiagnosis'] ?? '').toString().trim();
+              if (extractedComplaint.isEmpty) extractedComplaint = (prRaw['prescription']['complaint'] ?? prRaw['prescription']['condition'] ?? prRaw['prescription']['patientCondition'] ?? '').toString().trim();
             }
-            if (extractedDiagnosis.isEmpty) extractedDiagnosis = (prRaw['diagnosis'] ?? '').toString();
-            if (extractedDoctor.isEmpty) extractedDoctor = (prRaw['doctorName'] ?? prRaw['prescribedBy'] ?? '').toString();
+            if (extractedDiagnosis.isEmpty) extractedDiagnosis = (prRaw['diagnosis'] ?? prRaw['finalDiagnosis'] ?? prRaw['patientDiagnosis'] ?? '').toString().trim();
+            if (extractedComplaint.isEmpty) extractedComplaint = (prRaw['complaint'] ?? prRaw['condition'] ?? prRaw['patientCondition'] ?? '').toString().trim();
+            if (extractedDoctor.isEmpty) extractedDoctor = (prRaw['doctorName'] ?? prRaw['prescribedBy'] ?? '').toString().trim();
+          }
+        }
+        if ((meds.isEmpty || extractedDiagnosis.isEmpty) && Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+          final eBox = Hive.box(LocalStorageService.entriesBox);
+          for (final k in eBox.keys) {
+            if (k.toString().toLowerCase().contains(serial.toLowerCase())) {
+              final eRaw = eBox.get(k);
+              if (eRaw is Map) {
+                addMedList(eRaw['medicines']);
+                addMedList(eRaw['prescriptions']);
+                addMedList(eRaw['oralMedicines']);
+                addMedList(eRaw['injectables']);
+                if (eRaw['prescription'] is Map) {
+                  addMedList(eRaw['prescription']['medicines']);
+                  addMedList(eRaw['prescription']['prescriptions']);
+                  addMedList(eRaw['prescription']['oralMedicines']);
+                  addMedList(eRaw['prescription']['injectables']);
+                  if (extractedDiagnosis.isEmpty) extractedDiagnosis = (eRaw['prescription']['diagnosis'] ?? eRaw['prescription']['finalDiagnosis'] ?? eRaw['prescription']['patientDiagnosis'] ?? '').toString().trim();
+                  if (extractedComplaint.isEmpty) extractedComplaint = (eRaw['prescription']['complaint'] ?? eRaw['prescription']['condition'] ?? eRaw['prescription']['patientCondition'] ?? '').toString().trim();
+                  if (extractedDoctor.isEmpty) extractedDoctor = (eRaw['prescription']['doctorName'] ?? eRaw['prescription']['prescribedBy'] ?? '').toString().trim();
+                }
+                if (extractedDiagnosis.isEmpty) extractedDiagnosis = (eRaw['diagnosis'] ?? eRaw['finalDiagnosis'] ?? eRaw['patientDiagnosis'] ?? '').toString().trim();
+                if (extractedComplaint.isEmpty) extractedComplaint = (eRaw['complaint'] ?? eRaw['condition'] ?? eRaw['patientCondition'] ?? '').toString().trim();
+                if (extractedDoctor.isEmpty) extractedDoctor = (eRaw['doctorName'] ?? eRaw['prescribedBy'] ?? '').toString().trim();
+                break;
+              }
+            }
+          }
+        }
+        if ((meds.isEmpty || extractedDiagnosis.isEmpty) && Hive.isBoxOpen(LocalStorageService.reportsCacheBox)) {
+          final rcBox = Hive.box(LocalStorageService.reportsCacheBox);
+          for (final k in rcBox.keys) {
+            if (k.toString().toLowerCase().contains(serial.toLowerCase())) {
+              final rcRaw = rcBox.get(k);
+              if (rcRaw is Map) {
+                addMedList(rcRaw['medicines']);
+                addMedList(rcRaw['prescriptions']);
+                addMedList(rcRaw['oralMedicines']);
+                addMedList(rcRaw['injectables']);
+                if (rcRaw['prescription'] is Map) {
+                  addMedList(rcRaw['prescription']['medicines']);
+                  addMedList(rcRaw['prescription']['prescriptions']);
+                  addMedList(rcRaw['prescription']['oralMedicines']);
+                  addMedList(rcRaw['prescription']['injectables']);
+                  if (extractedDiagnosis.isEmpty) extractedDiagnosis = (rcRaw['prescription']['diagnosis'] ?? rcRaw['prescription']['finalDiagnosis'] ?? '').toString().trim();
+                  if (extractedComplaint.isEmpty) extractedComplaint = (rcRaw['prescription']['complaint'] ?? rcRaw['prescription']['condition'] ?? '').toString().trim();
+                }
+                if (extractedDiagnosis.isEmpty) extractedDiagnosis = (rcRaw['diagnosis'] ?? rcRaw['finalDiagnosis'] ?? '').toString().trim();
+                if (extractedComplaint.isEmpty) extractedComplaint = (rcRaw['complaint'] ?? rcRaw['condition'] ?? '').toString().trim();
+                if (extractedDoctor.isEmpty) extractedDoctor = (rcRaw['doctorName'] ?? rcRaw['prescribedBy'] ?? '').toString().trim();
+                break;
+              }
+            }
           }
         }
       } catch (_) {}

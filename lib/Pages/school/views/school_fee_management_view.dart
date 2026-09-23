@@ -8,6 +8,7 @@ import '../models/school_student.dart';
 import '../theme/school_theme.dart';
 import '../utils/school_local_storage.dart';
 import '../constants/school_constants.dart';
+import '../../../design/design_system.dart';
 
 class SchoolFeeManagementView extends StatefulWidget {
   final String branchId;
@@ -173,7 +174,7 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
     required double outstandingDues,
     required int defaultersCount,
   }) {
-    final isMobile = MediaQuery.of(context).size.width < 750;
+    final isMobile = GBreakpoint.isMobile(context);
 
     final cards = [
       _buildSummaryTile(
@@ -274,7 +275,7 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
   }
 
   Widget _buildFilterToolbar() {
-    final isMobile = MediaQuery.of(context).size.width < 800;
+    final isMobile = GBreakpoint.isCompact(context);
 
     if (isMobile) {
       return Container(

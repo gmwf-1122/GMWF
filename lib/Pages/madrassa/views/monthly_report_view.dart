@@ -14,6 +14,7 @@ import '../utils/madrassa_local_storage.dart';
 import '../../../services/local_storage_service.dart';
 import '../../../services/user_theme_service.dart';
 import '../../../services/sync_service.dart';
+import '../../../design/design_system.dart';
 
 /// Safely converts whatever Map-ish value comes back from Firestore / JSON
 /// / local-storage into a proper `Map<String, dynamic>`.
@@ -199,7 +200,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                       body: LayoutBuilder(
                         builder: (context, constraints) {
                           final bool showDetail = _userShowDetailOverride ?? (constraints.maxWidth >= 1100);
-                          final isMobile = MediaQuery.of(context).size.width < 600;
+                          final isMobile = constraints.maxWidth < GBreakpoint.mobile;
                           return Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
@@ -1557,7 +1558,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
     bool isDark,
   ) {
     final monthName = DateFormat('MMMM yyyy').format(DateTime(year, month));
-    final isMobile = MediaQuery.of(context).size.width < 600;
+    final isMobile = GBreakpoint.isMobile(context);
     final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
     final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7);
     final textPrimary = isDark ? Colors.white : const Color(0xFF1A1C1E);

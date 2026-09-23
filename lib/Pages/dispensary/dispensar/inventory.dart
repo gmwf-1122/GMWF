@@ -23,7 +23,9 @@ import 'package:gmwf/utils/string_similarity_helper.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
 import 'package:gmwf/services/sync_service.dart';
+import 'package:gmwf/services/auto_update_service.dart';
 import 'inventory_pdf_helper.dart';
+import 'package:gmwf/design/design_system.dart';
 
 class InventoryPage extends StatefulWidget {
   final String branchId;
@@ -107,6 +109,20 @@ class _InventoryPageState extends State<InventoryPage>
     return false;
   }
 
+  bool get _isDoctorUser {
+    if (widget.isDoctor) return true;
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final uData = Hive.box('app_settings').get('user_data') ?? Hive.box('app_settings').get('currentUser');
+        if (uData is Map) {
+          final r = (uData['role'] ?? uData['userRole'] ?? '').toString().trim().toLowerCase();
+          return r == 'doctor' || r.contains('doctor');
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
+
   bool get _isSupervisorUser {
     if (widget.isSupervisor) return true;
     try {
@@ -122,20 +138,20 @@ class _InventoryPageState extends State<InventoryPage>
   }
 
   bool get _isManager => !widget.isAdmin && !widget.isDispenser;
-  bool get _isSupervisorOrReadOnly => _isSupervisorUser || widget.isReadOnly;
+  bool get _isSupervisorOrReadOnly => _isSupervisorUser || widget.isReadOnly || _isDoctorUser;
 
-  /// Direct edit is strictly reserved for Doctors, Admins, Global Admins, Chairmen, HQ Managers & Supervisors.
-  /// Dispensers are explicitly barred from direct edits and must use "Update Stock" for approval.
-  /// Direct edit is strictly reserved for Doctors, Admins, Global Admins, Chairmen, HQ Managers & Supervisors.
+  /// Direct edit is strictly reserved for Admins, Global Admins, Chairmen, HQ Managers & Supervisors.
+  /// Doctors are restricted to viewing stock and requesting restock.
   /// Dispensers are explicitly barred from direct edits and must use "Update Stock" for approval.
   bool get _isDirectEditAllowed {
     if (widget.isReadOnly) return false;
     if (widget.isDispenser) return false;
-    return widget.isAdmin || widget.isDoctor || widget.isSupervisor;
+    if (_isDoctorUser) return false;
+    return widget.isAdmin || widget.isSupervisor;
   }
 
   bool get _canRegisterMedicine {
-    if (widget.isReadOnly) return false;
+    if (widget.isReadOnly || _isDoctorUser) return false;
     return true;
   }
 
@@ -172,6 +188,39 @@ class _InventoryPageState extends State<InventoryPage>
   int _displayLimit = 50;
   bool _isExportingPdf = false;
   bool _showRemoveAllMeds = false;
+  bool _isSelectMode = false;
+  final Set<String> _selectedBatchKeys = {};
+
+  bool get _allFilteredSelected =>
+      _filteredBatches.isNotEmpty &&
+      _filteredBatches.every((b) => _selectedBatchKeys.contains(b['batchKey']?.toString()));
+
+  void _toggleSelectAll() {
+    setState(() {
+      if (_allFilteredSelected) {
+        for (final b in _filteredBatches) {
+          final key = (b['batchKey'] ?? '').toString();
+          _selectedBatchKeys.remove(key);
+        }
+      } else {
+        for (final b in _filteredBatches) {
+          final key = (b['batchKey'] ?? '').toString();
+          if (key.isNotEmpty) _selectedBatchKeys.add(key);
+        }
+      }
+    });
+  }
+
+  void _toggleSelectItem(String batchKey) {
+    if (batchKey.isEmpty) return;
+    setState(() {
+      if (_selectedBatchKeys.contains(batchKey)) {
+        _selectedBatchKeys.remove(batchKey);
+      } else {
+        _selectedBatchKeys.add(batchKey);
+      }
+    });
+  }
 
   bool _handleKeyboardShortcuts(KeyEvent event) {
     if (event is KeyDownEvent) {
@@ -222,7 +271,7 @@ class _InventoryPageState extends State<InventoryPage>
     super.initState();
     HardwareKeyboard.instance.addHandler(_handleKeyboardShortcuts);
     int tabCount = 6; // Stock, Proforma, Ledger, Pending, Log, History
-    if (_isSupervisorUser) {
+    if (_isSupervisorUser || _isDoctorUser) {
       tabCount = 1;
     } else {
       if (!_isSupervisorOrReadOnly) tabCount++; // Update Stock
@@ -839,16 +888,20 @@ class _InventoryPageState extends State<InventoryPage>
   }
 
   Widget _buildMobileSubNav(BuildContext context) {
-    final List<Map<String, dynamic>> menuItems = [
-      {'label': 'Stock', 'icon': Icons.inventory_2_rounded},
-      if (!_isSupervisorOrReadOnly) {'label': 'Update Stock', 'icon': Icons.add_box_rounded},
-      if (_canRegisterMedicine) {'label': 'Register Medicine', 'icon': Icons.medication_liquid_rounded},
-      if (!_isSupervisorUser) {'label': 'Proforma Sheet', 'icon': Icons.list_alt_rounded},
-      {'label': 'Ledger', 'icon': Icons.receipt_long_rounded},
-      {'label': 'Pending', 'icon': Icons.pending_actions_rounded},
-      {'label': 'Log', 'icon': Icons.history_edu_rounded},
-      {'label': 'History', 'icon': Icons.history_rounded},
-    ];
+    final List<Map<String, dynamic>> menuItems = _isDoctorUser
+        ? [
+            {'label': 'Stock', 'icon': Icons.inventory_2_rounded},
+          ]
+        : [
+            {'label': 'Stock', 'icon': Icons.inventory_2_rounded},
+            if (!_isSupervisorOrReadOnly) {'label': 'Update Stock', 'icon': Icons.add_box_rounded},
+            if (_canRegisterMedicine) {'label': 'Register Medicine', 'icon': Icons.medication_liquid_rounded},
+            if (!_isSupervisorUser) {'label': 'Proforma Sheet', 'icon': Icons.list_alt_rounded},
+            {'label': 'Ledger', 'icon': Icons.receipt_long_rounded},
+            {'label': 'Pending', 'icon': Icons.pending_actions_rounded},
+            {'label': 'Log', 'icon': Icons.history_edu_rounded},
+            {'label': 'History', 'icon': Icons.history_rounded},
+          ];
 
     final branchCamps = CampSessionService.getCampsForBranch(widget.branchId);
     final hasCamps = (widget.branchId.toLowerCase().contains('karachi') ||
@@ -927,16 +980,20 @@ class _InventoryPageState extends State<InventoryPage>
   }
 
   Widget _buildSidebarContent(BuildContext context) {
-    final List<Map<String, dynamic>> menuItems = [
-      {'label': 'Stock', 'icon': Icons.inventory_2_rounded},
-      if (!_isSupervisorOrReadOnly) {'label': 'Update Stock', 'icon': Icons.add_box_rounded},
-      if (_canRegisterMedicine) {'label': 'Register Medicine', 'icon': Icons.medication_liquid_rounded},
-      if (!_isSupervisorUser) {'label': 'Proforma Sheet', 'icon': Icons.list_alt_rounded},
-      {'label': 'Ledger', 'icon': Icons.receipt_long_rounded},
-      {'label': 'Pending', 'icon': Icons.pending_actions_rounded},
-      {'label': 'Log', 'icon': Icons.history_edu_rounded},
-      {'label': 'History', 'icon': Icons.history_rounded},
-    ];
+    final List<Map<String, dynamic>> menuItems = _isDoctorUser
+        ? [
+            {'label': 'Stock', 'icon': Icons.inventory_2_rounded},
+          ]
+        : [
+            {'label': 'Stock', 'icon': Icons.inventory_2_rounded},
+            if (!_isSupervisorOrReadOnly) {'label': 'Update Stock', 'icon': Icons.add_box_rounded},
+            if (_canRegisterMedicine) {'label': 'Register Medicine', 'icon': Icons.medication_liquid_rounded},
+            if (!_isSupervisorUser) {'label': 'Proforma Sheet', 'icon': Icons.list_alt_rounded},
+            {'label': 'Ledger', 'icon': Icons.receipt_long_rounded},
+            {'label': 'Pending', 'icon': Icons.pending_actions_rounded},
+            {'label': 'Log', 'icon': Icons.history_edu_rounded},
+            {'label': 'History', 'icon': Icons.history_rounded},
+          ];
 
     return Container(
       color: _isDark ? const Color(0xFF1E293B) : Colors.white,
@@ -1011,7 +1068,7 @@ class _InventoryPageState extends State<InventoryPage>
                   child: InkWell(
                     onTap: () {
                       _tabCtrl.animateTo(index);
-                      if (MediaQuery.of(context).size.width < 800) {
+                      if (GBreakpoint.isCompact(context)) {
                         Navigator.of(context).maybePop();
                       } else {
                         if (mounted) setState(() {});
@@ -1075,13 +1132,19 @@ class _InventoryPageState extends State<InventoryPage>
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
-                      Text(
-                        'v2.6.1',
-                        style: TextStyle(
-                          color: _isDark ? const Color(0xFF64748B) : _textLight,
-                          fontSize: 10,
-                          fontWeight: FontWeight.w500,
-                        ),
+                      FutureBuilder<String>(
+                        future: AutoUpdateService.getAppVersion(),
+                        builder: (context, snapshot) {
+                          final version = snapshot.data ?? AutoUpdateService.resolvedVersion;
+                          return Text(
+                            'v$version',
+                            style: TextStyle(
+                              color: _isDark ? const Color(0xFF64748B) : _textLight,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          );
+                        },
                       ),
                     ],
                   ),
@@ -1098,10 +1161,9 @@ class _InventoryPageState extends State<InventoryPage>
   Widget build(BuildContext context) {
     super.build(context);
     final bool isWrapped = GlobalModuleWrapper.isWrapped(context);
-    final double screenWidth = MediaQuery.of(context).size.width;
-    final bool isMobile = screenWidth < 800;
+    final bool isMobile = GBreakpoint.isCompact(context);
 
-    if (_isSupervisorUser) {
+    if (_isSupervisorUser || _isDoctorUser) {
       return Scaffold(
         backgroundColor: _isDark ? const Color(0xFF0F172A) : _bg,
         appBar: (!widget.isEmbedded && !isWrapped) ? _buildAppBar(isMobile: isMobile) : null,
@@ -1116,7 +1178,7 @@ class _InventoryPageState extends State<InventoryPage>
         backgroundColor: _isDark ? const Color(0xFF1E293B) : Colors.white,
         child: _buildSidebarContent(context),
       ) : null,
-      floatingActionButton: (_isSupervisorOrReadOnly || widget.isAdmin || screenWidth > 800)
+      floatingActionButton: (_isSupervisorOrReadOnly || widget.isAdmin || !isMobile)
           ? null
           : FloatingActionButton.extended(
               backgroundColor: _teal,
@@ -1154,41 +1216,43 @@ class _InventoryPageState extends State<InventoryPage>
                     controller: _tabCtrl,
                     children: [
                       _stockTab(),
-                      if (!_isSupervisorOrReadOnly)
-                        InventoryUpdatePage(
+                      if (!_isSupervisorUser && !_isDoctorUser) ...[
+                        if (!_isSupervisorOrReadOnly)
+                          InventoryUpdatePage(
+                            branchId: widget.branchId,
+                            isAdmin: widget.isAdmin,
+                            isDispenser: widget.isDispenser,
+                            isDoctor: widget.isDoctor,
+                            isEmbedded: true,
+                            showMode: 1,
+                          ),
+                        if (_canRegisterMedicine)
+                          InventoryUpdatePage(
+                            branchId: widget.branchId,
+                            isAdmin: widget.isAdmin,
+                            isDispenser: widget.isDispenser,
+                            isDoctor: widget.isDoctor,
+                            isEmbedded: true,
+                            showMode: 2,
+                          ),
+                        UniversalProformaSheetPage(
                           branchId: widget.branchId,
                           isAdmin: widget.isAdmin,
                           isDispenser: widget.isDispenser,
-                          isDoctor: widget.isDoctor,
                           isEmbedded: true,
-                          showMode: 1,
+                          onBackToInventory: () {
+                            _tabCtrl.animateTo(0);
+                            _loadDataFromHive();
+                          },
                         ),
-                      if (_canRegisterMedicine)
-                        InventoryUpdatePage(
+                        MedicineLedgerPage(
                           branchId: widget.branchId,
-                          isAdmin: widget.isAdmin,
-                          isDispenser: widget.isDispenser,
-                          isDoctor: widget.isDoctor,
                           isEmbedded: true,
-                          showMode: 2,
                         ),
-                      UniversalProformaSheetPage(
-                        branchId: widget.branchId,
-                        isAdmin: widget.isAdmin,
-                        isDispenser: widget.isDispenser,
-                        isEmbedded: true,
-                        onBackToInventory: () {
-                          _tabCtrl.animateTo(0);
-                          _loadDataFromHive();
-                        },
-                      ),
-                      MedicineLedgerPage(
-                        branchId: widget.branchId,
-                        isEmbedded: true,
-                      ),
-                      _pendingTab(),
-                      _logTab(),
-                      _historyTab(),
+                        _pendingTab(),
+                        _logTab(),
+                        _historyTab(),
+                      ],
                     ],
                   ),
                 ),
@@ -1402,6 +1466,265 @@ class _InventoryPageState extends State<InventoryPage>
     }
   }
 
+  Future<void> _confirmDeleteSelectedMedicines() async {
+    if (!_canDeleteInventoryItem) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Only the Chairman and HQ Manager can delete medicines from inventory.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    if (_selectedBatchKeys.isEmpty) return;
+
+    final selectedBatches = _filteredBatches
+        .where((b) => _selectedBatchKeys.contains(b['batchKey']?.toString()))
+        .toList();
+    if (selectedBatches.isEmpty) return;
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (ctx) {
+        return AlertDialog(
+          title: Row(
+            children: [
+              const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Delete ${selectedBatches.length} Medicine(s)?',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                ),
+              ),
+            ],
+          ),
+          content: SizedBox(
+            width: 500,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Are you sure you want to permanently delete the ${selectedBatches.length} selected medicine batch(es) from inventory?\n\n'
+                  '• They will be removed from local storage immediately.\n'
+                  '• Real-time LAN deletion will notify all connected stations.\n'
+                  '• Cloud Firestore documents will be permanently purged.\n',
+                  style: const TextStyle(fontSize: 13),
+                ),
+                const SizedBox(height: 6),
+                const Text('Selected items to delete:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                const SizedBox(height: 6),
+                Container(
+                  constraints: const BoxConstraints(maxHeight: 180),
+                  decoration: BoxDecoration(
+                    color: _isDark ? const Color(0xFF1E293B) : Colors.grey.shade100,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.grey.shade300),
+                  ),
+                  child: ListView.separated(
+                    shrinkWrap: true,
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    itemCount: selectedBatches.length,
+                    separatorBuilder: (_, __) => const Divider(height: 1),
+                    itemBuilder: (_, idx) {
+                      final sb = selectedBatches[idx];
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.medication_rounded, size: 14, color: Colors.red),
+                            const SizedBox(width: 6),
+                            Expanded(
+                              child: Text(
+                                '${sb['name']} (${sb['type']} ${sb['dose'] ?? ''}) - Qty: ${sb['quantity']}',
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel'),
+            ),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade700, foregroundColor: Colors.white),
+              onPressed: () => Navigator.pop(ctx, true),
+              icon: const Icon(Icons.delete_forever_rounded, size: 18),
+              label: Text(
+                'Delete ${selectedBatches.length} Permanently',
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    try {
+      final activeCamp = (_selectedCampFilter != null && _selectedCampFilter!.isNotEmpty && _selectedCampFilter != 'all')
+          ? _selectedCampFilter!
+          : (CampSessionService.getActiveCamp(widget.branchId) ?? 'all');
+
+      final allDocIds = <String>{};
+      final batchTargetFilters = <Map<String, String>>[];
+
+      for (final batch in selectedBatches) {
+        final docIds = List<String>.from(batch['_docIds'] as List? ?? []);
+        allDocIds.addAll(docIds.where((id) => id.isNotEmpty && id != 'unknown'));
+        batchTargetFilters.add({
+          'name': (batch['name'] ?? '').toString().toLowerCase().trim(),
+          'type': (batch['type'] ?? '').toString().toLowerCase().trim(),
+          'dose': (batch['dose'] ?? '').toString().toLowerCase().trim(),
+        });
+      }
+
+      // 1. Delete from local Hive cache FIRST (instant 0ms response)
+      final box = Hive.box(LocalStorageService.stockBox);
+      int deletedHiveCount = 0;
+      final keysToRemove = <dynamic>{};
+
+      for (final id in allDocIds) {
+        keysToRemove.add('stock:$id');
+        keysToRemove.add(id);
+      }
+
+      for (final k in box.keys) {
+        final kStr = k.toString().toLowerCase();
+        for (final id in allDocIds) {
+          if (kStr == id.toLowerCase() || kStr == 'stock:${id.toLowerCase()}' || kStr.endsWith(':${id.toLowerCase()}')) {
+            keysToRemove.add(k);
+          }
+        }
+        final val = box.get(k);
+        if (val is Map) {
+          final vName = (val['name'] ?? '').toString().toLowerCase().trim();
+          final vType = (val['type'] ?? '').toString().toLowerCase().trim();
+          final vDose = (val['dose'] ?? '').toString().toLowerCase().trim();
+          for (final filter in batchTargetFilters) {
+            if (vName == filter['name'] && vType == filter['type'] && (filter['dose']!.isEmpty || vDose == filter['dose'])) {
+              keysToRemove.add(k);
+              break;
+            }
+          }
+        }
+      }
+
+      for (final k in keysToRemove) {
+        await box.delete(k);
+        deletedHiveCount++;
+      }
+      await box.flush();
+
+      // 2. Broadcast over LAN WebSocket to all peer PCs
+      try {
+        for (final id in allDocIds) {
+          RealtimeManager().sendMessage(RealtimeEvents.payload(
+            type: RealtimeEvents.deleteStockItem,
+            branchId: widget.branchId,
+            data: {'medicineId': id},
+          ));
+        }
+      } catch (_) {}
+
+      // 3. Enqueue for persistent cloud sync
+      for (final id in allDocIds) {
+        await LocalStorageService.enqueueSync({
+          'type': 'delete_inventory_item',
+          'branchId': widget.branchId,
+          'campId': activeCamp,
+          'medicineId': id,
+          'data': {'id': id},
+        });
+      }
+      SyncService().triggerUpload();
+
+      // 4. Background cloud delete from all potential collections
+      unawaited(() async {
+        try {
+          final db = FirebaseFirestore.instance;
+          final collections = <CollectionReference>{
+            db.collection('branches').doc(widget.branchId).collection('inventory'),
+          };
+
+          if (activeCamp.isNotEmpty && activeCamp != 'all') {
+            final campPath = CampSessionService.getCampInventoryPath(branchId: widget.branchId, campId: activeCamp);
+            collections.add(db.collection('branches').doc(widget.branchId).collection(campPath));
+          }
+
+          if (widget.branchId.toLowerCase().contains('karachi')) {
+            collections.add(db.collection('branches').doc(widget.branchId).collection('inventory_haji'));
+            collections.add(db.collection('branches').doc(widget.branchId).collection('inventory_haji_camp'));
+            collections.add(db.collection('branches').doc(widget.branchId).collection('inventory_saddar'));
+          }
+
+          WriteBatch batch = db.batch();
+          int batchOpCount = 0;
+
+          for (final col in collections) {
+            for (final id in allDocIds) {
+              batch.delete(col.doc(id));
+              batchOpCount++;
+              if (batchOpCount >= 350) {
+                await batch.commit();
+                batch = db.batch();
+                batchOpCount = 0;
+              }
+            }
+          }
+
+          if (batchOpCount > 0) {
+            await batch.commit();
+          }
+          debugPrint('[InventoryDelete] ✅ Background batch deleted ${allDocIds.length} doc IDs across collections');
+        } catch (e) {
+          debugPrint('[InventoryDelete] ⚠️ Background batch delete deferred to sync queue: $e');
+        }
+      }());
+
+      if (mounted) {
+        setState(() {
+          _isSelectMode = false;
+          _selectedBatchKeys.clear();
+        });
+        _loadDataFromHive();
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('✅ Successfully deleted ${selectedBatches.length} medicine(s) ($deletedHiveCount local records cleaned).'),
+            backgroundColor: Colors.green,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    } catch (e, st) {
+      debugPrint('[InventoryDelete] ❌ ERROR: $e\n$st');
+      if (mounted) {
+        ScaffoldMessenger.of(context).clearSnackBars();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Delete notice: $e'),
+            backgroundColor: Colors.orange,
+            duration: const Duration(seconds: 4),
+          ),
+        );
+      }
+    }
+  }
+
   PreferredSizeWidget _buildAppBar({bool isMobile = false}) => AppBar(
         backgroundColor: _isDark ? const Color(0xFF0F172A) : _teal,
         elevation: 1,
@@ -1409,7 +1732,7 @@ class _InventoryPageState extends State<InventoryPage>
         automaticallyImplyLeading: false,
         leading: (!widget.isEmbedded && Navigator.canPop(context))
             ? const AppBackButton(color: Colors.white)
-            : (isMobile && !widget.isDispenser
+            : (isMobile && !widget.isDispenser && !_isDoctorUser && !_isSupervisorUser
                 ? Builder(
                     builder: (context) => IconButton(
                       icon: const Icon(Icons.menu_rounded, color: Colors.white, size: 22),
@@ -1631,12 +1954,11 @@ class _InventoryPageState extends State<InventoryPage>
       );
     }
 
-    final screenWidth = MediaQuery.of(context).size.width;
-
     return Column(
       children: [
-        _buildMetricsRow(_groupedBatches, screenWidth < 800),
+        _buildMetricsRow(_groupedBatches, GBreakpoint.isCompact(context)),
         _buildFilterSection(),
+        if (_isSelectMode) _buildSelectionActionBar(),
         Expanded(
           child: LayoutBuilder(builder: (ctx, constraints) {
             return constraints.maxWidth > 640
@@ -1645,6 +1967,127 @@ class _InventoryPageState extends State<InventoryPage>
           }),
         ),
       ],
+    );
+  }
+
+  Widget _buildSelectionActionBar() {
+    final allSelected = _allFilteredSelected;
+    final count = _selectedBatchKeys.length;
+    final total = _filteredBatches.length;
+
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: _isDark ? const Color(0xFF1E293B) : const Color(0xFFFEF2F2),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: _isDark ? const Color(0xFF991B1B) : const Color(0xFFFECACA),
+          width: 1.2,
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.red.withValues(alpha: 0.06),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          // Select all checkbox
+          InkWell(
+            onTap: _toggleSelectAll,
+            borderRadius: BorderRadius.circular(6),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 2, horizontal: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: Checkbox(
+                      value: allSelected,
+                      tristate: count > 0 && !allSelected,
+                      activeColor: Colors.red.shade700,
+                      onChanged: (_) => _toggleSelectAll(),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    allSelected ? 'Deselect All' : 'Select All ($total)',
+                    style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: _isDark ? Colors.white : Colors.red.shade900,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(width: 14),
+          // Count badge
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
+            decoration: BoxDecoration(
+              color: count > 0
+                  ? Colors.red.withValues(alpha: 0.15)
+                  : (_isDark ? Colors.white10 : Colors.grey.withValues(alpha: 0.15)),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Text(
+              '$count of $total selected',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                color: count > 0
+                    ? (_isDark ? const Color(0xFFFF6B6B) : Colors.red.shade800)
+                    : (_isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700),
+              ),
+            ),
+          ),
+          const Spacer(),
+          // Delete selected button
+          ElevatedButton.icon(
+            onPressed: count > 0 ? _confirmDeleteSelectedMedicines : null,
+            icon: const Icon(Icons.delete_forever_rounded, size: 16, color: Colors.white),
+            label: Text(
+              'Delete Selected ($count)',
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
+            ),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade700,
+              foregroundColor: Colors.white,
+              disabledBackgroundColor: _isDark ? Colors.grey.shade800 : Colors.grey.shade300,
+              disabledForegroundColor: _isDark ? Colors.white38 : Colors.grey.shade600,
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+              minimumSize: const Size(0, 36),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+          const SizedBox(width: 8),
+          // Cancel / Exit button
+          OutlinedButton.icon(
+            onPressed: () {
+              setState(() {
+                _isSelectMode = false;
+                _selectedBatchKeys.clear();
+              });
+            },
+            icon: const Icon(Icons.close_rounded, size: 16),
+            label: const Text('Exit Selection', style: TextStyle(fontSize: 12)),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: _isDark ? Colors.white70 : Colors.grey.shade800,
+              side: BorderSide(color: _isDark ? Colors.white24 : Colors.grey.shade400),
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              minimumSize: const Size(0, 36),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1680,8 +2123,7 @@ class _InventoryPageState extends State<InventoryPage>
   }
 
   Widget _buildFilterSection() {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isCompact = screenWidth < 768;
+    final isCompact = GBreakpoint.isCompact(context);
     final branchCamps = CampSessionService.getCampsForBranch(widget.branchId);
     final hasCamps = (widget.branchId.toLowerCase().contains('karachi') ||
         CampSessionService.hasCampsForBranch(widget.branchId) ||
@@ -1958,6 +2400,33 @@ class _InventoryPageState extends State<InventoryPage>
                       label: const Text('Clear Camp', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.red.shade800,
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        minimumSize: const Size(0, 32),
+                      ),
+                    ),
+                  ],
+                  if (_canDeleteInventoryItem) ...[
+                    const SizedBox(width: 6),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _isSelectMode = !_isSelectMode;
+                          if (!_isSelectMode) {
+                            _selectedBatchKeys.clear();
+                          }
+                        });
+                      },
+                      icon: Icon(
+                        _isSelectMode ? Icons.close_rounded : Icons.checklist_rounded,
+                        color: Colors.white,
+                        size: 14,
+                      ),
+                      label: Text(
+                        _isSelectMode ? 'Cancel' : 'Select & Delete',
+                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _isSelectMode ? Colors.blueGrey.shade800 : Colors.red.shade700,
                         padding: const EdgeInsets.symmetric(horizontal: 8),
                         minimumSize: const Size(0, 32),
                       ),
@@ -2253,6 +2722,37 @@ class _InventoryPageState extends State<InventoryPage>
             backgroundColor: Colors.blueGrey.shade700,
             foregroundColor: Colors.white,
             padding: const EdgeInsets.symmetric(horizontal: 12),
+            minimumSize: const Size(0, 38),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        ),
+      );
+
+      // Select & Delete Toggle button for HQ Manager / Admin / Chairman
+      widgets.add(const SizedBox(width: 8));
+      widgets.add(
+        ElevatedButton.icon(
+          onPressed: () {
+            setState(() {
+              _isSelectMode = !_isSelectMode;
+              if (!_isSelectMode) {
+                _selectedBatchKeys.clear();
+              }
+            });
+          },
+          icon: Icon(
+            _isSelectMode ? Icons.close_rounded : Icons.checklist_rounded,
+            color: Colors.white,
+            size: 16,
+          ),
+          label: Text(
+            _isSelectMode ? 'Cancel Selection' : 'Select & Delete',
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+          ),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: _isSelectMode ? Colors.blueGrey.shade800 : Colors.red.shade700,
+            foregroundColor: Colors.white,
+            padding: const EdgeInsets.symmetric(horizontal: 14),
             minimumSize: const Size(0, 38),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
           ),
@@ -2677,6 +3177,163 @@ class _InventoryPageState extends State<InventoryPage>
     );
   }
 
+  Future<void> _requestRestock(Map<String, dynamic> b) async {
+    final name = (b['name'] ?? 'Medicine').toString();
+    final qty = _asInt(b['quantity']);
+    final noteCtrl = TextEditingController();
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: const [
+            Icon(Icons.notification_important_rounded, color: Color(0xFFD97706)),
+            SizedBox(width: 8),
+            Text('Request Restock', style: TextStyle(fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('Alert the dispensary that this medicine needs to be restocked:'),
+            const SizedBox(height: 10),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: _isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: _isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      name,
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
+                  ),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: qty < 10 ? Colors.red.withValues(alpha: 0.15) : Colors.amber.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      'Qty: $qty',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        color: qty < 10 ? Colors.red : Colors.amber.shade900,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: noteCtrl,
+              decoration: const InputDecoration(
+                labelText: 'Optional Note / Target Qty',
+                hintText: 'e.g. Need 50 more tablets',
+                border: OutlineInputBorder(),
+                isDense: true,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFD97706),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            icon: const Icon(Icons.send_rounded, size: 16),
+            label: const Text('Send Alert to Dispensary', style: TextStyle(fontWeight: FontWeight.bold)),
+            onPressed: () => Navigator.pop(ctx, true),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    String doctorName = 'Doctor';
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final uData = Hive.box('app_settings').get('user_data') ?? Hive.box('app_settings').get('currentUser');
+        if (uData is Map) {
+          doctorName = (uData['name'] ?? uData['username'] ?? 'Doctor').toString();
+        }
+      }
+    } catch (_) {}
+
+    final reqId = 'restock_${DateTime.now().millisecondsSinceEpoch}_${name.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '')}';
+    final reqData = {
+      'id': reqId,
+      'medicineName': name,
+      'currentQty': qty,
+      'requestedBy': doctorName,
+      'notes': noteCtrl.text.trim(),
+      'status': 'pending',
+      'createdAt': FieldValue.serverTimestamp(),
+      'timestamp': DateTime.now().toIso8601String(),
+      'branchId': widget.branchId,
+    };
+
+    // 1. Save locally in Hive so it is immediately persisted and available offline
+    await LocalStorageService.saveRestockRequest(widget.branchId, reqData);
+
+    final payload = RealtimeEvents.payload(
+      type: RealtimeEvents.restockRequest,
+      branchId: widget.branchId,
+      data: reqData,
+    );
+
+    // 2. Realtime broadcast
+    RealtimeManager().sendMessage(payload);
+
+    // 3. Persistent cloud & offline sync storage
+    try {
+      FirebaseFirestore.instance
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('restock_requests')
+          .doc(reqId)
+          .set(reqData, SetOptions(merge: true));
+    } catch (_) {
+      LocalStorageService.enqueueSync({
+        'type': 'save_restock_request',
+        'branchId': widget.branchId,
+        'id': reqId,
+        'data': reqData,
+      });
+    }
+
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Row(
+            children: [
+              const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+              const SizedBox(width: 8),
+              Expanded(child: Text('Restock alert sent & persisted for $name!')),
+            ],
+          ),
+          backgroundColor: const Color(0xFF00695C),
+          behavior: SnackBarBehavior.floating,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
+  }
+
   // ── Stock Table (wide screens) ─────────────────────────────────────────────
   Widget _stockTable(
       List<Map<String, dynamic>> data, double screenWidth, int totalCount, [double? availableHeight]) {
@@ -2709,6 +3366,8 @@ class _InventoryPageState extends State<InventoryPage>
         );
       }
       final b = data[i];
+      final batchKey = (b['batchKey'] ?? b['id'] ?? b['name'] ?? '$i').toString();
+      final isSelected = _selectedBatchKeys.contains(batchKey);
       final qty = b['quantity'] as int;
       final type = b['type'] as String;
       final barcode = (b['barcode'] ?? b['code'] ?? '').toString().trim();
@@ -2716,28 +3375,32 @@ class _InventoryPageState extends State<InventoryPage>
       final expSoon = _isExpiringSoon(b['expiryDate'] as String?);
       final expText = _formatDate(b['expiryDate'] as String?);
       final isWarning = lowStock || expSoon;
-      final rowColor = _isDark
-          ? (isWarning
-              ? const Color(0xFF2D1214)
-              : (i % 2 == 0 ? const Color(0xFF1E293B) : const Color(0xFF0F172A)))
-          : (isWarning
-              ? const Color(0xFFFFF5F5)
-              : (i % 2 == 0 ? _white : const Color(0xFFFAFAFA)));
+      final rowColor = isSelected
+          ? (_isDark ? Colors.red.withValues(alpha: 0.22) : const Color(0xFFFFEBEE))
+          : (_isDark
+              ? (isWarning
+                  ? const Color(0xFF2D1214)
+                  : (i % 2 == 0 ? const Color(0xFF1E293B) : const Color(0xFF0F172A)))
+              : (isWarning
+                  ? const Color(0xFFFFF5F5)
+                  : (i % 2 == 0 ? _white : const Color(0xFFFAFAFA))));
 
       final rowContent = Container(
         decoration: BoxDecoration(
           color: rowColor,
           border: Border(
             bottom: BorderSide(
-                color: isWarning
-                    ? (_isDark ? const Color(0xFF991B1B) : _red.withValues(alpha: 0.15))
-                    : (_isDark ? const Color(0xFF334155) : Colors.grey.shade100),
-                width: 1.0),
+                color: isSelected
+                    ? Colors.red.shade400
+                    : (isWarning
+                        ? (_isDark ? const Color(0xFF991B1B) : _red.withValues(alpha: 0.15))
+                        : (_isDark ? const Color(0xFF334155) : Colors.grey.shade100)),
+                width: isSelected ? 1.5 : 1.0),
           ),
         ),
         child: Stack(
           children: [
-            if (_canDeleteInventoryItem)
+            if (_canDeleteInventoryItem && !_isSelectMode)
               Positioned(
                 right: 10,
                 top: 6,
@@ -2757,12 +3420,59 @@ class _InventoryPageState extends State<InventoryPage>
                     ),
                   ),
                 ),
+              )
+            else if (_isDoctorUser && !_isSelectMode)
+              Positioned(
+                right: 10,
+                top: 5,
+                child: Tooltip(
+                  message: 'Request restock from Dispensary',
+                  child: InkWell(
+                    onTap: () => _requestRestock(b),
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFD97706).withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: const Color(0xFFD97706).withValues(alpha: 0.4)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: const [
+                          Icon(Icons.notification_important_rounded, size: 14, color: Color(0xFFD97706)),
+                          SizedBox(width: 4),
+                          Text(
+                            'Restock',
+                            style: TextStyle(
+                              color: Color(0xFFD97706),
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
               ),
             Row(children: [
               _dCell(
                   cols[0].w,
-                  Text('${i + 1}',
-                      style: TextStyle(color: _isDark ? const Color(0xFF94A3B8) : _textMid, fontSize: 12.5, fontWeight: FontWeight.bold))),
+                  _isSelectMode
+                      ? Center(
+                          child: SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: Checkbox(
+                              value: isSelected,
+                              activeColor: Colors.red.shade700,
+                              onChanged: (_) => _toggleSelectItem(batchKey),
+                            ),
+                          ),
+                        )
+                      : Text('${i + 1}',
+                          style: TextStyle(color: _isDark ? const Color(0xFF94A3B8) : _textMid, fontSize: 12.5, fontWeight: FontWeight.bold))),
               _dCell(
                   cols[1].w,
                   RichText(
@@ -2824,23 +3534,32 @@ class _InventoryPageState extends State<InventoryPage>
         ),
       );
 
+      void Function()? handleTap;
+      if (_isSelectMode) {
+        handleTap = () => _toggleSelectItem(batchKey);
+      } else if (_isDoctorUser) {
+        handleTap = () { _requestRestock(b); };
+      } else if (_isDirectEditAllowed) {
+        handleTap = () { _showEditSheet(b); };
+      } else {
+        handleTap = () {
+          if (widget.isDispenser && mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Text(
+                  '💡 Dispensers must use "Update Stock" to submit medicine changes for Supervisor approval.',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                ),
+                backgroundColor: _isDark ? const Color(0xFF0F766E) : _teal,
+                duration: const Duration(seconds: 3),
+              ),
+            );
+          }
+        };
+      }
+
       return InkWell(
-        onTap: _isDirectEditAllowed
-            ? () => _showEditSheet(b)
-            : () {
-                if (widget.isDispenser && mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: const Text(
-                        '💡 Dispensers must use "Update Stock" to submit medicine changes for Supervisor approval.',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                      ),
-                      backgroundColor: _isDark ? const Color(0xFF0F766E) : _teal,
-                      duration: const Duration(seconds: 3),
-                    ),
-                  );
-                }
-              },
+        onTap: handleTap,
         hoverColor: _isDark ? const Color(0xFF334155) : const Color(0xFFF3F7F6),
         child: rowContent,
       );
@@ -2869,7 +3588,30 @@ class _InventoryPageState extends State<InventoryPage>
                 height: 38,
                 color: _isDark ? const Color(0xFF0F766E) : _teal,
                 child: Row(
-                    children: cols.map((c) => _hCell(c.w, c.label, c.sort)).toList()),
+                    children: cols.asMap().entries.map((entry) {
+                      final idx = entry.key;
+                      final c = entry.value;
+                      if (idx == 0 && _isSelectMode) {
+                        return Container(
+                          width: c.w,
+                          height: 38,
+                          alignment: Alignment.center,
+                          child: SizedBox(
+                            width: 22,
+                            height: 22,
+                            child: Checkbox(
+                              value: _allFilteredSelected,
+                              tristate: _selectedBatchKeys.isNotEmpty && !_allFilteredSelected,
+                              activeColor: Colors.white,
+                              checkColor: _teal,
+                              side: const BorderSide(color: Colors.white, width: 1.5),
+                              onChanged: (_) => _toggleSelectAll(),
+                            ),
+                          ),
+                        );
+                      }
+                      return _hCell(c.w, c.label, c.sort);
+                    }).toList()),
               ),
               Expanded(
                 child: ListView.builder(
@@ -2920,6 +3662,8 @@ class _InventoryPageState extends State<InventoryPage>
             );
           }
           final b = data[i];
+          final batchKey = (b['batchKey'] ?? b['id'] ?? b['name'] ?? '$i').toString();
+          final isSelected = _selectedBatchKeys.contains(batchKey);
           final qty = _asInt(b['quantity']);
           final type = b['type']?.toString() ?? '';
           final price = _parsePrice(b['price']);
@@ -2934,13 +3678,17 @@ class _InventoryPageState extends State<InventoryPage>
             margin: const EdgeInsets.only(bottom: 10),
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: _isDark
-                  ? (isWarning ? const Color(0xFF2D1214) : const Color(0xFF1E293B))
-                  : (isWarning ? const Color(0xFFFFEBEE) : _white),
+              color: isSelected
+                  ? (_isDark ? Colors.red.withValues(alpha: 0.22) : const Color(0xFFFFEBEE))
+                  : (_isDark
+                      ? (isWarning ? const Color(0xFF2D1214) : const Color(0xFF1E293B))
+                      : (isWarning ? const Color(0xFFFFEBEE) : _white)),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: isWarning ? (_isDark ? const Color(0xFFFF6B6B) : _red) : (_isDark ? const Color(0xFF334155) : const Color(0xFFE0E0E0)),
-                width: isWarning ? 2.0 : 0.8,
+                color: isSelected
+                    ? Colors.red.shade600
+                    : (isWarning ? (_isDark ? const Color(0xFFFF6B6B) : _red) : (_isDark ? const Color(0xFF334155) : const Color(0xFFE0E0E0))),
+                width: isSelected || isWarning ? 2.0 : 0.8,
               ),
               boxShadow: [
                 BoxShadow(
@@ -2955,6 +3703,19 @@ class _InventoryPageState extends State<InventoryPage>
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(children: [
+                    if (_isSelectMode)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 8),
+                        child: SizedBox(
+                          width: 22,
+                          height: 22,
+                          child: Checkbox(
+                            value: isSelected,
+                            activeColor: Colors.red.shade700,
+                            onChanged: (_) => _toggleSelectItem(batchKey),
+                          ),
+                        ),
+                      ),
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
@@ -2984,7 +3745,7 @@ class _InventoryPageState extends State<InventoryPage>
                         ),
                       ],
                     )),
-                    if (_canDeleteInventoryItem)
+                    if (_canDeleteInventoryItem && !_isSelectMode)
                       Padding(
                         padding: const EdgeInsets.only(left: 8),
                         child: Tooltip(
@@ -3004,9 +3765,49 @@ class _InventoryPageState extends State<InventoryPage>
                           ),
                         ),
                       )
-                    else
+                    else if (_isDoctorUser && !_isSelectMode)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 8),
+                        child: Tooltip(
+                          message: 'Request restock from Dispensary',
+                          child: InkWell(
+                            onTap: () => _requestRestock(b),
+                            borderRadius: BorderRadius.circular(8),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFD97706).withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: const Color(0xFFD97706).withValues(alpha: 0.4)),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: const [
+                                  Icon(Icons.notification_important_rounded, size: 13, color: Color(0xFFD97706)),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'Restock',
+                                    style: TextStyle(
+                                      color: Color(0xFFD97706),
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      )
+                    else if (!_isSelectMode)
                       _qtyBadge(qty, lowStock),
-                    if (_canDeleteInventoryItem) ...[
+                    if (_canDeleteInventoryItem && !_isSelectMode) ...[
+                      const SizedBox(width: 8),
+                      _qtyBadge(qty, lowStock),
+                    ] else if (_isDoctorUser && !_isSelectMode) ...[
+                      const SizedBox(width: 8),
+                      _qtyBadge(qty, lowStock),
+                    ] else if (_isSelectMode) ...[
                       const SizedBox(width: 8),
                       _qtyBadge(qty, lowStock),
                     ],
@@ -3026,24 +3827,34 @@ class _InventoryPageState extends State<InventoryPage>
                 ]),
           );
 
+          void Function()? handleCardTap;
+          if (_isSelectMode) {
+            handleCardTap = () => _toggleSelectItem(batchKey);
+          } else if (_isDoctorUser) {
+            handleCardTap = () { _requestRestock(b); };
+          } else if (_isDirectEditAllowed) {
+            handleCardTap = () { _showEditSheet(b); };
+          } else {
+            handleCardTap = () {
+              if (widget.isDispenser && mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: const Text(
+                      '💡 Dispensers must use "Update Stock" to submit medicine changes for Supervisor approval.',
+                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                    ),
+                    backgroundColor: _isDark ? const Color(0xFF0F766E) : _teal,
+                    duration: const Duration(seconds: 3),
+                  ),
+                );
+              }
+            };
+          }
+
           return GestureDetector(
-                onTap: _isDirectEditAllowed
-                    ? () => _showEditSheet(b)
-                    : () {
-                        if (widget.isDispenser && mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: const Text(
-                                '💡 Dispensers must use "Update Stock" to submit medicine changes for Supervisor approval.',
-                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                              ),
-                              backgroundColor: _isDark ? const Color(0xFF0F766E) : _teal,
-                              duration: const Duration(seconds: 3),
-                            ),
-                          );
-                        }
-                      },
-                child: card);
+            onTap: handleCardTap,
+            child: card,
+          );
         },
       );
 
@@ -3916,7 +4727,7 @@ class _InventoryPageState extends State<InventoryPage>
       return v?.toString() ?? '—';
     }
 
-    final isWide = MediaQuery.of(context).size.width > 600;
+    final isWide = !GBreakpoint.isMobile(context);
 
     if (isWide) {
       return Container(
@@ -4023,7 +4834,7 @@ class _InventoryPageState extends State<InventoryPage>
   }
 
   Widget _buildItemsList(List<Map<String, dynamic>> items) {
-    final isWide = MediaQuery.of(context).size.width > 600;
+    final isWide = !GBreakpoint.isMobile(context);
     return isWide ? _itemsTable(items) : _itemsCompact(items);
   }
 
@@ -4583,43 +5394,27 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
 
       if (!mounted) return;
       Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: const Row(children: [
-            Icon(Icons.check_circle_rounded,
-                color: Colors.white, size: 18),
-            SizedBox(width: 10),
-            Text('Medicine updated successfully'),
-          ]),
-          backgroundColor: _green600,
-          behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        ),
+      AppFeedback.showSuccess(
+        context,
+        'Medicine updated successfully',
+        subtitle: 'Saved locally • Synced across dispensary & clinic',
       );
     } catch (e) {
       setState(() => _saving = false);
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Failed to update: $e'),
-          backgroundColor: _red,
-          behavior: SnackBarBehavior.floating,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-        ),
-      );
+      AppFeedback.showError(context, 'Failed to update: $e');
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final bottom = MediaQuery.of(context).viewInsets.bottom;
     return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
         borderRadius:
-            BorderRadius.vertical(top: Radius.circular(24)),
+            const BorderRadius.vertical(top: Radius.circular(24)),
       ),
       padding: EdgeInsets.fromLTRB(20, 0, 20, bottom + 24),
       child:
@@ -4630,7 +5425,7 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
             width: 40,
             height: 4,
             decoration: BoxDecoration(
-              color: Colors.grey[300],
+              color: isDark ? const Color(0xFF475569) : Colors.grey[300],
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -4650,23 +5445,23 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
             child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-              const Text('Edit Medicine',
+              Text('Edit Medicine',
                   style: TextStyle(
                       fontSize: 17,
                       fontWeight: FontWeight.bold,
-                      color: _tealDark)),
+                      color: isDark ? Colors.white : _tealDark)),
               Text('${widget.docIds.length} batch doc(s) will be updated',
-                  style: const TextStyle(
-                      fontSize: 11, color: _textLight)),
+                  style: TextStyle(
+                      fontSize: 11, color: isDark ? const Color(0xFF94A3B8) : _textLight)),
             ]),
           ),
           IconButton(
-            icon: const Icon(Icons.close_rounded, color: _textLight),
+            icon: Icon(Icons.close_rounded, color: isDark ? const Color(0xFF94A3B8) : _textLight),
             onPressed: () => Navigator.pop(context),
           ),
         ]),
         const SizedBox(height: 16),
-        const Divider(height: 1),
+        Divider(height: 1, color: isDark ? const Color(0xFF334155) : null),
         const SizedBox(height: 16),
         Form(
           key: _formKey,
@@ -4676,6 +5471,7 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
                 controller: _nameCtrl,
                 label: 'Formula',
                 icon: Icons.medication_rounded,
+                isDark: isDark,
                 validator: (v) =>
                     (v == null || v.trim().isEmpty) ? 'Required' : null,
               ),
@@ -4683,27 +5479,27 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
               Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                const Text('Type',
+                Text('Type',
                     style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: _textLight)),
+                        color: isDark ? const Color(0xFF94A3B8) : _textLight)),
                 const SizedBox(height: 6),
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 14),
                   decoration: BoxDecoration(
-                    color: _green50,
+                    color: isDark ? const Color(0xFF0F172A) : _green50,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: _border),
+                    border: Border.all(color: isDark ? const Color(0xFF334155) : _border),
                   ),
                   child: DropdownButton<String>(
                     value: _selectedType,
                     isExpanded: true,
                     underline: const SizedBox(),
-                    dropdownColor: Colors.white,
-                    style: const TextStyle(
-                        color: _textDark, fontSize: 14),
+                    dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                    style: TextStyle(
+                        color: isDark ? Colors.white : _textDark, fontSize: 14),
                     icon: const Icon(Icons.expand_more_rounded,
                         color: _teal),
                     items: widget.medicineTypes
@@ -4720,6 +5516,7 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
                 controller: _doseCtrl,
                 label: 'Dose (e.g. 500mg, 5ml)',
                 icon: Icons.vaccines_rounded,
+                isDark: isDark,
               ),
               const SizedBox(height: 12),
               Builder(builder: (context) {
@@ -4730,6 +5527,7 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
                   icon: Icons.qr_code_rounded,
                   keyboardType: TextInputType.text,
                   enabled: canEditBarcode,
+                  isDark: isDark,
                 );
               }),
               const SizedBox(height: 12),
@@ -4740,6 +5538,7 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
                   label: 'Total Quantity',
                   icon: Icons.numbers_rounded,
                   keyboardType: TextInputType.number,
+                  isDark: isDark,
                   inputFormatters: [
                     FilteringTextInputFormatter.digitsOnly
                   ],
@@ -4752,6 +5551,7 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
                   controller: _priceCtrl,
                   label: 'Price (PKR)',
                   icon: Icons.payments_rounded,
+                  isDark: isDark,
                   keyboardType: const TextInputType.numberWithOptions(
                       decimal: true),
                   inputFormatters: [
@@ -4772,6 +5572,7 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
                 controller: _expiryCtrl,
                 label: 'Expiry (MM-YYYY or DD-MM-YYYY)',
                 icon: Icons.calendar_today_rounded,
+                isDark: isDark,
               ),
               const SizedBox(height: 24),
               SizedBox(
@@ -4818,13 +5619,14 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
     String? Function(String?)? validator,
     bool enabled = true,
     String? helperText,
+    bool isDark = false,
   }) =>
       Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(label,
-            style: const TextStyle(
+            style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
-                color: _textLight)),
+                color: isDark ? const Color(0xFF94A3B8) : _textLight)),
         const SizedBox(height: 6),
         TextFormField(
           controller: controller,
@@ -4834,26 +5636,32 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
           enabled: enabled,
           readOnly: !enabled,
           cursorColor: _teal,
-          style: TextStyle(color: enabled ? _textDark : Colors.grey.shade700, fontSize: 14),
+          style: TextStyle(
+              color: enabled
+                  ? (isDark ? Colors.white : _textDark)
+                  : (isDark ? const Color(0xFF64748B) : Colors.grey.shade700),
+              fontSize: 14),
           decoration: InputDecoration(
             prefixIcon: Icon(icon, size: 17, color: enabled ? _teal : Colors.grey),
             suffixIcon: !enabled ? const Icon(Icons.lock_rounded, size: 16, color: Colors.grey) : null,
             helperText: helperText,
             helperStyle: TextStyle(color: Colors.amber.shade900, fontSize: 11, fontWeight: FontWeight.bold),
             filled: true,
-            fillColor: enabled ? _green50 : Colors.grey.shade100,
+            fillColor: enabled
+                ? (isDark ? const Color(0xFF0F172A) : _green50)
+                : (isDark ? const Color(0xFF1E293B) : Colors.grey.shade100),
             border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide: BorderSide.none),
             enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: _border)),
+                borderSide: BorderSide(color: isDark ? const Color(0xFF334155) : _border)),
             focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide: const BorderSide(color: _teal, width: 1.5)),
             disabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: Colors.grey.shade300)),
+                borderSide: BorderSide(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300)),
             errorBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide: const BorderSide(color: _red)),

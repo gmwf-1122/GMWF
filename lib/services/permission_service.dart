@@ -212,6 +212,13 @@ class PermissionService {
     },
     
     // School Roles
+    'school principal': {
+      AppPermission.manageSchool,
+      AppPermission.manageSchoolAdmin,
+      AppPermission.manageSchoolLibrary,
+      AppPermission.viewReports,
+      AppPermission.downloadData,
+    },
     'principal': {
       AppPermission.manageSchool,
       AppPermission.manageSchoolAdmin,

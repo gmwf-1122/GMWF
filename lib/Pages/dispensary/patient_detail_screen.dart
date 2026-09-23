@@ -97,8 +97,16 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
 
   Future<void> _fetchBranchName() async {
     try {
+      if (Hive.isBoxOpen(LocalStorageService.branchesBox)) {
+        final bBox = Hive.box(LocalStorageService.branchesBox);
+        final localB = bBox.get(widget.branchId) ?? bBox.get(widget.branchId.toLowerCase());
+        if (localB is Map && localB['name'] != null) {
+          if (mounted) setState(() => branchName = localB['name'].toString());
+          return;
+        }
+      }
       final doc = await _firestore.collection('branches').doc(widget.branchId.toLowerCase()).get();
-      if (doc.exists) setState(() => branchName = doc.data()!['name'] as String? ?? widget.branchId);
+      if (doc.exists && mounted) setState(() => branchName = doc.data()!['name'] as String? ?? widget.branchId);
     } catch (_) {}
   }
 
@@ -441,8 +449,24 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
     );
     if (confirmed != true) return;
     try {
-      await _firestore.collection('branches').doc(widget.branchId.toLowerCase())
-          .collection('patients').doc(widget.patientId).delete();
+      final bId = widget.branchId.toLowerCase().trim();
+      await LocalStorageService.deletePatientRegistrationPreservingHistory(
+        widget.patientId,
+        branchId: bId,
+        reason: 'Patient deleted via Patient Detail Screen',
+      );
+      try {
+        await _firestore
+            .collection('branches')
+            .doc(bId)
+            .collection('patients')
+            .doc(widget.patientId)
+            .set({
+          'isDeleted': true,
+          'status': 'deleted',
+          'deletedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      } catch (_) {}
       _snack('Patient deleted', success: true);
       if (mounted) Navigator.pop(context);
     } catch (e) { _snack('Error: $e', error: true); }

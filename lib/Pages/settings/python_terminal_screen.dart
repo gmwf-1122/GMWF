@@ -11,6 +11,7 @@ class PythonTerminalScreen extends StatelessWidget {
   final List<String>? initialArgs;
   final bool autoStart;
   final VoidCallback? onBack;
+  final bool isEmbedded;
 
   const PythonTerminalScreen({
     super.key,
@@ -18,14 +19,16 @@ class PythonTerminalScreen extends StatelessWidget {
     this.initialArgs,
     this.autoStart = false,
     this.onBack,
+    this.isEmbedded = false,
   });
 
   @override
   Widget build(BuildContext context) {
     return PopScope(
-      canPop: onBack == null && Navigator.canPop(context),
+      canPop: !isEmbedded && onBack == null && Navigator.canPop(context),
       onPopInvokedWithResult: (didPop, _) {
         if (didPop) return;
+        if (isEmbedded) return;
         if (onBack != null) {
           onBack!();
         }
@@ -33,18 +36,21 @@ class PythonTerminalScreen extends StatelessWidget {
       child: Scaffold(
         backgroundColor: const Color(0xFF0B0F19), // Deepest Onyx/Slate
         appBar: AppBar(
+          automaticallyImplyLeading: false,
           backgroundColor: const Color(0xFF0F172A), // Slate 900
           elevation: 0,
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-            onPressed: () {
-              if (onBack != null) {
-                onBack!();
-              } else if (Navigator.canPop(context)) {
-                Navigator.pop(context);
-              }
-            },
-          ),
+          leading: isEmbedded
+              ? null
+              : IconButton(
+                  icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+                  onPressed: () {
+                    if (onBack != null) {
+                      onBack!();
+                    } else if (Navigator.canPop(context)) {
+                      Navigator.pop(context);
+                    }
+                  },
+                ),
           title: Row(
             children: [
               Container(

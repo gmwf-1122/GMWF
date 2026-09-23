@@ -5,11 +5,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
-import '../../theme/role_theme_provider.dart';
 import '../../theme/app_theme.dart';
 import '../../utils/formatters.dart';
 import '../../services/image_upload_service.dart';
 import '../../widgets/bank_logo_widget.dart';
+import '../../widgets/app_feedback.dart';
 
 
 Widget buildFormField({
@@ -229,13 +229,11 @@ void showAddCustomDialog({
 }
 
 void showCustomSnackBar(BuildContext context, String msg, {bool error = false}) {
-  final t = RoleThemeScope.dataOf(context);
-  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-    content: Text(msg),
-    backgroundColor: error ? Colors.red : t.accent,
-    behavior: SnackBarBehavior.floating,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-  ));
+  if (error) {
+    AppFeedback.showError(context, msg);
+  } else {
+    AppFeedback.showSuccess(context, msg);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

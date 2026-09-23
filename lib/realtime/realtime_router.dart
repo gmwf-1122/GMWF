@@ -28,9 +28,12 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 
 import '../services/local_storage_service.dart';
+import '../services/camp_session_service.dart';
 import '../services/sync_service.dart';
 import '../services/finance_local_storage.dart';
 import '../services/donations_local_storage.dart';
+import '../services/donation_box_storage.dart';
+import '../models/donation_box_models.dart';
 import '../services/zkteco_network_service.dart';
 import '../pages/madrassa/utils/madrassa_local_storage.dart';
 import 'realtime_events.dart';
@@ -44,6 +47,10 @@ class RealtimeRouter {
   /// Must be called once at app startup alongside other Hive.openBox() calls.
   static Future<void> init() async {
     final box = await Hive.openBox<String>(_dedupBox);
+    // Open version box ONCE at startup so it's never opened per-message.
+    if (!Hive.isBoxOpen('realtime_entity_versions')) {
+      await Hive.openBox<int>('realtime_entity_versions');
+    }
     await RealtimeManager.initOutbox();
     // Preload keys into in-memory set for O(1) instant checking
     _seenMessageIds.addAll(box.values);
@@ -95,14 +102,19 @@ class RealtimeRouter {
 
     // Generate a collision-resistant message ID
     final data = message['data'] as Map<String, dynamic>? ?? message;
+    final isServerPush = message['_serverPush'] == true ||
+        message['isCatchUp'] == true ||
+        message['_isReplay'] == true ||
+        message['_resent'] == true;
+
     final messageId = message['_messageId']?.toString() ??
         '${message['_clientId'] ?? 'client'}_'
         '${message['_timestamp'] ?? ''}_'
         '${message['event_type'] ?? ''}_'
         '${message['serial'] ?? data['serial'] ?? data['id'] ?? data['localId'] ?? ''}';
 
-    // O(1) Instant In-memory set lookup
-    if (_seenMessageIds.contains(messageId)) {
+    // O(1) Instant In-memory set lookup - allow catchup / server-push replays so missed tokens are not dropped
+    if (!isServerPush && _seenMessageIds.contains(messageId)) {
       if (kDebugMode) print('⚠️ Duplicate message ignored: $messageId');
       return;
     }
@@ -122,7 +134,14 @@ class RealtimeRouter {
 
     if (incomingVersion > 0 && entityId.isNotEmpty) {
       try {
-        final versionBox = await Hive.openBox<int>('realtime_entity_versions');
+        // Use already-open box (opened once at startup in init()) instead of
+        // calling Hive.openBox on every message — openBox on an already-open
+        // box is idempotent but still causes async overhead and, during a
+        // catch-up batch of 100 tokens, creates 100 concurrent disk I/O ops
+        // that stall the Dart event loop and cause the UI "white screen trance".
+        final versionBox = Hive.isBoxOpen('realtime_entity_versions')
+            ? Hive.box<int>('realtime_entity_versions')
+            : await Hive.openBox<int>('realtime_entity_versions'); // fallback if init() was missed
         final localVersion = versionBox.get(entityId) ?? 0;
         if (incomingVersion <= localVersion) {
           if (kDebugMode) {
@@ -145,7 +164,7 @@ class RealtimeRouter {
         activeBranch != 'all' &&
         incomingBranch.isNotEmpty &&
         incomingBranch != 'all' &&
-        incomingBranch != activeBranch) {
+        !CampSessionService.areBranchesMatching(incomingBranch, activeBranch)) {
       if (kDebugMode) {
         print('🛑 Cross-branch packet rejected: Inbound branch "$incomingBranch" != active branch "$activeBranch" (type: $type)');
       }
@@ -196,8 +215,28 @@ Serial: ${data['serial'] ?? 'N/A'}
         }
         break;
 
+      case 'migrate_patient_key':
+        final oldId = data['oldPatientId']?.toString();
+        final newId = data['newPatientId']?.toString();
+        final pData = (data['patient'] ?? data['data']) as Map<String, dynamic>?;
+        if (oldId != null && oldId.isNotEmpty) {
+          await LocalStorageService.deleteLocalPatient(oldId);
+        }
+        if (pData != null) {
+          await LocalStorageService.saveLocalPatient(pData, isFromSync: true);
+          final bId = (pData['branchId'] ?? '').toString();
+          if (bId.isNotEmpty && newId != null && newId.isNotEmpty) {
+            await LocalStorageService.updateActiveEntriesForPatient(bId, newId, pData);
+          }
+        }
+        break;
+
       case 'dispense_completed':
         await _handleDispenseCompleted(data, message);
+        break;
+
+      case 'inventory_stock_sync':
+        await _handleInventoryStockSync(data, message);
         break;
 
       case RealtimeEvents.saveEmployee:
@@ -342,6 +381,11 @@ Serial: ${data['serial'] ?? 'N/A'}
       case RealtimeEvents.saveDonor:
       case RealtimeEvents.saveDonationCollection:
         await _handleDonationEvent(type, data);
+        break;
+
+      case RealtimeEvents.saveDonationBox:
+      case RealtimeEvents.saveBoxOpening:
+        await _handleDonationBoxEvent(type, data);
         break;
 
       // ── EXECUTIVE GLOBAL CLOUD SYNC ────────────────────────────────────────
@@ -567,16 +611,25 @@ Serial: ${data['serial'] ?? 'N/A'}
     }
 
     final normBranch = branchId.toLowerCase().trim();
-    final normSerial = serial.toLowerCase().trim();
-    final key        = '$normBranch-$serial';
+    var cleanSerial = serial.trim();
+    if (cleanSerial.toLowerCase().startsWith('$normBranch-')) {
+      cleanSerial = cleanSerial.substring(normBranch.length + 1).trim();
+    }
+    final normSerial = cleanSerial.toLowerCase();
+    final normSerialUpper = cleanSerial.toUpperCase();
+    final canonicalKey = '$normBranch-$normSerialUpper';
     final box        = Hive.box(LocalStorageService.entriesBox);
-    dynamic targetKey = key;
-    dynamic existing = box.get(key);
+    dynamic targetKey = canonicalKey;
+    dynamic existing = box.get(canonicalKey) ?? box.get('$normBranch-$cleanSerial');
 
     if (existing == null) {
       for (final k in box.keys) {
         final kStr = k.toString().toLowerCase().trim();
-        if (kStr == '$normBranch-$normSerial' || kStr == normSerial || kStr.endsWith('-$normSerial')) {
+        if (kStr == canonicalKey.toLowerCase() ||
+            kStr == '$normBranch-$normSerial' ||
+            kStr == normSerial ||
+            kStr.endsWith('-$normSerial') ||
+            kStr.endsWith('-$normSerialUpper'.toLowerCase())) {
           targetKey = k;
           existing = box.get(k);
           break;
@@ -590,35 +643,57 @@ Serial: ${data['serial'] ?? 'N/A'}
       updated['status']         = 'completed';
       updated['dispensedAt']    =
           data['dispensedAt'] ?? DateTime.now().toIso8601String();
-      updated['dispensedBy']    = data['dispensedBy'];
+      updated['dispensedBy']    = data['dispensedBy'] ?? data['dispenserName'];
       updated['completedAt']    =
           data['completedAt'] ?? DateTime.now().toIso8601String();
 
+      // Guard: enrich with any incoming clinical or creator metadata if existing lacked them
+      for (final f in [
+        'patientName', 'name', 'patientCnic', 'cnic', 'guardianCnic', 'guardianName',
+        'doctorName', 'prescribedBy', 'doctorId', 'createdByName', 'receptionistName',
+        'tokenBy', 'createdBy', 'receptionistId', 'campId', 'dispensaryId', 'dispensaryTag', 'session',
+      ]) {
+        if (data[f] != null && (updated[f] == null || updated[f] == '' || updated[f] == 'Unknown' || updated[f] == 'Unknown Patient')) {
+          updated[f] = data[f];
+        }
+      }
+
       await box.put(targetKey, updated);
+      if (targetKey != canonicalKey) {
+        await box.put(canonicalKey, updated);
+      }
 
       if (kDebugMode) {
         print('╔════════════════════════════════════════════════════════════╗');
         print('║ ✅ DISPENSE COMPLETED (ROUTER)                            ║');
         print('╠════════════════════════════════════════════════════════════╣');
-        print('║ Serial: $serial');
-        print('║ Entry Key: $targetKey');
+        print('║ Serial: $normSerialUpper');
+        print('║ Entry Key: $canonicalKey');
         print('║ Dispensed By: ${data['dispensedBy']}');
         print('╚════════════════════════════════════════════════════════════╝');
       }
     } else {
-      final newEntry = {
+      // Lookup prescription and dispensary records to ensure entry is not created bare
+      final presc = LocalStorageService.getLocalPrescription(normSerialUpper, branchId: normBranch);
+      final newEntry = <String, dynamic>{
+        if (presc != null) ...presc,
         ...data,
         'branchId': normBranch,
-        'serial': serial.toUpperCase(),
+        'serial': normSerialUpper,
         'dispenseStatus': 'dispensed',
         'status': 'completed',
         'dispensedAt': data['dispensedAt'] ?? DateTime.now().toIso8601String(),
-        'dispensedBy': data['dispensedBy'],
+        'dispensedBy': data['dispensedBy'] ?? data['dispenserName'],
         'completedAt': data['completedAt'] ?? DateTime.now().toIso8601String(),
       };
-      await box.put(key, newEntry);
-      if (kDebugMode) print('✅ Created dispensed entry for: $key');
+      await box.put(canonicalKey, newEntry);
+      if (kDebugMode) print('✅ Created dispensed entry for: $canonicalKey');
     }
+
+    // Keep LocalStorageService canonical entriesBox updated & deduplicated
+    try {
+      await LocalStorageService.updateDispenseStatus(normBranch, normSerialUpper, 'dispensed');
+    } catch (_) {}
 
     // Also update dispensaryBox so all records screens reflect 'dispensed' instantly
     try {
@@ -728,6 +803,44 @@ Serial: ${data['serial'] ?? 'N/A'}
       if (kDebugMode) {
         print('💊 [Router] Multi-day restriction applied: $pId ($days days)');
       }
+    }
+  }
+
+  static Future<void> _handleInventoryStockSync(
+    dynamic data,
+    Map<String, dynamic> fullMessage,
+  ) async {
+    try {
+      List items = [];
+      if (data is List) {
+        items = data;
+      } else if (data is Map && data['data'] is List) {
+        items = data['data'] as List;
+      } else if (data is Map && data['items'] is List) {
+        items = data['items'] as List;
+      }
+
+      if (items.isEmpty) return;
+
+      if (!Hive.isBoxOpen(LocalStorageService.stockBox)) {
+        await LocalStorageService.ensureBoxOpen(LocalStorageService.stockBox);
+      }
+      final box = Hive.box(LocalStorageService.stockBox);
+
+      for (final raw in items) {
+        if (raw is! Map) continue;
+        final item = Map<String, dynamic>.from(raw);
+        final medId = (item['id'] ?? item['medicineId'] ?? item['docId'])?.toString().trim();
+        if (medId == null || medId.isEmpty) continue;
+        await box.put('stock:$medId', item);
+        await box.put(medId, item);
+      }
+
+      if (kDebugMode) {
+        print('✅ INVENTORY STOCK SYNC: Received and merged ${items.length} items from LAN Server');
+      }
+    } catch (e) {
+      if (kDebugMode) print('❌ Error handling inventory_stock_sync: $e');
     }
   }
 
@@ -1049,6 +1162,41 @@ Serial: ${data['serial'] ?? 'N/A'}
     }
   }
 
+  static Future<void> _handleDonationBoxEvent(String type, Map<String, dynamic> data) async {
+    try {
+      if (type == RealtimeEvents.saveDonationBox) {
+        final box = DonationBox.fromMap(data, data['id']?.toString() ?? '');
+        final hiveBox = await LocalStorageService.openBoxSafe(DonationBoxStorage.boxesBoxName);
+        await hiveBox.put(box.id, box.toMap());
+        await LocalStorageService.enqueueSync({
+          'type': 'save_donation_box',
+          'entityId': box.id,
+          'boxId': box.id,
+          'branchId': box.branchId,
+          'data': box.toMap(),
+        });
+        SyncService().triggerUpload(force: true);
+        if (kDebugMode) print('✅ DONATION BOX saved via LAN → ${box.boxNumber}');
+      } else if (type == RealtimeEvents.saveBoxOpening) {
+        final opening = BoxOpening.fromMap(data, data['id']?.toString() ?? '');
+        final openingsBox = await LocalStorageService.openBoxSafe(DonationBoxStorage.openingsBoxName);
+        await openingsBox.put(opening.id, opening.toMap());
+        await LocalStorageService.enqueueSync({
+          'type': 'save_box_opening',
+          'entityId': opening.id,
+          'openingId': opening.id,
+          'boxId': opening.boxId,
+          'branchId': opening.branchId,
+          'data': opening.toMap(),
+        });
+        SyncService().triggerUpload(force: true);
+        if (kDebugMode) print('✅ BOX OPENING saved via LAN → ${opening.boxNumber} (${opening.amount})');
+      }
+    } catch (e) {
+      if (kDebugMode) print('❌ _handleDonationBoxEvent error: $e');
+    }
+  }
+
   static Future<void> _handleDasterkhwanEvent(String type, Map<String, dynamic> data) async {
     try {
       if (type == RealtimeEvents.saveOfficeBoyToken) {
@@ -1062,8 +1210,10 @@ Serial: ${data['serial'] ?? 'N/A'}
           for (final tid in tokenIds) {
             await tokenBox.delete(tid);
           }
+          final revBatchId = data['batchId']?.toString() ?? 'rev_${branchId}_${dateKey}_${tokenIds.join('_')}';
           await LocalStorageService.enqueueSync({
             'type': 'reverse_dasterkhwan_tokens',
+            'entityId': revBatchId,
             'branchId': branchId,
             'dateKey': dateKey,
             'data': data,
@@ -1079,8 +1229,12 @@ Serial: ${data['serial'] ?? 'N/A'}
               await tokenBox.put(tid, LocalStorageService.sanitize(tMap));
             }
           }
+          final firstNum = tokensList.isNotEmpty && tokensList.first is Map ? (tokensList.first['number'] ?? '') : '';
+          final lastNum = tokensList.isNotEmpty && tokensList.last is Map ? (tokensList.last['number'] ?? '') : '';
+          final batchId = data['batchId']?.toString() ?? 'dst_batch_${branchId}_${dateKey}_${firstNum}_$lastNum';
           await LocalStorageService.enqueueSync({
             'type': 'save_dasterkhwan_tokens',
+            'entityId': batchId,
             'branchId': branchId,
             'dateKey': dateKey,
             'data': data,

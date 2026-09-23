@@ -46,6 +46,29 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
       await _loadStockItems();
       return;
     }
+
+    // Check local Hive cache for user branch first (0 cloud reads)
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final box = Hive.box('app_settings');
+        final u = box.get('user_data') ?? box.get('currentUser');
+        if (u is Map) {
+          final b = (u['branchId'] ?? u['branch'] ?? u['selectedBranchId'])?.toString();
+          if (b != null && b.isNotEmpty && b != 'all') {
+            setState(() => _branchId = b);
+            await _loadStockItems();
+            return;
+          }
+        }
+        final cb = box.get('current_branch_id')?.toString();
+        if (cb != null && cb.isNotEmpty && cb != 'all') {
+          setState(() => _branchId = cb);
+          await _loadStockItems();
+          return;
+        }
+      }
+    } catch (_) {}
+
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
     final branches =

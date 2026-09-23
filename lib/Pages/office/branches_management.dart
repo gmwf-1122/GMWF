@@ -12,6 +12,7 @@ import '../../services/local_storage_service.dart';
 import '../../services/offline_auth_service.dart';
 import '../../services/finance_local_storage.dart';
 import '../../services/camp_session_service.dart';
+import '../../design/design_system.dart';
 
 class BranchesManagementPage extends StatefulWidget {
   final String? currentUserRole;
@@ -35,6 +36,11 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
   @override
   void initState() {
     super.initState();
+    if (!Hive.isBoxOpen(LocalStorageService.branchesBox)) {
+      LocalStorageService.ensureBoxOpen(LocalStorageService.branchesBox).then((_) {
+        if (mounted) setState(() {});
+      });
+    }
     _searchController.addListener(() {
       setState(() {
         _searchQuery = _searchController.text.trim().toLowerCase();
@@ -1414,9 +1420,13 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
 
     return Scaffold(
       backgroundColor: t.bg,
-      body: ValueListenableBuilder<Box>(
-        valueListenable: Hive.box('local_branches').listenable(),
-        builder: (context, box, _) {
+      body: !Hive.isBoxOpen(LocalStorageService.branchesBox)
+          ? Center(
+              child: CircularProgressIndicator(color: t.accent),
+            )
+          : ValueListenableBuilder<Box>(
+              valueListenable: Hive.box(LocalStorageService.branchesBox).listenable(),
+              builder: (context, box, _) {
           final Map<String, Map<String, dynamic>> branchMap = {};
 
           // Load from Hive baseline
@@ -1584,8 +1594,8 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
 
                 // ── KPI Summary Cards Grid ───────────────────────────────────
                 LayoutBuilder(builder: (context, constraints) {
-                  final isMobile = constraints.maxWidth < 700;
-                  final isTablet = constraints.maxWidth >= 700 && constraints.maxWidth < 1100;
+                  final isMobile = GBreakpoint.isMobileC(constraints);
+                  final isTablet = GBreakpoint.isTabletC(constraints);
                   return GridView.count(
                     crossAxisCount: isMobile ? 2 : (isTablet ? 3 : 5),
                     crossAxisSpacing: 12,
@@ -1730,227 +1740,381 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            // Card Header: Name, Status Badge, and Admin Password Actions
-                            Row(
+                            // ── Branch Card Hero Header ──────────────────────────────
+                            Wrap(
+                              alignment: WrapAlignment.spaceBetween,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              spacing: 16,
+                              runSpacing: 14,
                               children: [
-                                Container(
-                                  padding: const EdgeInsets.all(10),
-                                  decoration: BoxDecoration(
-                                    color: isOffboarded ? Colors.orange.withValues(alpha: 0.12) : t.accent.withValues(alpha: 0.1),
-                                    borderRadius: BorderRadius.circular(12),
-                                  ),
-                                  child: Icon(
-                                    isOffboarded ? Icons.archive_rounded : Icons.store_rounded,
-                                    color: isOffboarded ? Colors.orange.shade800 : t.accent,
-                                    size: 24,
-                                  ),
-                                ),
-                                const SizedBox(width: 14),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Row(
-                                        children: [
-                                          Text(
-                                            branchName,
-                                            style: TextStyle(
-                                              fontSize: 18,
-                                              fontWeight: FontWeight.bold,
-                                              color: isOffboarded ? t.textSecondary : t.textPrimary,
-                                            ),
-                                          ),
-                                          const SizedBox(width: 10),
-                                          Container(
-                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                                            decoration: BoxDecoration(
-                                              color: isOffboarded ? Colors.red.withValues(alpha: 0.12) : Colors.green.withValues(alpha: 0.12),
-                                              borderRadius: BorderRadius.circular(6),
-                                              border: Border.all(color: isOffboarded ? Colors.red.withValues(alpha: 0.3) : Colors.green.withValues(alpha: 0.3)),
-                                            ),
-                                            child: Text(
-                                              isOffboarded ? 'OFFBOARDED 🔴 (Archived Data Preserved)' : 'ACTIVE 🟢',
-                                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: isOffboarded ? Colors.redAccent : Colors.green),
-                                            ),
-                                          ),
-                                        ],
+                                // Identity Zone
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                      width: 48,
+                                      height: 48,
+                                      decoration: BoxDecoration(
+                                        gradient: LinearGradient(
+                                          begin: Alignment.topLeft,
+                                          end: Alignment.bottomRight,
+                                          colors: [
+                                            (isOffboarded ? Colors.orange : t.accent).withValues(alpha: 0.2),
+                                            (isOffboarded ? Colors.orange : t.accent).withValues(alpha: 0.05),
+                                          ],
+                                        ),
+                                        borderRadius: BorderRadius.circular(14),
+                                        border: Border.all(
+                                          color: (isOffboarded ? Colors.orange : t.accent).withValues(alpha: 0.3),
+                                          width: 1.2,
+                                        ),
                                       ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        'Branch ID: $branchId • Helpline/Verif: ${(branch['verificationPhone'] ?? branch['complaintPhone'] ?? (branchId.toLowerCase().contains('karachi') ? '0333-3047931' : (branch['phone'] ?? 'Default HQ')))} • 🔒',
-                                        style: TextStyle(fontSize: 12, color: t.textTertiary, fontWeight: FontWeight.w500),
+                                      child: Icon(
+                                        isOffboarded ? Icons.archive_rounded : Icons.domain_rounded,
+                                        color: isOffboarded ? Colors.orange.shade800 : t.accent,
+                                        size: 26,
                                       ),
-                                    ],
-                                  ),
+                                    ),
+                                    const SizedBox(width: 14),
+                                    Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(
+                                              branchName,
+                                              style: TextStyle(
+                                                fontSize: 19,
+                                                fontWeight: FontWeight.w900,
+                                                color: isOffboarded ? t.textSecondary : t.textPrimary,
+                                                letterSpacing: -0.3,
+                                              ),
+                                            ),
+                                            const SizedBox(width: 10),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                              decoration: BoxDecoration(
+                                                color: isOffboarded ? Colors.red.withValues(alpha: 0.12) : Colors.green.withValues(alpha: 0.12),
+                                                borderRadius: BorderRadius.circular(6),
+                                                border: Border.all(
+                                                  color: isOffboarded ? Colors.red.withValues(alpha: 0.3) : Colors.green.withValues(alpha: 0.3),
+                                                ),
+                                              ),
+                                              child: Text(
+                                                isOffboarded ? 'OFFBOARDED 🔴' : 'ACTIVE 🟢',
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.w800,
+                                                  color: isOffboarded ? Colors.redAccent : Colors.green,
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                        const SizedBox(height: 4),
+                                        Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: t.bgCardAlt,
+                                                borderRadius: BorderRadius.circular(4),
+                                                border: Border.all(color: t.bgRule),
+                                              ),
+                                              child: Text(
+                                                'ID: $branchId',
+                                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: t.textSecondary),
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Icon(Icons.phone_in_talk_rounded, size: 13, color: t.textTertiary),
+                                            const SizedBox(width: 4),
+                                            Text(
+                                              (branch['verificationPhone'] ?? branch['complaintPhone'] ?? (branchId.toLowerCase().contains('karachi') ? '0333-3047931' : (branch['phone'] ?? 'Default HQ'))).toString(),
+                                              style: TextStyle(fontSize: 11.5, color: t.textTertiary, fontWeight: FontWeight.w500),
+                                            ),
+                                          ],
+                                        ),
+                                      ],
+                                    ),
+                                  ],
                                 ),
 
-                                // Actions: Require Admin Password Verification
-                                OutlinedButton.icon(
-                                  onPressed: () => _openFacilityEditor(context, branchId, branchName, branch),
-                                  icon: Icon(Icons.tune_rounded, size: 16, color: t.accent),
-                                  label: Text('Configure Facilities 🔒', style: TextStyle(color: t.accent, fontWeight: FontWeight.bold, fontSize: 13)),
-                                  style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                    side: BorderSide(color: t.accent.withValues(alpha: 0.4)),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                  ),
+                                // Action Hub (Primary + Secondary Menu)
+                                Wrap(
+                                  spacing: 8,
+                                  runSpacing: 8,
+                                  crossAxisAlignment: WrapCrossAlignment.center,
+                                  children: [
+                                    ElevatedButton.icon(
+                                      onPressed: () => _openFacilityEditor(context, branchId, branchName, branch),
+                                      icon: const Icon(Icons.tune_rounded, size: 16),
+                                      label: const Text('Configure Facilities 🔒', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: t.accent,
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                        elevation: 0,
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                      ),
+                                    ),
+                                    OutlinedButton.icon(
+                                      onPressed: () => _openAddOrEditCampDialog(context, branchId, branchName),
+                                      icon: const Icon(Icons.holiday_village_rounded, size: 16, color: Color(0xFF0284C7)),
+                                      label: const Text('+ Add Camp 🏕️', style: TextStyle(color: Color(0xFF0284C7), fontWeight: FontWeight.w800, fontSize: 12.5)),
+                                      style: OutlinedButton.styleFrom(
+                                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                                        side: BorderSide(color: const Color(0xFF0284C7).withValues(alpha: 0.5)),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                      ),
+                                    ),
+                                    PopupMenuButton<String>(
+                                      icon: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                        decoration: BoxDecoration(
+                                          color: t.bgCardAlt,
+                                          borderRadius: BorderRadius.circular(10),
+                                          border: Border.all(color: t.bgRule),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.more_horiz_rounded, size: 18, color: t.textSecondary),
+                                            const SizedBox(width: 4),
+                                            Text('Options', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: t.textSecondary)),
+                                          ],
+                                        ),
+                                      ),
+                                      tooltip: 'Branch Options',
+                                      onSelected: (val) {
+                                        switch (val) {
+                                          case 'timings':
+                                            _openDasterkhwaanTimingsDialog(context, branchId, branchName, branch);
+                                            break;
+                                          case 'contacts':
+                                            _openBranchContactsDialog(context, branchId, branchName, branch);
+                                            break;
+                                          case 'offboard':
+                                            _offboardBranch(context, branchId, branchName, isOffboarded);
+                                            break;
+                                        }
+                                      },
+                                      itemBuilder: (ctx) => [
+                                        const PopupMenuItem(
+                                          value: 'timings',
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.access_time_filled_rounded, size: 16, color: Colors.orange),
+                                              SizedBox(width: 10),
+                                              Text('Dasterkhwaan Timings 🕒'),
+                                            ],
+                                          ),
+                                        ),
+                                        const PopupMenuItem(
+                                          value: 'contacts',
+                                          child: Row(
+                                            children: [
+                                              Icon(Icons.phone_in_talk_rounded, size: 16, color: Color(0xFF10B981)),
+                                              SizedBox(width: 10),
+                                              Text('Helpline & Complaint Contact 📞'),
+                                            ],
+                                          ),
+                                        ),
+                                        if (_isAdminOrExecutive)
+                                          PopupMenuItem(
+                                            value: 'offboard',
+                                            child: Row(
+                                              children: [
+                                                Icon(
+                                                  isOffboarded ? Icons.unarchive_rounded : Icons.archive_rounded,
+                                                  size: 16,
+                                                  color: isOffboarded ? Colors.green : Colors.orange.shade800,
+                                                ),
+                                                const SizedBox(width: 10),
+                                                Text(isOffboarded ? 'Reactivate Branch 🟢' : 'Offboard & Archive 🔒'),
+                                              ],
+                                            ),
+                                          ),
+                                      ],
+                                    ),
+                                  ],
                                 ),
-                                const SizedBox(width: 10),
-                                OutlinedButton.icon(
-                                  onPressed: () => _openAddOrEditCampDialog(context, branchId, branchName),
-                                  icon: const Icon(Icons.holiday_village_rounded, size: 16, color: Color(0xFF0284C7)),
-                                  label: const Text('Add Camp 🏕️', style: TextStyle(color: Color(0xFF0284C7), fontWeight: FontWeight.bold, fontSize: 13)),
-                                  style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                    side: BorderSide(color: const Color(0xFF0284C7).withValues(alpha: 0.4)),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                OutlinedButton.icon(
-                                  onPressed: () => _openDasterkhwaanTimingsDialog(context, branchId, branchName, branch),
-                                  icon: const Icon(Icons.access_time_filled_rounded, size: 16, color: Colors.orange),
-                                  label: const Text('Dasterkhwaan Timings 🕒', style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 13)),
-                                  style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                    side: BorderSide(color: Colors.orange.withValues(alpha: 0.4)),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                  ),
-                                ),
-                                const SizedBox(width: 10),
-                                OutlinedButton.icon(
-                                  onPressed: () => _openBranchContactsDialog(context, branchId, branchName, branch),
-                                  icon: const Icon(Icons.phone_in_talk_rounded, size: 16, color: Color(0xFF10B981)),
-                                  label: const Text('Helpline & Complaint Contact 📞', style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 13)),
-                                  style: OutlinedButton.styleFrom(
-                                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                    side: BorderSide(color: const Color(0xFF10B981).withValues(alpha: 0.4)),
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                  ),
-                                ),
-                                if (_isAdminOrExecutive) ...[
-                                  const SizedBox(width: 10),
-                                  ElevatedButton.icon(
-                                    onPressed: () async {
-                                      final current = branch['allowVitalsToken'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowVitalsToken'] : null) ?? LocalStorageService.isVitalsTokenAllowed(branchId);
-                                      final next = !(current == true || current == 'true' || current == 1);
-                                      await LocalStorageService.setVitalsTokenAllowed(branchId, next);
-                                      setState(() {});
-                                    },
-                                    icon: const Icon(Icons.confirmation_number_rounded, size: 16, color: Colors.white),
-                                    label: Text(
-                                      (() {
-                                        final current = branch['allowVitalsToken'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowVitalsToken'] : null) ?? LocalStorageService.isVitalsTokenAllowed(branchId);
-                                        final enabled = current == true || current == 'true' || current == 1;
-                                        return enabled ? 'Dual Tokens: ON 🟢' : 'Dual Tokens: OFF 🔴';
-                                      })(),
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white),
-                                    ),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: (() {
-                                        final current = branch['allowVitalsToken'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowVitalsToken'] : null) ?? LocalStorageService.isVitalsTokenAllowed(branchId);
-                                        final enabled = current == true || current == 'true' || current == 1;
-                                        return enabled ? Colors.teal.shade700 : Colors.blueGrey.shade700;
-                                      })(),
-                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                      elevation: 0,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 10),
-                                  ElevatedButton.icon(
-                                    onPressed: () async {
-                                      final current = branch['allowDonationBox'] ?? branch['donationBoxAllowed'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowDonationBox'] ?? branch['sessionsConfig']['donationBoxAllowed'] : null) ?? LocalStorageService.isDonationBoxAllowed(branchId);
-                                      final next = !(current == true || current == 'true' || current == 1);
-                                      await LocalStorageService.setDonationBoxAllowed(branchId, next);
-                                      setState(() {});
-                                    },
-                                    icon: Icon(Icons.volunteer_activism_rounded, size: 16, color: Colors.white),
-                                    label: Text(
-                                      (() {
-                                        final current = branch['allowDonationBox'] ?? branch['donationBoxAllowed'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowDonationBox'] ?? branch['sessionsConfig']['donationBoxAllowed'] : null) ?? LocalStorageService.isDonationBoxAllowed(branchId);
-                                        final enabled = current == true || current == 'true' || current == 1;
-                                        return enabled ? 'Donation Box ON' : 'Donation Box OFF';
-                                      })(),
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white),
-                                    ),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: (() {
-                                        final current = branch['allowDonationBox'] ?? branch['donationBoxAllowed'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowDonationBox'] ?? branch['sessionsConfig']['donationBoxAllowed'] : null) ?? LocalStorageService.isDonationBoxAllowed(branchId);
-                                        final enabled = current == true || current == 'true' || current == 1;
-                                        return enabled ? Colors.green : Colors.red.shade700;
-                                      })(),
-                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                      elevation: 0,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                    ),
-                                  ),
-                                ],
-                                if (_isAdminOrExecutive) ...[
-                                  const SizedBox(width: 10),
-                                  ElevatedButton.icon(
-                                    onPressed: () => _offboardBranch(context, branchId, branchName, isOffboarded),
-                                    icon: Icon(
-                                      isOffboarded ? Icons.unarchive_rounded : Icons.archive_rounded,
-                                      size: 16,
-                                      color: Colors.white,
-                                    ),
-                                    label: Text(
-                                      isOffboarded ? 'Reactivate 🟢' : 'Offboard 🔒',
-                                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.white),
-                                    ),
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: isOffboarded ? Colors.green : Colors.orange.shade800,
-                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                      elevation: 0,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                    ),
-                                  ),
-                                ],
                               ],
                             ),
                             const SizedBox(height: 16),
-                            Divider(color: t.bgRule, height: 1),
+                            Divider(color: t.bgRule.withValues(alpha: 0.7), height: 1),
                             const SizedBox(height: 14),
 
-                            // Facility Counters & Operational Policy Row
+                            // ── Facility Metrics Summary Strip ───────────────────────
                             Wrap(
-                              spacing: 10,
+                              spacing: 8,
                               runSpacing: 8,
                               children: [
-                                _buildBadge('🏥 ${dispList.length} Dispensary(ies)', t.accent, t),
-                                _buildBadge('🍽️ ${dastList.length} Dasterkhwaan(s)', Colors.orange, t),
-                                _buildBadge('📖 ${madrList.length} Madrassa(s)', Colors.teal, t),
-                                _buildBadge('🏫 ${schList.length} School(s)', Colors.indigo, t),
+                                _buildBadge('🏥 ${dispList.length} Dispensary', t.accent, t),
+                                _buildBadge('🍽️ ${dastList.length} Dasterkhwaan', Colors.orange, t),
+                                _buildBadge('📖 ${madrList.length} Madrassa', Colors.teal, t),
+                                _buildBadge('🏫 ${schList.length} School', Colors.indigo, t),
                                 if (campsList.isNotEmpty) ...[
                                   _buildBadge('🏕️ ${campsList.where((c) => c['status'] != 'closed' && c['isClosed'] != true).length} Active Camp(s)', const Color(0xFF0284C7), t),
                                   if (campsList.any((c) => c['status'] == 'closed' || c['isClosed'] == true))
-                                    _buildBadge('🏕️ ${campsList.where((c) => c['status'] == 'closed' || c['isClosed'] == true).length} Closed Camp(s)', Colors.grey, t),
+                                    _buildBadge('🏕️ ${campsList.where((c) => c['status'] == 'closed' || c['isClosed'] == true).length} Closed', Colors.grey, t),
                                 ],
-                                () {
-                                  final allowVitals = branch['allowVitalsToken'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowVitalsToken'] : null) ?? LocalStorageService.isVitalsTokenAllowed(branchId);
-                                  return _buildBadge(
-                                    allowVitals ? '🩺 Vitals Token: ALLOWED 🟢' : '🩺 Vitals Token: DISALLOWED 🔴',
-                                    allowVitals ? Colors.teal : Colors.redAccent,
-                                    t,
-                                  );
-                                }(),
-                                () {
-                                  final allowDonationBox = branch['allowDonationBox'] ?? branch['donationBoxAllowed'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowDonationBox'] ?? branch['sessionsConfig']['donationBoxAllowed'] : null) ?? LocalStorageService.isDonationBoxAllowed(branchId);
-                                  return _buildBadge(
-                                    allowDonationBox ? '💰 Donation Box: ALLOWED 🟢' : '💰 Donation Box: DISALLOWED 🔴',
-                                    allowDonationBox ? Colors.green : Colors.redAccent,
-                                    t,
-                                  );
-                                }(),
-                                if (madrList.isNotEmpty) () {
-                                  final feeEnabled = branch['madrassaFeeEnabled'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['madrassaFeeEnabled'] : null) ?? LocalStorageService.isMadrassaFeeEnabled(branchId);
-                                  return _buildBadge(
-                                    feeEnabled ? '💰 Madrassa: FEES ACTIVE 🟢' : '💰 Madrassa: FREE (NO FEES) 🟡',
-                                    feeEnabled ? Colors.green : Colors.amber.shade800,
-                                    t,
-                                  );
-                                }(),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+
+                            // ── Operational Policies Toggle Bar ─────────────────────
+                            Wrap(
+                              spacing: 10,
+                              runSpacing: 8,
+                              crossAxisAlignment: WrapCrossAlignment.center,
+                              children: [
+                                // Dual Tokens Policy Toggle
+                                InkWell(
+                                  onTap: () async {
+                                    final current = branch['allowVitalsToken'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowVitalsToken'] : null) ?? LocalStorageService.isVitalsTokenAllowed(branchId);
+                                    final next = !(current == true || current == 'true' || current == 1);
+                                    await LocalStorageService.setVitalsTokenAllowed(branchId, next);
+                                    setState(() {});
+                                  },
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                    decoration: BoxDecoration(
+                                      color: (() {
+                                        final current = branch['allowVitalsToken'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowVitalsToken'] : null) ?? LocalStorageService.isVitalsTokenAllowed(branchId);
+                                        final enabled = current == true || current == 'true' || current == 1;
+                                        return enabled ? Colors.teal.withValues(alpha: 0.12) : Colors.grey.withValues(alpha: 0.1);
+                                      })(),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: (() {
+                                          final current = branch['allowVitalsToken'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowVitalsToken'] : null) ?? LocalStorageService.isVitalsTokenAllowed(branchId);
+                                          final enabled = current == true || current == 'true' || current == 1;
+                                          return enabled ? Colors.teal.withValues(alpha: 0.3) : Colors.grey.withValues(alpha: 0.3);
+                                        })(),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.confirmation_number_rounded, size: 14, color: Colors.teal),
+                                        const SizedBox(width: 5),
+                                        Text(
+                                          (() {
+                                            final current = branch['allowVitalsToken'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowVitalsToken'] : null) ?? LocalStorageService.isVitalsTokenAllowed(branchId);
+                                            final enabled = current == true || current == 'true' || current == 1;
+                                            return enabled ? 'Dual Vitals Tokens: ON 🟢' : 'Dual Vitals Tokens: OFF 🔴';
+                                          })(),
+                                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+
+                                // Donation Box Policy Toggle
+                                InkWell(
+                                  onTap: () async {
+                                    final current = branch['allowDonationBox'] ?? branch['donationBoxAllowed'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowDonationBox'] ?? branch['sessionsConfig']['donationBoxAllowed'] : null) ?? LocalStorageService.isDonationBoxAllowed(branchId);
+                                    final next = !(current == true || current == 'true' || current == 1);
+                                    await LocalStorageService.setDonationBoxAllowed(branchId, next);
+                                    setState(() {});
+                                  },
+                                  borderRadius: BorderRadius.circular(8),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                    decoration: BoxDecoration(
+                                      color: (() {
+                                        final current = branch['allowDonationBox'] ?? branch['donationBoxAllowed'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowDonationBox'] ?? branch['sessionsConfig']['donationBoxAllowed'] : null) ?? LocalStorageService.isDonationBoxAllowed(branchId);
+                                        final enabled = current == true || current == 'true' || current == 1;
+                                        return enabled ? Colors.green.withValues(alpha: 0.12) : Colors.red.withValues(alpha: 0.1);
+                                      })(),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(
+                                        color: (() {
+                                          final current = branch['allowDonationBox'] ?? branch['donationBoxAllowed'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowDonationBox'] ?? branch['sessionsConfig']['donationBoxAllowed'] : null) ?? LocalStorageService.isDonationBoxAllowed(branchId);
+                                          final enabled = current == true || current == 'true' || current == 1;
+                                          return enabled ? Colors.green.withValues(alpha: 0.3) : Colors.red.withValues(alpha: 0.3);
+                                        })(),
+                                      ),
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.volunteer_activism_rounded, size: 14, color: Colors.green),
+                                        const SizedBox(width: 5),
+                                        Text(
+                                          (() {
+                                            final current = branch['allowDonationBox'] ?? branch['donationBoxAllowed'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowDonationBox'] ?? branch['sessionsConfig']['donationBoxAllowed'] : null) ?? LocalStorageService.isDonationBoxAllowed(branchId);
+                                            final enabled = current == true || current == 'true' || current == 1;
+                                            return enabled ? 'Donation Box: ALLOWED 🟢' : 'Donation Box: RESTRICTED 🔴';
+                                          })(),
+                                          style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+
+                                if (madrList.isNotEmpty) ...[
+                                  (() {
+                                    final mode = branch['madrassaProgramMode'] ??
+                                        branch['madrassaMode'] ??
+                                        (branch['sessionsConfig'] is Map ? (branch['sessionsConfig']['madrassaProgramMode'] ?? branch['sessionsConfig']['madrassaMode']) : null) ??
+                                        LocalStorageService.getMadrassaProgramMode(branchId);
+                                    
+                                    final isNazra = mode == 'nazra_only' ||
+                                        branch['isNazraOnly'] == true ||
+                                        branch['madrassaNazraOnly'] == true ||
+                                        (branch['sessionsConfig'] is Map &&
+                                            (branch['sessionsConfig']['isNazraOnly'] == true ||
+                                                (branch['sessionsConfig']['madrassa'] is Map &&
+                                                    branch['sessionsConfig']['madrassa']['isNazraOnly'] == true)));
+                                    
+                                    final isHifz = mode == 'hifz_only';
+
+                                    if (isNazra) {
+                                      return _buildBadge(
+                                        '📖 Only Nazra System (صرف ناظرہ)',
+                                        const Color(0xFF0D9488),
+                                        t,
+                                      );
+                                    } else if (isHifz) {
+                                      return _buildBadge(
+                                        '🕋 Only Hifz Campus (صرف حفظ)',
+                                        const Color(0xFF7C3AED),
+                                        t,
+                                      );
+                                    } else {
+                                      return _buildBadge(
+                                        '📖 & 🕋 Both Hifz & Nazra (حفظ و ناظرہ)',
+                                        const Color(0xFF0F766E),
+                                        t,
+                                      );
+                                    }
+                                  })(),
+                                  if (!(branch['isNazraOnly'] == true || branch['madrassaNazraOnly'] == true || LocalStorageService.isMadrassaNazraOnly(branchId)))
+                                    (() {
+                                      final feeEnabled = branch['madrassaFeeEnabled'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['madrassaFeeEnabled'] : null) ?? LocalStorageService.isMadrassaFeeEnabled(branchId);
+                                      return _buildBadge(
+                                        feeEnabled ? '💰 Madrassa: FEES ACTIVE 🟢' : '💰 Madrassa: FREE (NO FEES) 🟡',
+                                        feeEnabled ? Colors.green : Colors.amber.shade800,
+                                        t,
+                                      );
+                                    })(),
+                                  (() {
+                                    final sessions = CampSessionService.getMadrassaSessions(branchId);
+                                    final labels = sessions.map((s) => s == 'morning' ? '☀️ Morning' : (s == 'evening' ? '🌅 Evening' : '🌙 Night')).join(' • ');
+                                    return _buildBadge(
+                                      '🕒 ${sessions.length} Shift${sessions.length > 1 ? "s" : ""}: ${labels.isNotEmpty ? labels : "Morning"}',
+                                      const Color(0xFF0F766E),
+                                      t,
+                                    );
+                                  })(),
+                                ],
                               ],
                             ),
 

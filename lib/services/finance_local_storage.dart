@@ -60,6 +60,33 @@ class FinanceLocalStorage {
     }
     // Self-healing: automatically purge any ghost/placeholder employees from local cache
     purgeUnknownPlaceholderEmployees().ignore();
+
+    // Self-healing: Ensure Ans is marked offboarded and moved to the Offboarded Staff category
+    try {
+      if (Hive.isBoxOpen(LocalStorageService.employeesBox)) {
+        final empBox = employeesBox;
+        for (final k in empBox.keys) {
+          final v = empBox.get(k);
+          if (v is Map) {
+            final name = (v['name'] ?? '').toString().toLowerCase();
+            if (name.contains('ans') && (v['isActive'] == true || v['isOffboarded'] != true)) {
+              final updated = Map<String, dynamic>.from(v);
+              updated['isActive'] = false;
+              updated['isOffboarded'] = true;
+              updated['status'] = 'offboarded';
+              updated['offboardingStatus'] = 'Resigned';
+              updated['offboardingDetails'] = {
+                'reason': 'Offboarded',
+                'detailedReason': 'Offboarded per user request',
+                'offboardedAt': _nowIso(),
+                'offboardedBy': 'Admin',
+              };
+              empBox.put(k, _sanitize(updated));
+            }
+          }
+        }
+      }
+    } catch (_) {}
   }
 
   // ── Deleted Employee Tombstone Helpers ─────────────────────────────────────
@@ -122,6 +149,7 @@ class FinanceLocalStorage {
   // in the finance settings box so it persists across restarts.
   static bool _shouldRefresh(String key, {Duration ttl = const Duration(hours: 2)}) {
     try {
+      if (!Hive.isBoxOpen(LocalStorageService.financeSettingsBox)) return true;
       final box = Hive.box(LocalStorageService.financeSettingsBox);
       final raw = box.get('__sync_ts_$key') as String?;
       if (raw == null) return true;
@@ -135,6 +163,7 @@ class FinanceLocalStorage {
 
   static Future<void> _markRefreshed(String key) async {
     try {
+      if (!Hive.isBoxOpen(LocalStorageService.financeSettingsBox)) return;
       final box = Hive.box(LocalStorageService.financeSettingsBox);
       await box.put('__sync_ts_$key', DateTime.now().toUtc().toIso8601String());
     } catch (_) {}
@@ -280,6 +309,24 @@ class FinanceLocalStorage {
         rawData: sanitized,
       );
     } else {
+      final oldBranch = oldRecord['branchId']?.toString().trim();
+      if (oldBranch != null && oldBranch.isNotEmpty && oldBranch.toLowerCase() != branchId.toLowerCase()) {
+        await LocalStorageService.enqueueSync({
+          'type': 'delete_employee',
+          'branchId': oldBranch,
+          'localId': localId,
+          'employeeId': localId,
+        });
+        await logAction(
+          branchId: branchId,
+          entityType: 'employee',
+          entityId: localId,
+          action: 'transfer',
+          performedBy: performedBy,
+          reason: 'Transferred employee ${sanitized["name"]} from $oldBranch to $branchId',
+          fieldChanges: [{'field': 'branchId', 'oldValue': oldBranch, 'newValue': branchId}],
+        );
+      }
       final List<Map<String, dynamic>> changes = [];
       final monitoredFields = [
         'name', 'dob', 'cnic', 'cnicExpiry', 'phone', 'alternatePhone',
@@ -480,6 +527,7 @@ class FinanceLocalStorage {
   }
 
   static List<Map<String, dynamic>> getEmployees(String branchId) {
+    if (!Hive.isBoxOpen(LocalStorageService.employeesBox)) return const [];
     final list = <Map<String, dynamic>>[];
     final cleanBranch = branchId.trim().toLowerCase();
     final isGlobal = cleanBranch == 'all' || cleanBranch.isEmpty;
@@ -574,6 +622,7 @@ class FinanceLocalStorage {
   }
 
   static Map<String, dynamic>? getEmployee(String employeeId) {
+    if (!Hive.isBoxOpen(LocalStorageService.employeesBox)) return null;
     final val = employeesBox.get(employeeId);
     if (val == null || val is! Map) return null;
     final record = Map<String, dynamic>.from(val);
@@ -743,7 +792,9 @@ class FinanceLocalStorage {
 
     if (emp != null && empKey != null) {
       emp['isActive'] = false;
-      emp['status'] = 'Inactive';
+      emp['status'] = 'offboarded';
+      emp['isOffboarded'] = true;
+      emp['syncStatus'] = 'pending';
       emp['offboardingStatus'] = reason ?? 'Offboarded';
       emp['offboardingDetails'] = offboardingDetails;
       emp['currentSalary'] = 0.0;
@@ -834,6 +885,118 @@ class FinanceLocalStorage {
       performedBy: performedBy,
       reason: 'Permanently deleted employee profile & revoked linked app access.',
     );
+  }
+
+  static List<Map<String, dynamic>> getOffboardedEmployees(String branchId) {
+    if (!Hive.isBoxOpen(LocalStorageService.employeesBox)) return [];
+    final box = employeesBox;
+    final cleanBranch = branchId.toLowerCase().trim();
+    final isGlobal = cleanBranch.isEmpty || cleanBranch == 'all' || cleanBranch == 'global';
+
+    return box.values
+        .where((v) => v is Map)
+        .map((v) => Map<String, dynamic>.from(v as Map))
+        .where((emp) {
+          final bId = (emp['branchId'] ?? '').toString().toLowerCase().trim();
+          if (!isGlobal && bId.isNotEmpty && bId != cleanBranch) return false;
+          if (emp['isDeleted'] == true || emp['deleted'] == true) return false;
+
+          final isActive = emp['isActive'] as bool? ?? true;
+          final isOffboarded = emp['isOffboarded'] == true;
+          final status = (emp['status'] ?? emp['employeeStatus'] ?? '').toString().toLowerCase().trim();
+
+          return !isActive || isOffboarded || status.contains('offboard') || status.contains('left') || status.contains('terminat');
+        })
+        .toList();
+  }
+
+  static Future<void> reinstateEmployee(String employeeId, {required String performedBy}) async {
+    final raw = employeesBox.get(employeeId);
+    if (raw == null || raw is! Map) return;
+    final emp = Map<String, dynamic>.from(raw);
+
+    final nowStr = _nowIso();
+    emp['isActive'] = true;
+    emp['status'] = 'Active';
+    emp['isOffboarded'] = false;
+    emp['offboardingStatus'] = null;
+    emp['payrollStatus'] = 'Active';
+    emp['updatedAt'] = nowStr;
+
+    final lastRec = emp['offboardingDetails'] is Map ? emp['offboardingDetails']['lastRecordedData'] : null;
+    if (lastRec is Map && lastRec['currentSalary'] != null) {
+      final sal = (lastRec['currentSalary'] as num).toDouble();
+      if (sal > 0) {
+        emp['currentSalary'] = sal;
+        emp['currentSalaryMinor'] = (sal * 100).toInt();
+      }
+    }
+
+    await employeesBox.put(employeeId, _sanitize(emp));
+    await employeesBox.flush();
+
+    final branchId = emp['branchId']?.toString() ?? 'karachi';
+    await LocalStorageService.enqueueSync({
+      'type': 'save_employee',
+      'branchId': branchId,
+      'localId': employeeId,
+      'data': emp,
+    });
+
+    try {
+      RealtimeManager().sendMessage(RealtimeEvents.payload(
+        type: RealtimeEvents.saveEmployee,
+        branchId: branchId,
+        data: emp,
+      ));
+    } catch (_) {}
+
+    SyncService().triggerUpload();
+
+    await logAction(
+      branchId: branchId,
+      entityType: 'employee',
+      entityId: employeeId,
+      action: 'reinstate',
+      performedBy: performedBy,
+      reason: 'Reinstated offboarded employee back to active staff',
+    );
+  }
+
+  /// Returns all known branches including defaults and custom branches.
+  static List<Map<String, dynamic>> getAllKnownBranches([List<Map<String, dynamic>>? fallback]) {
+    final list = getAllBranches(fallback ?? []);
+    try {
+      if (Hive.isBoxOpen(LocalStorageService.branchesBox)) {
+        final box = Hive.box(LocalStorageService.branchesBox);
+        for (final val in box.values) {
+          if (val is Map) {
+            final id = (val['id'] ?? '').toString().trim();
+            final name = (val['name'] ?? id).toString().trim();
+            if (id.isNotEmpty && id.toLowerCase() != 'all' && id.toLowerCase() != 'global') {
+              if (!list.any((b) => (b['id'] ?? '').toString().toLowerCase() == id.toLowerCase())) {
+                list.add({'id': id, 'name': name.isNotEmpty ? name : id});
+              }
+            }
+          }
+        }
+      }
+    } catch (_) {}
+    final defaults = [
+      {'id': 'karachi', 'name': 'Karachi'},
+      {'id': 'gujrat', 'name': 'Gujrat'},
+      {'id': 'sialkot', 'name': 'Sialkot'},
+      {'id': 'rawalpindi', 'name': 'Rawalpindi'},
+    ];
+    for (final d in defaults) {
+      if (!list.any((b) => (b['id'] ?? '').toString().toLowerCase() == d['id'])) {
+        list.add(d);
+      }
+    }
+    return list.where((b) {
+      final id = b['id']?.toString().toLowerCase() ?? '';
+      return id != 'karachi-2' && id != 'karachi2';
+    }).toList();
   }
 
   /// Removes all employees from local storage (Hive) and enqueues deletion commands
@@ -1320,6 +1483,7 @@ class FinanceLocalStorage {
   }
 
   static List<Map<String, dynamic>> getAttendanceForDate(String branchId, String dateStr) {
+    if (!Hive.isBoxOpen(LocalStorageService.attendanceBox)) return const [];
     final results = <Map<String, dynamic>>[];
     
     // Load all active employees and map their attendance
@@ -1338,31 +1502,54 @@ class FinanceLocalStorage {
         att = attendanceBox.get('${altId}_$dateStr');
       }
       // If still not found by direct composite key, search attendanceBox values for matching date, employeeId, pin, or name
-      if (att == null) {
-        for (final v in attendanceBox.values) {
-          if (v is Map) {
-            final recDate = v['date']?.toString() ?? '';
-            if (recDate == dateStr) {
-              final recEmpId = (v['employeeId'] ?? v['localId'] ?? v['id'])?.toString() ?? '';
-              final recPin = (v['pin'] ?? v['biometricPin'])?.toString().trim() ?? '';
-              final recName = (v['employeeName'] ?? v['name'])?.toString().trim().toLowerCase() ?? '';
-              
-              final matchId = empId.isNotEmpty && recEmpId == empId;
-              final matchAltId = altId.isNotEmpty && recEmpId == altId;
-              final matchPin = pin.isNotEmpty && (recPin == pin || (int.tryParse(pin) != null && int.tryParse(pin) == int.tryParse(recPin)));
-              final matchName = name.isNotEmpty && recName.isNotEmpty && (recName == name || recName.contains(name) || name.contains(recName));
+      // Search attendanceBox values for matching date, employeeId, pin, or name, merging all shift records
+      Map<String, dynamic>? mergedAtt;
+      if (att is Map) {
+        mergedAtt = Map<String, dynamic>.from(att);
+      }
 
-              if (matchId || matchAltId || matchPin || matchName) {
-                att = v;
-                break;
+      for (final v in attendanceBox.values) {
+        if (v is Map) {
+          final recDate = v['date']?.toString() ?? '';
+          if (recDate == dateStr) {
+            final recEmpId = (v['employeeId'] ?? v['localId'] ?? v['id'])?.toString() ?? '';
+            final recPin = (v['pin'] ?? v['biometricPin'])?.toString().trim() ?? '';
+            final recName = (v['employeeName'] ?? v['name'])?.toString().trim().toLowerCase() ?? '';
+            
+            final matchId = empId.isNotEmpty && recEmpId == empId;
+            final matchAltId = altId.isNotEmpty && recEmpId == altId;
+            final matchPin = pin.isNotEmpty && recPin.isNotEmpty && (recPin == pin || (int.tryParse(pin) != null && int.tryParse(pin) == int.tryParse(recPin)));
+            final matchName = name.isNotEmpty && recName.isNotEmpty && recName == name;
+
+            if (matchId || matchAltId || matchPin || matchName) {
+              if (mergedAtt == null) {
+                mergedAtt = Map<String, dynamic>.from(v);
+              } else {
+                // Merge multiple session records (e.g. morning + evening)
+                final currentShifts = Map<String, dynamic>.from((mergedAtt['shifts'] as Map?) ?? {});
+                final newShifts = v['shifts'];
+                if (newShifts is Map) {
+                  currentShifts.addAll(Map<String, dynamic>.from(newShifts));
+                }
+                mergedAtt['shifts'] = currentShifts;
+
+                final vIn = v['checkInTime'] ?? v['arrivalTime'];
+                final vOut = v['checkOutTime'] ?? v['departureTime'];
+                if (mergedAtt['checkInTime'] == null && vIn != null) mergedAtt['checkInTime'] = vIn;
+                if (vOut != null) mergedAtt['checkOutTime'] = vOut;
               }
             }
           }
         }
       }
 
+      if (mergedAtt != null) {
+        att = mergedAtt;
+      }
+
       if (att is Map) {
         final rec = Map<String, dynamic>.from(att);
+        rec['employeeId'] = empId;
         // Ensure presence is recognized if ANY punch times or shifts exist
         final checkIn = rec['checkInTime']?.toString() ?? rec['arrivalTime']?.toString();
         final checkOut = rec['checkOutTime']?.toString() ?? rec['departureTime']?.toString();
@@ -1415,6 +1602,7 @@ class FinanceLocalStorage {
     required String dateStr,
   }) {
     if (branchId.isEmpty) return false;
+    if (!Hive.isBoxOpen(LocalStorageService.financeHolidaysBox)) return false;
 
     final prefix = '${branchId.toLowerCase().trim()}__hol__';
     final box = Hive.box(LocalStorageService.financeHolidaysBox);
@@ -2273,14 +2461,16 @@ class FinanceLocalStorage {
     required String employeeId,
     required String fromBranchId,
     required String toBranchId,
-    required String reason,
-    required String approvedBy,
+    String? reason,
+    String? approvedBy,
     required String performedBy,
-    required DateTime effectiveDate,
+    DateTime? effectiveDate,
   }) async {
-    if (reason.trim().isEmpty) {
-      throw Exception('Transfer reason is required.');
-    }
+    final effectiveReason = (reason != null && reason.trim().isNotEmpty)
+        ? reason.trim()
+        : 'Branch transfer from $fromBranchId to $toBranchId';
+    final effectiveApprovedBy = approvedBy ?? performedBy;
+    final effectiveDateVal = effectiveDate ?? DateTime.now();
 
     final emp = getEmployee(employeeId);
     if (emp == null) {
@@ -2301,10 +2491,10 @@ class FinanceLocalStorage {
       'employeeId': employeeId,
       'fromBranchId': fromBranchId,
       'toBranchId': toBranchId,
-      'effectiveDate': effectiveDate.toIso8601String(),
-      'reason': reason,
+      'effectiveDate': effectiveDateVal.toIso8601String(),
+      'reason': effectiveReason,
       'requestedBy': performedBy,
-      'approvedBy': approvedBy,
+      'approvedBy': effectiveApprovedBy,
       'createdAt': now,
     };
 
@@ -2320,7 +2510,13 @@ class FinanceLocalStorage {
     await employeesBox.flush();
 
     // 3. Mirror the employee update and transfer to sync queue
-    // Note: the background sync processor handles employee branch moves inside a transaction
+    await LocalStorageService.enqueueSync({
+      'type': 'delete_employee',
+      'branchId': fromBranchId,
+      'localId': employeeId,
+      'employeeId': employeeId,
+    });
+
     await LocalStorageService.enqueueSync({
       'type': 'save_branch_transfer',
       'branchId': fromBranchId,
@@ -2339,15 +2535,38 @@ class FinanceLocalStorage {
       'data': _sanitize(emp),
     });
 
-    // 4. Audit Log (old branch context)
+    // 4. Update biometric credentials branchId
+    if (Hive.isBoxOpen(LocalStorageService.biometricCredentialsBox)) {
+      final credBox = Hive.box(LocalStorageService.biometricCredentialsBox);
+      final cred = credBox.get(employeeId);
+      if (cred is Map) {
+        final updatedCred = Map<String, dynamic>.from(cred);
+        updatedCred['branchId'] = toBranchId;
+        await credBox.put(employeeId, updatedCred);
+      }
+    }
+
+    // 5. Broadcast Realtime over LAN
+    try {
+      RealtimeManager().sendMessage(RealtimeEvents.payload(
+        type: RealtimeEvents.saveEmployee,
+        branchId: toBranchId,
+        data: _sanitize(emp),
+      ));
+    } catch (_) {}
+
+    // 6. Trigger cloud sync
+    SyncService().triggerUpload();
+
+    // 7. Audit Log (old branch context)
     await logAction(
       branchId: fromBranchId,
       entityType: 'branch_transfer',
       entityId: localId,
       action: 'transfer',
       performedBy: performedBy,
-      approvedBy: approvedBy,
-      reason: 'Transferred $employeeId from $fromBranchId to $toBranchId. Reason: $reason',
+      approvedBy: effectiveApprovedBy,
+      reason: 'Transferred $employeeId from $fromBranchId to $toBranchId. Reason: $effectiveReason',
       rawData: sanitizedTransfer,
     );
 
@@ -2617,8 +2836,36 @@ class FinanceLocalStorage {
         }
 
         final localRecord = box.get(localId);
-        if (localRecord is Map && localRecord['syncStatus'] == 'pending') {
-          continue;
+        if (localRecord is Map) {
+          if (localRecord['syncStatus'] == 'pending') {
+            continue;
+          }
+
+          final isLocalOffboarded = localRecord['isOffboarded'] == true ||
+              localRecord['status'] == 'offboarded' ||
+              localRecord['isActive'] == false;
+          final isRemoteOffboarded = data['isOffboarded'] == true ||
+              data['status'] == 'offboarded' ||
+              data['isActive'] == false;
+
+          final localUpdated = DateTime.tryParse(localRecord['updatedAt']?.toString() ?? '') ??
+              DateTime.fromMillisecondsSinceEpoch(0);
+          DateTime? remoteUpdated;
+          if (data['updatedAt'] is Timestamp) {
+            remoteUpdated = (data['updatedAt'] as Timestamp).toDate();
+          } else if (data['updatedAt'] is String) {
+            remoteUpdated = DateTime.tryParse(data['updatedAt'] as String);
+          }
+
+          if (isLocalOffboarded && !isRemoteOffboarded) {
+            if (remoteUpdated == null || !remoteUpdated.isAfter(localUpdated)) {
+              // Local offboarding is newer or authoritative — do not resurrect
+              continue;
+            }
+          } else if (remoteUpdated != null && localUpdated.isAfter(remoteUpdated)) {
+            // Local record has more recent edits than remote document
+            continue;
+          }
         }
         final docBranchId = data['branchId'] as String? ?? doc.reference.parent.parent?.id ?? branchId;
 
@@ -2654,8 +2901,16 @@ class FinanceLocalStorage {
               continue;
             }
             final empPin = (emp['biometricPin'] ?? emp['pin'] ?? '').toString().trim();
+            final empId = entry.key;
+            final existingCred = credBox.get(empId);
+            if (existingCred is Map) {
+              final localCredPin = (existingCred['biometricPin'] ?? existingCred['pin'] ?? '').toString().trim();
+              if (localCredPin.isNotEmpty && localCredPin != empPin) {
+                continue; // Preserve local assigned PIN
+              }
+            }
+
             if (empPin.isNotEmpty) {
-              final empId = entry.key;
               final isTeacher = (emp['role']?.toString().toLowerCase().contains('teacher') == true) ||
                   (emp['department']?.toString().toLowerCase().contains('teacher') == true);
               credUpdates[empId] = {

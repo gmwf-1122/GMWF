@@ -9,6 +9,7 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../models/stock_item.dart';
+import '../../../widgets/app_feedback.dart';
 import 'cook_dialog.dart' show
     kPrimary, kAccent, kSuccess, kWarning, kInfo, kPurple,
     kSurface, kCardBg, kTextDark, kTextMid, kTextLight,
@@ -186,10 +187,7 @@ void showAddStockDialog(
                       if (!formKey.currentState!.validate()) return;
                       final name = nameCtrl.text.trim();
                       if (name.isEmpty) {
-                        ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-                          content: Text('Enter item name'),
-                          backgroundColor: kAccent,
-                        ));
+                        AppFeedback.showWarning(ctx, 'Enter item name');
                         return;
                       }
                       final qty = double.tryParse(qtyCtrl.text) ?? 0;
@@ -206,10 +204,11 @@ void showAddStockDialog(
                           'lastUpdated': FieldValue.serverTimestamp(),
                         });
                       } else if (snap.exists) {
-                        ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
-                          content: Text('Product already exists. Edit its quantity instead.'),
-                          backgroundColor: kAccent,
-                        ));
+                        AppFeedback.showWarning(
+                          ctx,
+                          'Product already exists',
+                          subtitle: 'Edit its quantity instead of creating a duplicate.',
+                        );
                         return;
                       } else {
                         await ref.set({
@@ -221,16 +220,11 @@ void showAddStockDialog(
                       }
                       await onDone();
                       if (ctx.mounted) Navigator.pop(ctx);
-                      ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
-                        content: Text(isEdit
-                            ? '$name updated'
-                            : '$qty $unit of $name added to stock'),
-                        backgroundColor: kSuccess,
-                        behavior: SnackBarBehavior.floating,
-                        margin: const EdgeInsets.all(16),
-                        shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12)),
-                      ));
+                      AppFeedback.showSuccess(
+                        context,
+                        isEdit ? '$name updated' : '$name added to stock',
+                        subtitle: isEdit ? 'Stock values updated' : 'Added $qty $unit to local inventory',
+                      );
                     },
                     child: Text(isEdit ? 'Update Stock' : 'Add to Stock',
                         style: const TextStyle(
@@ -368,16 +362,11 @@ void showAdjustStockDialog(
                     final qty = double.parse(qtyCtrl.text);
                     await onAdjust(item.name, isAdd ? qty : -qty);
                     if (context.mounted) Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text(isAdd
-                          ? 'Added $qty ${item.unit} of ${item.name}'
-                          : 'Removed $qty ${item.unit} of ${item.name}'),
-                      backgroundColor: kSuccess,
-                      behavior: SnackBarBehavior.floating,
-                      margin: const EdgeInsets.all(16),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12)),
-                    ));
+                    AppFeedback.showSuccess(
+                      context,
+                      isAdd ? 'Added $qty ${item.unit} of ${item.name}' : 'Removed $qty ${item.unit} of ${item.name}',
+                      subtitle: 'Inventory adjusted successfully',
+                    );
                   },
                   child: Text(isAdd ? 'Add Stock' : 'Remove',
                       style: const TextStyle(

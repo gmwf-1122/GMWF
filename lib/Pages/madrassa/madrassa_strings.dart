@@ -158,6 +158,13 @@ class MadrassaLocale {
   final String statusActive = 'Active';
   final String statusArchived = 'Archived';
   final String statusHifzCompleted = 'Hifz Completed';
+  final String statusNazraCompleted = 'Nazra Completed';
+  final String markNazraCompleted = 'Mark Nazra Completed';
+  final String markHifzCompleted = 'Mark Hifz Completed';
+  final String nazraCertificate = 'Certificate of Nazra Completion';
+  final String teachers = 'Teachers';
+  final String teacherAttendance = 'Teacher Attendance';
+  final String teacherManagement = 'Faculty Directory';
   final String statusLeft = 'Left';
   final String joinDate = 'Join Date';
   final String studentProgress = 'Daily Progress';
@@ -537,6 +544,20 @@ class MadrassaLocaleUr extends MadrassaLocale {
   final String statusArchived = 'آرکائیو شدہ';
   @override
   final String statusHifzCompleted = 'حفظ مکمل';
+  @override
+  final String statusNazraCompleted = 'ناظرہ مکمل';
+  @override
+  final String markNazraCompleted = 'ناظرہ کی تکمیل';
+  @override
+  final String markHifzCompleted = 'حفظ کی تکمیل';
+  @override
+  final String nazraCertificate = 'ناظرہ تکمیل سرٹیفکیٹ';
+  @override
+  final String teachers = 'اساتذہ';
+  @override
+  final String teacherAttendance = 'اساتذہ کی حاضری';
+  @override
+  final String teacherManagement = 'اساتذہ کی تفصیلات';
   @override
   final String statusLeft = 'چھوڑ دیا';
   @override

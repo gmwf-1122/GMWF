@@ -24,6 +24,7 @@ import '../../../theme/role_theme_provider.dart';
 import '../dialogs/enrollment_dialog.dart';
 import '../madrassa_strings.dart';
 import 'student_detail_page.dart';
+import '../../../design/design_system.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../providers/madrassa_providers.dart';
@@ -46,15 +47,44 @@ class StudentManagementView extends ConsumerStatefulWidget {
 }
 
 class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
+  bool get _effectiveIsAdmin {
+    final r = widget.role.toLowerCase().trim();
+    return widget.isAdmin ||
+        r.contains('admin') ||
+        r.contains('chairman') ||
+        r.contains('hq') ||
+        r.contains('hq manager') ||
+        r.contains('hqmanager') ||
+        r.contains('hq_manager') ||
+        r.contains('ceo') ||
+        r.contains('principal') ||
+        r.contains('manager') ||
+        r.contains('director') ||
+        r.contains('supervisor') ||
+        r.contains('global');
+  }
+
+  bool get _isHQManager {
+    final r = widget.role.toLowerCase().trim();
+    return r.contains('hqmanager') ||
+        r.contains('hq manager') ||
+        r.contains('hq_manager') ||
+        r == 'hq' ||
+        r.contains('chairman');
+  }
+
   bool get _canAddStudent {
-    if (widget.isAdmin) return true;
+    if (_effectiveIsAdmin) return true;
     final r = widget.role.toLowerCase();
-    return r.contains('admin') || r.contains('teacher') || r.contains('nazim') || r.contains('staff') || r.contains('madrassa');
+    return r.contains('admin') || r.contains('teacher') || r.contains('nazim') || r.contains('staff') || r.contains('madrassa') || r.contains('chairman') || r.contains('hq');
   }
 
   String _searchQuery = '';
   String _statusFilter = 'all';
   String _sortBy = 'rollNumber';
+  String _sessionFilter = 'all';
+  String _genderFilter = 'all';
+  String _programFilter = 'all'; // 'all', 'hifz', 'nazra'
   final Map<String, PhotoUploadStatus> _uploadStates = {};
   final Set<String> _expandedStudentIds = {};
   bool _showFilters = false;
@@ -461,7 +491,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
         builder: (_) => StudentDetailPage(
           studentData: studentData,
           branchId: widget.branchId,
-          isAdmin: widget.isAdmin,
+          isAdmin: _effectiveIsAdmin,
           username: widget.username,
           role: widget.role,
         ),
@@ -503,12 +533,32 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
     final estimatedDays = recentDailyRate > 0.3 ? (remainingLines / recentDailyRate).ceil() : null;
     final pct = ((totalMemorized / totalLines) * 100).clamp(0.0, 100.0).toStringAsFixed(1);
 
+    final isNazra = (studentData['isNazra'] == true) ||
+        (studentData['program']?.toString().toLowerCase() == 'nazra') ||
+        (studentData['class']?.toString().toLowerCase() == 'nazra') ||
+        LocalStorageService.isMadrassaNazraOnly(branchId);
+    final isQaidaComp = studentData['qaidaCompleted'] == true || studentData['qaidaSabak'] == 'completed';
+
+    // Retrieve today's or latest log for this student to get ruku / rukuPara
+    final todayKey = DateFormat('yyyy-MM-dd').format(DateTime.now());
+    Map<String, dynamic>? todayLog;
+    if (Hive.isBoxOpen(LocalStorageService.madrassaLogsBox)) {
+      final logBox = Hive.box(LocalStorageService.madrassaLogsBox);
+      final logKey = '${branchId.toLowerCase().trim()}__log__$todayKey';
+      final rawLog = logBox.get(logKey);
+      if (rawLog is Map && rawLog[studentId] is Map) {
+        todayLog = Map<String, dynamic>.from(rawLog[studentId] as Map);
+      }
+    }
+    final dynamic rukuVal = todayLog?['ruku'] ?? studentData['ruku'];
+    final dynamic rukuParaVal = todayLog?['rukuPara'] ?? studentData['rukuPara'];
+
     showDialog(
       context: context,
       builder: (_) => StudentProgressDialog(
         studentName: studentData['name'] ?? 'Student',
         photoUrl: studentData['photoUrl'],
-        className: studentData['class']?.toString() ?? 'Hifz',
+        className: isNazra ? 'Nazra' : (studentData['class']?.toString() ?? 'Hifz'),
         rollNumber: studentData['rollNumber']?.toString() ?? '?',
         joinDate: joinDate,
         totalLines: totalLines,
@@ -517,8 +567,89 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
         percentage: pct,
         estimatedDays: estimatedDays,
         recentDailyRate: recentDailyRate,
+        isNazra: isNazra,
+        qaidaCompleted: isQaidaComp,
+        qaidaSabak: studentData['qaidaSabak']?.toString(),
+        rukuPara: rukuParaVal is int ? rukuParaVal : int.tryParse(rukuParaVal?.toString() ?? ''),
+        ruku: rukuVal,
       ),
     );
+  }
+
+  Future<void> _confirmDeleteStudent(BuildContext context, Map<String, dynamic> studentData) async {
+    final studentName = studentData['name'] ?? 'Student';
+    final studentId = studentData['id']?.toString() ?? '';
+    final branchId = widget.branchId;
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.red.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.delete_forever, color: Colors.red, size: 24),
+            ),
+            const SizedBox(width: 12),
+            Text(
+              ctx.isUrdu ? 'طالب علم ڈیلیٹ کریں؟' : 'Delete Student?',
+              style: ctx.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)),
+            ),
+          ],
+        ),
+        content: Text(
+          ctx.isUrdu
+              ? 'کیا آپ واقعی $studentName کو مستقل طور پر ڈیلیٹ کرنا چاہتے ہیں؟ یہ عمل واپس نہیں لیا جا سکتا۔'
+              : 'Are you sure you want to permanently delete $studentName? This action cannot be undone and will permanently remove all student records.',
+          style: ctx.urduStyle(style: const TextStyle(fontSize: 14)),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: Text(ctx.isUrdu ? 'منسوخ کریں' : 'Cancel'),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: Text(ctx.isUrdu ? 'ڈیلیٹ کریں' : 'Delete'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      await MadrassaLocalStorage.permanentlyDeleteStudent(
+        branchId: branchId,
+        studentId: studentId,
+      );
+      await MadrassaAuditService.logAction(
+        branchId: branchId,
+        editor: widget.username,
+        role: widget.role,
+        type: 'delete_student',
+        message: 'Student $studentName permanently deleted by ${widget.username} (${widget.role}).',
+        studentId: studentId,
+        studentName: studentName,
+      );
+      if (mounted) {
+        setState(() {});
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('$studentName deleted successfully'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   Widget _buildStatusChip(BuildContext context, Map<String, dynamic> d, {bool isDark = false}) {
@@ -538,6 +669,10 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
       case 'hifz_completed':
         statusLabel = context.l.statusHifzCompleted;
         color = const Color(0xFF4C4DDC); // Purple
+        break;
+      case 'nazra_completed':
+        statusLabel = context.l.statusNazraCompleted;
+        color = const Color(0xFF0D9488); // Teal / Emerald
         break;
       case 'left':
         statusLabel = context.l.statusLeft;
@@ -690,16 +825,70 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
               ),
             ),
           ),
-          title: Text(
-            (d['name'] ?? '').toString().trim(),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              fontSize: 15.5,
-              color: textPrimary,
-              fontFamily: context.isUrdu ? 'Noori' : null,
-            ),
+          title: Row(
+            children: [
+              Expanded(
+                child: Text(
+                  (d['name'] ?? '').toString().trim(),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 15.5,
+                    color: textPrimary,
+                    fontFamily: context.isUrdu ? 'Noori' : null,
+                  ),
+                ),
+              ),
+              if ((d['gender'] ?? '').toString().toLowerCase() == 'female' || (d['gender'] ?? '').toString().toLowerCase() == 'girl') ...[
+                const SizedBox(width: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                  decoration: BoxDecoration(
+                    color: Colors.pink.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.pink.withValues(alpha: 0.35)),
+                  ),
+                  child: Text(
+                    context.isUrdu ? '👧 لڑکی' : '👧 Girl',
+                    style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.pink),
+                  ),
+                ),
+              ] else if ((d['gender'] ?? '').toString().toLowerCase() == 'male' || (d['gender'] ?? '').toString().toLowerCase() == 'boy') ...[
+                const SizedBox(width: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                  decoration: BoxDecoration(
+                    color: Colors.blue.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.blue.withValues(alpha: 0.35)),
+                  ),
+                  child: Text(
+                    context.isUrdu ? '👦 لڑکا' : '👦 Boy',
+                    style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blue),
+                  ),
+                ),
+              ],
+              if ((d['session'] ?? '').toString().isNotEmpty) ...[
+                const SizedBox(width: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.withValues(alpha: 0.18),
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: Colors.amber.withValues(alpha: 0.4)),
+                  ),
+                  child: Text(
+                    (d['session'] ?? '').toString().toLowerCase() == 'morning'
+                        ? '☀️ M'
+                        : (d['session'] ?? '').toString().toLowerCase() == 'evening'
+                            ? '🌅 E'
+                            : '🌙 N',
+                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.amber[800]),
+                  ),
+                ),
+              ],
+            ],
           ),
           subtitle: Padding(
             padding: const EdgeInsets.only(top: 3.0),
@@ -801,7 +990,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                     return const SizedBox.shrink();
                   }(),
                   const SizedBox(height: 12),
-                  _buildProgressBar(context, d['currentLines'] ?? 0, isDark),
+                  _buildProgressBar(context, d, d['currentLines'] ?? 0, isDark),
                   const SizedBox(height: 12),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -809,7 +998,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                       StatusActionMenu(
                         student: s,
                         branchId: widget.branchId,
-                        isAdmin: widget.isAdmin,
+                        isAdmin: _effectiveIsAdmin,
                         t: RoleThemeScope.dataOf(context),
                         username: widget.username,
                         role: widget.role,
@@ -840,11 +1029,63 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
     );
   }
 
-  Widget _buildProgressBar(BuildContext context, int currentLines, bool isDark) {
+  Widget _buildProgressBar(BuildContext context, Map<String, dynamic> d, int currentLines, bool isDark) {
+    final isNazra = (d['isNazra'] == true) ||
+        (d['program']?.toString().toLowerCase() == 'nazra') ||
+        (d['class']?.toString().toLowerCase() == 'nazra') ||
+        LocalStorageService.isMadrassaNazraOnly(widget.branchId);
+    final textMuted = isDark ? const Color(0xFF94A3B8) : Colors.grey[600]!;
+
+    if (isNazra) {
+      final isQComp = d['qaidaCompleted'] == true || d['qaidaSabak'] == 'completed';
+      final currentLesson = int.tryParse(d['qaidaSabak']?.toString() ?? '1') ?? 1;
+      final double qPct = isQComp ? 1.0 : (currentLesson / 21).clamp(0.0, 1.0);
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                isQComp
+                    ? (context.isUrdu ? 'قاعدہ مکمل ✅' : 'Qaida Completed ✅')
+                    : (context.isUrdu ? 'قاعدہ پیشرفت (سبق $currentLesson / ۲۱)' : 'Qaida Progress (Lesson $currentLesson / 21)'),
+                style: context.urduStyle(
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: isQComp ? const Color(0xFF10B981) : Colors.amber[800],
+                  ),
+                ),
+              ),
+              Text(
+                isQComp ? '100%' : '${(qPct * 100).toStringAsFixed(0)}%',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.bold,
+                  color: isQComp ? const Color(0xFF10B981) : Colors.amber[800],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(
+              value: qPct,
+              backgroundColor: isDark ? const Color(0xFF334155) : const Color(0xFFF0F2F5),
+              valueColor: AlwaysStoppedAnimation<Color>(isQComp ? const Color(0xFF10B981) : Colors.amber[700]!),
+              minHeight: 8,
+            ),
+          ),
+        ],
+      );
+    }
+
     const int totalLines = 8640;
     final double pct = (currentLines / totalLines).clamp(0.0, 1.0);
     final pctText = (pct * 100).toStringAsFixed(1);
-    final textMuted = isDark ? const Color(0xFF94A3B8) : Colors.grey[600]!;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -874,7 +1115,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
 
   @override
   Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width < 600;
+    final isMobile = GBreakpoint.isMobile(context);
 
     return ValueListenableBuilder(
       valueListenable: UserThemeService.listenable(widget.username),
@@ -883,7 +1124,6 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
         final scaffoldBg = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8F9FD);
         final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
         final textPrimary = isDark ? Colors.white : const Color(0xFF1A1C1E);
-        final textMuted = isDark ? const Color(0xFF94A3B8) : Colors.grey[600]!;
         final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7);
 
         final studentsAsync = ref.watch(madrassaStudentsProvider(widget.branchId));
@@ -911,8 +1151,29 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
 
                   if (_statusFilter != 'all') {
                     final status = d['status'] ?? 'active';
-                    return status == _statusFilter;
+                    if (status != _statusFilter) return false;
                   }
+
+                  if (_sessionFilter != 'all') {
+                    final sVal = (d['session'] ?? 'morning').toString().toLowerCase().trim();
+                    if (sVal != _sessionFilter) return false;
+                  }
+
+                  if (_genderFilter != 'all') {
+                    final gVal = (d['gender'] ?? 'male').toString().toLowerCase().trim();
+                    if (_genderFilter == 'male' && gVal != 'male' && gVal != 'boy') return false;
+                    if (_genderFilter == 'female' && gVal != 'female' && gVal != 'girl') return false;
+                  }
+
+                  if (_programFilter != 'all') {
+                    final isNazra = (d['isNazra'] == true) ||
+                        (d['program']?.toString().toLowerCase() == 'nazra') ||
+                        (d['class']?.toString().toLowerCase() == 'nazra') ||
+                        LocalStorageService.isMadrassaNazraOnly(widget.branchId);
+                    if (_programFilter == 'hifz' && isNazra) return false;
+                    if (_programFilter == 'nazra' && !isNazra) return false;
+                  }
+
                   return true;
                 }).toList()..sort((a, b) {
                   if (_sortBy == 'rollNumber') {
@@ -973,7 +1234,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                 }
 
                 // Define batch order
-                const batchOrder = ['active', 'left', 'dropped', 'dropped_out', 'hifz_completed', 'hifz_complete', 'archived', 'inactive'];
+                const batchOrder = ['active', 'left', 'dropped', 'dropped_out', 'hifz_completed', 'hifz_complete', 'nazra_completed', 'nazra_complete', 'archived', 'inactive'];
 
                 if (isMobile) {
                   return RefreshIndicator(
@@ -1015,96 +1276,357 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                               const SizedBox(height: 12),
                               Container(
                                 width: double.infinity,
+                                clipBehavior: Clip.antiAlias,
                                 decoration: BoxDecoration(
                                   color: cardBg,
                                   borderRadius: BorderRadius.circular(16),
                                   border: Border.all(color: borderColor),
                                 ),
-                                child: SingleChildScrollView(
-                                  scrollDirection: Axis.horizontal,
-                                  child: DataTable(
-                                  columnSpacing: 12,
-                                  horizontalMargin: 12,
-                                  headingRowColor: WidgetStateProperty.all(isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F4F9)),
-                                  dataRowMinHeight: 60,
-                                  dataRowMaxHeight: 60,
-                                  columns: [
-                                    DataColumn(label: Text('#', style: TextStyle(fontWeight: FontWeight.bold, color: textPrimary))),
-                                    DataColumn(label: Text(context.l.students, style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.bold, color: textPrimary)))),
-                                    DataColumn(label: Text(context.l.rollNumber, style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.bold, color: textPrimary)))),
-                                    DataColumn(label: Text('Class', style: TextStyle(fontWeight: FontWeight.bold, color: textPrimary))),
-                                    DataColumn(label: Text(context.l.guardianFullName, style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.bold, color: textPrimary)))),
-                                    DataColumn(label: Text(context.l.contactPhone, style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.bold, color: textPrimary)))),
-                                    DataColumn(label: Text(context.l.overallProgress, style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.bold, color: textPrimary)))),
-                                    DataColumn(label: Text('Status', style: TextStyle(fontWeight: FontWeight.bold, color: textPrimary))),
-                                    DataColumn(label: Text(context.l.todayActions, style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.bold, color: textPrimary)))),
-                                  ],
-                                  rows: List.generate(studentsByBatch[batch]!.length, (i) {
-                                    final s = studentsByBatch[batch]![i];
-                                    final d = s;
-                                    final studentId = s['id'].toString();
-                                    final lines = d['currentLines'] ?? 0;
-                                    final prevL = int.tryParse(d['prevHifzLines']?.toString() ?? '0') ?? 0;
-                                    final totalL = lines + prevL;
-                                    final pct = (totalL / 8640 * 100).clamp(0.0, 100.0).toStringAsFixed(1);
-
-                                    return DataRow(cells: [
-                                      DataCell(Text('${i + 1}', style: TextStyle(color: textPrimary))),
-                                      DataCell(Row(
+                                child: Column(
+                                  children: [
+                                    // ── Table Header ──
+                                    Container(
+                                      decoration: BoxDecoration(
+                                        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F4F9),
+                                        border: Border(bottom: BorderSide(color: borderColor)),
+                                      ),
+                                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                                      child: Row(
                                         children: [
-                                          GestureDetector(
-                                            onTap: () => _pickAndUploadPhoto(studentId),
-                                            child: SizedBox(
-                                              width: 28,
-                                              height: 28,
-                                              child: _uploadStates[studentId] == PhotoUploadStatus.uploading
-                                                  ? const Padding(
-                                                      padding: EdgeInsets.all(4.0),
-                                                      child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF008080)),
-                                                    )
-                                                  : _buildStudentAvatar(d['photoUrl']?.toString(), d['name']?.toString(), size: 28),
-                                            ),
+                                          SizedBox(
+                                            width: 26,
+                                            child: Text('#', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: textPrimary)),
                                           ),
                                           const SizedBox(width: 8),
-                                          InkWell(
-                                            onTap: () => _openStudentDetailPage(d),
+                                          Expanded(
+                                            flex: 23,
+                                            child: Text(context.l.students, style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: textPrimary))),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            flex: 11,
+                                            child: Text(context.l.rollNumber, style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: textPrimary))),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            flex: 14,
+                                            child: Text('Class', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: textPrimary)),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            flex: 13,
+                                            child: Text(context.l.guardianFullName, style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: textPrimary))),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            flex: 13,
+                                            child: Text(context.l.contactPhone, style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: textPrimary))),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            flex: 17,
+                                            child: Text(context.l.overallProgress, style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: textPrimary))),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          Expanded(
+                                            flex: 11,
+                                            child: Text('Status', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: textPrimary)),
+                                          ),
+                                          const SizedBox(width: 8),
+                                          SizedBox(
+                                            width: _isHQManager ? 72 : 40,
                                             child: Text(
-                                              d['name'] ?? '',
-                                              style: TextStyle(
-                                                fontWeight: FontWeight.bold,
-                                                color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080),
-                                              ),
+                                              context.l.todayActions,
+                                              textAlign: TextAlign.center,
+                                              style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: textPrimary)),
                                             ),
                                           ),
                                         ],
-                                      )),
-                                      DataCell(Text(d['rollNumber']?.toString() ?? '?', style: TextStyle(color: textPrimary))),
-                                      DataCell(Text(d['class']?.toString() ?? 'Hifz', style: TextStyle(color: textPrimary))),
-                                      DataCell(Text(d['guardianName']?.toString() ?? '—', style: TextStyle(color: textPrimary))),
-                                      DataCell(Text(d['contactPhone']?.toString() ?? d['phone']?.toString() ?? '—', style: TextStyle(color: textPrimary))),
-                                      DataCell(Row(
-                                        children: [
-                                          Text('$totalL lines ($pct%)', style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080))),
-                                          IconButton(
-                                            icon: Icon(Icons.info_outline, size: 14, color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080)),
-                                            tooltip: context.l.moreInfo,
-                                            onPressed: () => _showStudentProgressDialog(context, d),
+                                      ),
+                                    ),
+
+                                    // ── Table Rows ──
+                                    for (int i = 0; i < studentsByBatch[batch]!.length; i++) ...[
+                                      () {
+                                        final s = studentsByBatch[batch]![i];
+                                        final d = s;
+                                        final studentId = s['id'].toString();
+                                        final lines = d['currentLines'] ?? 0;
+                                        final prevL = int.tryParse(d['prevHifzLines']?.toString() ?? '0') ?? 0;
+                                        final totalL = lines + prevL;
+                                        final pct = (totalL / 8640 * 100).clamp(0.0, 100.0).toStringAsFixed(1);
+                                        final isNazra = (d['isNazra'] == true) ||
+                                            (d['program']?.toString().toLowerCase() == 'nazra') ||
+                                            (d['class']?.toString().toLowerCase() == 'nazra') ||
+                                            LocalStorageService.isMadrassaNazraOnly(widget.branchId);
+                                        final isQComp = d['qaidaCompleted'] == true || d['qaidaSabak'] == 'completed';
+                                        final gender = (d['gender'] ?? '').toString().toLowerCase();
+                                        final isGirl = gender == 'female' || gender == 'girl';
+                                        final isBoy = gender == 'male' || gender == 'boy';
+                                        final session = (d['session'] ?? '').toString();
+
+                                        return Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                          decoration: BoxDecoration(
+                                            color: i.isEven
+                                                ? cardBg
+                                                : (isDark ? const Color(0xFF1E293B).withValues(alpha: 0.25) : const Color(0xFFF8FAFC)),
+                                            border: i < studentsByBatch[batch]!.length - 1
+                                                ? Border(bottom: BorderSide(color: borderColor.withValues(alpha: 0.6), width: 0.8))
+                                                : null,
                                           ),
-                                        ],
-                                      )),
-                                      DataCell(_buildStatusChip(context, d, isDark: isDark)),
-                                      DataCell(StatusActionMenu(
-                                        student: s,
-                                        branchId: widget.branchId,
-                                        isAdmin: widget.isAdmin,
-                                        t: RoleThemeScope.dataOf(context),
-                                        username: widget.username,
-                                        role: widget.role,
-                                      )),
-                                    ]);
-                                  }),
+                                          child: Row(
+                                            children: [
+                                              // #
+                                              SizedBox(
+                                                width: 26,
+                                                child: Text('${i + 1}', style: TextStyle(color: textPrimary, fontSize: 13)),
+                                              ),
+                                              const SizedBox(width: 8),
+
+                                              // Students
+                                              Expanded(
+                                                flex: 23,
+                                                child: Row(
+                                                  children: [
+                                                    GestureDetector(
+                                                      onTap: () => _pickAndUploadPhoto(studentId),
+                                                      child: SizedBox(
+                                                        width: 28,
+                                                        height: 28,
+                                                        child: _uploadStates[studentId] == PhotoUploadStatus.uploading
+                                                            ? const Padding(
+                                                                padding: EdgeInsets.all(4.0),
+                                                                child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF008080)),
+                                                              )
+                                                            : _buildStudentAvatar(d['photoUrl']?.toString(), d['name']?.toString(), size: 28),
+                                                      ),
+                                                    ),
+                                                    const SizedBox(width: 8),
+                                                    Expanded(
+                                                      child: Column(
+                                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                                        mainAxisSize: MainAxisSize.min,
+                                                        children: [
+                                                          InkWell(
+                                                            onTap: () => _openStudentDetailPage(d),
+                                                            child: Text(
+                                                              d['name'] ?? '',
+                                                              maxLines: 1,
+                                                              overflow: TextOverflow.ellipsis,
+                                                              style: TextStyle(
+                                                                fontWeight: FontWeight.bold,
+                                                                fontSize: 13,
+                                                                color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080),
+                                                              ),
+                                                            ),
+                                                          ),
+                                                          if (isGirl || isBoy || session.isNotEmpty) ...[
+                                                            const SizedBox(height: 2),
+                                                            Wrap(
+                                                              spacing: 4,
+                                                              runSpacing: 2,
+                                                              children: [
+                                                                if (isGirl)
+                                                                  Container(
+                                                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                                                    decoration: BoxDecoration(
+                                                                      color: Colors.pink.withValues(alpha: 0.15),
+                                                                      borderRadius: BorderRadius.circular(4),
+                                                                      border: Border.all(color: Colors.pink.withValues(alpha: 0.35)),
+                                                                    ),
+                                                                    child: Text(
+                                                                      context.isUrdu ? '👧 لڑکی' : '👧 Girl',
+                                                                      style: const TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Colors.pink),
+                                                                    ),
+                                                                  )
+                                                                else if (isBoy)
+                                                                  Container(
+                                                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                                                    decoration: BoxDecoration(
+                                                                      color: Colors.blue.withValues(alpha: 0.15),
+                                                                      borderRadius: BorderRadius.circular(4),
+                                                                      border: Border.all(color: Colors.blue.withValues(alpha: 0.35)),
+                                                                    ),
+                                                                    child: Text(
+                                                                      context.isUrdu ? '👦 لڑکا' : '👦 Boy',
+                                                                      style: const TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Colors.blue),
+                                                                    ),
+                                                                  ),
+                                                                if (session.isNotEmpty)
+                                                                  Container(
+                                                                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                                                    decoration: BoxDecoration(
+                                                                      color: Colors.amber.withValues(alpha: 0.18),
+                                                                      borderRadius: BorderRadius.circular(4),
+                                                                      border: Border.all(color: Colors.amber.withValues(alpha: 0.4)),
+                                                                    ),
+                                                                    child: Text(
+                                                                      session.toLowerCase() == 'morning'
+                                                                          ? '☀️ Morning'
+                                                                          : (session.toLowerCase() == 'evening' ? '🌅 Evening' : '🌙 Night'),
+                                                                      style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Colors.amber[800]),
+                                                                    ),
+                                                                  ),
+                                                              ],
+                                                            ),
+                                                          ],
+                                                        ],
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+
+                                              // Roll Number
+                                              Expanded(
+                                                flex: 11,
+                                                child: Text(
+                                                  d['rollNumber']?.toString() ?? '?',
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: TextStyle(color: textPrimary, fontSize: 13),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+
+                                              // Class
+                                              Expanded(
+                                                flex: 14,
+                                                child: Text(
+                                                  isNazra
+                                                      ? (isQComp ? 'Nazra (قاعدہ مکمل)' : 'Nazra (قاعدہ جاری)')
+                                                      : (d['class']?.toString() ?? 'Hifz'),
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: TextStyle(color: textPrimary, fontSize: 12.5),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+
+                                              // Guardian Full Name
+                                              Expanded(
+                                                flex: 13,
+                                                child: Text(
+                                                  d['guardianName']?.toString() ?? '—',
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: TextStyle(color: textPrimary, fontSize: 12.5),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+
+                                              // Contact Phone
+                                              Expanded(
+                                                flex: 13,
+                                                child: Text(
+                                                  d['contactPhone']?.toString() ?? d['phone']?.toString() ?? '—',
+                                                  maxLines: 1,
+                                                  overflow: TextOverflow.ellipsis,
+                                                  style: TextStyle(color: textPrimary, fontSize: 12.5),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+
+                                              // Overall Progress
+                                              Expanded(
+                                                flex: 17,
+                                                child: Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    Flexible(
+                                                      child: isNazra
+                                                          ? Container(
+                                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                              decoration: BoxDecoration(
+                                                                color: isQComp ? Colors.green.withValues(alpha: 0.15) : Colors.teal.withValues(alpha: 0.15),
+                                                                borderRadius: BorderRadius.circular(6),
+                                                                border: Border.all(
+                                                                  color: isQComp ? Colors.green.withValues(alpha: 0.4) : Colors.teal.withValues(alpha: 0.4),
+                                                                ),
+                                                              ),
+                                                              child: Text(
+                                                                isQComp
+                                                                    ? 'قاعدہ مکمل ✅'
+                                                                    : 'قاعدہ سبق: ${d['qaidaSabak'] ?? '1'} / 21',
+                                                                maxLines: 1,
+                                                                overflow: TextOverflow.ellipsis,
+                                                                style: TextStyle(
+                                                                  fontSize: 10.5,
+                                                                  fontWeight: FontWeight.bold,
+                                                                  color: isQComp ? Colors.green : (isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080)),
+                                                                ),
+                                                              ),
+                                                            )
+                                                          : Text(
+                                                              '$totalL lines ($pct%)',
+                                                              maxLines: 1,
+                                                              overflow: TextOverflow.ellipsis,
+                                                              style: TextStyle(
+                                                                fontSize: 11.5,
+                                                                fontWeight: FontWeight.bold,
+                                                                color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080),
+                                                              ),
+                                                            ),
+                                                    ),
+                                                    IconButton(
+                                                      icon: Icon(Icons.info_outline, size: 14, color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080)),
+                                                      tooltip: context.l.moreInfo,
+                                                      padding: const EdgeInsets.all(4),
+                                                      constraints: const BoxConstraints(),
+                                                      onPressed: () => _showStudentProgressDialog(context, d),
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+
+                                              // Status
+                                              Expanded(
+                                                flex: 11,
+                                                child: Align(
+                                                  alignment: Alignment.centerLeft,
+                                                  child: _buildStatusChip(context, d, isDark: isDark),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+
+                                              // Actions (Delete button for HQ Manager only + Status menu)
+                                              SizedBox(
+                                                width: _isHQManager ? 72 : 40,
+                                                child: Row(
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  mainAxisAlignment: MainAxisAlignment.end,
+                                                  children: [
+                                                    if (_isHQManager) ...[
+                                                      IconButton(
+                                                        icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                                                        tooltip: context.isUrdu ? 'طالب علم ڈیلیٹ کریں (صرف HQ)' : 'Delete Student (HQ Only)',
+                                                        padding: const EdgeInsets.all(4),
+                                                        constraints: const BoxConstraints(),
+                                                        onPressed: () => _confirmDeleteStudent(context, d),
+                                                      ),
+                                                      const SizedBox(width: 2),
+                                                    ],
+                                                    StatusActionMenu(
+                                                      student: s,
+                                                      branchId: widget.branchId,
+                                                      isAdmin: _effectiveIsAdmin,
+                                                      t: RoleThemeScope.dataOf(context),
+                                                      username: widget.username,
+                                                      role: widget.role,
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        );
+                                      }(),
+                                    ],
+                                  ],
                                 ),
-                              ),
                               ),
                                 const SizedBox(height: 24),
                               ],
@@ -1145,9 +1667,21 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
         batchIcon = Icons.cancel;
         break;
       case 'hifz_complete':
-        displayName = 'Hifz Complete';
+      case 'hifz_completed':
+        displayName = context.isUrdu ? 'حفظ مکمل' : 'Hifz Complete';
         batchColor = Colors.blue;
         batchIcon = Icons.auto_stories;
+        break;
+      case 'nazra_complete':
+      case 'nazra_completed':
+        displayName = context.isUrdu ? 'ناظرہ مکمل' : 'Nazra Complete';
+        batchColor = const Color(0xFF0D9488);
+        batchIcon = Icons.menu_book_rounded;
+        break;
+      case 'archived':
+        displayName = context.isUrdu ? 'آرکائیو شدہ' : 'Archived Students';
+        batchColor = Colors.amber[800]!;
+        batchIcon = Icons.archive_rounded;
         break;
       default:
         displayName = batch;
@@ -1209,7 +1743,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                   runSpacing: 8,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
-                    if (widget.isAdmin)
+                    if (_effectiveIsAdmin)
                       ElevatedButton.icon(
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF008080),
@@ -1298,11 +1832,60 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
               ),
             ],
           ),
+          const SizedBox(height: 8),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                ChoiceChip(
+                  label: const Text('All'),
+                  selected: _programFilter == 'all',
+                  onSelected: (val) {
+                    if (val) setState(() => _programFilter = 'all');
+                  },
+                  selectedColor: const Color(0xFF008080),
+                  labelStyle: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: _programFilter == 'all' ? Colors.white : (isDark ? Colors.white70 : const Color(0xFF475569)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ChoiceChip(
+                  label: const Text('🕋 Hifz'),
+                  selected: _programFilter == 'hifz',
+                  onSelected: (val) {
+                    if (val) setState(() => _programFilter = 'hifz');
+                  },
+                  selectedColor: const Color(0xFF7C3AED),
+                  labelStyle: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: _programFilter == 'hifz' ? Colors.white : (isDark ? Colors.white70 : const Color(0xFF475569)),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                ChoiceChip(
+                  label: const Text('📖 Nazra'),
+                  selected: _programFilter == 'nazra',
+                  onSelected: (val) {
+                    if (val) setState(() => _programFilter = 'nazra');
+                  },
+                  selectedColor: const Color(0xFF0D9488),
+                  labelStyle: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: _programFilter == 'nazra' ? Colors.white : (isDark ? Colors.white70 : const Color(0xFF475569)),
+                  ),
+                ),
+              ],
+            ),
+          ),
           if (_showFilters) ...[
             const SizedBox(height: 12),
             Builder(
               builder: (context) {
-                final isSmallScreen = MediaQuery.of(context).size.width < 600;
+                final isSmallScreen = GBreakpoint.isMobile(context);
 
                 final statusFilterDropdown = DropdownButtonFormField<String>(
                   value: _statusFilter,
@@ -1329,6 +1912,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                     DropdownMenuItem(value: 'inactive', child: Text(context.isUrdu ? 'غیر فعال' : 'Inactive')),
                     DropdownMenuItem(value: 'archived', child: Text(context.l.statusArchived)),
                     DropdownMenuItem(value: 'hifz_completed', child: Text(context.l.statusHifzCompleted)),
+                    DropdownMenuItem(value: 'nazra_completed', child: Text(context.l.statusNazraCompleted)),
                     DropdownMenuItem(value: 'left', child: Text(context.l.statusLeft)),
                   ],
                   onChanged: (val) {
@@ -1373,19 +1957,102 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                   },
                 );
 
+                final sessionFilterDropdown = DropdownButtonFormField<String>(
+                  value: _sessionFilter,
+                  decoration: InputDecoration(
+                    labelText: context.isUrdu ? 'سیشن فلٹر' : 'Session',
+                    labelStyle: context.urduStyle(style: TextStyle(fontSize: 12, color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080))),
+                    filled: true,
+                    fillColor: cardBg,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: borderColor),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: borderColor),
+                    ),
+                  ),
+                  dropdownColor: cardBg,
+                  style: context.urduStyle(style: TextStyle(color: textPrimary, fontSize: 13)),
+                  items: [
+                    DropdownMenuItem(value: 'all', child: Text(context.isUrdu ? 'تمام سیشنز' : 'All Sessions')),
+                    DropdownMenuItem(value: 'morning', child: Text(context.isUrdu ? '☀️ صبح (Morning)' : '☀️ Morning')),
+                    DropdownMenuItem(value: 'evening', child: Text(context.isUrdu ? '🌅 شام (Evening)' : '🌅 Evening')),
+                    DropdownMenuItem(value: 'night', child: Text(context.isUrdu ? '🌙 رات (Night)' : '🌙 Night')),
+                  ],
+                  onChanged: (val) {
+                    if (val != null) {
+                      setState(() {
+                        _sessionFilter = val;
+                      });
+                    }
+                  },
+                );
+
+                final genderFilterDropdown = DropdownButtonFormField<String>(
+                  value: _genderFilter,
+                  decoration: InputDecoration(
+                    labelText: context.isUrdu ? 'جنس فلٹر' : 'Gender',
+                    labelStyle: context.urduStyle(style: TextStyle(fontSize: 12, color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080))),
+                    filled: true,
+                    fillColor: cardBg,
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: borderColor),
+                    ),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(color: borderColor),
+                    ),
+                  ),
+                  dropdownColor: cardBg,
+                  style: context.urduStyle(style: TextStyle(color: textPrimary, fontSize: 13)),
+                  items: [
+                    DropdownMenuItem(value: 'all', child: Text(context.isUrdu ? 'سب طلباء (All)' : 'All Genders')),
+                    DropdownMenuItem(value: 'male', child: Text(context.isUrdu ? '👦 صرف لڑکے (Boys)' : '👦 Boys Only')),
+                    DropdownMenuItem(value: 'female', child: Text(context.isUrdu ? '👧 صرف لڑکیاں (Girls)' : '👧 Girls Only')),
+                  ],
+                  onChanged: (val) {
+                    if (val != null) {
+                      setState(() {
+                        _genderFilter = val;
+                      });
+                    }
+                  },
+                );
+
                 return isSmallScreen
                     ? Column(
                         children: [
                           statusFilterDropdown,
                           const SizedBox(height: 12),
                           sortByDropdown,
+                          const SizedBox(height: 12),
+                          sessionFilterDropdown,
+                          const SizedBox(height: 12),
+                          genderFilterDropdown,
                         ],
                       )
-                    : Row(
+                    : Column(
                         children: [
-                          Expanded(child: statusFilterDropdown),
-                          const SizedBox(width: 12),
-                          Expanded(child: sortByDropdown),
+                          Row(
+                            children: [
+                              Expanded(child: statusFilterDropdown),
+                              const SizedBox(width: 12),
+                              Expanded(child: sortByDropdown),
+                            ],
+                          ),
+                          const SizedBox(height: 12),
+                          Row(
+                            children: [
+                              Expanded(child: sessionFilterDropdown),
+                              const SizedBox(width: 12),
+                              Expanded(child: genderFilterDropdown),
+                            ],
+                          ),
                         ],
                       );
               },

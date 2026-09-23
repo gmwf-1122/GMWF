@@ -64,6 +64,8 @@ class AuthService {
     String? dispensaryId,    // Sub-location dispensary identifier (legacy)
     List<String> dispensaryIds = const [], // Sub-location dispensary identifiers
     List<Map<String, String>> campSchedule = const [], // Time-based camp schedule
+    String? session,         // Madrassa/Office operational session ('morning', 'evening', 'night')
+    List<String> sessions = const [], // Operational sessions
     String? biometricPin,
     String? linkedEmployeeId,
   }) async {
@@ -72,40 +74,60 @@ class AuthService {
       final lowerEmail    = email.trim().toLowerCase();
 
       // Duplicate check uses the lowercase version
-      final query = await _firestore
-          .collection('users')
-          .where('usernameLower', isEqualTo: lowerUsername)
-          .get();
-      if (query.docs.isNotEmpty) throw Exception('Username taken');
+      try {
+        final query = await _firestore
+            .collection('users')
+            .where('usernameLower', isEqualTo: lowerUsername)
+            .get()
+            .timeout(const Duration(seconds: 10));
+        final activeDocs = query.docs.where((d) {
+          final data = d.data();
+          final status = (data['status'] ?? data['accountStatus'] ?? '').toString().toLowerCase();
+          return data['isDeleted'] != true && status != 'deleted';
+        }).toList();
+        if (activeDocs.isNotEmpty) throw Exception('Username taken');
+      } catch (e) {
+        if (e.toString().contains('Username taken')) rethrow;
+        debugPrint('[AuthService] Remote username check skipped/notice: $e');
+      }
 
       final currentAdminUser = _auth.currentUser;
-      UserCredential cred;
-      if (currentAdminUser != null) {
-        FirebaseApp secondaryApp;
-        try {
-          secondaryApp = Firebase.app('SecondaryRegistrationApp');
-        } catch (_) {
-          secondaryApp = await Firebase.initializeApp(
-            name: 'SecondaryRegistrationApp',
-            options: Firebase.app().options,
-          );
+      String uid = '';
+      try {
+        if (currentAdminUser != null) {
+          FirebaseApp secondaryApp;
+          try {
+            secondaryApp = Firebase.app('SecondaryRegistrationApp');
+          } catch (_) {
+            secondaryApp = await Firebase.initializeApp(
+              name: 'SecondaryRegistrationApp',
+              options: Firebase.app().options,
+            );
+          }
+          final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
+          final cred = await secondaryAuth.createUserWithEmailAndPassword(
+            email: lowerEmail,
+            password: password,
+          ).timeout(const Duration(seconds: 7));
+          final user = cred.user;
+          if (user != null) uid = user.uid;
+          await secondaryAuth.signOut().timeout(const Duration(seconds: 3)).catchError((_) {});
+        } else {
+          final cred = await _auth.createUserWithEmailAndPassword(
+            email: lowerEmail,
+            password: password,
+          ).timeout(const Duration(seconds: 7));
+          final user = cred.user;
+          if (user != null) uid = user.uid;
         }
-        final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
-        cred = await secondaryAuth.createUserWithEmailAndPassword(
-          email: lowerEmail,
-          password: password,
-        );
-        await secondaryAuth.signOut();
-      } else {
-        cred = await _auth.createUserWithEmailAndPassword(
-          email: lowerEmail,
-          password: password,
-        );
+      } catch (authErr) {
+        debugPrint('[AuthService] Cloud Auth notice: $authErr');
+        uid = 'local-${lowerEmail.replaceAll('@', '_').replaceAll('.', '_')}';
       }
-      final user = cred.user;
-      if (user == null) throw Exception('Sign up failed: User is null');
 
-      final uid = user.uid;
+      if (uid.isEmpty) {
+        uid = 'local-${lowerEmail.replaceAll('@', '_').replaceAll('.', '_')}';
+      }
 
       String creatorEmail = currentAdminUser?.email ?? '';
       String creatorUid   = currentAdminUser?.uid ?? '';
@@ -124,19 +146,28 @@ class AuthService {
         }
       } catch (_) {}
 
+      final effectiveName = name.trim().isNotEmpty ? name.trim() : username.trim();
       final userData = <String, dynamic>{
         'uid': uid,
+        'id': uid,
         'username': username.trim(),        // original casing preserved
         'usernameLower': lowerUsername,      // for case-insensitive lookup
         'email': lowerEmail,
         'role': role.trim(),
         'branchId': branchId.trim(),
         'branchName': branchName.trim(),
-        'name': name,
-        'cnic': cnic,
+        'name': effectiveName,
+        'cnic': cnic.isNotEmpty ? cnic : (identification?.trim() ?? ''),
+        'status': 'active',
+        'accountStatus': 'active',
+        'isActive': true,
+        'isRevoked': false,
+        'accessRevoked': false,
         'studentIds': studentIds,
         'dispensaryIds': dispensaryIds.map((d) => d.trim().toLowerCase()).toList(),
         'campSchedule': campSchedule,
+        if (session != null && session.trim().isNotEmpty) 'session': session.trim().toLowerCase(),
+        if (sessions.isNotEmpty) 'sessions': sessions.map((s) => s.trim().toLowerCase()).toList(),
         if (biometricPin != null && biometricPin.trim().isNotEmpty) 'biometricPin': biometricPin.trim(),
         'createdBy': creatorEmail.isNotEmpty ? creatorEmail : (creatorName.isNotEmpty ? creatorName : 'Direct Registration'),
         'createdByName': creatorName.isNotEmpty ? creatorName : (creatorEmail.isNotEmpty ? creatorEmail : 'Admin'),
@@ -183,36 +214,59 @@ class AuthService {
         if (url != null) userData['degreeCertificateUrl'] = url;
       }
 
-      await _firestore.collection('users').doc(uid).set(userData);
-
-      const globalRoles = ['ceo', 'chairman', 'admin', 'hq manager'];
-      if (!globalRoles.contains(role.toLowerCase())) {
-        await _firestore
-            .collection('branches')
-            .doc(branchId)
-            .collection('users')
-            .doc(uid)
-            .set(userData);
+      try {
+        await _firestore.collection('users').doc(uid).set(userData).timeout(const Duration(seconds: 15));
+      } catch (cloudErr) {
+        debugPrint('[AuthService] Cloud user document write notice (enqueued for sync): $cloudErr');
       }
 
-      if (currentAdminUser == null) {
-        await _cacheUserDataLocally(userData);
-      } else {
-        try {
-          final box = Hive.isBoxOpen('local_users') ? Hive.box('local_users') : await Hive.openBox('local_users');
-          await box.put('user:${userData['email']}', userData);
-          if (userData['uid'] != null) {
-            await box.put('user:${userData['uid']}', userData);
-          }
-        } catch (_) {}
-      }
+      // Build a Hive-safe copy by replacing FieldValue sentinels with local timestamps.
+      // FieldValue.serverTimestamp() cannot be serialized by Hive and causes silent failures.
+      final nowIso = DateTime.now().toUtc().toIso8601String();
+      final hiveUserData = <String, dynamic>{};
+      userData.forEach((key, value) {
+        if (value != null && value.runtimeType.toString().contains('FieldValue')) {
+          hiveUserData[key] = nowIso; // Replace sentinel with local ISO timestamp
+        } else {
+          hiveUserData[key] = value;
+        }
+      });
+      hiveUserData['password'] = password; // Ensure local offline fallback authentication works immediately
 
+      // Use the proper multi-key save that sanitizes Timestamps, deduplicates, and flushes.
+      await LocalStorageService.saveUserOffline(
+        uid: uid,
+        branchId: branchId,
+        userData: hiveUserData,
+      );
+
+      // Also enqueue for cloud sync (without plain password in cloud payload)
+      final syncData = Map<String, dynamic>.from(hiveUserData)..remove('password');
+      await LocalStorageService.enqueueSync({
+        'type': 'save_user',
+        'branchId': branchId,
+        'uid': uid,
+        'data': syncData,
+      });
+
+      // Always cache locally (for both admin-initiated and direct registrations)
+      await _cacheUserDataLocally(hiveUserData);
+
+      // Save credentials for offline authentication under both email and username
       await OfflineAuthService.saveCredentials(
         usernameOrEmail: lowerEmail,
         password: password,
-        userData: userData,
+        userData: hiveUserData,
         setAsLastLoggedIn: currentAdminUser == null,
       );
+      if (lowerUsername.isNotEmpty && lowerUsername != lowerEmail) {
+        await OfflineAuthService.saveCredentials(
+          usernameOrEmail: lowerUsername,
+          password: password,
+          userData: hiveUserData,
+          setAsLastLoggedIn: false,
+        );
+      }
 
       // Explicit Employee Link:
       if (linkedEmployeeId != null && linkedEmployeeId.isNotEmpty) {
@@ -438,9 +492,25 @@ class AuthService {
     return null;
   }
 
-  // ── Username → email lookup ───────────────────────────────────────────────
   Future<Map<String, dynamic>?> _findUserByUsername(String username) async {
     final lower = username.trim().toLowerCase();
+
+    // 1. Check local users cache first to avoid unnecessary network & Firestore reads
+    try {
+      final cached = LocalStorageService.findLocalUser(lower);
+      if (cached != null) {
+        final email = cached['email'] as String?;
+        if (email != null && email.isNotEmpty) {
+          return {
+            'email': email,
+            'username': cached['username'] ?? lower,
+            'role': cached['role'] ?? 'unknown',
+            'branchId': cached['branchId'] ?? 'all',
+            'uid': cached['uid'] ?? cached['id'] ?? '',
+          };
+        }
+      }
+    } catch (_) {}
 
     try {
       final q = await _firestore
@@ -514,4 +584,121 @@ class AuthService {
       return null;
     }
   }
+
+  // ── Profile & Credentials Update Helper (Offline First) ───────────────────
+  Future<void> updateUserProfileAndCredentials({
+    required String uid,
+    String? newName,
+    String? currentPassword,
+    String? newPassword,
+    String? branchId,
+  }) async {
+    final currentUser = _auth.currentUser;
+    final Map<String, dynamic> updates = {
+      'updatedAt': FieldValue.serverTimestamp(),
+      'updatedAtLocal': DateTime.now().toIso8601String(),
+    };
+
+    if (newName != null && newName.trim().isNotEmpty) {
+      final cleanName = newName.trim();
+      updates['name'] = cleanName;
+      updates['displayName'] = cleanName;
+
+      // Update Firebase Auth user display name if online and self
+      if (currentUser != null && (currentUser.uid == uid || currentUser.displayName != cleanName)) {
+        try {
+          await currentUser.updateDisplayName(cleanName);
+        } catch (e) {
+          debugPrint('[AuthService] updateDisplayName skipped/offline: $e');
+        }
+      }
+    }
+
+    if (newPassword != null && newPassword.trim().isNotEmpty) {
+      final cleanNewPw = newPassword.trim();
+      updates['password'] = cleanNewPw;
+      updates['passwordHash'] = LocalStorageService.hashPassword(cleanNewPw);
+
+      // Re-authenticate and update Firebase Auth password if currentPassword provided
+      if (currentUser != null && (currentUser.uid == uid || currentUser.email != null)) {
+        if (currentPassword != null && currentPassword.trim().isNotEmpty) {
+          try {
+            final cred = EmailAuthProvider.credential(
+              email: currentUser.email!,
+              password: currentPassword.trim(),
+            );
+            await currentUser.reauthenticateWithCredential(cred).timeout(const Duration(seconds: 4));
+          } catch (reauthErr) {
+            debugPrint('[AuthService] Online reauth check failed: $reauthErr');
+            // If offline, check against cached hash or OfflineAuthService
+            if (Hive.isBoxOpen(LocalStorageService.usersBox)) {
+              final box = Hive.box(LocalStorageService.usersBox);
+              final u = box.get(uid) ?? box.get('user:$uid') ?? box.get('user:${currentUser.email}');
+              if (u is Map) {
+                final curHash = LocalStorageService.hashPassword(currentPassword.trim());
+                if (u['passwordHash'] != null && u['passwordHash'] != curHash && u['password'] != currentPassword.trim()) {
+                  throw Exception('Incorrect current password.');
+                }
+              }
+            }
+          }
+        }
+
+        try {
+          await currentUser.updatePassword(cleanNewPw).timeout(const Duration(seconds: 4));
+        } catch (pwErr) {
+          debugPrint('[AuthService] Firebase updatePassword error/offline: $pwErr');
+        }
+      }
+
+      // Update offline auth secure storage password immediately
+      if (currentUser?.email != null) {
+        await OfflineAuthService.updateCachedPassword(cleanNewPw, usernameOrEmail: currentUser!.email!);
+      }
+      await OfflineAuthService.updateCachedPassword(cleanNewPw, usernameOrEmail: uid);
+    }
+
+    // 1. Update local Hive users box immediately (Offline-First)
+    try {
+      if (Hive.isBoxOpen(LocalStorageService.usersBox)) {
+        final box = Hive.box(LocalStorageService.usersBox);
+        for (final k in box.keys) {
+          final val = box.get(k);
+          if (val is Map) {
+            final uId = (val['uid'] ?? val['id'])?.toString();
+            if (uId == uid || k == uid || k == 'user:$uid' || (currentUser?.email != null && k == 'user:${currentUser!.email}')) {
+              final merged = Map<String, dynamic>.from(val)..addAll(updates);
+              await box.put(k, merged);
+            }
+          }
+        }
+      }
+
+      if (Hive.isBoxOpen('app_settings')) {
+        final box = Hive.box('app_settings');
+        final currentMap = box.get('user_data') ?? box.get('currentUser');
+        if (currentMap is Map && (currentMap['uid'] == uid || currentMap['id'] == uid)) {
+          final updated = Map<String, dynamic>.from(currentMap)..addAll(updates);
+          await box.put('user_data', updated);
+          await box.put('currentUser', updated);
+        }
+      }
+    } catch (e) {
+      debugPrint('[AuthService] Hive local update notice: $e');
+    }
+
+    // 2. Update Firestore & Enqueue Sync
+    try {
+      await _firestore.collection('users').doc(uid).set(updates, SetOptions(merge: true)).timeout(const Duration(seconds: 4));
+    } catch (cloudErr) {
+      debugPrint('[AuthService] Firestore update deferred to sync queue: $cloudErr');
+      await LocalStorageService.enqueueSync({
+        'type': 'save_user',
+        'uid': uid,
+        if (branchId != null) 'branchId': branchId,
+        'data': updates,
+      });
+    }
+  }
 }
+

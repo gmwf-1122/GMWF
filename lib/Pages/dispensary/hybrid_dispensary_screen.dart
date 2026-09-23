@@ -12,6 +12,7 @@ import 'package:gmwf/services/sync_service.dart';
 import 'package:gmwf/services/auth_service.dart';
 import 'package:gmwf/realtime/connection_manager.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
+import 'package:gmwf/realtime/realtime_events.dart';
 import 'package:gmwf/widgets/connection_status_widget.dart';
 import 'package:gmwf/widgets/gmwf_app_bar.dart';
 import 'package:gmwf/services/camp_session_service.dart';
@@ -20,6 +21,7 @@ import 'user_settings_dialog.dart';
 import 'package:gmwf/models/patient.dart';
 import 'package:gmwf/models/token.dart';
 import 'package:gmwf/services/firestore_service.dart';
+import 'package:gmwf/design/design_system.dart';
 
 import 'receptionist/receptionist_screen.dart';
 import 'dispensar/dispensar_screen.dart';
@@ -66,12 +68,27 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
 
   static const Color _teal = Color(0xFF00695C);
 
+  StreamSubscription? _restockRealtimeSub;
+  StreamSubscription? _restockFirestoreSub;
+  List<Map<String, dynamic>> _pendingRestockAlerts = [];
+
+  bool get _shouldShowRestockAlert {
+    final r = widget.role.toLowerCase().trim();
+    final hasDispenser = r.contains('dis') || r.contains('dispenser') || r.contains('dispensar');
+    final hasDoctor = r.contains('doc') || r.contains('doctor');
+    return hasDispenser && !hasDoctor;
+  }
+
   @override
   void initState() {
     super.initState();
 
     _parseRole();
     _tabController = TabController(length: _tabs.length, vsync: this);
+
+    if (_shouldShowRestockAlert) {
+      _listenRestockRequests();
+    }
 
     // Start services once
     SyncService().start(widget.branchId);
@@ -373,6 +390,8 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
 
   @override
   void dispose() {
+    _restockRealtimeSub?.cancel();
+    _restockFirestoreSub?.cancel();
     _connSub?.cancel();
     _connectionSub?.cancel();
     _tabController.dispose();
@@ -382,8 +401,7 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isMobile = screenWidth < 700;
+    final isMobile = GBreakpoint.isMobile(context);
 
     if (!Hive.isBoxOpen('app_settings')) {
       return FutureBuilder<Box>(
@@ -414,6 +432,7 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
         return Scaffold(
           backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F8F5),
           appBar: GmwfAppBar(
+            isFloating: false,
             title: 'Hybrid Desk – ${_resolvedName ?? widget.userName}',
             subtitle: CampSessionService.getBranchAndCampDisplayName(
               branchName: _branchName ?? 'Free Dispensary',
@@ -434,6 +453,31 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
             isSyncing: _isSyncing,
             onSync: _forceSync,
             onLogout: _logout,
+            onInventory: () {
+              final stockIdx = _tabs.indexWhere((t) =>
+                  (t['title'] as String).toLowerCase().contains('stock') ||
+                  (t['title'] as String).toLowerCase().contains('inventory'));
+              if (stockIdx >= 0) {
+                _tabController.animateTo(stockIdx);
+              } else {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => InventoryPage(
+                      branchId: widget.branchId,
+                      isDispenser: widget.role.toLowerCase().contains('dis'),
+                    ),
+                  ),
+                );
+              }
+            },
+            onUserSettings: () => DispensaryUserSettingsDialog.show(
+              context,
+              branchId: widget.branchId,
+              onUserUpdated: () {
+                if (mounted) setState(() { _fetchUserNameAndConnect(); });
+              },
+            ),
             bottom: isMobile
                 ? null
                 : PreferredSize(
@@ -497,17 +541,38 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
                                             : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
                                       ),
                                       const SizedBox(width: 8),
-                                      Text(
-                                        t['title'] as String,
-                                        style: TextStyle(
-                                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-                                          fontSize: 14,
-                                          color: isSelected
-                                              ? (isDark ? const Color(0xFF34D399) : const Color(0xFF00875A))
-                                              : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                                        Text(
+                                          t['title'] as String,
+                                          style: TextStyle(
+                                            fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
+                                            fontSize: 14,
+                                            color: isSelected
+                                                ? (isDark ? const Color(0xFF34D399) : const Color(0xFF00875A))
+                                                : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                                          ),
                                         ),
-                                      ),
-                                    ],
+                                        if (_shouldShowRestockAlert &&
+                                            _pendingRestockAlerts.isNotEmpty &&
+                                            ((t['title'] as String).toLowerCase().contains('dispens') ||
+                                                (t['title'] as String).toLowerCase().contains('stock'))) ...[
+                                          const SizedBox(width: 6),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: Colors.red.shade700,
+                                              borderRadius: BorderRadius.circular(10),
+                                            ),
+                                            child: Text(
+                                              '${_pendingRestockAlerts.length}',
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 10,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ],
                                   ),
                                 ),
                               );
@@ -518,15 +583,22 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
                     ),
                   ),
           ),
-          body: AnimatedBuilder(
-            animation: _tabController,
-            builder: (context, _) {
-              final safeIndex = _tabs.isEmpty ? 0 : _tabController.index.clamp(0, _tabs.length - 1);
-              return IndexedStack(
-                index: safeIndex,
-                children: _tabs.map((t) => t['widget'] as Widget).toList(),
-              );
-            },
+          body: Column(
+            children: [
+              _buildRestockBanner(isDark),
+              Expanded(
+                child: AnimatedBuilder(
+                  animation: _tabController,
+                  builder: (context, _) {
+                    final safeIndex = _tabs.isEmpty ? 0 : _tabController.index.clamp(0, _tabs.length - 1);
+                    return IndexedStack(
+                      index: safeIndex,
+                      children: _tabs.map((t) => t['widget'] as Widget).toList(),
+                    );
+                  },
+                ),
+              ),
+            ],
           ),
           bottomNavigationBar: isMobile ? _buildMobileBottomBar(isDark) : null,
         );
@@ -614,6 +686,228 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
             );
           },
         ),
+      ),
+    );
+  }
+
+  void _listenRestockRequests() {
+    if (widget.branchId.isEmpty) return;
+
+    // 1. Initial load from local Hive storage (instant, persists across restarts and works offline)
+    _pendingRestockAlerts = LocalStorageService.getPendingRestockRequests(widget.branchId);
+
+    // 2. Realtime WebSocket message stream
+    _restockRealtimeSub?.cancel();
+    _restockRealtimeSub = RealtimeManager().messageStream.listen((event) {
+      final type = (event['event_type'] ?? event['type'])?.toString();
+      if (type == RealtimeEvents.restockRequest || type == 'restock_request') {
+        final rawData = event['data'];
+        final data = (rawData is Map) ? Map<String, dynamic>.from(rawData) : Map<String, dynamic>.from(event);
+        final medName = (data['medicineName'] ?? data['name'] ?? 'Medicine').toString();
+        final currentQty = data['currentQty'] ?? data['quantity'] ?? 'low';
+        final doctor = (data['requestedBy'] ?? 'Doctor').toString();
+        final notes = (data['notes'] ?? '').toString();
+        final reqId = data['id']?.toString() ?? 'restock_${DateTime.now().millisecondsSinceEpoch}';
+
+        final reqData = {
+          'id': reqId,
+          'medicineName': medName,
+          'currentQty': currentQty,
+          'requestedBy': doctor,
+          'notes': notes,
+          'status': 'pending',
+          'branchId': widget.branchId,
+          'timestamp': DateTime.now().toIso8601String(),
+        };
+
+        LocalStorageService.saveRestockRequest(widget.branchId, reqData);
+
+        final exists = _pendingRestockAlerts.any((r) => r['id'] == reqId || (r['medicineName'] == medName && r['status'] == 'pending'));
+        if (!exists) {
+          _pendingRestockAlerts.insert(0, reqData);
+        }
+
+        if (mounted) {
+          setState(() {});
+          ScaffoldMessenger.of(context).hideCurrentSnackBar();
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Row(
+                children: [
+                  const Icon(Icons.warning_amber_rounded, color: Colors.amberAccent, size: 28),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'RESTOCK ALERT: $medName',
+                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
+                        ),
+                        Text(
+                          '$doctor reported low stock (Current: $currentQty). Please restock.${notes.isNotEmpty ? ' ($notes)' : ''}',
+                          style: const TextStyle(fontSize: 11.5, color: Colors.white70),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              backgroundColor: const Color(0xFFB91C1C),
+              behavior: SnackBarBehavior.floating,
+              duration: const Duration(seconds: 8),
+              action: SnackBarAction(
+                label: 'OPEN INVENTORY',
+                textColor: Colors.amberAccent,
+                onPressed: () {
+                  final stockIdx = _tabs.indexWhere((t) =>
+                      (t['title'] as String).toLowerCase().contains('stock') ||
+                      (t['title'] as String).toLowerCase().contains('inventory'));
+                  if (stockIdx >= 0) _tabController.animateTo(stockIdx);
+                },
+              ),
+            ),
+          );
+        }
+      }
+    });
+
+    // 3. Firestore snapshot listener for pending cloud catch-up
+    try {
+      _restockFirestoreSub?.cancel();
+      _restockFirestoreSub = FirebaseFirestore.instance
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('restock_requests')
+          .where('status', isEqualTo: 'pending')
+          .snapshots()
+          .listen((snap) {
+        if (!mounted) return;
+        final alerts = <Map<String, dynamic>>[];
+        for (final doc in snap.docs) {
+          final d = Map<String, dynamic>.from(doc.data());
+          d['id'] = doc.id;
+          alerts.add(d);
+          LocalStorageService.saveRestockRequest(widget.branchId, d);
+        }
+        setState(() {
+          _pendingRestockAlerts = alerts;
+        });
+      }, onError: (e) {
+        debugPrint('[HybridScreen] Restock requests stream error: $e');
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _dismissRestockAlert(String reqId) async {
+    setState(() {
+      _pendingRestockAlerts.removeWhere((r) => r['id'] == reqId);
+    });
+    await LocalStorageService.updateRestockRequestStatus(widget.branchId, reqId, 'acknowledged');
+    try {
+      await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('restock_requests')
+          .doc(reqId)
+          .update({'status': 'acknowledged', 'acknowledgedAt': FieldValue.serverTimestamp()});
+    } catch (_) {}
+  }
+
+  Widget _buildRestockBanner(bool isDark) {
+    if (!_shouldShowRestockAlert || _pendingRestockAlerts.isEmpty) return const SizedBox.shrink();
+
+    final first = _pendingRestockAlerts.first;
+    final count = _pendingRestockAlerts.length;
+    final medName = first['medicineName'] ?? first['name'] ?? 'Medicine';
+    final doctor = first['requestedBy'] ?? 'Doctor';
+    final currentQty = first['currentQty'] ?? first['quantity'] ?? '0';
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(14, 8, 14, 4),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF451A03) : const Color(0xFFFFFBEB),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFF59E0B), width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.warning_amber_rounded, color: Color(0xFFD97706), size: 24),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  count > 1
+                      ? '⚠️ Restock Requests ($count pending): $medName and ${count - 1} more'
+                      : '⚠️ Restock Alert: $medName (Current: $currentQty)',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: isDark ? const Color(0xFFFDE68A) : const Color(0xFF92400E),
+                  ),
+                ),
+                Text(
+                  '$doctor requested restock from dispensary. Please restock soon.',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: isDark ? const Color(0xFFD1D5DB) : const Color(0xFF78350F),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: () {
+              final stockIdx = _tabs.indexWhere((t) =>
+                  (t['title'] as String).toLowerCase().contains('stock') ||
+                  (t['title'] as String).toLowerCase().contains('inventory'));
+              if (stockIdx >= 0) {
+                _tabController.animateTo(stockIdx);
+              } else {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => InventoryPage(
+                      branchId: widget.branchId,
+                      isDispenser: true,
+                    ),
+                  ),
+                );
+              }
+            },
+            style: TextButton.styleFrom(
+              backgroundColor: const Color(0xFFD97706),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('Open Inventory', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+          ),
+          const SizedBox(width: 4),
+          IconButton(
+            icon: const Icon(Icons.close, size: 18),
+            color: isDark ? Colors.white70 : Colors.black54,
+            tooltip: 'Dismiss alert',
+            onPressed: () {
+              final id = first['id']?.toString();
+              if (id != null) _dismissRestockAlert(id);
+            },
+          ),
+        ],
       ),
     );
   }

@@ -39,6 +39,7 @@ import 'dasterkhwaan/kitchen.dart';
 import 'donations/donations_screen.dart';
 import 'welfare/ramadan_welfare_screen.dart';
 import 'donations/donations_shared.dart';
+import '../services/sync_service.dart';
 import '../widgets/gmwf_loading_view.dart';
 import 'global_modular_dashboard.dart'; // Unified modular entry point
 import 'madrassa/madrassa_dashboard.dart';
@@ -257,20 +258,24 @@ class _HomeRouterState extends State<HomeRouter> {
         if (appSettingsUser is Map) {
           final m = Map<String, dynamic>.from(appSettingsUser);
           final r = (m['role'] ?? '').toString().toLowerCase().trim();
-          final mUid = (m['uid'] ?? '').toString();
+          final mUid = (m['uid'] ?? m['id'] ?? '').toString();
           final mEmail = (m['email'] ?? '').toString().toLowerCase().trim();
-          if (r.isNotEmpty && r != 'unknown' && (mUid == uid || mEmail == emailLower)) {
+          if (r.isNotEmpty && r != 'unknown' && (mUid == uid || (emailLower.isNotEmpty && mEmail == emailLower))) {
             debugPrint("HomeRouter: Fast resolution from app_settings user_data (role=$r)");
             return m;
           }
         }
       }
-      final cachedData = await offline_auth.OfflineAuthService.getCachedUserData();
+      final cachedData = await offline_auth.OfflineAuthService.getCachedUserData(usernameOrEmail: emailLower.isNotEmpty ? emailLower : uid);
       if (cachedData != null && cachedData.isNotEmpty) {
-        final r = (cachedData['role'] ?? '').toString().toLowerCase().trim();
-        if (r.isNotEmpty && r != 'unknown') {
-          debugPrint("HomeRouter: Fast resolution from OfflineAuthService (role=$r)");
-          return cachedData;
+        final cUid = (cachedData['uid'] ?? cachedData['id'] ?? '').toString();
+        final cEmail = (cachedData['email'] ?? '').toString().toLowerCase().trim();
+        if (cUid == uid || (emailLower.isNotEmpty && cEmail == emailLower)) {
+          final r = (cachedData['role'] ?? '').toString().toLowerCase().trim();
+          if (r.isNotEmpty && r != 'unknown') {
+            debugPrint("HomeRouter: Fast resolution from OfflineAuthService (role=$r)");
+            return cachedData;
+          }
         }
       }
       final localByUid = LocalStorageService.getLocalUserByUid(uid);
@@ -294,11 +299,15 @@ class _HomeRouterState extends State<HomeRouter> {
       debugPrint("HomeRouter: Device is offline, using local storage");
       try {
         final cachedData =
-            await offline_auth.OfflineAuthService.getCachedUserData();
+            await offline_auth.OfflineAuthService.getCachedUserData(usernameOrEmail: emailLower.isNotEmpty ? emailLower : uid);
         if (cachedData != null) {
-          debugPrint(
-              "HomeRouter: Using cached user data from OfflineAuthService");
-          return cachedData;
+          final cUid = (cachedData['uid'] ?? cachedData['id'] ?? '').toString();
+          final cEmail = (cachedData['email'] ?? '').toString().toLowerCase().trim();
+          if (cUid == uid || (emailLower.isNotEmpty && cEmail == emailLower)) {
+            debugPrint(
+                "HomeRouter: Using cached user data from OfflineAuthService");
+            return cachedData;
+          }
         }
       } catch (e) {
         debugPrint("HomeRouter: Error retrieving cached data: $e");
@@ -448,9 +457,13 @@ class _HomeRouterState extends State<HomeRouter> {
 
     // Final attempt from OfflineAuthService
     try {
-      final cachedData = await offline_auth.OfflineAuthService.getCachedUserData();
+      final cachedData = await offline_auth.OfflineAuthService.getCachedUserData(usernameOrEmail: emailLower.isNotEmpty ? emailLower : uid);
       if (cachedData != null && cachedData.isNotEmpty) {
-        return cachedData;
+        final cUid = (cachedData['uid'] ?? cachedData['id'] ?? '').toString();
+        final cEmail = (cachedData['email'] ?? '').toString().toLowerCase().trim();
+        if (cUid == uid || (emailLower.isNotEmpty && cEmail == emailLower)) {
+          return cachedData;
+        }
       }
     } catch (_) {}
 
@@ -581,15 +594,24 @@ class _HomeRouterState extends State<HomeRouter> {
       case 'dasterkhwaan token generator':
       case 'token generator':
       case 'dasterkhwaan':
+        if (branchId.isNotEmpty && branchId != 'all') {
+          SyncService().start(branchId);
+        }
         return DasterkhwaanOfficeBoy(branchId: branchId, userName: userName, role: r);
 
       case 'kitchen':
       case 'dasterkhwaan kitchen':
+        if (branchId.isNotEmpty && branchId != 'all') {
+          SyncService().start(branchId);
+        }
         return DasterkhwaanKitchen(branchId: branchId, username: userName, role: r);
 
       case 'donations':
       case 'donation':
       case 'donations officer':
+        if (branchId.isNotEmpty && branchId != 'all') {
+          SyncService().start(branchId);
+        }
         return DonationsScreen.embedded(
           branchId:   branchId.isNotEmpty ? branchId : 'all',
           username:   userName,
@@ -602,6 +624,9 @@ class _HomeRouterState extends State<HomeRouter> {
       case 'ramadan welfare':
       case 'rations':
       case 'libaas':
+        if (branchId.isNotEmpty && branchId != 'all') {
+          SyncService().start(branchId);
+        }
         return RamadanWelfareScreen(branchId: branchId);
 
       case 'madrassa':
@@ -612,7 +637,13 @@ class _HomeRouterState extends State<HomeRouter> {
           branchId: branchId,
           username: userName,
           role: role,
-          isAdmin: normRole == 'madrassa' || normRole == 'madrassa admin' || normRole == 'madrassa principal',
+          isAdmin: normRole == 'madrassa' ||
+              normRole == 'madrassa admin' ||
+              normRole == 'madrassa principal' ||
+              normRole.contains('chairman') ||
+              normRole.contains('hq') ||
+              normRole.contains('ceo') ||
+              normRole.contains('admin'),
         );
 
       case 'madrassa parent':
@@ -635,7 +666,11 @@ class _HomeRouterState extends State<HomeRouter> {
       case 'school teacher':
       case 'school principal':
       case 'principal':
-        return SchoolDashboard(branchId: branchId);
+        return SchoolDashboard(
+          branchId: branchId,
+          role: role,
+          username: userName,
+        );
     }
 
     if (normRole.contains('madrassa') && !normRole.contains('parent') && !normRole.contains('guardian')) {
@@ -643,19 +678,64 @@ class _HomeRouterState extends State<HomeRouter> {
         branchId: branchId,
         username: userName,
         role: role,
-        isAdmin: normRole.contains('admin') || normRole.contains('principal'),
+        isAdmin: normRole.contains('admin') ||
+            normRole.contains('principal') ||
+            normRole.contains('chairman') ||
+            normRole.contains('hq') ||
+            normRole.contains('ceo'),
       );
     }
 
-    if (normRole.contains('school')) {
-      return SchoolDashboard(branchId: branchId);
+    if (normRole.contains('school') || normRole.contains('principal')) {
+      return SchoolDashboard(
+        branchId: branchId,
+        role: role,
+        username: userName,
+      );
     }
 
     // 3. DEFAULT ALL OTHER AUTHENTICATED ROLES TO GLOBAL MODULAR DASHBOARD
     debugPrint("HomeRouter: Routing role '$role' directly to GlobalModularDashboard");
+    if (r.isEmpty || r == 'unknown') {
+      return Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                const Icon(Icons.lock_person_rounded, size: 64, color: Colors.orange),
+                const SizedBox(height: 20),
+                const Text('Role Unassigned / Verification Needed',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 10),
+                Text('User account @$userName does not have an active assigned role in the system. Please contact your HQ Manager or Administrator.',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
+                const SizedBox(height: 24),
+                ElevatedButton.icon(
+                  onPressed: () async {
+                    await AuthService().signOut();
+                    if (context.mounted) {
+                      Navigator.pushAndRemoveUntil(
+                        context,
+                        MaterialPageRoute(builder: (_) => const LoginPage()),
+                        (r) => false,
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.logout_rounded),
+                  label: const Text('Log Out'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
     return GlobalModularDashboard(userData: {
       ...userData,
-      'role': r.isNotEmpty ? r : 'admin',
+      'role': r,
       'branchId': branchId.isNotEmpty ? branchId : (userData['branchId'] ?? 'all'),
       'uid': uid,
       'name': userName.isNotEmpty ? userName : 'User',
@@ -844,7 +924,16 @@ class _HomeRouterState extends State<HomeRouter> {
           rawRole = 'hq manager';
         } else if (rawRole == 'madrassa principal' || rawRole == 'madrassa admin' || rawRole == 'madrassa_principal' || rawRole == 'madrassa_admin') {
           rawRole = 'madrassa admin';
-        } else if (rawRole == 'principal' || rawRole == 'school principal' || rawRole == 'school_principal') {
+        } else if (rawRole == 'principal' ||
+            rawRole == 'school principal' ||
+            rawRole == 'school_principal' ||
+            rawRole == 'school admin' ||
+            rawRole == 'school_admin' ||
+            rawRole == 'school' ||
+            rawRole == 'headmaster' ||
+            rawRole == 'headmistress' ||
+            rawRole.contains('school principal') ||
+            rawRole.contains('school admin')) {
           rawRole = 'school principal';
         }
 
@@ -934,7 +1023,10 @@ class _HomeRouterState extends State<HomeRouter> {
 
             Widget screenWidget;
             final normActiveRole = activeRole.replaceAll('_', ' ').replaceAll('-', ' ').trim();
-            if ((globalRoles.contains(normActiveRole) || normActiveRole.contains('supervisor')) && !normActiveRole.contains('madrassa') && !normActiveRole.contains('school')) {
+            if ((globalRoles.contains(normActiveRole) || normActiveRole.contains('supervisor')) &&
+                !normActiveRole.contains('madrassa') &&
+                !normActiveRole.contains('school') &&
+                !normActiveRole.contains('principal')) {
               screenWidget = GlobalModularDashboard(userData: {
                 ...data,
                 'role': activeRole,
@@ -996,7 +1088,7 @@ class _HomeRouterState extends State<HomeRouter> {
                                     DropdownMenuItem(value: 'madrassa admin', child: Text('📖 Madrassa Principal / Admin')),
                                     DropdownMenuItem(value: 'madrassa teacher', child: Text('📖 Madrassa Teacher')),
                                     DropdownMenuItem(value: 'madrassa parent', child: Text('👪 Madrassa Guardian')),
-                                    DropdownMenuItem(value: 'school admin', child: Text('🏫 School Principal')),
+                                    DropdownMenuItem(value: 'school principal', child: Text('🏫 School Principal')),
                                     DropdownMenuItem(value: 'school teacher', child: Text('👩‍🏫 School Teacher')),
                                   ],
 

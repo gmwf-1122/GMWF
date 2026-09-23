@@ -147,8 +147,45 @@ class SchoolSyncService {
       // 1. Trigger global SyncService upload
       SyncService().triggerUpload();
 
-      // 2. Fetch and merge latest remote school records for branch
-      await fetchRemoteSchoolData(branchId);
+      // Resolve real branch ID dynamically if 'all' was passed
+      String targetBranch = branchId.trim().toLowerCase();
+      if (targetBranch == 'all' || targetBranch == 'global' || targetBranch.isEmpty) {
+        try {
+          final uData = LocalStorageService.getActiveUserData();
+          final b = (uData['branchId'] ?? '').toString().trim().toLowerCase();
+          if (b.isNotEmpty && b != 'all' && b != 'global') {
+            targetBranch = b;
+          } else {
+            final assigned = LocalStorageService.getActiveUserBranchId().toLowerCase().trim();
+            if (assigned.isNotEmpty && assigned != 'all' && assigned != 'global') {
+              targetBranch = assigned;
+            }
+          }
+        } catch (_) {}
+      }
+
+      final branchesToSync = <String>{};
+      if (targetBranch != 'all' && targetBranch != 'global' && targetBranch.isNotEmpty) {
+        branchesToSync.add(targetBranch);
+      } else {
+        if (Hive.isBoxOpen(LocalStorageService.branchesBox)) {
+          final bBox = Hive.box(LocalStorageService.branchesBox);
+          for (final k in bBox.keys) {
+            final val = bBox.get(k);
+            if (val is Map) {
+              final bId = (val['id'] ?? k.toString().replaceFirst('branch:', '')).toString().trim().toLowerCase();
+              if (bId.isNotEmpty && bId != 'all' && bId != 'global') {
+                branchesToSync.add(bId);
+              }
+            }
+          }
+        }
+      }
+
+      // 2. Fetch and merge latest remote school records for branch(es)
+      for (final b in branchesToSync) {
+        await fetchRemoteSchoolData(b);
+      }
 
       // 3. Mark last synced timestamp
       await SchoolLocalStorage.setLastSchoolSyncTimestamp(
@@ -179,8 +216,17 @@ class SchoolSyncService {
 
   /// Pull remote school collections from Firestore using delta sync & resolve conflicts
   Future<void> fetchRemoteSchoolData(String branchId, {bool force = false}) async {
+    if (branchId == 'all' || branchId == 'global' || branchId.isEmpty) return;
+    await SchoolLocalStorage.ensureBoxesOpen();
     final firestore = FirebaseFirestore.instance;
-    final collections = ['school_students', 'school_teachers', 'school_books'];
+    final collections = [
+      'school_students',
+      'school_teachers',
+      'school_books',
+      'school_grades',
+      'school_fees',
+      'school_homerooms',
+    ];
 
     for (final col in collections) {
       try {
@@ -220,7 +266,7 @@ class SchoolSyncService {
               local = SchoolLocalStorage.getBookCached(branchId, doc.id);
             }
 
-            final docTs = remote['updatedAt']?.toString();
+            final docTs = remote['updatedAt']?.toString() ?? remote['lastModified']?.toString();
             if (docTs != null) {
               if (maxServerTs == null || docTs.compareTo(maxServerTs) > 0) {
                 maxServerTs = docTs;
@@ -233,9 +279,22 @@ class SchoolSyncService {
               remoteData: remote,
               localData: local,
               saveLocal: (data) async {
-                if (col == 'school_students') await SchoolLocalStorage.cacheStudent(branchId, doc.id, data);
-                if (col == 'school_teachers') await SchoolLocalStorage.cacheTeacher(branchId, doc.id, data);
-                if (col == 'school_books') await SchoolLocalStorage.cacheBook(branchId, doc.id, data);
+                if (col == 'school_students') {
+                  await SchoolLocalStorage.cacheStudent(branchId, doc.id, data);
+                } else if (col == 'school_teachers') {
+                  await SchoolLocalStorage.cacheTeacher(branchId, doc.id, data);
+                } else if (col == 'school_books') {
+                  await SchoolLocalStorage.cacheBook(branchId, doc.id, data);
+                } else if (col == 'school_grades') {
+                  final box = Hive.box(SchoolLocalStorage.gradesBox);
+                  await box.put('${branchId.toLowerCase()}__${doc.id}', data);
+                } else if (col == 'school_fees') {
+                  final box = Hive.box(SchoolLocalStorage.feesBox);
+                  await box.put('${branchId.toLowerCase()}__${doc.id}', data);
+                } else if (col == 'school_homerooms') {
+                  final box = Hive.box(SchoolLocalStorage.homeroomBox);
+                  await box.put('${branchId.toLowerCase()}__${doc.id}', data);
+                }
               },
               recordType: col,
             );

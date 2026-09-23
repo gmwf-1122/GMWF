@@ -11,6 +11,7 @@ import '../services/finance_local_storage.dart';
 import '../services/cloud_messaging_service.dart';
 import 'admin/branch_facility_editor.dart';
 import 'users.dart';
+import '../design/design_system.dart';
 
 class BranchesRegister extends StatefulWidget {
   const BranchesRegister({super.key});
@@ -718,7 +719,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
   @override
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
-    final isDesktop = MediaQuery.of(context).size.width >= 860;
+    final isDesktop = GBreakpoint.isDesktop(context);
     final branchName = _branchController.text.trim();
     final branchId = _sanitizeBranchId(branchName);
 

@@ -26,6 +26,8 @@ import 'patient_history.dart';
 import 'package:gmwf/pages/dispensary/dispensar/inventory.dart';
 import 'package:gmwf/pages/request.dart';
 import 'package:gmwf/widgets/update_dialog_widget.dart';
+import 'package:gmwf/services/prescription_template_service.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 class DoctorScreen extends StatefulWidget {
   final String branchId;
@@ -80,6 +82,19 @@ class _DoctorScreenState extends State<DoctorScreen>
   // [BUG-12] Debounce + guard for reconnect-triggered sync
   Timer? _syncDebounce;
   bool _reconnectSyncing = false;
+
+  // [FIX-FREEZE] Debounce rapid catch-up setState() storms.
+  // When the LAN server sends a catch-up batch (e.g. 100 tokens), every token
+  // fires _handleNewToken → setState(). 100 redraws in <100ms stall the UI
+  // thread, causing the "white screen trance". Instead, coalesce all updates
+  // within a 120ms window into a single setState().
+  Timer? _refreshDebounce;
+  void _scheduleRefresh() {
+    _refreshDebounce?.cancel();
+    _refreshDebounce = Timer(const Duration(milliseconds: 120), () {
+      if (mounted) setState(() {});
+    });
+  }
 
   static const Color _teal = Color(0xFF00695C);
 
@@ -145,6 +160,7 @@ class _DoctorScreenState extends State<DoctorScreen>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && !widget.isEmbedded) {
         UpdateDialogWidget.showUpdateDialogIfNeeded(context);
+        RealtimeManager().forceFlushAndCatchUp();
       }
     });
   }
@@ -232,7 +248,7 @@ class _DoctorScreenState extends State<DoctorScreen>
     if (!mounted || _reconnectSyncing) return;
     _reconnectSyncing = true;
     try {
-      // triggerUpload() handles upload → conditional download in the right order
+      await RealtimeManager().forceFlushAndCatchUp();
       await SyncService().triggerUpload();
       if (mounted) setState(() {});
       debugPrint('[DoctorScreen] ✅ Synced on reconnect');
@@ -324,10 +340,10 @@ class _DoctorScreenState extends State<DoctorScreen>
   }
 
   void _handleNewToken(Map<String, dynamic> data, [Map<String, dynamic>? fullEvent]) {
-    final serial = data['serial']?.toString();
-    if (serial != null && serial.isNotEmpty) {
-      LocalStorageService.saveEntryLocal(widget.branchId, serial, data);
-    }
+    // DO NOT call saveEntryLocal() here — RealtimeRouter._handleSaveEntry()
+    // already persisted this token to Hive before this stream listener fires.
+    // Calling it again is a duplicate write that triggers an extra Hive flush
+    // per token (200 bytes of disk I/O per token in a catch-up batch).
 
     final isReplay = fullEvent?['_serverPush'] == true ||
         fullEvent?['_resent'] == true ||
@@ -338,11 +354,13 @@ class _DoctorScreenState extends State<DoctorScreen>
         data['isCatchUp'] == true ||
         data['_isReplay'] == true;
     if (isReplay) {
-      if (mounted) setState(() {});
+      // [FIX-FREEZE] Debounce — don't setState() for every token in a batch.
+      _scheduleRefresh();
       return;
     }
 
     final today = CampSessionService.resolveShiftAndDateKey().dateKey;
+    final serial = data['serial']?.toString();
     final itemDateKey = (data['dateKey'] ?? fullEvent?['dateKey'])?.toString().trim();
     final parts = (serial != null && serial.contains('-')) ? serial.split('-') : <String>[];
     final serialDk = (parts.isNotEmpty && parts[0].toUpperCase() == 'X')
@@ -365,7 +383,7 @@ class _DoctorScreenState extends State<DoctorScreen>
     final rawTime = data['createdAt'] ?? data['timestamp'];
     final dt = rawTime != null ? DateTime.tryParse(rawTime.toString()) : null;
     if (dt != null && DateTime.now().difference(dt).inMinutes > 3) {
-      if (mounted) setState(() {});
+      _scheduleRefresh();
       return;
     }
 
@@ -515,6 +533,11 @@ class _DoctorScreenState extends State<DoctorScreen>
 
   Future<void> _selectPatient(Map<String, dynamic> rawEntry) async {
     if (_isSaving || !mounted) return;
+    final incomingSerial = (rawEntry['serial'] ?? rawEntry['id'])?.toString().trim();
+    final currentSerial = (_selectedPatientData?['serial'] ?? _selectedPatientData?['id'])?.toString().trim();
+    if (currentSerial != null && currentSerial.isNotEmpty && incomingSerial != null && currentSerial == incomingSerial) {
+      return; // Already selected, skip redundant save, broadcast, and rebuild loop
+    }
     setState(() => _isSaving = true);
     try {
       _selectedPatientData = Map.from(rawEntry);
@@ -764,6 +787,270 @@ class _DoctorScreenState extends State<DoctorScreen>
     );
   }
 
+  Future<void> _openTemplatesManagerDialog(bool isDark) async {
+    showDialog(
+      context: context,
+      builder: (dialogCtx) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            return FutureBuilder<List<Map<String, dynamic>>>(
+              future: PrescriptionTemplateService.loadTemplates(
+                widget.branchId,
+                doctorId: widget.doctorId,
+              ),
+              builder: (context, snapshot) {
+                final templates = snapshot.data ?? [];
+                final isLoading = snapshot.connectionState == ConnectionState.waiting;
+
+                return AlertDialog(
+                  backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+                  titlePadding: EdgeInsets.zero,
+                  contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
+                  title: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF0F172A) : const Color(0xFF004D40),
+                      borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.collections_bookmark_rounded, color: Colors.white, size: 20),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Disease Templates & Presets',
+                                style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                              ),
+                              SizedBox(height: 2),
+                              Text(
+                                'Manage re-usable clinical templates for rapid prescribing',
+                                style: TextStyle(color: Colors.white70, fontSize: 11),
+                              ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                          onPressed: () => Navigator.pop(dialogCtx),
+                        ),
+                      ],
+                    ),
+                  ),
+                  content: SizedBox(
+                    width: 580,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (isLoading)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 40),
+                            child: Center(child: CircularProgressIndicator(color: _teal)),
+                          )
+                        else if (templates.isEmpty)
+                          Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 30),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.bookmark_border_rounded, size: 48, color: isDark ? const Color(0xFF475569) : Colors.grey.shade400),
+                                const SizedBox(height: 12),
+                                Text(
+                                  'No Presets Created Yet',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 15,
+                                    color: isDark ? Colors.white : Colors.grey.shade800,
+                                  ),
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Save disease prescriptions directly from the consultation workspace to quickly apply them across visits.',
+                                  textAlign: TextAlign.center,
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          )
+                        else
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxHeight: 420),
+                            child: ListView.separated(
+                              shrinkWrap: true,
+                              itemCount: templates.length,
+                              separatorBuilder: (_, __) => const SizedBox(height: 10),
+                              itemBuilder: (ctx, i) {
+                                final tpl = templates[i];
+                                final name = tpl['name']?.toString() ?? 'Template';
+                                final iconData = PrescriptionTemplateService.getIcon(tpl['icon']?.toString());
+                                final condition = tpl['condition']?.toString() ?? tpl['complaint']?.toString() ?? '';
+                                final diagnosis = tpl['diagnosis']?.toString() ?? '';
+                                final meds = (tpl['medicines'] as List?) ?? [];
+                                final labs = (tpl['labResults'] as List?) ?? (tpl['tests'] as List?) ?? [];
+
+                                return Container(
+                                  padding: const EdgeInsets.all(12),
+                                  decoration: BoxDecoration(
+                                    color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                                    borderRadius: BorderRadius.circular(14),
+                                    border: Border.all(
+                                      color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                                      width: 1,
+                                    ),
+                                  ),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Row(
+                                        children: [
+                                          Container(
+                                            padding: const EdgeInsets.all(8),
+                                            decoration: BoxDecoration(
+                                              color: isDark ? const Color(0xFF134E4A) : const Color(0xFFE0F2F1),
+                                              borderRadius: BorderRadius.circular(10),
+                                            ),
+                                            child: FaIcon(iconData, size: 14, color: isDark ? const Color(0xFF2DD4BF) : _teal),
+                                          ),
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: Column(
+                                              crossAxisAlignment: CrossAxisAlignment.start,
+                                              children: [
+                                                Text(
+                                                  name,
+                                                  style: TextStyle(
+                                                    fontWeight: FontWeight.bold,
+                                                    fontSize: 14,
+                                                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                                  ),
+                                                ),
+                                                if (diagnosis.isNotEmpty)
+                                                  Text(
+                                                    'Dx: $diagnosis',
+                                                    style: TextStyle(
+                                                      fontSize: 11.5,
+                                                      color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700,
+                                                    ),
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
+                                                  ),
+                                              ],
+                                            ),
+                                          ),
+                                          if (_selectedPatientData != null)
+                                            ElevatedButton.icon(
+                                              onPressed: () {
+                                                Navigator.pop(dialogCtx);
+                                                _applyRepeatData({
+                                                  'complaint': condition,
+                                                  'diagnosis': diagnosis,
+                                                  'prescriptions': meds,
+                                                  'labResults': labs,
+                                                });
+                                              },
+                                              icon: const Icon(Icons.bolt_rounded, size: 14),
+                                              label: const Text('Apply', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
+                                              style: ElevatedButton.styleFrom(
+                                                backgroundColor: isDark ? const Color(0xFF0D9488) : _teal,
+                                                foregroundColor: Colors.white,
+                                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                              ),
+                                            ),
+                                          const SizedBox(width: 6),
+                                          IconButton(
+                                            icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.redAccent),
+                                            tooltip: 'Delete Template',
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints(),
+                                            onPressed: () async {
+                                              final confirmed = await showDialog<bool>(
+                                                context: context,
+                                                builder: (confirmCtx) => AlertDialog(
+                                                  title: const Text('Delete Template?'),
+                                                  content: Text('Are you sure you want to delete "$name"?'),
+                                                  actions: [
+                                                    TextButton(
+                                                      onPressed: () => Navigator.pop(confirmCtx, false),
+                                                      child: const Text('Cancel'),
+                                                    ),
+                                                    ElevatedButton(
+                                                      onPressed: () => Navigator.pop(confirmCtx, true),
+                                                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                                                      child: const Text('Delete', style: TextStyle(color: Colors.white)),
+                                                    ),
+                                                  ],
+                                                ),
+                                              );
+                                              if (confirmed == true) {
+                                                await PrescriptionTemplateService.deleteTemplate(
+                                                  widget.branchId,
+                                                  tpl['id']?.toString() ?? '',
+                                                  doctorId: widget.doctorId,
+                                                );
+                                                setDialogState(() {});
+                                              }
+                                            },
+                                          ),
+                                        ],
+                                      ),
+                                      if (meds.isNotEmpty) ...[
+                                        const SizedBox(height: 8),
+                                        Wrap(
+                                          spacing: 4,
+                                          runSpacing: 4,
+                                          children: meds.map<Widget>((m) {
+                                            final mName = m['name']?.toString() ?? '';
+                                            final mTiming = m['timing']?.toString() ?? m['dose']?.toString() ?? '';
+                                            return Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                                                borderRadius: BorderRadius.circular(6),
+                                              ),
+                                              child: Text(
+                                                mTiming.isNotEmpty ? '$mName ($mTiming)' : mName,
+                                                style: TextStyle(
+                                                  fontSize: 10,
+                                                  color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155),
+                                                ),
+                                              ),
+                                            );
+                                          }).toList(),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
+                                );
+                              },
+                            ),
+                          ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            );
+          },
+        );
+      },
+    );
+  }
+
   bool get _isDark {
     try {
       if (Hive.isBoxOpen('app_settings')) {
@@ -772,6 +1059,220 @@ class _DoctorScreenState extends State<DoctorScreen>
       }
     } catch (_) {}
     return Theme.of(context).brightness == Brightness.dark;
+  }
+
+  Widget _buildDoctorActionMenu(bool isDark) {
+    final Box boxToListen = Hive.isBoxOpen('local_edit_requests')
+        ? Hive.box('local_edit_requests')
+        : (Hive.isBoxOpen('app_settings') ? Hive.box('app_settings') : Hive.box(LocalStorageService.entriesBox));
+    return ValueListenableBuilder<Box>(
+      valueListenable: boxToListen.listenable(),
+      builder: (context, reqBox, _) {
+        int pendingApprovals = 0;
+        if (_canApproveRequests && Hive.isBoxOpen('local_edit_requests')) {
+          final normBranch = widget.branchId.toLowerCase().trim();
+          for (final v in Hive.box('local_edit_requests').values) {
+            if (v is Map) {
+              final b = (v['branchId'] ?? '').toString().toLowerCase().trim();
+              final st = (v['status'] ?? '').toString().toLowerCase().trim();
+              if (st == 'pending' && (normBranch.isEmpty || b.isEmpty || b == normBranch)) {
+                pendingApprovals++;
+              }
+            }
+          }
+        }
+
+        final menuBtn = Container(
+          width: 38,
+          height: 38,
+          decoration: BoxDecoration(
+            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+              width: 1,
+            ),
+          ),
+          child: Center(
+            child: Icon(
+              Icons.more_vert_rounded,
+              size: 20,
+              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF0F5B46),
+            ),
+          ),
+        );
+
+        return PopupMenuButton<String>(
+          tooltip: 'Menu',
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+          elevation: 8,
+          offset: const Offset(0, 46),
+          icon: pendingApprovals > 0
+              ? Badge(
+                  label: Text('$pendingApprovals', style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold)),
+                  backgroundColor: Colors.amber.shade800,
+                  child: menuBtn,
+                )
+              : menuBtn,
+          onSelected: (val) async {
+            switch (val) {
+              case 'templates':
+                _openTemplatesManagerDialog(isDark);
+                break;
+              case 'inventory':
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => InventoryPage(
+                      branchId: widget.branchId,
+                      isDoctor: true,
+                      isSupervisor: _canApproveRequests,
+                      isDispenser: false,
+                    ),
+                  ),
+                );
+                break;
+              case 'approvals':
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => RequestPage(
+                      branchId: widget.branchId,
+                      isSupervisor: true,
+                    ),
+                  ),
+                );
+                break;
+              case 'settings':
+                DispensaryUserSettingsDialog.show(
+                  context,
+                  branchId: widget.branchId,
+                  onUserUpdated: () {
+                    if (mounted) setState(() { _fetchDoctorName(); });
+                  },
+                );
+                break;
+              case 'logout':
+                _logout();
+                break;
+              case 'sync':
+                _forceSync();
+                break;
+              case 'theme':
+                try {
+                  if (Hive.isBoxOpen('app_settings')) {
+                    await Hive.box('app_settings').put('is_dark_mode', !isDark);
+                  }
+                } catch (_) {}
+                if (mounted) setState(() {});
+                break;
+            }
+          },
+          itemBuilder: (ctx) => [
+            PopupMenuItem(
+              value: 'templates',
+              child: Row(
+                children: [
+                  Icon(Icons.collections_bookmark_outlined, size: 18, color: isDark ? const Color(0xFF2DD4BF) : _teal),
+                  const SizedBox(width: 10),
+                  Text(
+                    'Disease Templates & Presets',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isDark ? Colors.white : const Color(0xFF1E293B)),
+                  ),
+                ],
+              ),
+            ),
+            PopupMenuItem(
+              value: 'inventory',
+              child: Row(
+                children: [
+                  Icon(Icons.inventory_2_outlined, size: 18, color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0F5B46)),
+                  const SizedBox(width: 10),
+                  Text(
+                    'Medicine Inventory',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isDark ? Colors.white : const Color(0xFF1E293B)),
+                  ),
+                ],
+              ),
+            ),
+            if (_canApproveRequests)
+              PopupMenuItem(
+                value: 'approvals',
+                child: Row(
+                  children: [
+                    Badge(
+                      isLabelVisible: pendingApprovals > 0,
+                      label: Text('$pendingApprovals', style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold)),
+                      backgroundColor: Colors.amber.shade800,
+                      child: Icon(Icons.approval_rounded, size: 18, color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706)),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Stock Requests',
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isDark ? Colors.white : const Color(0xFF1E293B)),
+                    ),
+                  ],
+                ),
+              ),
+            PopupMenuItem(
+              value: 'settings',
+              child: Row(
+                children: [
+                  Icon(Icons.manage_accounts_outlined, size: 18, color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0F5B46)),
+                  const SizedBox(width: 10),
+                  Text(
+                    'Edit Account Settings',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isDark ? Colors.white : const Color(0xFF1E293B)),
+                  ),
+                ],
+              ),
+            ),
+            const PopupMenuDivider(),
+            PopupMenuItem(
+              value: 'sync',
+              child: Row(
+                children: [
+                  Icon(Icons.sync_rounded, size: 18, color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0F5B46)),
+                  const SizedBox(width: 10),
+                  Text(
+                    _isSyncing ? 'Syncing...' : 'Sync Database',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isDark ? Colors.white : const Color(0xFF1E293B)),
+                  ),
+                ],
+              ),
+            ),
+            PopupMenuItem(
+              value: 'theme',
+              child: Row(
+                children: [
+                  Icon(isDark ? Icons.wb_sunny_outlined : Icons.dark_mode_outlined, size: 18, color: isDark ? const Color(0xFFFBBF24) : const Color(0xFF0F5B46)),
+                  const SizedBox(width: 10),
+                  Text(
+                    isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isDark ? Colors.white : const Color(0xFF1E293B)),
+                  ),
+                ],
+              ),
+            ),
+            const PopupMenuDivider(),
+            PopupMenuItem(
+              value: 'logout',
+              child: Row(
+                children: [
+                  Icon(Icons.logout_rounded, size: 18, color: Colors.red.shade400),
+                  const SizedBox(width: 10),
+                  Text(
+                    'Logout',
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.red.shade400),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        );
+      },
+    );
   }
 
   PreferredSizeWidget _buildAppBar(bool isMobile, bool isDark) {
@@ -808,113 +1309,13 @@ class _DoctorScreenState extends State<DoctorScreen>
       onRetryConnection: () => ConnectionManager().reconnectNow(),
       isOnline: _online,
       isSyncing: _isSyncing,
-      onSync: _forceSync,
-      onLogout: _logout,
+      onSync: null,
+      showThemeToggle: false,
+      onLogout: null, // Included in 3-dot menu
+      useMenuButton: false,
+      isFloating: false,
       extraActions: [
-        if (_canApproveRequests) ...[
-          Tooltip(
-            message: 'Medicine & Stock Requests (Supervisor Approval)',
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                borderRadius: BorderRadius.circular(12),
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => RequestPage(
-                      branchId: widget.branchId,
-                      isSupervisor: true,
-                    ),
-                  ),
-                ),
-                child: Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF1E293B) : Colors.white,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
-                      width: 1,
-                    ),
-                  ),
-                    child: Hive.isBoxOpen('local_edit_requests')
-                        ? ValueListenableBuilder<Box>(
-                            valueListenable: Hive.box('local_edit_requests').listenable(),
-                            builder: (context, box, _) {
-                              int count = 0;
-                              final normBranch = widget.branchId.toLowerCase().trim();
-                              for (final v in box.values) {
-                                if (v is Map) {
-                                  final b = (v['branchId'] ?? '').toString().toLowerCase().trim();
-                                  final st = (v['status'] ?? '').toString().toLowerCase().trim();
-                                  if (st == 'pending' && (normBranch.isEmpty || b.isEmpty || b == normBranch)) {
-                                    count++;
-                                  }
-                                }
-                              }
-                              return Badge(
-                                isLabelVisible: count > 0,
-                                label: Text('$count', style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold)),
-                                backgroundColor: Colors.amber.shade800,
-                                child: Icon(
-                                  Icons.approval_rounded,
-                                  size: 18,
-                                  color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706),
-                                ),
-                              );
-                            },
-                          )
-                        : Icon(
-                            Icons.approval_rounded,
-                            size: 18,
-                            color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706),
-                          ),
-                ),
-              ),
-            ),
-          ),
-          const SizedBox(width: 8),
-        ],
-        Tooltip(
-          message: 'Medicine Inventory',
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(12),
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => InventoryPage(
-                    branchId: widget.branchId,
-                    isDoctor: true,
-                    isSupervisor: _canApproveRequests,
-                    isDispenser: false,
-                  ),
-                ),
-              ),
-              child: Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF1E293B) : Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
-                    width: 1,
-                  ),
-                ),
-                child: Center(
-                  child: Icon(
-                    Icons.inventory_2_outlined,
-                    size: 18,
-                    color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0F5B46),
-                  ),
-                ),
-              ),
-            ),
-          ),
-        ),
+        _buildDoctorActionMenu(isDark),
       ],
       bottom: isMobile
           ? PreferredSize(
@@ -1165,19 +1566,19 @@ class _DoctorScreenState extends State<DoctorScreen>
         : const BorderSide(color: Color(0xFFE2E8F0), width: 1);
 
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          // Left Queue Column
+          // ── Column 1 (Left): Today's Queue ─────────────────────────────
           Expanded(
-            flex: 3,
+            flex: 32,
             child: Card(
               color: cardColor,
               elevation: isDark ? 2 : 4,
               clipBehavior: Clip.antiAlias,
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(20),
+                borderRadius: BorderRadius.circular(18),
                 side: cardBorder,
               ),
               child: PatientQueue(
@@ -1190,22 +1591,22 @@ class _DoctorScreenState extends State<DoctorScreen>
               ),
             ),
           ),
-          const SizedBox(width: 16),
+          const SizedBox(width: 12),
 
-          // Right Workspace Column
+          // ── Column 2 (Right Workspace): Spans from center to the right end ────
           Expanded(
-            flex: 8,
+            flex: 94,
             child: Column(
               children: [
-                // Top Patient Info & Vitals Header Card
-                SizedBox(
-                  height: 168,
-                  child: Card(
+                // Top Patient Info & Vitals Header Card: Spans full width from center to right end
+                if (_selectedPatientData != null)
+                  Card(
                     color: cardColor,
                     elevation: isDark ? 2 : 4,
+                    margin: const EdgeInsets.only(bottom: 10),
                     clipBehavior: Clip.antiAlias,
                     shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: BorderRadius.circular(16),
                       side: cardBorder,
                     ),
                     child: PatientInfo(
@@ -1223,38 +1624,37 @@ class _DoctorScreenState extends State<DoctorScreen>
                       },
                     ),
                   ),
-                ),
-                const SizedBox(height: 14),
 
-                // Bottom Clinical Panels: Prescription Form & Visit History
+                // Bottom Clinical Panels: Doctor Right Panel (Left) & Patient History (Right)
                 Expanded(
                   child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // Prescription Panel
+                      // Doctor Right Panel / Prescription Form (stays as it is)
                       Expanded(
-                        flex: 7,
+                        flex: 58,
                         child: Card(
                           color: cardColor,
                           elevation: isDark ? 2 : 4,
                           clipBehavior: Clip.antiAlias,
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20),
+                            borderRadius: BorderRadius.circular(18),
                             side: cardBorder,
                           ),
                           child: _buildPrescriptionPanel(),
                         ),
                       ),
-                      const SizedBox(width: 14),
+                      const SizedBox(width: 12),
 
-                      // Visit History Panel
+                      // Patient History Panel (stays as it is)
                       Expanded(
-                        flex: 4,
+                        flex: 36,
                         child: Card(
                           color: cardColor,
                           elevation: isDark ? 2 : 4,
                           clipBehavior: Clip.antiAlias,
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(20),
+                            borderRadius: BorderRadius.circular(18),
                             side: cardBorder,
                           ),
                           child: Padding(
@@ -1282,6 +1682,7 @@ class _DoctorScreenState extends State<DoctorScreen>
   void dispose() {
     _tabController.dispose();
     _syncDebounce?.cancel();
+    _refreshDebounce?.cancel();
     // [BUG-13] Unregister from ConnectionManager's listener list
     _removeReconnectListener?.call();
     CampSessionService.activeCampNotifier.removeListener(_onActiveCampChanged);

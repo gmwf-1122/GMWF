@@ -474,7 +474,7 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
                       children: [
                         Expanded(child: _campaignChip('rations', '🍚 GMWF Rations', Colors.green, t)),
                         const SizedBox(width: 12),
-                        Expanded(child: _campaignChip('libaas', '👗 GMWF Libaas', Colors.purpleAccent, t)),
+                        Expanded(child: _campaignChip('libaas', '👗 GMWF Free Libaas', Colors.purpleAccent, t)),
                       ],
                     ),
                   ],
@@ -865,7 +865,7 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
                         decoration: const InputDecoration(labelText: 'Target Campaign', border: OutlineInputBorder()),
                         items: const [
                           DropdownMenuItem(value: 'rations', child: Text('🍚 GMWF Rations')),
-                          DropdownMenuItem(value: 'libaas', child: Text('👗 GMWF Libaas')),
+                          DropdownMenuItem(value: 'libaas', child: Text('👗 GMWF Free Libaas')),
                         ],
                         onChanged: (val) => setState(() => _drawCampaign = val!),
                       ),
@@ -881,7 +881,7 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
                           onChanged: (_) => setState(() {}),
                         ),
                       ] else ...[
-                        Text('👗 Libaas Suit Allocation (Child Male / Child Female / Adult)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: t.textPrimary)),
+                        Text('👗 Free Libaas Suit Allocation (Child Male / Child Female / Adult)', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: t.textPrimary)),
                         const SizedBox(height: 12),
                         Row(
                           children: [

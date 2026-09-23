@@ -76,6 +76,8 @@ class _BranchFacilityEditorDialogState
   late List<Map<String, dynamic>> _schools;
   late Map<String, dynamic> _sessionsConfig;
   late bool _madrassaFeeEnabled;
+  late bool _madrassaNazraOnly;
+  late String _madrassaProgramMode;
   late bool _allowVitalsToken;
   late bool _allowDoctorInventoryApproval;
   final List<String> _newCampDepts = ['dispensary'];
@@ -124,15 +126,35 @@ class _BranchFacilityEditorDialogState
       'lunch':   Map<String, dynamic>.from(rawDast['lunch']   ?? defaultDast['lunch']   ?? {'enabled': false, 'openTime': '12:00', 'closeTime': '16:00'}),
     };
 
-    // Madrassa Config & Fee Factor
+    // Madrassa Config & Fee Factor & Program Mode (Both / Hifz Only / Nazra Only)
     final rawMad = initSess['madrassa'] is Map ? initSess['madrassa'] as Map : {};
-    _madrassaFeeEnabled = rawMad['enableFees'] ?? initSess['madrassaFeeEnabled'] ?? LocalStorageService.isMadrassaFeeEnabled(widget.branchId);
+    final modeFromStorage = LocalStorageService.getMadrassaProgramMode(widget.branchId);
+    final rawMode = rawMad['madrassaProgramMode'] ??
+        rawMad['madrassaMode'] ??
+        initSess['madrassaProgramMode'] ??
+        initSess['madrassaMode'] ??
+        modeFromStorage;
+
+    if (rawMode == 'hifz_only' || rawMode == 'nazra_only' || rawMode == 'both') {
+      _madrassaProgramMode = rawMode.toString();
+    } else {
+      final isNaz = rawMad['isNazraOnly'] ?? initSess['isNazraOnly'] ?? LocalStorageService.isMadrassaNazraOnly(widget.branchId);
+      _madrassaProgramMode = isNaz ? 'nazra_only' : 'both';
+    }
+    _madrassaNazraOnly = (_madrassaProgramMode == 'nazra_only');
+
+    _madrassaFeeEnabled = _madrassaNazraOnly
+        ? false
+        : (rawMad['enableFees'] ?? initSess['madrassaFeeEnabled'] ?? LocalStorageService.isMadrassaFeeEnabled(widget.branchId));
 
     final madConfig = {
       'morning': Map<String, dynamic>.from(rawMad['morning'] ?? defaultMad['morning'] ?? {'enabled': true, 'openTime': '06:00', 'closeTime': '12:00'}),
       'evening': Map<String, dynamic>.from(rawMad['evening'] ?? defaultMad['evening'] ?? {'enabled': true, 'openTime': '14:00', 'closeTime': '18:00'}),
       'night':   Map<String, dynamic>.from(rawMad['night']   ?? defaultMad['night']   ?? {'enabled': false, 'openTime': '19:00', 'closeTime': '22:00'}),
       'enableFees': _madrassaFeeEnabled,
+      'isNazraOnly': _madrassaNazraOnly,
+      'madrassaProgramMode': _madrassaProgramMode,
+      'madrassaMode': _madrassaProgramMode,
     };
 
     // School Config
@@ -149,6 +171,10 @@ class _BranchFacilityEditorDialogState
       'madrassa': madConfig,
       'school': schConfig,
       'madrassaFeeEnabled': _madrassaFeeEnabled,
+      'madrassaNazraOnly': _madrassaNazraOnly,
+      'isNazraOnly': _madrassaNazraOnly,
+      'madrassaProgramMode': _madrassaProgramMode,
+      'madrassaMode': _madrassaProgramMode,
       'allowVitalsToken': _allowVitalsToken,
       'allowDoctorInventoryApproval': _allowDoctorInventoryApproval,
       // Backward-compatible top-level keys
@@ -492,19 +518,36 @@ class _BranchFacilityEditorDialogState
     try {
       if (_sessionsConfig['dispensary'] is Map) {
         (_sessionsConfig['dispensary'] as Map)['allowVitalsToken'] = _allowVitalsToken;
+        (_sessionsConfig['dispensary'] as Map)['allowDoctorInventoryApproval'] = _allowDoctorInventoryApproval;
       }
       _sessionsConfig['allowVitalsToken'] = _allowVitalsToken;
+      _sessionsConfig['allowDoctorInventoryApproval'] = _allowDoctorInventoryApproval;
+
+      final isNazra = _madrassaProgramMode == 'nazra_only';
+      final effectiveMadrassaFees = isNazra ? false : _madrassaFeeEnabled;
 
       if (_sessionsConfig['madrassa'] is Map) {
-        (_sessionsConfig['madrassa'] as Map)['enableFees'] = _madrassaFeeEnabled;
+        (_sessionsConfig['madrassa'] as Map)['enableFees'] = effectiveMadrassaFees;
+        (_sessionsConfig['madrassa'] as Map)['isNazraOnly'] = isNazra;
+        (_sessionsConfig['madrassa'] as Map)['madrassaProgramMode'] = _madrassaProgramMode;
+        (_sessionsConfig['madrassa'] as Map)['madrassaMode'] = _madrassaProgramMode;
       }
-      _sessionsConfig['madrassaFeeEnabled'] = _madrassaFeeEnabled;
+      _sessionsConfig['madrassaFeeEnabled'] = effectiveMadrassaFees;
+      _sessionsConfig['madrassaNazraOnly'] = isNazra;
+      _sessionsConfig['isNazraOnly'] = isNazra;
+      _sessionsConfig['madrassaProgramMode'] = _madrassaProgramMode;
+      _sessionsConfig['madrassaMode'] = _madrassaProgramMode;
 
       final docData = <String, dynamic>{
         'name': newName,
         'sessionsConfig': _sessionsConfig,
-        'madrassaFeeEnabled': _madrassaFeeEnabled,
+        'madrassaFeeEnabled': effectiveMadrassaFees,
+        'madrassaProgramMode': _madrassaProgramMode,
+        'madrassaMode': _madrassaProgramMode,
+        'madrassaNazraOnly': isNazra,
+        'isNazraOnly': isNazra,
         'allowVitalsToken': _allowVitalsToken,
+        'allowDoctorInventoryApproval': _allowDoctorInventoryApproval,
         'dispensaries': _dispensaries,
         'dasterkhwaans': _dasterkhwaans,
         'madrassas': _madrassas,
@@ -518,41 +561,52 @@ class _BranchFacilityEditorDialogState
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
-      // 1. Firestore Update
-      await FirebaseFirestore.instance
-          .collection('branches')
-          .doc(widget.branchId)
-          .set(docData, SetOptions(merge: true));
+      // 1. Local Hive Box Update FIRST (0ms, immediate response, never hangs)
+      final localPayload = Map<String, dynamic>.from(docData);
+      localPayload['id'] = widget.branchId;
+      localPayload['updatedAt'] = DateTime.now().toIso8601String();
 
-      // Sync to Madrassa Config in Firestore
-      await FirebaseFirestore.instance
-          .collection('branches')
-          .doc(widget.branchId)
-          .collection('madrassa_config')
-          .doc('current')
-          .set({'enableFees': _madrassaFeeEnabled}, SetOptions(merge: true));
-
-      // 2. Local Hive Box Update
       if (Hive.isBoxOpen('local_branches')) {
         final box = Hive.box('local_branches');
-        await box.put('branch:${widget.branchId}', {
-          'id': widget.branchId,
-          'name': newName,
-          'sessionsConfig': _sessionsConfig,
-          'madrassaFeeEnabled': _madrassaFeeEnabled,
-          'allowVitalsToken': _allowVitalsToken,
-          'dispensaries': _dispensaries,
-          'dasterkhwaans': _dasterkhwaans,
-          'madrassas': _madrassas,
-          'schools': _schools,
-          'camps': _camps,
-          'campsCount': _camps.length,
-          'dispensariesCount': _dispensaries.length,
-          'dasterkhwaansCount': _dasterkhwaans.length,
-          'madrassasCount': _madrassas.length,
-          'schoolsCount': _schools.length,
-        });
+        await box.put('branch:${widget.branchId}', localPayload);
+        await box.put(widget.branchId, localPayload);
       }
+
+      // 2. Cloud Firestore Update with strict 3-second timeout (never blocks modal close)
+      try {
+        await Future.wait([
+          FirebaseFirestore.instance
+              .collection('branches')
+              .doc(widget.branchId)
+              .set(docData, SetOptions(merge: true)),
+          FirebaseFirestore.instance
+              .collection('branches')
+              .doc(widget.branchId)
+              .collection('madrassa_config')
+              .doc('current')
+              .set({
+                'enableFees': effectiveMadrassaFees,
+                'isNazraOnly': isNazra,
+                'madrassaProgramMode': _madrassaProgramMode,
+                'madrassaMode': _madrassaProgramMode,
+                'updatedAt': FieldValue.serverTimestamp(),
+              }, SetOptions(merge: true)),
+        ]).timeout(const Duration(seconds: 3));
+      } catch (cloudErr) {
+        debugPrint('[BranchFacilityEditor] Background network save note: $cloudErr');
+      }
+
+      // 3. Enqueue local sync queue so changes persist across all platforms reliably
+      try {
+        await LocalStorageService.enqueueSync({
+          'type': 'update_branch',
+          'collection': 'branches',
+          'docId': widget.branchId,
+          'branchId': widget.branchId,
+          'data': docData,
+          'timestamp': DateTime.now().toIso8601String(),
+        });
+      } catch (_) {}
 
       if (mounted) {
         Navigator.of(context).pop(true);
@@ -1072,6 +1126,19 @@ class _BranchFacilityEditorDialogState
 
           if (deptKey == 'madrassa') ...[
             const SizedBox(height: 14),
+            _buildMadrassaSessionPresets(
+              isDark: isDark,
+              borderColor: borderColor,
+              subtextColor: subtextColor,
+              deptConf: deptConf,
+            ),
+            const SizedBox(height: 14),
+            _buildMadrassaProgramModeSelector(
+              isDark: isDark,
+              borderColor: borderColor,
+              subtextColor: subtextColor,
+            ),
+            const SizedBox(height: 14),
             _buildMadrassaMoneyFactorToggle(
               isDark: isDark,
               borderColor: borderColor,
@@ -1478,20 +1545,437 @@ class _BranchFacilityEditorDialogState
     );
   }
 
+  Widget _buildMadrassaSessionPresets({
+    required bool isDark,
+    required Color borderColor,
+    required Color subtextColor,
+    required Map<String, dynamic> deptConf,
+  }) {
+    final mornEnabled = (deptConf['morning'] as Map?)?['enabled'] == true;
+    final eveEnabled  = (deptConf['evening'] as Map?)?['enabled'] == true;
+    final nightEnabled = (deptConf['night'] as Map?)?['enabled'] == true;
+
+    final int activeCount = (mornEnabled ? 1 : 0) + (eveEnabled ? 1 : 0) + (nightEnabled ? 1 : 0);
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: borderColor),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.schedule_rounded, size: 16, color: Color(0xFF059669)),
+              const SizedBox(width: 6),
+              Text(
+                'Madrassa Shift / Session Presets (شعبہ حفظ و ناظرہ کے اوقات)',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold,
+                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                ),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF059669).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  '$activeCount Active Shifts',
+                  style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF059669)),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Quickly configure whether this Madrassa operates on 1, 2, or 3 shifts daily. Teachers and students are assigned to these operational sessions.',
+            style: TextStyle(fontSize: 11, color: subtextColor),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              // 1 Session
+              _sessionPresetButton(
+                label: '1 Session (Morning Only)',
+                urduLabel: 'صرف صبح کا سیشن',
+                isSelected: mornEnabled && !eveEnabled && !nightEnabled,
+                isDark: isDark,
+                onTap: () {
+                  setState(() {
+                    if (deptConf['morning'] is Map) (deptConf['morning'] as Map)['enabled'] = true;
+                    if (deptConf['evening'] is Map) (deptConf['evening'] as Map)['enabled'] = false;
+                    if (deptConf['night'] is Map) (deptConf['night'] as Map)['enabled'] = false;
+                  });
+                },
+              ),
+              // 2 Sessions
+              _sessionPresetButton(
+                label: '2 Sessions (Morning + Evening)',
+                urduLabel: 'صبح اور شام سیشن',
+                isSelected: mornEnabled && eveEnabled && !nightEnabled,
+                isDark: isDark,
+                onTap: () {
+                  setState(() {
+                    if (deptConf['morning'] is Map) (deptConf['morning'] as Map)['enabled'] = true;
+                    if (deptConf['evening'] is Map) (deptConf['evening'] as Map)['enabled'] = true;
+                    if (deptConf['night'] is Map) (deptConf['night'] as Map)['enabled'] = false;
+                  });
+                },
+              ),
+              // 3 Sessions
+              _sessionPresetButton(
+                label: '3 Sessions (Morning + Evening + Night)',
+                urduLabel: 'صبح، شام اور رات (تین سیشن)',
+                isSelected: mornEnabled && eveEnabled && nightEnabled,
+                isDark: isDark,
+                onTap: () {
+                  setState(() {
+                    if (deptConf['morning'] is Map) (deptConf['morning'] as Map)['enabled'] = true;
+                    if (deptConf['evening'] is Map) (deptConf['evening'] as Map)['enabled'] = true;
+                    if (deptConf['night'] is Map) (deptConf['night'] as Map)['enabled'] = true;
+                  });
+                },
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sessionPresetButton({
+    required String label,
+    required String urduLabel,
+    required bool isSelected,
+    required bool isDark,
+    required VoidCallback onTap,
+  }) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? const Color(0xFF059669)
+              : (isDark ? const Color(0xFF1E293B) : Colors.white),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(
+            color: isSelected
+                ? const Color(0xFF059669)
+                : (isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
+            width: isSelected ? 1.5 : 1,
+          ),
+          boxShadow: isSelected
+              ? [
+                  BoxShadow(
+                    color: const Color(0xFF059669).withValues(alpha: 0.25),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : null,
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isSelected ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+              size: 14,
+              color: isSelected ? Colors.white : const Color(0xFF64748B),
+            ),
+            const SizedBox(width: 6),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  label,
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: isSelected ? Colors.white : (isDark ? Colors.white : const Color(0xFF0F172A)),
+                  ),
+                ),
+                Text(
+                  urduLabel,
+                  style: TextStyle(
+                    fontSize: 9.5,
+                    color: isSelected ? Colors.white70 : const Color(0xFF64748B),
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMadrassaProgramModeSelector({
+    required bool isDark,
+    required Color borderColor,
+    required Color subtextColor,
+  }) {
+    final modes = [
+      {
+        'key': 'both',
+        'title': 'Both Hifz & Nazra',
+        'urdu': 'حفظ اور ناظرہ دونوں',
+        'desc': 'Offers both programs. In student enrollment, teachers/admins select whether each student fits into Hifz or Nazra.',
+        'badge': 'BOTH AVAILABLE 📖 🕋',
+        'color': const Color(0xFF0F766E),
+        'icon': Icons.auto_stories_rounded,
+      },
+      {
+        'key': 'hifz_only',
+        'title': 'Hifz Only Campus',
+        'urdu': 'صرف حفظ قرآن کیمپس',
+        'desc': 'Dedicated Quran memorization. All enrolled students are set to Hifz with Sabak, Sabqi, and Manzil progression.',
+        'badge': 'HIFZ ONLY 🕋',
+        'color': const Color(0xFF7C3AED),
+        'icon': Icons.mosque_rounded,
+      },
+      {
+        'key': 'nazra_only',
+        'title': 'Nazra Only Campus',
+        'urdu': 'صرف ناظرہ قرآن کیمپس',
+        'desc': 'Dedicated Nazra reading. All students are enrolled into Nazra (Sabak & Attendance only). 100% Free / No fees.',
+        'badge': 'NAZRA ONLY 📖',
+        'color': const Color(0xFF059669),
+        'icon': Icons.menu_book_rounded,
+      },
+    ];
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: borderColor, width: 1),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0F766E).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Icon(Icons.school_rounded, color: Color(0xFF0F766E), size: 20),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Madrassa Educational Programs (تعلیمی پروگرامز)',
+                      style: TextStyle(
+                        fontSize: 13.5,
+                        fontWeight: FontWeight.bold,
+                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Choose whether this Madrassa offers Both Hifz & Nazra, or specializes in Hifz Only or Nazra Only.',
+                      style: TextStyle(fontSize: 11, color: subtextColor),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Column(
+            children: modes.map((m) {
+              final modeKey = m['key'] as String;
+              final isSelected = _madrassaProgramMode == modeKey;
+              final mColor = m['color'] as Color;
+
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8.0),
+                child: InkWell(
+                  onTap: () {
+                    setState(() {
+                      _madrassaProgramMode = modeKey;
+                      _madrassaNazraOnly = (modeKey == 'nazra_only');
+                      if (modeKey == 'nazra_only') {
+                        _madrassaFeeEnabled = false;
+                        if (_sessionsConfig['madrassa'] is Map) {
+                          (_sessionsConfig['madrassa'] as Map)['enableFees'] = false;
+                        }
+                        _sessionsConfig['madrassaFeeEnabled'] = false;
+                      }
+                      if (_sessionsConfig['madrassa'] is Map) {
+                        (_sessionsConfig['madrassa'] as Map)['isNazraOnly'] = _madrassaNazraOnly;
+                        (_sessionsConfig['madrassa'] as Map)['madrassaProgramMode'] = _madrassaProgramMode;
+                        (_sessionsConfig['madrassa'] as Map)['madrassaMode'] = _madrassaProgramMode;
+                      }
+                      _sessionsConfig['madrassaNazraOnly'] = _madrassaNazraOnly;
+                      _sessionsConfig['isNazraOnly'] = _madrassaNazraOnly;
+                      _sessionsConfig['madrassaProgramMode'] = _madrassaProgramMode;
+                      _sessionsConfig['madrassaMode'] = _madrassaProgramMode;
+                    });
+                  },
+                  borderRadius: BorderRadius.circular(10),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? mColor.withValues(alpha: isDark ? 0.25 : 0.08)
+                          : (isDark ? const Color(0xFF0F172A).withValues(alpha: 0.5) : const Color(0xFFF8FAFC)),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: isSelected ? mColor : borderColor,
+                        width: isSelected ? 1.8 : 1.0,
+                      ),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: isSelected ? mColor : (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(
+                            m['icon'] as IconData,
+                            size: 18,
+                            color: isSelected ? Colors.white : (isDark ? Colors.white70 : const Color(0xFF64748B)),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Row(
+                                children: [
+                                  Text(
+                                    m['title'] as String,
+                                    style: TextStyle(
+                                      fontSize: 12.5,
+                                      fontWeight: FontWeight.bold,
+                                      color: isSelected
+                                          ? (isDark ? Colors.white : mColor)
+                                          : (isDark ? Colors.white : const Color(0xFF1E293B)),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    '(${m['urdu']})',
+                                    style: TextStyle(
+                                      fontSize: 11,
+                                      color: isSelected ? mColor : subtextColor,
+                                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                    ),
+                                  ),
+                                  const Spacer(),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: isSelected ? mColor.withValues(alpha: 0.18) : Colors.transparent,
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      m['badge'] as String,
+                                      style: TextStyle(
+                                        fontSize: 9.5,
+                                        fontWeight: FontWeight.bold,
+                                        color: isSelected ? mColor : const Color(0xFF94A3B8),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                m['desc'] as String,
+                                style: TextStyle(fontSize: 10.5, color: subtextColor, height: 1.3),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Radio<String>(
+                          value: modeKey,
+                          groupValue: _madrassaProgramMode,
+                          activeColor: mColor,
+                          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                          visualDensity: VisualDensity.compact,
+                          onChanged: (val) {
+                            if (val != null) {
+                              setState(() {
+                                _madrassaProgramMode = val;
+                                _madrassaNazraOnly = (val == 'nazra_only');
+                                if (val == 'nazra_only') {
+                                  _madrassaFeeEnabled = false;
+                                  if (_sessionsConfig['madrassa'] is Map) {
+                                    (_sessionsConfig['madrassa'] as Map)['enableFees'] = false;
+                                  }
+                                  _sessionsConfig['madrassaFeeEnabled'] = false;
+                                }
+                                if (_sessionsConfig['madrassa'] is Map) {
+                                  (_sessionsConfig['madrassa'] as Map)['isNazraOnly'] = _madrassaNazraOnly;
+                                  (_sessionsConfig['madrassa'] as Map)['madrassaProgramMode'] = _madrassaProgramMode;
+                                  (_sessionsConfig['madrassa'] as Map)['madrassaMode'] = _madrassaProgramMode;
+                                }
+                                _sessionsConfig['madrassaNazraOnly'] = _madrassaNazraOnly;
+                                _sessionsConfig['isNazraOnly'] = _madrassaNazraOnly;
+                                _sessionsConfig['madrassaProgramMode'] = _madrassaProgramMode;
+                                _sessionsConfig['madrassaMode'] = _madrassaProgramMode;
+                              });
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildMadrassaMoneyFactorToggle({
     required bool isDark,
     required Color borderColor,
     required Color subtextColor,
   }) {
+    final isLockedByNazra = _madrassaProgramMode == 'nazra_only';
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: _madrassaFeeEnabled
-            ? (isDark ? const Color(0xFF064E3B).withValues(alpha: 0.35) : const Color(0xFFECFDF5))
-            : (isDark ? const Color(0xFF451A03).withValues(alpha: 0.35) : const Color(0xFFFFFBEB)),
+        color: isLockedByNazra
+            ? (isDark ? const Color(0xFF1E293B).withValues(alpha: 0.5) : const Color(0xFFF1F5F9))
+            : (_madrassaFeeEnabled
+                ? (isDark ? const Color(0xFF064E3B).withValues(alpha: 0.35) : const Color(0xFFECFDF5))
+                : (isDark ? const Color(0xFF451A03).withValues(alpha: 0.35) : const Color(0xFFFFFBEB))),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: _madrassaFeeEnabled ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+          color: isLockedByNazra
+              ? borderColor
+              : (_madrassaFeeEnabled ? const Color(0xFF10B981) : const Color(0xFFF59E0B)),
           width: 1.5,
         ),
       ),
@@ -1501,11 +1985,15 @@ class _BranchFacilityEditorDialogState
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: _madrassaFeeEnabled ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+              color: isLockedByNazra
+                  ? const Color(0xFF64748B)
+                  : (_madrassaFeeEnabled ? const Color(0xFF10B981) : const Color(0xFFF59E0B)),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Icon(
-              _madrassaFeeEnabled ? Icons.payments_rounded : Icons.money_off_rounded,
+              isLockedByNazra
+                  ? Icons.money_off_rounded
+                  : (_madrassaFeeEnabled ? Icons.payments_rounded : Icons.money_off_rounded),
               color: Colors.white,
               size: 20,
             ),
@@ -1529,15 +2017,23 @@ class _BranchFacilityEditorDialogState
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: _madrassaFeeEnabled ? const Color(0xFF10B981).withValues(alpha: 0.15) : const Color(0xFFF59E0B).withValues(alpha: 0.15),
+                        color: isLockedByNazra
+                            ? const Color(0xFF64748B).withValues(alpha: 0.15)
+                            : (_madrassaFeeEnabled
+                                ? const Color(0xFF10B981).withValues(alpha: 0.15)
+                                : const Color(0xFFF59E0B).withValues(alpha: 0.15)),
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
-                        _madrassaFeeEnabled ? 'FEES ACTIVE' : 'FREE / NO FEES',
+                        isLockedByNazra
+                            ? 'FREE / NO FEES (LOCKED BY NAZRA-ONLY)'
+                            : (_madrassaFeeEnabled ? 'FEES ACTIVE 🟢' : 'FREE / NO FEES 🟡'),
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
-                          color: _madrassaFeeEnabled ? const Color(0xFF059669) : const Color(0xFFD97706),
+                          color: isLockedByNazra
+                              ? const Color(0xFF64748B)
+                              : (_madrassaFeeEnabled ? const Color(0xFF059669) : const Color(0xFFD97706)),
                         ),
                       ),
                     ),
@@ -1545,9 +2041,11 @@ class _BranchFacilityEditorDialogState
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  _madrassaFeeEnabled
-                      ? 'Keep money factor active: Student monthly dues, base tuition, fee deduction rewards, and payment cards operate as standard across Parent, Teacher, and Principal screens.'
-                      : 'Remove money factor: All student fees, monthly dues, discounts, and payment records are completely stopped and hidden across Parent, Teacher, and Principal screens (100% Free / Non-Fee Facility).',
+                  isLockedByNazra
+                      ? 'Fees are completely disabled and locked because this campus is set to "Nazra Only". Nazra facilities are 100% Free / Non-Fee.'
+                      : (_madrassaFeeEnabled
+                          ? 'Keep money factor active: Student monthly dues, base tuition, fee deduction rewards, and payment cards operate as standard across Parent, Teacher, and Principal screens.'
+                          : 'Remove money factor: All student fees, monthly dues, discounts, and payment records are completely stopped and hidden across Parent, Teacher, and Principal screens (100% Free / Non-Fee Facility).'),
                   style: TextStyle(fontSize: 11, color: subtextColor),
                 ),
               ],
@@ -1555,16 +2053,19 @@ class _BranchFacilityEditorDialogState
           ),
           const SizedBox(width: 8),
           Switch(
-            value: _madrassaFeeEnabled,
+            value: isLockedByNazra ? false : _madrassaFeeEnabled,
             activeColor: const Color(0xFF10B981),
-            onChanged: (val) {
-              setState(() {
-                _madrassaFeeEnabled = val;
-                if (_sessionsConfig['madrassa'] is Map) {
-                  (_sessionsConfig['madrassa'] as Map)['enableFees'] = val;
-                }
-              });
-            },
+            onChanged: isLockedByNazra
+                ? null
+                : (val) {
+                    setState(() {
+                      _madrassaFeeEnabled = val;
+                      if (_sessionsConfig['madrassa'] is Map) {
+                        (_sessionsConfig['madrassa'] as Map)['enableFees'] = val;
+                      }
+                      _sessionsConfig['madrassaFeeEnabled'] = val;
+                    });
+                  },
           ),
         ],
       ),

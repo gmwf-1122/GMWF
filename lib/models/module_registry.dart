@@ -2,6 +2,7 @@
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../services/permission_service.dart';
+import '../services/local_storage_service.dart';
 import '../pages/dispensary/receptionist/receptionist_screen.dart';
 import '../pages/dispensary/doctor/doctor_screen.dart';
 import '../pages/dispensary/dispensar/dispensar_screen.dart';
@@ -16,15 +17,14 @@ import '../pages/server.dart';
 import '../pages/download_screen.dart';
 import '../pages/office/finance_page.dart';
 import '../pages/office/branches_management.dart';
-import '../pages/Dasterkhwaan/office_boy.dart';
-import '../pages/Dasterkhwaan/kitchen.dart';
-import '../pages/Dasterkhwaan/stock.dart';
+import '../pages/dasterkhwaan/office_boy.dart';
+import '../pages/dasterkhwaan/kitchen.dart';
+import '../pages/dasterkhwaan/stock.dart';
 import '../pages/dasterkhwaan/food_log_screen.dart';
 import '../pages/branches_register.dart';
 import '../pages/register.dart';
 import '../pages/dispensary/patient_detail_screen.dart';
 import '../pages/dispensary/receptionist/patient_register.dart';
-import '../pages/overview.dart';
 import '../pages/request.dart';
 import '../pages/madrassa/madrassa_dashboard.dart';
 import '../pages/madrassa/madrassa_guardian_screen.dart';
@@ -129,10 +129,11 @@ class ModuleRegistry {
       isBranchDependent: true,
       supportsGlobalWrapper: true,
       builder: (context, data) => DonationsScreen.embedded(
-        branchId: data['branchId'] ?? 'all',
-        username: data['name'] ?? 'User',
-        userId:   data['uid'] ?? '',
-        role:     UserRoleX.fromString(data['role'] ?? 'staff'),
+        branchId:   data['branchId'] ?? 'all',
+        branchName: data['branchName'] ?? '',
+        username:   data['name'] ?? 'User',
+        userId:     data['uid'] ?? '',
+        role:       UserRoleX.fromString(data['role'] ?? 'staff'),
       ),
       category: ModuleCategory.office,
       isFeatured: true,
@@ -513,8 +514,8 @@ class ModuleRegistry {
       supportsGlobalWrapper: true,
       hideFromExecutives: true,
       builder: (context, data) => PatientRegisterPage(
-        branchId: data['branchId'] ?? 'unknown',
-        receptionistId: data['uid'] ?? 'unknown',
+        branchId: LocalStorageService.sanitizeBranchId(data['branchId'] ?? data['branch']),
+        receptionistId: data['uid'] ?? 'receptionist',
       ),
       category: ModuleCategory.dispensary,
     ),
@@ -531,8 +532,8 @@ class ModuleRegistry {
         patientId: '',
         isOnline: true,
         localBox: Hive.box('local'),
-        branchId: data['branchId'] ?? 'unknown',
-        doctorId: data['uid'] ?? 'unknown',
+        branchId: LocalStorageService.sanitizeBranchId(data['branchId'] ?? data['branch']),
+        doctorId: data['uid'] ?? '',
         isAdmin: true,
       ),
       category: ModuleCategory.dispensary,
@@ -549,7 +550,7 @@ class ModuleRegistry {
       supportsGlobalWrapper: true,
       isFeatured: true,
       builder: (context, data) => DasterkhwaanOfficeBoy(
-        branchId: data['branchId'] ?? 'unknown',
+        branchId: LocalStorageService.sanitizeBranchId(data['branchId'] ?? data['branch']),
         userName: data['name'] ?? 'User',
         role: data['role'] ?? 'Food Tokens',
       ),
@@ -564,7 +565,7 @@ class ModuleRegistry {
       isBranchDependent: true,
       supportsGlobalWrapper: true,
       builder: (context, data) => DasterkhwaanKitchen(
-        branchId: data['branchId'] ?? 'all',
+        branchId: LocalStorageService.sanitizeBranchId(data['branchId'] ?? data['branch']),
         username: data['name'] ?? 'Executive',
       ),
       category: ModuleCategory.dasterkhwaan,
@@ -669,7 +670,7 @@ class ModuleRegistry {
         branchId: data['branchId'] ?? 'all',
         username: data['name'] ?? data['username'] ?? 'User',
         role: data['role'] ?? 'School Admin',
-        initialTabIndex: 1,
+        initialTabIndex: 2,
       ),
       category: ModuleCategory.school,
     ),
@@ -686,7 +687,7 @@ class ModuleRegistry {
         branchId: data['branchId'] ?? 'all',
         username: data['name'] ?? data['username'] ?? 'User',
         role: data['role'] ?? 'School Admin',
-        initialTabIndex: 2,
+        initialTabIndex: 3,
       ),
       category: ModuleCategory.school,
     ),
@@ -702,7 +703,7 @@ class ModuleRegistry {
         branchId: data['branchId'] ?? 'all',
         username: data['name'] ?? data['username'] ?? 'User',
         role: data['role'] ?? 'School Admin',
-        initialTabIndex: 3,
+        initialTabIndex: 1,
       ),
       category: ModuleCategory.school,
     ),
@@ -735,7 +736,7 @@ class ModuleRegistry {
         branchId: data['branchId'] ?? 'all',
         username: data['name'] ?? data['username'] ?? 'User',
         role: data['role'] ?? 'School Admin',
-        initialTabIndex: 5,
+        initialTabIndex: 6,
       ),
       category: ModuleCategory.school,
     ),

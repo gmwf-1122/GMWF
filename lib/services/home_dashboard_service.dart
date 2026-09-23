@@ -171,6 +171,33 @@ Future<BranchStats> fetchLocalBranchStats(String branchId, DateTime date, {bool 
     debugPrint('Error reading local entries: $e');
   }
 
+  // 2b. Calculate food tokens from dasterkhwaan_tokens box
+  try {
+    if (Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)) {
+      final tokenBox = Hive.box(LocalStorageService.dasterkhwaanTokensBox);
+      for (final raw in tokenBox.values) {
+        if (raw is! Map) continue;
+        final t = Map<String, dynamic>.from(raw);
+        final status = t['status']?.toString().toLowerCase();
+        final syncStatus = t['syncStatus']?.toString().toLowerCase();
+        if (status == 'deleted' || status == 'void' || syncStatus == 'deleted') continue;
+
+        final b = (t['branchId'] as String? ?? '').toLowerCase().trim();
+        if (b.isNotEmpty && !_isMatchingBranch(b, bId)) continue;
+        final dk = t['dateKey']?.toString() ?? '';
+        final rawD = t['createdAt'] ?? t['timestamp'] ?? t['date'] ?? t['time'];
+        if (dk == dateKeyYmd || dk == dateKeyDmyy || _isSameDate(rawD, dateKeyYmd, dateKeyDmyy)) {
+          das++;
+          if (t['served'] == true) {
+            served++;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    debugPrint('Error reading local food tokens: $e');
+  }
+
   // If no local entries were found, fallback to cached docs from remote
   if (z == 0 && nz == 0 && gm == 0 && das == 0) {
     try {
@@ -288,7 +315,7 @@ Future<BranchStats?> _fetchFirestoreBranchStats(String branchId, DateTime date) 
           .where('date', isGreaterThanOrEqualTo: dateKeyYmd)
           .where('date', isLessThanOrEqualTo: dateKeyYmd)
           .get()
-          .timeout(const Duration(milliseconds: 1200));
+          .timeout(const Duration(milliseconds: 5000));
       for (final doc in donSnap.docs) {
         final val = doc.data();
         final status = val['status']?.toString().toLowerCase();
@@ -308,17 +335,17 @@ Future<BranchStats?> _fetchFirestoreBranchStats(String branchId, DateTime date) 
           .collection('branches').doc(bId).collection('serials');
 
       final results = await Future.wait([
-        base.doc(dateKeyDmyy).collection('zakat').get().timeout(const Duration(milliseconds: 1500)),
-        base.doc(dateKeyDmyy).collection('non-zakat').get().timeout(const Duration(milliseconds: 1500)),
-        base.doc(dateKeyDmyy).collection('gmwf').get().timeout(const Duration(milliseconds: 1500)),
-        base.doc(dateKeyDmyy).collection('dasterkhwan').get().timeout(const Duration(milliseconds: 1500)),
-        base.doc('${dateKeyDmyy}_saddar').collection('zakat').get().timeout(const Duration(milliseconds: 1500)),
-        base.doc('${dateKeyDmyy}_saddar').collection('non-zakat').get().timeout(const Duration(milliseconds: 1500)),
-        base.doc('${dateKeyDmyy}_saddar').collection('gmwf').get().timeout(const Duration(milliseconds: 1500)),
-        base.doc('${dateKeyDmyy}_haji').collection('zakat').get().timeout(const Duration(milliseconds: 1500)),
-        base.doc('${dateKeyDmyy}_haji').collection('non-zakat').get().timeout(const Duration(milliseconds: 1500)),
-        base.doc('${dateKeyDmyy}_haji').collection('gmwf').get().timeout(const Duration(milliseconds: 1500)),
-      ]).timeout(const Duration(milliseconds: 2000));
+        base.doc(dateKeyDmyy).collection('zakat').get().timeout(const Duration(milliseconds: 5000)),
+        base.doc(dateKeyDmyy).collection('non-zakat').get().timeout(const Duration(milliseconds: 5000)),
+        base.doc(dateKeyDmyy).collection('gmwf').get().timeout(const Duration(milliseconds: 5000)),
+        base.doc(dateKeyDmyy).collection('dasterkhwan').get().timeout(const Duration(milliseconds: 5000)),
+        base.doc('${dateKeyDmyy}_saddar').collection('zakat').get().timeout(const Duration(milliseconds: 5000)),
+        base.doc('${dateKeyDmyy}_saddar').collection('non-zakat').get().timeout(const Duration(milliseconds: 5000)),
+        base.doc('${dateKeyDmyy}_saddar').collection('gmwf').get().timeout(const Duration(milliseconds: 5000)),
+        base.doc('${dateKeyDmyy}_haji').collection('zakat').get().timeout(const Duration(milliseconds: 5000)),
+        base.doc('${dateKeyDmyy}_haji').collection('non-zakat').get().timeout(const Duration(milliseconds: 5000)),
+        base.doc('${dateKeyDmyy}_haji').collection('gmwf').get().timeout(const Duration(milliseconds: 5000)),
+      ]).timeout(const Duration(milliseconds: 7000));
 
       // Zakat patients (root + saddar + haji)
       for (final i in [0, 4, 7]) {
@@ -356,7 +383,7 @@ Future<BranchStats?> _fetchFirestoreBranchStats(String branchId, DateTime date) 
             .collection('branches').doc(bId).collection('entries')
             .where('dateKey', isEqualTo: dateKeyYmd)
             .get()
-            .timeout(const Duration(milliseconds: 1500));
+            .timeout(const Duration(milliseconds: 5000));
         for (final doc in entriesSnap.docs) {
           final data = doc.data();
           final status = data['status']?.toString().toLowerCase();
@@ -618,16 +645,16 @@ Future<KarachiCampBreakdown> fetchKarachiCampBreakdown([DateTime? date]) async {
     try {
       final base = FirebaseFirestore.instance.collection('branches').doc('karachi').collection('serials');
       final fsResults = await Future.wait([
-        base.doc('${dmyy}_saddar').collection('zakat').get().timeout(const Duration(milliseconds: 1500)),
-        base.doc('${dmyy}_saddar').collection('non-zakat').get().timeout(const Duration(milliseconds: 1500)),
-        base.doc('${dmyy}_saddar').collection('gmwf').get().timeout(const Duration(milliseconds: 1500)),
-        base.doc('${dmyy}_haji').collection('zakat').get().timeout(const Duration(milliseconds: 1500)),
-        base.doc('${dmyy}_haji').collection('non-zakat').get().timeout(const Duration(milliseconds: 1500)),
-        base.doc('${dmyy}_haji').collection('gmwf').get().timeout(const Duration(milliseconds: 1500)),
-        base.doc(dmyy).collection('zakat').get().timeout(const Duration(milliseconds: 1500)),
-        base.doc(dmyy).collection('non-zakat').get().timeout(const Duration(milliseconds: 1500)),
-        base.doc(dmyy).collection('gmwf').get().timeout(const Duration(milliseconds: 1500)),
-      ]).timeout(const Duration(milliseconds: 2000));
+        base.doc('${dmyy}_saddar').collection('zakat').get().timeout(const Duration(milliseconds: 5000)),
+        base.doc('${dmyy}_saddar').collection('non-zakat').get().timeout(const Duration(milliseconds: 5000)),
+        base.doc('${dmyy}_saddar').collection('gmwf').get().timeout(const Duration(milliseconds: 5000)),
+        base.doc('${dmyy}_haji').collection('zakat').get().timeout(const Duration(milliseconds: 5000)),
+        base.doc('${dmyy}_haji').collection('non-zakat').get().timeout(const Duration(milliseconds: 5000)),
+        base.doc('${dmyy}_haji').collection('gmwf').get().timeout(const Duration(milliseconds: 5000)),
+        base.doc(dmyy).collection('zakat').get().timeout(const Duration(milliseconds: 5000)),
+        base.doc(dmyy).collection('non-zakat').get().timeout(const Duration(milliseconds: 5000)),
+        base.doc(dmyy).collection('gmwf').get().timeout(const Duration(milliseconds: 5000)),
+      ]).timeout(const Duration(milliseconds: 7000));
 
       for (final doc in (fsResults[0] as QuerySnapshot).docs) {
         final data = Map<String, dynamic>.from(doc.data() as Map);

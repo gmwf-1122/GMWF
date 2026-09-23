@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
+import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:another_flushbar/flushbar.dart';
 import 'package:intl/intl.dart';
@@ -20,6 +21,7 @@ import 'package:gmwf/realtime/realtime_events.dart';
 import 'package:gmwf/theme/app_theme.dart';
 import 'package:gmwf/theme/role_theme_provider.dart';
 import 'package:gmwf/widgets/file_action_helper.dart';
+import 'package:gmwf/design/design_system.dart';
 
 class PatientForm extends StatefulWidget {
   final String branchId;
@@ -105,19 +107,19 @@ class _PatientFormState extends State<PatientForm> {
   }
 
   List<dynamic> _getPrescriptionsList() {
-    final fromData = _data['prescriptions'];
+    final fromData = _data['prescriptions'] ?? _data['medicines'];
     if (fromData is List && fromData.isNotEmpty) return fromData;
     final embeddedData = _data['prescription'];
-    if (embeddedData is Map && embeddedData['prescriptions'] is List) {
-      final list = embeddedData['prescriptions'] as List;
-      if (list.isNotEmpty) return list;
+    if (embeddedData is Map) {
+      final embList = embeddedData['prescriptions'] ?? embeddedData['medicines'];
+      if (embList is List && embList.isNotEmpty) return embList;
     }
-    final fromQueue = widget.queueEntry['prescriptions'];
+    final fromQueue = widget.queueEntry['prescriptions'] ?? widget.queueEntry['medicines'];
     if (fromQueue is List && fromQueue.isNotEmpty) return fromQueue;
     final embeddedQueue = widget.queueEntry['prescription'];
-    if (embeddedQueue is Map && embeddedQueue['prescriptions'] is List) {
-      final list = embeddedQueue['prescriptions'] as List;
-      if (list.isNotEmpty) return list;
+    if (embeddedQueue is Map) {
+      final embList = embeddedQueue['prescriptions'] ?? embeddedQueue['medicines'];
+      if (embList is List && embList.isNotEmpty) return embList;
     }
     return [];
   }
@@ -327,10 +329,6 @@ class _PatientFormState extends State<PatientForm> {
         found = await _fetchFromSerialsEmbedded(serial);
         if (found.isNotEmpty) await LocalStorageService.saveLocalPrescription(found);
       }
-      if (found.isEmpty && serial.isNotEmpty) {
-        found = await _fetchFromPrescriptionsScanAll(serial);
-        if (found.isNotEmpty) await LocalStorageService.saveLocalPrescription(found);
-      }
       if (found.isEmpty &&
           (widget.queueEntry['status'] == 'completed' || widget.queueEntry['dispenseStatus'] == 'dispensed') &&
           (widget.queueEntry['isVitalsOnly'] == true ||
@@ -420,39 +418,30 @@ class _PatientFormState extends State<PatientForm> {
     return {};
   }
 
-  Future<Map<String, dynamic>> _fetchFromPrescriptionsScanAll(String serial) async {
-    try {
-      final snapshot = await FirebaseFirestore.instance
-          .collectionGroup('prescriptions')
-          .where('serial', isEqualTo: serial)
-          .limit(1)
-          .get()
-          .timeout(const Duration(seconds: 4));
-      if (snapshot.docs.isNotEmpty) {
-        final prescSnap = snapshot.docs.first;
-        final d = Map<String, dynamic>.from(prescSnap.data());
-        d['id'] = prescSnap.id; d['serial'] = prescSnap.id;
-        final parentPath = prescSnap.reference.parent.parent;
-        if (parentPath != null) {
-          d['patientCnic'] = parentPath.id; 
-          d['cnic'] = parentPath.id;
-        }
-        return d;
-      }
-    } catch (e) { debugPrint('[PatientForm] Firestore collectionGroup error: $e'); }
-    return {};
-  }
-
   Future<Map<String, dynamic>> _fetchFromSerialsEmbedded(String serial) async {
     try {
-      final dateKey = serial.contains('-')
-          ? serial.split('-')[0]
+      final dateKey = CampSessionService.getDateKeyFromSerial(serial).isNotEmpty
+          ? CampSessionService.getDateKeyFromSerial(serial)
           : DateFormat('ddMMyy').format(DateTime.now());
       if (dateKey.isEmpty) return {};
-      for (final type in ['zakat', 'non-zakat', 'gmwf']) {
+
+      final explicitType = (widget.queueEntry['queueType'] ?? _data['queueType'])?.toString().toLowerCase().trim();
+      final typesToCheck = (explicitType != null && explicitType.isNotEmpty && ['zakat', 'non-zakat', 'gmwf'].contains(explicitType))
+          ? [explicitType]
+          : ['zakat', 'non-zakat', 'gmwf'];
+
+      final campDocKey = CampSessionService.getCampDateDocId(
+        branchId: widget.branchId,
+        dateKey: dateKey,
+        campId: widget.queueEntry['campId']?.toString() ?? widget.queueEntry['dispensaryId']?.toString() ?? _data['campId']?.toString() ?? _data['dispensaryId']?.toString(),
+        dispensaryTag: widget.queueEntry['dispensaryTag']?.toString() ?? _data['dispensaryTag']?.toString(),
+        serial: serial,
+      );
+
+      for (final type in typesToCheck) {
         final snap = await FirebaseFirestore.instance
             .collection('branches').doc(widget.branchId)
-            .collection('serials').doc(dateKey)
+            .collection('serials').doc(campDocKey)
             .collection(type).doc(serial).get()
             .timeout(const Duration(seconds: 4));
         if (snap.exists && snap.data() != null) {
@@ -474,7 +463,7 @@ class _PatientFormState extends State<PatientForm> {
   // ─── Helpers ──────────────────────────────────────────────────────────────
   bool get _hasPrintableContent {
     final lab = (_data['labResults'] ?? []) as List;
-    final rx = (_data['prescriptions'] ?? []) as List;
+    final rx = (_data['prescriptions'] ?? _data['medicines'] ?? []) as List;
     return lab.isNotEmpty || rx.isNotEmpty;
   }
 
@@ -561,105 +550,255 @@ class _PatientFormState extends State<PatientForm> {
     return autoCount;
   }
 
-  Future<void> _deductInventoryLocally(
+  Future<List<Map<String, dynamic>>> _deductInventoryLocally(
       String branchId, String serial, List<dynamic> medicines, int days) async {
     final activeCamp = widget.queueEntry['campId']?.toString() ??
         widget.queueEntry['dispensaryId']?.toString() ??
         CampSessionService.getActiveCamp(branchId) ??
         '';
+    final patientSerial = widget.queueEntry['serial']?.toString() ?? widget.queueEntry['id']?.toString() ?? serial;
+    final patientCampId = widget.queueEntry['campId']?.toString() ?? widget.queueEntry['dispensaryId']?.toString() ?? CampSessionService.getActiveCamp();
+    final List<Map<String, dynamic>> allDeductedBatches = [];
+
     for (final med in medicines) {
       if (med is! Map) continue;
       final medMap = Map<String, dynamic>.from(med);
-      var medicineId = (medMap['inventoryId'] ??
+      final rawMedicineId = (medMap['inventoryId'] ??
               medMap['medicineId'] ?? medMap['id'] ?? '').toString().trim();
       final perDayRaw = medMap['quantity'] ?? medMap['qty'] ?? 0;
       final perDay = perDayRaw is num
           ? perDayRaw.toDouble()
           : double.tryParse(perDayRaw.toString()) ?? 0.0;
-      if (medicineId.isEmpty || perDay <= 0) continue;
+      if (perDay <= 0) continue;
       final isSyrup = _isSyrupType(medMap['type']?.toString(), medMap['name']?.toString());
       final multiplier = isSyrup
           ? 1.0
           : (_isInjectableType(medMap['type']?.toString()) ? 1.0 : days.toDouble());
       final qtyNum = isSyrup ? 1.0 : perDay * multiplier;
-      debugPrint('[PatientForm] deduct $medicineId: (isSyrup=$isSyrup) perDay=${perDay}/day × $multiplier = $qtyNum');
+      debugPrint('[PatientForm] FEFO deduct for ${medMap['name']} ($rawMedicineId): perDay=$perDay × $multiplier = $qtyNum');
+
       try {
         final stockBox = Hive.box(LocalStorageService.stockBox);
-        var existing = stockBox.get('stock:$medicineId');
-        var keyUsed = 'stock:$medicineId';
-        if (existing == null) {
-          existing = stockBox.get(medicineId);
-          if (existing != null) {
-            keyUsed = medicineId;
-          }
-        }
-        // Name & Formula fallback with brand cleaning and camp isolation
-        if (existing == null) {
-          final mName = MasterProformaService.cleanBrandToFormula((medMap['name'] ?? medMap['formula'] ?? '').toString().toLowerCase().trim());
-          final mType = (medMap['type'] ?? medMap['dosageForm'] ?? '').toString().toLowerCase().trim();
-          final hasCamps = CampSessionService.hasCampsForBranch(branchId);
+        var targetName = MasterProformaService.cleanBrandToFormula((medMap['name'] ?? medMap['formula'] ?? '').toString().toLowerCase().trim());
+        var targetFormula = MasterProformaService.cleanBrandToFormula((medMap['formula'] ?? medMap['name'] ?? '').toString().toLowerCase().trim());
+        var targetType = (medMap['type'] ?? medMap['dosageForm'] ?? '').toString().toLowerCase().trim();
+        var targetDose = (medMap['dose'] ?? medMap['dosage'] ?? '').toString().toLowerCase().trim();
+        final targetId = rawMedicineId.toLowerCase();
 
-          for (final key in stockBox.keys) {
-            final val = stockBox.get(key);
-            if (val is Map) {
-              final vName = MasterProformaService.cleanBrandToFormula((val['name'] ?? val['formula'] ?? '').toString().toLowerCase().trim());
-              final vType = (val['type'] ?? val['dosageForm'] ?? '').toString().toLowerCase().trim();
-
-              bool campMatch = true;
-              if (hasCamps && activeCamp.isNotEmpty && activeCamp != 'all') {
-                campMatch = CampSessionService.matchesCamp(
-                  selectedCamp: activeCamp,
-                  dispensaryId: val['dispensaryId']?.toString(),
-                  campId: val['campId']?.toString(),
-                  serial: (val['barcode'] ?? val['code'] ?? val['id'])?.toString(),
-                );
-              }
-
-              if (campMatch && (vName == mName || (vName.isNotEmpty && mName.isNotEmpty && (vName.contains(mName) || mName.contains(vName)))) &&
-                  (vType.isEmpty || mType.isEmpty || vType == mType)) {
-                existing = val;
-                keyUsed = key.toString();
-                // Update medicineId for Firestore deduction to match the correct ID
-                medicineId = (val['id'] ?? val['medicineId'] ?? val['docId'] ?? medicineId).toString();
-                break;
-              }
+        // Seed canonical attributes from raw medicine ID if available in stockBox
+        if (rawMedicineId.isNotEmpty) {
+          final refItem = stockBox.get('stock:$rawMedicineId') ?? stockBox.get(rawMedicineId);
+          if (refItem is Map) {
+            if (targetName.isEmpty) {
+              targetName = MasterProformaService.cleanBrandToFormula((refItem['name'] ?? refItem['formula'] ?? '').toString().toLowerCase().trim());
+            }
+            if (targetFormula.isEmpty) {
+              targetFormula = MasterProformaService.cleanBrandToFormula((refItem['formula'] ?? refItem['name'] ?? '').toString().toLowerCase().trim());
+            }
+            if (targetType.isEmpty) {
+              targetType = (refItem['type'] ?? refItem['dosageForm'] ?? refItem['form'] ?? '').toString().toLowerCase().trim();
+            }
+            if (targetDose.isEmpty) {
+              targetDose = (refItem['dose'] ?? refItem['dosage'] ?? '').toString().toLowerCase().trim();
             }
           }
         }
-        if (existing is Map) {
-          final updated = Map<String, dynamic>.from(existing);
-          final q = updated['quantity'];
-          final current = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
-          updated['quantity'] = (current - qtyNum).clamp(0.0, double.infinity);
-          stockBox.put(keyUsed, updated);
-          debugPrint('[PatientForm] Hive stock $medicineId: $current → ${updated['quantity']}');
+
+        // Find all matching batches for this medicine in this camp
+        final hasCamps = CampSessionService.hasCampsForBranch(branchId);
+        final List<Map<String, dynamic>> matchingBatches = [];
+
+        for (final key in stockBox.keys) {
+          final val = stockBox.get(key);
+          if (val is! Map) continue;
+          final vMap = Map<String, dynamic>.from(val);
+          final vKey = key.toString();
+          vMap['_hiveKey'] = vKey;
+
+          if (hasCamps && activeCamp.isNotEmpty && activeCamp != 'all') {
+            final campMatch = CampSessionService.matchesCamp(
+              selectedCamp: activeCamp,
+              dispensaryId: vMap['dispensaryId']?.toString(),
+              campId: vMap['campId']?.toString(),
+              serial: (vMap['barcode'] ?? vMap['code'] ?? vMap['id'])?.toString(),
+            );
+            if (!campMatch) continue;
+          }
+
+          final vId = (vMap['id'] ?? vMap['medicineId'] ?? vMap['docId'] ?? '').toString().trim().toLowerCase();
+          final vName = MasterProformaService.cleanBrandToFormula((vMap['name'] ?? vMap['formula'] ?? '').toString().toLowerCase().trim());
+          final vFormula = MasterProformaService.cleanBrandToFormula((vMap['formula'] ?? vMap['name'] ?? '').toString().toLowerCase().trim());
+          final vType = (vMap['type'] ?? vMap['dosageForm'] ?? vMap['form'] ?? '').toString().toLowerCase().trim();
+          final vDose = (vMap['dose'] ?? vMap['dosage'] ?? '').toString().toLowerCase().trim();
+
+          bool isMatch = false;
+          if (targetId.isNotEmpty && (vId == targetId || vKey == 'stock:$targetId' || vKey == targetId)) {
+            isMatch = true;
+          } else if (targetName.isNotEmpty &&
+              (vName == targetName || (vFormula.isNotEmpty && vFormula == targetFormula) ||
+               vName.contains(targetName) || targetName.contains(vName))) {
+            final typeMatch = targetType.isEmpty || vType.isEmpty || vType == targetType ||
+                (targetType.contains('tab') && vType.contains('tab')) ||
+                (targetType.contains('cap') && vType.contains('cap')) ||
+                (targetType.contains('syp') && vType.contains('syp')) ||
+                (targetType.contains('inj') && vType.contains('inj'));
+            final doseMatch = targetDose.isEmpty || vDose.isEmpty || vDose == targetDose;
+            if (typeMatch && doseMatch) {
+              isMatch = true;
+            }
+          }
+
+          if (isMatch) {
+            matchingBatches.add(vMap);
+          }
+        }
+
+        // Branch-wide fallback if camp-partitioned inventory had no matching batch
+        if (matchingBatches.isEmpty && hasCamps && activeCamp.isNotEmpty && activeCamp != 'all') {
+          for (final key in stockBox.keys) {
+            final val = stockBox.get(key);
+            if (val is! Map) continue;
+            final vMap = Map<String, dynamic>.from(val);
+            final vKey = key.toString();
+            vMap['_hiveKey'] = vKey;
+
+            final b = (vMap['branchId'] ?? '').toString().toLowerCase().trim();
+            final normB = branchId.toLowerCase().trim();
+            if (b.isNotEmpty && normB.isNotEmpty && b != normB && !b.contains(normB) && !normB.contains(b)) {
+              continue;
+            }
+
+            final vId = (vMap['id'] ?? vMap['medicineId'] ?? vMap['docId'] ?? '').toString().trim().toLowerCase();
+            final vName = MasterProformaService.cleanBrandToFormula((vMap['name'] ?? vMap['formula'] ?? '').toString().toLowerCase().trim());
+            final vFormula = MasterProformaService.cleanBrandToFormula((vMap['formula'] ?? vMap['name'] ?? '').toString().toLowerCase().trim());
+            final vType = (vMap['type'] ?? vMap['dosageForm'] ?? vMap['form'] ?? '').toString().toLowerCase().trim();
+            final vDose = (vMap['dose'] ?? vMap['dosage'] ?? '').toString().toLowerCase().trim();
+
+            bool isMatch = false;
+            if (targetId.isNotEmpty && (vId == targetId || vKey == 'stock:$targetId' || vKey == targetId)) {
+              isMatch = true;
+            } else if (targetName.isNotEmpty &&
+                (vName == targetName || (vFormula.isNotEmpty && vFormula == targetFormula) ||
+                 vName.contains(targetName) || targetName.contains(vName))) {
+              final typeMatch = targetType.isEmpty || vType.isEmpty || vType == targetType ||
+                  (targetType.contains('tab') && vType.contains('tab')) ||
+                  (targetType.contains('cap') && vType.contains('cap')) ||
+                  (targetType.contains('syp') && vType.contains('syp')) ||
+                  (targetType.contains('inj') && vType.contains('inj'));
+              final doseMatch = targetDose.isEmpty || vDose.isEmpty || vDose == targetDose;
+              if (typeMatch && doseMatch) {
+                isMatch = true;
+              }
+            }
+            if (isMatch) {
+              matchingBatches.add(vMap);
+            }
+          }
+        }
+
+        // Sort matching batches by expiry date ascending (FEFO: earliest first)
+        matchingBatches.sort((a, b) {
+          final expA = MasterProformaService.parseExpiryDate(a['expiryDate'] ?? a['expiry'], (a['id'] ?? a['medicineId'])?.toString());
+          final expB = MasterProformaService.parseExpiryDate(b['expiryDate'] ?? b['expiry'], (b['id'] ?? b['medicineId'])?.toString());
+          return expA.compareTo(expB);
+        });
+
+        double remainingToDeduct = qtyNum;
+        final List<Map<String, dynamic>> medDeductions = [];
+
+        // Deduct from earlier expiry batches first
+        for (final batch in matchingBatches) {
+          if (remainingToDeduct <= 0) break;
+          final q = batch['quantity'];
+          final currentQty = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
+          if (currentQty <= 0) continue; // Batch is already 0, move to next batch
+
+          final deductFromBatch = remainingToDeduct <= currentQty ? remainingToDeduct : currentQty;
+          final newQty = currentQty - deductFromBatch;
+          remainingToDeduct -= deductFromBatch;
+
+          final updated = Map<String, dynamic>.from(batch);
+          updated['quantity'] = newQty;
+          final hiveKey = batch['_hiveKey'];
+          updated.remove('_hiveKey');
+          stockBox.put(hiveKey, updated);
+
+          final bId = (batch['id'] ?? batch['medicineId'] ?? batch['docId'] ?? hiveKey).toString();
+          final dedInfo = {
+            'medicineId': bId,
+            'name': batch['name'] ?? medMap['name'],
+            'delta': -deductFromBatch,
+            'expiryDate': batch['expiryDate'],
+          };
+          medDeductions.add(dedInfo);
+          allDeductedBatches.add(dedInfo);
+
+          debugPrint('[PatientForm] FEFO deducted $deductFromBatch from $bId (expiry: ${batch['expiryDate']}). Remaining in batch: $newQty');
+        }
+
+        // If stock was insufficient across all non-zero batches, deduct any remaining
+        // from the first batch (or primary match) so it is accounted for
+        if (remainingToDeduct > 0 && matchingBatches.isNotEmpty) {
+          final primary = matchingBatches.first;
+          final hiveKey = primary['_hiveKey'];
+          final existingPrimary = stockBox.get(hiveKey);
+          if (existingPrimary is Map) {
+            final updated = Map<String, dynamic>.from(existingPrimary);
+            final cur = (updated['quantity'] as num?)?.toDouble() ?? 0.0;
+            updated['quantity'] = (cur - remainingToDeduct).clamp(0.0, double.infinity);
+            updated.remove('_hiveKey');
+            stockBox.put(hiveKey, updated);
+
+            final bId = (primary['id'] ?? primary['medicineId'] ?? primary['docId'] ?? hiveKey).toString();
+            final dedInfo = {
+              'medicineId': bId,
+              'name': primary['name'] ?? medMap['name'],
+              'delta': -remainingToDeduct,
+              'expiryDate': primary['expiryDate'],
+            };
+            medDeductions.add(dedInfo);
+            allDeductedBatches.add(dedInfo);
+          }
+        } else if (matchingBatches.isEmpty && rawMedicineId.isNotEmpty) {
+          // Fallback if no matching batch found by name/attributes
+          final fallbackKey = stockBox.containsKey('stock:$rawMedicineId') ? 'stock:$rawMedicineId' : rawMedicineId;
+          final existing = stockBox.get(fallbackKey);
+          if (existing is Map) {
+            final updated = Map<String, dynamic>.from(existing);
+            final cur = (updated['quantity'] as num?)?.toDouble() ?? 0.0;
+            updated['quantity'] = (cur - qtyNum).clamp(0.0, double.infinity);
+            stockBox.put(fallbackKey, updated);
+          }
+          final dedInfo = {
+            'medicineId': rawMedicineId,
+            'name': medMap['name'],
+            'delta': -qtyNum,
+          };
+          medDeductions.add(dedInfo);
+          allDeductedBatches.add(dedInfo);
+        }
+
+        // Enqueue offline sync for each affected batch if LAN is not connected
+        if (!RealtimeManager().isConnected) {
+          for (final ded in medDeductions) {
+            LocalStorageService.enqueueSync({
+              'type': 'update_inventory',
+              'branchId': branchId,
+              'medicineId': ded['medicineId'],
+              'inventoryId': ded['medicineId'],
+              'delta': ded['delta'],
+              'campId': patientCampId,
+              'dispensaryId': patientCampId,
+              'serial': patientSerial,
+            });
+          }
         }
       } catch (e) {
-        debugPrint('[PatientForm] Hive stock decrement failed $medicineId: $e');
+        debugPrint('[PatientForm] Hive stock decrement failed $rawMedicineId: $e');
       }
-      // Fire and forget Firestore update so it doesn't block UI loop
-      final patientSerial = widget.queueEntry['serial']?.toString() ?? widget.queueEntry['id']?.toString();
-      final patientCampId = widget.queueEntry['campId']?.toString() ?? widget.queueEntry['dispensaryId']?.toString() ?? CampSessionService.getActiveCamp();
-
-      // If LAN server is connected, ServerSyncManager handles inventory deduction via WebSocket broadcast
-      if (RealtimeManager().isConnected) {
-        debugPrint('[PatientForm] LAN connected — server handles cloud inventory deduction for $medicineId');
-        continue;
-      }
-
-      // Enqueue sync for background processing without UI lag
-      LocalStorageService.enqueueSync({
-        'type': 'update_inventory',
-        'branchId': branchId,
-        'medicineId': medicineId,
-        'inventoryId': medicineId,
-        'delta': -qtyNum,
-        'campId': patientCampId,
-        'dispensaryId': patientCampId,
-        'serial': patientSerial,
-      });
-
     }
+
+    return allDeductedBatches;
   }
 
   List<Map<String, dynamic>> _getAvailableSyringeStockItems() {
@@ -675,7 +814,7 @@ class _PatientFormState extends State<PatientForm> {
         CampSessionService.getActiveCamp(widget.branchId);
 
     if (activeCamp == null || activeCamp.isEmpty || activeCamp == 'all') {
-      activeCamp = CampSessionService.getActiveCamp(widget.branchId) ?? 'haji_camp';
+      activeCamp = CampSessionService.getActiveCamp(widget.branchId) ?? '';
     }
 
     for (final key in stockBox.keys) {
@@ -689,18 +828,16 @@ class _PatientFormState extends State<PatientForm> {
           continue;
         }
 
-        // Strict Camp isolation
-        if (CampSessionService.hasCampsForBranch(widget.branchId)) {
-          if (activeCamp.isNotEmpty && activeCamp != 'all') {
-            final matches = CampSessionService.matchesCamp(
-              selectedCamp: activeCamp,
-              dispensaryId: m['dispensaryId']?.toString(),
-              campId: m['campId']?.toString(),
-              dispensaryTag: m['dispensaryTag']?.toString(),
-              serial: (m['barcode'] ?? m['code'] ?? m['id'] ?? key)?.toString(),
-            );
-            if (!matches) continue;
-          }
+        // Strict Camp isolation only if a specific camp is active
+        if (CampSessionService.hasCampsForBranch(widget.branchId) && activeCamp.isNotEmpty && activeCamp != 'all') {
+          final matches = CampSessionService.matchesCamp(
+            selectedCamp: activeCamp,
+            dispensaryId: m['dispensaryId']?.toString(),
+            campId: m['campId']?.toString(),
+            dispensaryTag: m['dispensaryTag']?.toString(),
+            serial: (m['barcode'] ?? m['code'] ?? m['id'] ?? key)?.toString(),
+          );
+          if (!matches) continue;
         }
 
         final type = (m['type'] ?? m['dosageForm'] ?? '').toString().toLowerCase();
@@ -807,35 +944,18 @@ class _PatientFormState extends State<PatientForm> {
 
           final rawSyringeId = (syringeMap['id'] ?? syringeMap['medicineId'] ?? syringeKey.replaceFirst('stock:', '')).toString();
           Future<void> updateSyringeFirestore() async {
-            try {
-              final conn = await Connectivity().checkConnectivity();
-              final online = !conn.contains(ConnectivityResult.none);
-              if (online) {
-                final docRef = FirebaseFirestore.instance
-                    .collection('branches').doc(branchId)
-                    .collection(invCol).doc(rawSyringeId);
-                await FirebaseFirestore.instance.runTransaction((transaction) async {
-                  final snapshot = await transaction.get(docRef);
-                  if (snapshot.exists) {
-                    final sq = snapshot.data()?['quantity'] ?? snapshot.data()?['stock'];
-                    final scurrent = sq is num ? sq.toDouble() : double.tryParse(sq?.toString() ?? '') ?? 0.0;
-                    final updated = (scurrent - totalSyringesToDeduct).clamp(0.0, double.infinity);
-                    transaction.update(docRef, {'quantity': updated, 'stock': updated});
-                  }
-                });
-                debugPrint('[PatientForm] ✅ Auto-deducted $totalSyringesToDeduct Syringe ($rawSyringeId) in Firestore $invCol');
-                return;
-              }
-            } catch (e) {
-              debugPrint('[PatientForm] Auto-deducted syringe Firestore update failed: $e');
+            // If connected to LAN, the server handles atomic inventory deduction.
+            // If not connected to LAN, enqueue to sync queue for zero-read FieldValue.increment.
+            if (!RealtimeManager().isConnected) {
+              await LocalStorageService.enqueueSync({
+                'type': 'update_inventory',
+                'branchId': branchId,
+                'inventoryId': rawSyringeId,
+                'delta': -totalSyringesToDeduct,
+                'campId': patientCampId,
+                'serial': patientSerial,
+              });
             }
-            // If offline or failed, enqueue sync
-            await LocalStorageService.enqueueSync({
-              'type': 'update_inventory', 'branchId': branchId,
-              'inventoryId': rawSyringeId, 'delta': -totalSyringesToDeduct,
-              'campId': patientCampId,
-              'serial': patientSerial,
-            });
           }
           updateSyringeFirestore();
         } else {
@@ -916,34 +1036,18 @@ class _PatientFormState extends State<PatientForm> {
           
           final rawNeedleId = needleKey.replaceFirst('stock:', '');
           Future<void> updateNeedleFirestore() async {
-            try {
-              final conn = await Connectivity().checkConnectivity();
-              final online = !conn.contains(ConnectivityResult.none);
-              if (online) {
-                final docRef = FirebaseFirestore.instance
-                    .collection('branches').doc(branchId)
-                    .collection(invCol).doc(rawNeedleId);
-                await FirebaseFirestore.instance.runTransaction((transaction) async {
-                  final snapshot = await transaction.get(docRef);
-                  if (snapshot.exists) {
-                    final q = snapshot.data()?['quantity'];
-                    final current = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
-                    final updated = (current - totalNeedlesToDeduct).clamp(0.0, double.infinity);
-                    transaction.update(docRef, {'quantity': updated});
-                  }
-                });
-                debugPrint('[PatientForm] ✅ Auto-deducted $totalNeedlesToDeduct Needle ($rawNeedleId) in Firestore');
-                return;
-              }
-            } catch (e) {
-              debugPrint('[PatientForm] Auto-deducted needle Firestore update failed: $e');
+            // If connected to LAN, the server handles atomic inventory deduction.
+            // If not connected to LAN, enqueue to sync queue for zero-read FieldValue.increment.
+            if (!RealtimeManager().isConnected) {
+              await LocalStorageService.enqueueSync({
+                'type': 'update_inventory',
+                'branchId': branchId,
+                'inventoryId': rawNeedleId,
+                'delta': -totalNeedlesToDeduct,
+                'campId': patientCampId,
+                'serial': patientSerial,
+              });
             }
-            await LocalStorageService.enqueueSync({
-              'type': 'update_inventory', 'branchId': branchId,
-              'inventoryId': rawNeedleId, 'delta': -totalNeedlesToDeduct,
-              'campId': patientCampId,
-              'serial': patientSerial,
-            });
           }
           updateNeedleFirestore();
         } else {
@@ -966,20 +1070,27 @@ class _PatientFormState extends State<PatientForm> {
             (m['inventoryId'] != null || m['medicineId'] != null || m['id'] != null))
         .toList();
 
-    // Check stock levels first
+    // Check stock levels across all matching batches
     final stockBox = Hive.box(LocalStorageService.stockBox);
     final List<String> insufficientMeds = [];
+    final hasCamps = CampSessionService.hasCampsForBranch(widget.branchId);
+    final normBranch = widget.branchId.toLowerCase().trim();
+    final patientCamp = widget.queueEntry['campId']?.toString() ??
+        widget.queueEntry['dispensaryId']?.toString() ??
+        _data['campId']?.toString() ??
+        _data['dispensaryId']?.toString() ??
+        CampSessionService.getActiveCamp(widget.branchId) ?? '';
 
     for (final med in medicines) {
       if (med is! Map) continue;
       final medMap = Map<String, dynamic>.from(med);
-      final medicineId = (medMap['inventoryId'] ??
+      final rawMedicineId = (medMap['inventoryId'] ??
               medMap['medicineId'] ?? medMap['id'] ?? '').toString().trim();
       final perDayRaw = medMap['quantity'] ?? medMap['qty'] ?? 0;
       final perDay = perDayRaw is num
           ? perDayRaw.toDouble()
           : double.tryParse(perDayRaw.toString()) ?? 0.0;
-      if (medicineId.isEmpty || perDay <= 0) continue;
+      if (rawMedicineId.isEmpty || perDay <= 0) continue;
       
       final isSyrup = _isSyrupType(medMap['type']?.toString(), medMap['name']?.toString());
       final multiplier = isSyrup
@@ -987,29 +1098,152 @@ class _PatientFormState extends State<PatientForm> {
           : (_isInjectableType(medMap['type']?.toString()) ? 1.0 : days.toDouble());
       final qtyNum = isSyrup ? 1.0 : perDay * multiplier;
 
-      var existing = stockBox.get('stock:$medicineId');
-      if (existing == null) {
-        existing = stockBox.get(medicineId);
-      }
-      // Name fallback
-      if (existing == null) {
-        for (final val in stockBox.values) {
-          if (val is Map && (val['name']?.toString().toLowerCase().trim() == medMap['name']?.toString().toLowerCase().trim())) {
-            existing = val;
-            break;
+      var targetName = MasterProformaService.cleanBrandToFormula((medMap['name'] ?? medMap['formula'] ?? '').toString().toLowerCase().trim());
+      var targetFormula = MasterProformaService.cleanBrandToFormula((medMap['formula'] ?? medMap['name'] ?? '').toString().toLowerCase().trim());
+      var targetType = (medMap['type'] ?? medMap['dosageForm'] ?? '').toString().toLowerCase().trim();
+      var targetDose = (medMap['dose'] ?? medMap['dosage'] ?? '').toString().toLowerCase().trim();
+      final targetId = rawMedicineId.toLowerCase();
+
+      // Seed canonical attributes from raw medicine ID if available in stockBox
+      if (rawMedicineId.isNotEmpty) {
+        final refItem = stockBox.get('stock:$rawMedicineId') ?? stockBox.get(rawMedicineId);
+        if (refItem is Map) {
+          if (targetName.isEmpty) {
+            targetName = MasterProformaService.cleanBrandToFormula((refItem['name'] ?? refItem['formula'] ?? '').toString().toLowerCase().trim());
+          }
+          if (targetFormula.isEmpty) {
+            targetFormula = MasterProformaService.cleanBrandToFormula((refItem['formula'] ?? refItem['name'] ?? '').toString().toLowerCase().trim());
+          }
+          if (targetType.isEmpty) {
+            targetType = (refItem['type'] ?? refItem['dosageForm'] ?? refItem['form'] ?? '').toString().toLowerCase().trim();
+          }
+          if (targetDose.isEmpty) {
+            targetDose = (refItem['dose'] ?? refItem['dosage'] ?? '').toString().toLowerCase().trim();
           }
         }
       }
 
-      double currentStock = 0.0;
-      if (existing is Map) {
-        final q = existing['quantity'];
-        currentStock = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
+      double totalAvailableStock = 0.0;
+
+      for (final key in stockBox.keys) {
+        final val = stockBox.get(key);
+        if (val is! Map) continue;
+        final vMap = Map<String, dynamic>.from(val);
+        final vKey = key.toString();
+
+        // Branch filter
+        final b = (vMap['branchId'] ?? '').toString().toLowerCase().trim();
+        if (b.isNotEmpty && normBranch.isNotEmpty && b != normBranch && !b.contains(normBranch) && !normBranch.contains(b)) {
+          continue;
+        }
+
+        if (hasCamps && patientCamp.isNotEmpty && patientCamp != 'all') {
+          final campMatch = CampSessionService.matchesCamp(
+            selectedCamp: patientCamp,
+            dispensaryId: vMap['dispensaryId']?.toString(),
+            campId: vMap['campId']?.toString(),
+            serial: (vMap['barcode'] ?? vMap['code'] ?? vMap['id'])?.toString(),
+          );
+          if (!campMatch) continue;
+        }
+
+        final vId = (vMap['id'] ?? vMap['medicineId'] ?? vMap['docId'] ?? '').toString().trim().toLowerCase();
+        final vName = MasterProformaService.cleanBrandToFormula((vMap['name'] ?? vMap['formula'] ?? '').toString().toLowerCase().trim());
+        final vFormula = MasterProformaService.cleanBrandToFormula((vMap['formula'] ?? vMap['name'] ?? '').toString().toLowerCase().trim());
+        final vType = (vMap['type'] ?? vMap['dosageForm'] ?? vMap['form'] ?? '').toString().toLowerCase().trim();
+        final vDose = (vMap['dose'] ?? vMap['dosage'] ?? '').toString().toLowerCase().trim();
+
+        bool isMatch = false;
+        if (targetId.isNotEmpty && (vId == targetId || vKey == 'stock:$targetId' || vKey == targetId)) {
+          isMatch = true;
+        } else if (targetName.isNotEmpty &&
+            (vName == targetName || (vFormula.isNotEmpty && vFormula == targetFormula) ||
+             vName.contains(targetName) || targetName.contains(vName))) {
+          final typeMatch = targetType.isEmpty || vType.isEmpty || vType == targetType ||
+              (targetType.contains('tab') && vType.contains('tab')) ||
+              (targetType.contains('cap') && vType.contains('cap')) ||
+              (targetType.contains('syp') && vType.contains('syp')) ||
+              (targetType.contains('inj') && vType.contains('inj'));
+          final doseMatch = targetDose.isEmpty || vDose.isEmpty || vDose == targetDose;
+          if (typeMatch && doseMatch) {
+            isMatch = true;
+          }
+        }
+
+        if (isMatch) {
+          final q = vMap['quantity'] ?? vMap['stock'];
+          final currentQty = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
+          if (currentQty > 0) {
+            totalAvailableStock += currentQty;
+          }
+        }
       }
 
-      if (currentStock < qtyNum) {
-        final medName = medMap['name'] ?? 'Unknown Medicine';
-        insufficientMeds.add('$medName (Required: ${qtyNum.toInt()}, Stock: ${currentStock.toInt()})');
+      // Branch-wide fallback if camp-partitioned inventory check was insufficient
+      if (totalAvailableStock < qtyNum && hasCamps && patientCamp.isNotEmpty && patientCamp != 'all') {
+        double branchAvailableStock = 0.0;
+        for (final key in stockBox.keys) {
+          final val = stockBox.get(key);
+          if (val is! Map) continue;
+          final vMap = Map<String, dynamic>.from(val);
+          final vKey = key.toString();
+
+          final b = (vMap['branchId'] ?? '').toString().toLowerCase().trim();
+          if (b.isNotEmpty && normBranch.isNotEmpty && b != normBranch && !b.contains(normBranch) && !normBranch.contains(b)) {
+            continue;
+          }
+
+          final vId = (vMap['id'] ?? vMap['medicineId'] ?? vMap['docId'] ?? '').toString().trim().toLowerCase();
+          final vName = MasterProformaService.cleanBrandToFormula((vMap['name'] ?? vMap['formula'] ?? '').toString().toLowerCase().trim());
+          final vFormula = MasterProformaService.cleanBrandToFormula((vMap['formula'] ?? vMap['name'] ?? '').toString().toLowerCase().trim());
+          final vType = (vMap['type'] ?? vMap['dosageForm'] ?? vMap['form'] ?? '').toString().toLowerCase().trim();
+          final vDose = (vMap['dose'] ?? vMap['dosage'] ?? '').toString().toLowerCase().trim();
+
+          bool isMatch = false;
+          if (targetId.isNotEmpty && (vId == targetId || vKey == 'stock:$targetId' || vKey == targetId)) {
+            isMatch = true;
+          } else if (targetName.isNotEmpty &&
+              (vName == targetName || (vFormula.isNotEmpty && vFormula == targetFormula) ||
+               vName.contains(targetName) || targetName.contains(vName))) {
+            final typeMatch = targetType.isEmpty || vType.isEmpty || vType == targetType ||
+                (targetType.contains('tab') && vType.contains('tab')) ||
+                (targetType.contains('cap') && vType.contains('cap')) ||
+                (targetType.contains('syp') && vType.contains('syp')) ||
+                (targetType.contains('inj') && vType.contains('inj'));
+            final doseMatch = targetDose.isEmpty || vDose.isEmpty || vDose == targetDose;
+            if (typeMatch && doseMatch) {
+              isMatch = true;
+            }
+          }
+
+          if (isMatch) {
+            final q = vMap['quantity'] ?? vMap['stock'];
+            final currentQty = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
+            if (currentQty > 0) {
+              branchAvailableStock += currentQty;
+            }
+          }
+        }
+        if (branchAvailableStock > totalAvailableStock) {
+          totalAvailableStock = branchAvailableStock;
+        }
+      }
+
+      // Direct ID fallback (e.g. stock:medId or medId)
+      if (totalAvailableStock < qtyNum && rawMedicineId.isNotEmpty) {
+        final directItem = stockBox.get('stock:$rawMedicineId') ?? stockBox.get(rawMedicineId);
+        if (directItem is Map) {
+          final q = directItem['quantity'] ?? directItem['stock'];
+          final directQty = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
+          if (directQty > totalAvailableStock) {
+            totalAvailableStock = directQty;
+          }
+        }
+      }
+
+      if (totalAvailableStock < qtyNum) {
+        final medName = (medMap['name'] ?? (targetName.isNotEmpty ? targetName : 'Unknown Medicine')).toString();
+        insufficientMeds.add('$medName (Required: ${qtyNum.toInt()}, Available: ${totalAvailableStock.toInt()})');
       }
     }
 
@@ -1018,28 +1252,18 @@ class _PatientFormState extends State<PatientForm> {
 
     if (totalSyringesToDeduct > 0.0) {
       final availableSyringes = _getAvailableSyringeStockItems();
-      if (availableSyringes.isEmpty) {
-        insufficientMeds.add('Syringe (Required: ${totalSyringesToDeduct.toInt()}, Stock: 0)');
+      double totalAvailableSyringes = 0.0;
+      for (final s in availableSyringes) {
+        final q = s['quantity'] ?? s['stock'] ?? 0;
+        final sQty = q is num ? q.toDouble() : double.tryParse(q.toString()) ?? 0.0;
+        if (sQty > 0) totalAvailableSyringes += sQty;
+      }
+
+      if (totalAvailableSyringes < totalSyringesToDeduct) {
+        insufficientMeds.add('Syringe (Required: ${totalSyringesToDeduct.toInt()}, Available: ${totalAvailableSyringes.toInt()})');
       } else {
-        if (_selectedSyringeHiveKey == null) {
+        if (_selectedSyringeHiveKey == null && availableSyringes.isNotEmpty) {
           _selectedSyringeHiveKey = availableSyringes.first['hiveKey'];
-        }
-        Map<String, dynamic>? syringeMap;
-        if (_selectedSyringeHiveKey != null) {
-          final val = stockBox.get(_selectedSyringeHiveKey);
-          if (val is Map) {
-            syringeMap = Map<String, dynamic>.from(val);
-          }
-        }
-        syringeMap ??= availableSyringes.first;
-
-        final q = syringeMap['quantity'] ?? syringeMap['stock'] ?? 0;
-        final currentSyringes = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
-
-        if (currentSyringes < totalSyringesToDeduct) {
-          final label = _formatSyringeLabel(syringeMap);
-          final name = syringeMap['name'] ?? 'Syringe $label';
-          insufficientMeds.add('$name (Required: ${totalSyringesToDeduct.toInt()}, Stock: ${currentSyringes.toInt()})');
         }
       }
     }
@@ -1146,48 +1370,34 @@ class _PatientFormState extends State<PatientForm> {
     if (confirm != true || !mounted) return;
     setState(() => _isDispensing = true);
     try {
-      final serial = _resolvedSerial;
-      if (serial.isEmpty) throw Exception(
+      final rawSerial = _resolvedSerial;
+      if (rawSerial.isEmpty) throw Exception(
           'Missing serial — queueEntry keys: ${widget.queueEntry.keys.toList()}');
+      final normBranch = widget.branchId.trim().toLowerCase();
+      var cleanSerial = rawSerial.trim();
+      if (cleanSerial.toLowerCase().startsWith('$normBranch-')) {
+        cleanSerial = cleanSerial.substring(normBranch.length + 1).trim();
+      }
+      final normSerial = cleanSerial.toUpperCase();
+      final canonicalKey = '$normBranch-$normSerial';
+      final serial = normSerial;
+
       final queueType = _resolvedQueueType;
       final now = DateTime.now();
       final dateKey = DateFormat('ddMMyy').format(now);
       final nowIso = now.toIso8601String();
       final dispenserName = widget.dispenserName ?? 'Unknown Dispenser';
-      final doctorName = _firstNonEmpty([
-        _data['doctorName'], _data['prescribedBy'], _data['updatedBy'],
-        widget.queueEntry['doctorName'], 'Unknown',
-      ]);
-      final tokenBy = _firstNonEmpty([
-        widget.queueEntry['createdByName'], widget.queueEntry['tokenBy'],
-        widget.queueEntry['createdBy'], 'Unknown',
-      ]);
-      final minimalUpdate = {
-        'dispenseStatus': 'dispensed',
-        'status': 'completed',
-        'dispensedAt': nowIso,
-        'dispensedBy': dispenserName,
-        'dispenserName': dispenserName,
-        'serial': serial,
-        'dateKey': dateKey,
-        'queueType': queueType,
-        'branchId': widget.branchId,
-        'daysOfMedicine': days,
-      };
 
       // 1. Update local entries box immediately (preserve existing patient & prescription data)
-      final normBranch = widget.branchId.trim().toLowerCase();
-      final normSerial = serial.trim().toUpperCase();
-      final canonicalKey = '$normBranch-$normSerial';
       final entriesBox = Hive.box(LocalStorageService.entriesBox);
 
       Map<String, dynamic>? existingEntry;
-      final direct = entriesBox.get(canonicalKey) ?? entriesBox.get('${widget.branchId}-$serial') ?? entriesBox.get(serial);
+      final direct = entriesBox.get(canonicalKey) ?? entriesBox.get('${widget.branchId}-$serial') ?? entriesBox.get(serial) ?? entriesBox.get(rawSerial);
       if (direct is Map) {
         existingEntry = Map<String, dynamic>.from(direct);
       } else {
         for (final k in entriesBox.keys) {
-          final kStr = k.toString();
+          final kStr = k.toString().trim();
           if (kStr.toUpperCase() == normSerial || kStr.toUpperCase().endsWith('-$normSerial')) {
             final val = entriesBox.get(k);
             if (val is Map) {
@@ -1198,37 +1408,79 @@ class _PatientFormState extends State<PatientForm> {
         }
       }
 
+      final doctorName = _firstNonEmpty([
+        existingEntry?['doctorName'], existingEntry?['prescribedBy'],
+        _data['doctorName'], _data['prescribedBy'], _data['updatedBy'],
+        widget.queueEntry['doctorName'], widget.queueEntry['prescribedBy'],
+        '',
+      ]);
+      final doctorId = _firstNonEmpty([
+        existingEntry?['doctorId'], existingEntry?['prescribedById'],
+        _data['doctorId'], _data['prescribedById'],
+        widget.queueEntry['doctorId'], widget.queueEntry['prescribedById'],
+        '',
+      ]);
+      final tokenBy = _firstNonEmpty([
+        existingEntry?['createdByName'], existingEntry?['receptionistName'],
+        existingEntry?['tokenBy'], existingEntry?['createdBy'],
+        widget.queueEntry['createdByName'], widget.queueEntry['receptionistName'],
+        widget.queueEntry['tokenBy'], widget.queueEntry['createdBy'],
+        _data['createdByName'], _data['tokenBy'],
+        '',
+      ]);
+      final createdBy = _firstNonEmpty([
+        existingEntry?['createdBy'], existingEntry?['receptionistId'],
+        existingEntry?['userId'], widget.queueEntry['createdBy'],
+        widget.queueEntry['receptionistId'], widget.queueEntry['userId'],
+        '',
+      ]);
+
+      final minimalUpdate = {
+        'dispenseStatus': 'dispensed',
+        'status': 'completed',
+        'dispensedAt': nowIso,
+        'dispensedBy': dispenserName,
+        'dispenserName': dispenserName,
+        'serial': normSerial,
+        'dateKey': dateKey,
+        'queueType': queueType,
+        'branchId': widget.branchId,
+        'daysOfMedicine': days,
+      };
+
       final fullEntry = <String, dynamic>{
         if (existingEntry != null) ...existingEntry,
         ...Map<String, dynamic>.from(widget.queueEntry),
         ...Map<String, dynamic>.from(_data),
         ...minimalUpdate,
-        'doctorName': doctorName,
-        'prescribedBy': doctorName,
-        'tokenBy': tokenBy,
-        'createdByName': tokenBy,
+        if (doctorName.isNotEmpty && doctorName != 'Unknown') 'doctorName': doctorName,
+        if (doctorName.isNotEmpty && doctorName != 'Unknown') 'prescribedBy': doctorName,
+        if (doctorId.isNotEmpty) 'doctorId': doctorId,
+        if (tokenBy.isNotEmpty && tokenBy != 'Unknown') 'tokenBy': tokenBy,
+        if (tokenBy.isNotEmpty && tokenBy != 'Unknown') 'createdByName': tokenBy,
+        if (createdBy.isNotEmpty) 'createdBy': createdBy,
       };
 
       await entriesBox.put(canonicalKey, fullEntry);
       // Clean up legacy non-canonical keys so duplicate records are not kept
-      if (entriesBox.containsKey(serial)) {
-        await entriesBox.delete(serial);
+      if (entriesBox.containsKey(rawSerial) && rawSerial != canonicalKey) {
+        await entriesBox.delete(rawSerial);
       }
-      if (entriesBox.containsKey(serial.toUpperCase())) {
-        await entriesBox.delete(serial.toUpperCase());
+      if (entriesBox.containsKey(normSerial) && normSerial != canonicalKey) {
+        await entriesBox.delete(normSerial);
       }
-      if (canonicalKey != '${widget.branchId}-$serial' && entriesBox.containsKey('${widget.branchId}-$serial')) {
-        await entriesBox.delete('${widget.branchId}-$serial');
+      if (canonicalKey != '${widget.branchId}-$rawSerial' && entriesBox.containsKey('${widget.branchId}-$rawSerial')) {
+        await entriesBox.delete('${widget.branchId}-$rawSerial');
       }
 
-      await LocalStorageService.updateDispenseStatus(widget.branchId, serial, 'dispensed');
+      await LocalStorageService.updateDispenseStatus(widget.branchId, normSerial, 'dispensed');
 
       // 2. Save dispensary record locally
       final dispensaryRecord = {
         ...Map<String, dynamic>.from(widget.queueEntry),
         ...Map<String, dynamic>.from(_data),
         'branchId': widget.branchId,
-        'serial': serial,
+        'serial': normSerial,
         'dateKey': dateKey,
         'date': dateKey,
         'queueType': queueType,
@@ -1239,15 +1491,17 @@ class _PatientFormState extends State<PatientForm> {
         'dispensedAt': nowIso,
         'dispensedBy': dispenserName,
         'dispenserName': dispenserName,
-        'doctorName': doctorName,
-        'prescribedBy': doctorName,
-        'tokenBy': tokenBy,
-        'createdByName': tokenBy,
+        'doctorName': doctorName.isNotEmpty ? doctorName : 'Unknown',
+        'prescribedBy': doctorName.isNotEmpty ? doctorName : 'Unknown',
+        'tokenBy': tokenBy.isNotEmpty ? tokenBy : 'Unknown',
+        'createdByName': tokenBy.isNotEmpty ? tokenBy : 'Unknown',
         'daysOfMedicine': days,
       };
       await LocalStorageService.saveLocalDispensaryRecord(dispensaryRecord);
 
-      final allPrescriptions = (_data['prescriptions'] as List?) ?? [];
+      final allPrescriptions = (_data['prescriptions'] as List?) ??
+          (_data['medicines'] as List?) ??
+          _getPrescriptionsList();
       final medicines = allPrescriptions
           .where((m) => m is Map &&
               (m['inventoryId'] != null || m['medicineId'] != null || m['id'] != null))
@@ -1272,21 +1526,38 @@ class _PatientFormState extends State<PatientForm> {
       // 4. Run inventory deduction, LAN broadcast & Firestore sync asynchronously in background
       unawaited(() async {
         try {
+          List<Map<String, dynamic>> deductedBatches = [];
           if (medicines.isNotEmpty) {
-            await _deductInventoryLocally(widget.branchId, serial, medicines, days);
+            deductedBatches = await _deductInventoryLocally(widget.branchId, normSerial, medicines, days);
           }
-          await _deductSyringeIfNeeded(widget.branchId, serial, allPrescriptions);
-          await _deductNeedleIfNeeded(widget.branchId, serial, allPrescriptions);
+          await _deductSyringeIfNeeded(widget.branchId, normSerial, allPrescriptions);
+          await _deductNeedleIfNeeded(widget.branchId, normSerial, allPrescriptions);
 
           try {
             RealtimeManager().sendMessage(RealtimeEvents.payload(
               type: 'dispense_completed',
               data: {
                 'branchId': widget.branchId,
-                'serial': serial,
+                'serial': normSerial,
                 'dateKey': dateKey,
                 ...minimalUpdate,
+                if (doctorName.isNotEmpty && doctorName != 'Unknown') 'doctorName': doctorName,
+                if (doctorId.isNotEmpty) 'doctorId': doctorId,
+                if (tokenBy.isNotEmpty && tokenBy != 'Unknown') 'createdByName': tokenBy,
+                if (tokenBy.isNotEmpty && tokenBy != 'Unknown') 'tokenBy': tokenBy,
+                if (createdBy.isNotEmpty) 'createdBy': createdBy,
+                if (fullEntry['patientName'] != null) 'patientName': fullEntry['patientName'],
+                if (fullEntry['name'] != null) 'name': fullEntry['name'],
+                if (fullEntry['patientCnic'] != null) 'patientCnic': fullEntry['patientCnic'],
+                if (fullEntry['cnic'] != null) 'cnic': fullEntry['cnic'],
+                if (fullEntry['guardianCnic'] != null) 'guardianCnic': fullEntry['guardianCnic'],
+                if (fullEntry['guardianName'] != null) 'guardianName': fullEntry['guardianName'],
+                if (fullEntry['campId'] != null) 'campId': fullEntry['campId'],
+                if (fullEntry['dispensaryId'] != null) 'dispensaryId': fullEntry['dispensaryId'],
+                if (fullEntry['dispensaryTag'] != null) 'dispensaryTag': fullEntry['dispensaryTag'],
+                if (fullEntry['session'] != null) 'session': fullEntry['session'],
                 if (medicines.isNotEmpty) 'medicines': medicines,
+                if (deductedBatches.isNotEmpty) 'deductedBatches': deductedBatches,
               },
             ));
           } catch (_) {}
@@ -1300,23 +1571,27 @@ class _PatientFormState extends State<PatientForm> {
             serial: upperSerial,
           );
 
-          try {
-            final branchRef = FirebaseFirestore.instance
-                .collection('branches').doc(widget.branchId);
-            await branchRef.collection('serials').doc(campDocKey)
-                .collection(queueType).doc(upperSerial)
-                .set(minimalUpdate, SetOptions(merge: true));
-          } catch (e) {
-            await LocalStorageService.enqueueSync({
-              'type': 'update_serial_status',
-              'branchId': widget.branchId,
-              'dateKey': dateKey,
-              'queueType': queueType,
-              'serial': upperSerial,
-              'data': minimalUpdate,
-            });
+          // Single-Writer Gateway: Only write directly to Firestore if NOT connected to LAN server.
+          // When connected, the LAN server handles cloud sync from the dispense_completed event.
+          if (!RealtimeManager().isConnected) {
+            try {
+              final branchRef = FirebaseFirestore.instance
+                  .collection('branches').doc(widget.branchId);
+              await branchRef.collection('serials').doc(campDocKey)
+                  .collection(queueType).doc(upperSerial)
+                  .set(minimalUpdate, SetOptions(merge: true));
+            } catch (e) {
+              await LocalStorageService.enqueueSync({
+                'type': 'update_serial_status',
+                'branchId': widget.branchId,
+                'dateKey': dateKey,
+                'queueType': queueType,
+                'serial': upperSerial,
+                'data': minimalUpdate,
+              });
+            }
+            SyncService().triggerUpload();
           }
-          SyncService().triggerUpload();
         } catch (e) {
           debugPrint('[PatientForm] Background async dispense sync error: $e');
         }
@@ -1359,6 +1634,49 @@ class _PatientFormState extends State<PatientForm> {
           ),
         ),
       ]),
+    );
+  }
+
+  Widget _buildMedTypeIconBadge(String? type, String? name, bool isDark) {
+    final t = (type ?? '').toLowerCase().trim();
+    final n = (name ?? '').toLowerCase().trim();
+
+    IconData icon;
+    Color color;
+    if (t.contains('cap') || n.startsWith('cap')) {
+      icon = FontAwesomeIcons.capsules;
+      color = const Color(0xFFF59E0B); // Amber / Orange
+    } else if (t.contains('inj') || t.contains('drip') || t.contains('infusion') || n.startsWith('inj')) {
+      icon = FontAwesomeIcons.syringe;
+      color = const Color(0xFFEF4444); // Crimson / Red
+    } else if (t.contains('syp') || t.contains('syrup') || t.contains('susp') || n.startsWith('syp')) {
+      icon = FontAwesomeIcons.bottleDroplet;
+      color = const Color(0xFF10B981); // Emerald Green
+    } else if (t.contains('drop') || n.startsWith('drop')) {
+      icon = FontAwesomeIcons.eyeDropper;
+      color = const Color(0xFF06B6D4); // Cyan
+    } else if (t.contains('cream') || t.contains('oint') || t.contains('gel')) {
+      icon = Icons.sanitizer_rounded;
+      color = const Color(0xFFEC4899); // Pink
+    } else if (t.contains('inhal') || t.contains('resp') || n.contains('inhal')) {
+      icon = FontAwesomeIcons.lungs;
+      color = const Color(0xFF8B5CF6); // Purple
+    } else if (t.contains('tab') || n.startsWith('tab')) {
+      icon = FontAwesomeIcons.tablets;
+      color = const Color(0xFF3B82F6); // Blue
+    } else {
+      icon = Icons.medication_rounded;
+      color = const Color(0xFF0D9488); // Teal
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(5.5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: isDark ? 0.22 : 0.12),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: isDark ? 0.45 : 0.28), width: 1),
+      ),
+      child: Icon(icon, size: 14, color: color),
     );
   }
 
@@ -1406,6 +1724,15 @@ class _PatientFormState extends State<PatientForm> {
         final totalQty = isSyrup ? 1 : (isInj ? perDayQty : perDayQty * days);
         
         final isDark = _isDark;
+        final fullUrdu = [
+          if (urduLine.isNotEmpty) urduLine,
+          if (mealUrdu.isNotEmpty) mealUrdu,
+        ].join('، ');
+
+        final qtyLabel = isSyrup
+            ? '1 Bottle'
+            : (isInj ? 'Single Dose · qty $perDayQty' : '$perDayQty/day · qty $totalQty');
+
         return Container(
           margin: const EdgeInsets.only(bottom: 10),
           padding: EdgeInsets.symmetric(
@@ -1413,124 +1740,86 @@ class _PatientFormState extends State<PatientForm> {
             vertical: isMobile ? 10 : 12,
           ),
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1E293B) : t.bgCardAlt.withValues(alpha: 0.35),
+            color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: isDark ? const Color(0xFF334155) : t.bgRule.withValues(alpha: 0.7)),
+            border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
           ),
-          child: Row(
+          child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                flex: 5,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Wrap(
-                      crossAxisAlignment: WrapCrossAlignment.center,
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Expanded(
+                    child: Row(
                       children: [
-                        Text(
-                          displayName,
-                          style: TextStyle(
-                            color: isDark ? Colors.white : t.textPrimary,
-                            fontWeight: FontWeight.w800,
-                            fontSize: isMobile ? 13.5 : 16,
-                          ),
-                        ),
-                        if (dose.isNotEmpty) ...[
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: isDark ? const Color(0xFF134E4A) : t.accent.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: isDark ? const Color(0xFF2DD4BF) : t.accent.withValues(alpha: 0.4)),
-                            ),
-                            child: Text(
-                              dose,
-                              style: TextStyle(
-                                color: isDark ? const Color(0xFF2DD4BF) : t.accent,
-                                fontSize: isMobile ? 10 : 11.5,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ],
-                    ),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                          decoration: BoxDecoration(
-                            color: isDark ? const Color(0xFF134E4A) : t.accent.withValues(alpha: 0.1),
-                            borderRadius: BorderRadius.circular(6),
-                          ),
-                          child: Text(
-                            isSyrup ? '1 Bottle' : (isInj ? 'Single Dose' : '$perDayQty/day'),
-                            style: TextStyle(
-                              color: isDark ? const Color(0xFF2DD4BF) : t.accent,
-                              fontSize: isMobile ? 10 : 11,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ),
+                        _buildMedTypeIconBadge(item['type']?.toString(), item['name']?.toString(), isDark),
                         const SizedBox(width: 8),
-                        if (!isInj)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                            decoration: BoxDecoration(
-                              color: isDark ? const Color(0xFF14532D) : t.zakat.withValues(alpha: 0.1),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Text(
-                              'Qty: $totalQty total',
+                        Expanded(
+                          child: RichText(
+                            text: TextSpan(
                               style: TextStyle(
-                                color: isDark ? const Color(0xFF4ADE80) : t.zakat,
-                                fontSize: isMobile ? 10 : 11,
-                                fontWeight: FontWeight.bold,
+                                fontFamily: 'Roboto',
+                                color: isDark ? Colors.white : t.textPrimary,
                               ),
+                              children: [
+                                TextSpan(
+                                  text: '$displayName ',
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.w800,
+                                    fontSize: isMobile ? 13.5 : 15,
+                                  ),
+                                ),
+                                if (dose.isNotEmpty)
+                                  TextSpan(
+                                    text: dose,
+                                    style: TextStyle(
+                                      fontWeight: FontWeight.w500,
+                                      fontSize: isMobile ? 12 : 13.5,
+                                      color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                    ),
+                                  ),
+                              ],
                             ),
                           ),
+                        ),
                       ],
                     ),
-                  ],
-                ),
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    qtyLabel,
+                    style: TextStyle(
+                      fontSize: isMobile ? 12 : 13.5,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                    ),
+                  ),
+                ],
               ),
-              Expanded(
-                flex: 5,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    if (urduLine.isNotEmpty)
-                      Text(
-                        urduLine,
-                        textAlign: TextAlign.right,
-                        textDirection: ui.TextDirection.rtl,
-                        style: TextStyle(
-                          fontFamily: 'Jameel Noori Nastaleeq',
-                          fontSize: isMobile ? 15 : 18,
-                          color: isDark ? const Color(0xFFE2E8F0) : t.textSecondary,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    if (mealUrdu.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(
-                          mealUrdu,
-                          textAlign: TextAlign.right,
-                          textDirection: ui.TextDirection.rtl,
-                          style: TextStyle(
-                            fontFamily: 'Jameel Noori Nastaleeq',
-                            fontSize: isMobile ? 13 : 15,
-                            color: isDark ? const Color(0xFF94A3B8) : t.textTertiary,
-                          ),
-                        ),
-                      ),
-                  ],
+              if (fullUrdu.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF14532D).withValues(alpha: 0.35) : const Color(0xFFDCFCE7),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: isDark ? const Color(0xFF166534) : const Color(0xFFBBF7D0)),
+                  ),
+                  child: Text(
+                    fullUrdu,
+                    textAlign: TextAlign.right,
+                    textDirection: ui.TextDirection.rtl,
+                    style: TextStyle(
+                      fontFamily: 'Jameel Noori Nastaleeq',
+                      fontSize: isMobile ? 15 : 17,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? const Color(0xFF86EFAC) : const Color(0xFF166534),
+                    ),
+                  ),
                 ),
-              ),
+              ],
             ],
           ),
         );
@@ -1538,11 +1827,16 @@ class _PatientFormState extends State<PatientForm> {
     );
   }
 
-  // ─── "Medicines for X days" banner ────────────────────────────────────────
-  Widget _buildDaysBanner(RoleThemeData t, {required bool isMobile}) {
+  // ─── Lab Tests & Duration Section (Side-by-Side Capsules) ───────────────────
+  Widget _buildLabAndDurationSection(
+    List labTests,
+    RoleThemeData t, {
+    required bool isMobile,
+  }) {
+    final isDark = _isDark;
     final prescribed = _daysOfMedicine;
-    final suggested  = _suggestedDays;
-    final queueType  = _resolvedQueueType;
+    final suggested = _suggestedDays;
+    final queueType = _resolvedQueueType;
 
     final prices = _isKarachi
         ? const {'zakat': 20, 'non-zakat': 20, 'gmwf': 0}
@@ -1550,62 +1844,81 @@ class _PatientFormState extends State<PatientForm> {
     final rate = prices[queueType] ?? 0;
 
     final refundDays = suggested - prescribed;
-    final extraDays  = prescribed - suggested;
-    final refundAmt  = refundDays > 0 ? refundDays * rate : 0;
-    final extraAmt   = extraDays > 0 ? extraDays * rate : 0;
+    final extraDays = prescribed - suggested;
+    final refundAmt = refundDays > 0 ? refundDays * rate : 0;
+    final extraAmt = extraDays > 0 ? extraDays * rate : 0;
 
-    return Column(
+    final isPhysio = _data['isPhysiotherapist'] == true ||
+        _data['isPhysiotherapy'] == true ||
+        _data['department']?.toString().toLowerCase().contains('physio') == true ||
+        _data['dpt']?.toString().toLowerCase().contains('physio') == true ||
+        labTests.any((item) {
+          final name = (item['name'] ?? '').toString().toLowerCase();
+          return name.contains('therapy') ||
+              name.contains('tens') ||
+              name.contains('traction') ||
+              name.contains('swd') ||
+              name.contains('exercise') ||
+              name.contains('diathermy') ||
+              name.contains('pack') ||
+              name.contains('massage') ||
+              name.contains('ultrasound');
+        });
+
+    final durationWidget = Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        Text(
+          'Medicine duration',
+          style: TextStyle(
+            fontSize: isMobile ? 13 : 15,
+            fontWeight: FontWeight.w700,
+            color: t.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 8),
         Container(
-          margin: EdgeInsets.only(bottom: isMobile ? 8 : 10),
-          padding: EdgeInsets.all(isMobile ? 12 : 16),
+          padding: EdgeInsets.symmetric(horizontal: isMobile ? 12 : 16, vertical: isMobile ? 10 : 12),
           decoration: BoxDecoration(
-            color: t.accent.withValues(alpha: 0.06),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: t.accent.withValues(alpha: 0.15)),
+            color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
           ),
           child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Icon(Icons.calendar_today, color: t.accent, size: isMobile ? 24 : 32),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Medicine Duration Summary',
-                      style: PatientFormHelper.robotoBold(size: isMobile ? 14 : 16, color: t.accent),
-                    ),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: [
-                        _dayPill('Paid: $suggested day${suggested > 1 ? 's' : ''}', t.textSecondary),
-                        const SizedBox(width: 8),
-                        _dayPill('Prescribed: $prescribed day${prescribed > 1 ? 's' : ''}', t.accent),
-                      ],
-                    ),
-                  ],
+              Text(
+                'Prescribed / paid',
+                style: TextStyle(
+                  fontSize: isMobile ? 12 : 13.5,
+                  fontWeight: FontWeight.w500,
+                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                ),
+              ),
+              Text(
+                '$prescribed / $suggested day${suggested > 1 ? 's' : ''}',
+                style: TextStyle(
+                  fontSize: isMobile ? 13 : 15,
+                  fontWeight: FontWeight.w800,
+                  color: t.textPrimary,
                 ),
               ),
             ],
           ),
         ),
-
-        // Refund Alert
-        if (refundAmt > 0)
+        if (refundAmt > 0) ...[
+          const SizedBox(height: 8),
           Container(
-            margin: EdgeInsets.only(bottom: isMobile ? 12 : 16),
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.orange.shade50,
+              color: isDark ? const Color(0xFF451A03) : Colors.orange.shade50,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.orange.shade300, width: 1.5),
+              border: Border.all(color: isDark ? const Color(0xFFD97706) : Colors.orange.shade300, width: 1.5),
             ),
             child: Row(
               children: [
-                Icon(Icons.payments_rounded, color: Colors.orange.shade900, size: 28),
-                const SizedBox(width: 12),
+                Icon(Icons.payments_rounded, color: isDark ? const Color(0xFFFBBF24) : Colors.orange.shade900, size: 24),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1613,14 +1926,14 @@ class _PatientFormState extends State<PatientForm> {
                       Text(
                         'REFUND REQUIRED: Rs. $refundAmt',
                         style: TextStyle(
-                          color: Colors.orange.shade900,
+                          color: isDark ? const Color(0xFFFBBF24) : Colors.orange.shade900,
                           fontWeight: FontWeight.bold,
-                          fontSize: isMobile ? 13 : 15,
+                          fontSize: isMobile ? 12 : 14,
                         ),
                       ),
                       Text(
-                        'Patient paid for $suggested days but got $prescribed days. Please return the extra amount.',
-                        style: TextStyle(color: Colors.orange.shade800, fontSize: 11),
+                        'Patient paid for $suggested days but got $prescribed days.',
+                        style: TextStyle(color: isDark ? const Color(0xFFFDE68A) : Colors.orange.shade800, fontSize: 11),
                       ),
                     ],
                   ),
@@ -1628,21 +1941,20 @@ class _PatientFormState extends State<PatientForm> {
               ],
             ),
           ),
-
-        // Extra Payment Alert
-        if (extraAmt > 0)
+        ],
+        if (extraAmt > 0) ...[
+          const SizedBox(height: 8),
           Container(
-            margin: EdgeInsets.only(bottom: isMobile ? 12 : 16),
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.red.shade50,
+              color: isDark ? const Color(0xFF450A0A) : Colors.red.shade50,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.red.shade300, width: 1.5),
+              border: Border.all(color: isDark ? const Color(0xFFEF4444) : Colors.red.shade300, width: 1.5),
             ),
             child: Row(
               children: [
-                Icon(Icons.warning_amber_rounded, color: Colors.red.shade900, size: 28),
-                const SizedBox(width: 12),
+                Icon(Icons.warning_amber_rounded, color: isDark ? const Color(0xFFF87171) : Colors.red.shade900, size: 24),
+                const SizedBox(width: 10),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1650,14 +1962,14 @@ class _PatientFormState extends State<PatientForm> {
                       Text(
                         'EXTRA PAYMENT NEEDED: Rs. $extraAmt',
                         style: TextStyle(
-                          color: Colors.red.shade900,
+                          color: isDark ? const Color(0xFFF87171) : Colors.red.shade900,
                           fontWeight: FontWeight.bold,
-                          fontSize: isMobile ? 13 : 15,
+                          fontSize: isMobile ? 12 : 14,
                         ),
                       ),
                       Text(
-                        'Patient paid for $suggested days but got $prescribed days. Please collect the remaining amount.',
-                        style: TextStyle(color: Colors.red.shade800, fontSize: 11),
+                        'Patient paid for $suggested days but got $prescribed days.',
+                        style: TextStyle(color: isDark ? const Color(0xFFFECACA) : Colors.red.shade800, fontSize: 11),
                       ),
                     ],
                   ),
@@ -1665,22 +1977,88 @@ class _PatientFormState extends State<PatientForm> {
               ],
             ),
           ),
+        ],
       ],
     );
-  }
 
-  Widget _dayPill(String label, Color color) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.1),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: color.withValues(alpha: 0.3)),
-      ),
-      child: Text(
-        label,
-        style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: color),
-      ),
+    if (labTests.isEmpty) {
+      return Padding(
+        padding: const EdgeInsets.only(top: 14),
+        child: durationWidget,
+      );
+    }
+
+    final labWidget = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          isPhysio ? 'Physiotherapies' : 'Lab tests',
+          style: TextStyle(
+            fontSize: isMobile ? 13 : 15,
+            fontWeight: FontWeight.w700,
+            color: t.textPrimary,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: labTests.map((item) {
+            final name = item['name']?.toString() ?? 'Unknown';
+            return Container(
+              padding: EdgeInsets.symmetric(
+                horizontal: isMobile ? 12 : 14,
+                vertical: isMobile ? 8 : 10,
+              ),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    isPhysio ? Icons.spa_rounded : Icons.science_outlined,
+                    color: isDark ? const Color(0xFF2DD4BF) : t.accent,
+                    size: 16,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    name,
+                    style: TextStyle(
+                      fontSize: isMobile ? 12 : 13.5,
+                      fontWeight: FontWeight.w600,
+                      color: t.textPrimary,
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 14),
+      child: isMobile
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                labWidget,
+                const SizedBox(height: 14),
+                durationWidget,
+              ],
+            )
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(child: labWidget),
+                const SizedBox(width: 16),
+                Expanded(child: durationWidget),
+              ],
+            ),
     );
   }
 
@@ -2484,164 +2862,167 @@ class _PatientFormState extends State<PatientForm> {
     );
   }
 
-  Widget _infoTile(IconData icon, String label, String value, RoleThemeData t, bool isMobile) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            Icon(icon, color: t.textTertiary, size: isMobile ? 12 : 14),
-            const SizedBox(width: 4),
-            Text(
-              label,
-              style: TextStyle(
-                color: t.textTertiary,
-                fontSize: isMobile ? 9 : 11,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 0.5,
-              ),
-            ),
-          ],
+  Widget _buildVitalsCard(
+    Map<String, dynamic> vitals,
+    RoleThemeData t, {
+    required bool isMobile,
+    required bool isVitalsOnly,
+  }) {
+    final isDark = _isDark;
+
+    // Extract doctor vitals and receptionist vitals
+    final recVitals = (vitals['receptionistVitals'] is Map)
+        ? Map<String, dynamic>.from(vitals['receptionistVitals'])
+        : <String, dynamic>{};
+    final docVitals = (vitals['doctorVitals'] is Map)
+        ? Map<String, dynamic>.from(vitals['doctorVitals'])
+        : (_data['doctorVitals'] is Map
+            ? Map<String, dynamic>.from(_data['doctorVitals'])
+            : (widget.queueEntry['doctorVitals'] is Map
+                ? Map<String, dynamic>.from(widget.queueEntry['doctorVitals'])
+                : <String, dynamic>{}));
+    final hasDocUpdate = docVitals.isNotEmpty;
+
+    String cleanVal(dynamic v) {
+      if (v == null) return '';
+      final s = v.toString().trim();
+      if (s == 'N/A' || s == 'null') return '';
+      return s;
+    }
+
+    // BP
+    final docBp = cleanVal(docVitals['bp'] ?? (hasDocUpdate ? vitals['bp'] : null));
+    final recBp = cleanVal(recVitals['bp'] ?? (!hasDocUpdate ? vitals['bp'] : null));
+    final primaryBp = docBp.isNotEmpty ? docBp : (recBp.isNotEmpty ? recBp : '—');
+    final subBp = (hasDocUpdate && recBp.isNotEmpty && recBp != docBp) ? 'Rec: $recBp' : null;
+
+    // Weight
+    final docWeightRaw = cleanVal(docVitals['weight'] ?? (hasDocUpdate ? vitals['weight'] : null));
+    final recWeightRaw = cleanVal(recVitals['weight'] ?? (!hasDocUpdate ? vitals['weight'] : null));
+    final primaryWeight = docWeightRaw.isNotEmpty ? '$docWeightRaw kg' : (recWeightRaw.isNotEmpty ? '$recWeightRaw kg' : '—');
+    final subWeight = (hasDocUpdate && recWeightRaw.isNotEmpty && recWeightRaw != docWeightRaw) ? 'Rec: $recWeightRaw kg' : null;
+
+    // Sugar
+    final docSugarRaw = cleanVal(docVitals['sugar'] ?? (hasDocUpdate ? vitals['sugar'] : null));
+    final recSugarRaw = cleanVal(recVitals['sugar'] ?? (!hasDocUpdate ? vitals['sugar'] : null));
+    final primarySugar = docSugarRaw.isNotEmpty ? '$docSugarRaw mg/dL' : (recSugarRaw.isNotEmpty ? '$recSugarRaw mg/dL' : '—');
+    final subSugar = (hasDocUpdate && recSugarRaw.isNotEmpty && recSugarRaw != docSugarRaw) ? 'Rec: $recSugarRaw' : null;
+
+    // Temp
+    final docTempRaw = cleanVal(docVitals['temp'] ?? (hasDocUpdate ? vitals['temp'] : null));
+    final recTempRaw = cleanVal(recVitals['temp'] ?? (!hasDocUpdate ? vitals['temp'] : null));
+    final hasTemp = docTempRaw.isNotEmpty || recTempRaw.isNotEmpty;
+    final primaryTemp = docTempRaw.isNotEmpty ? '$docTempRaw °C' : (recTempRaw.isNotEmpty ? '$recTempRaw °C' : '—');
+    final subTemp = (hasDocUpdate && recTempRaw.isNotEmpty && recTempRaw != docTempRaw) ? 'Rec: $recTempRaw °C' : null;
+
+    final statCards = <Widget>[
+      Expanded(
+        child: _vitalStatCard(
+          title: 'Blood pressure',
+          value: primaryBp,
+          subValue: subBp,
+          color: primaryBp != '—' ? const Color(0xFFDC2626) : (isDark ? Colors.white54 : Colors.grey),
+          isDark: isDark,
+          isMobile: isMobile,
         ),
-        const SizedBox(height: 2),
-        Text(
-          value,
-          style: TextStyle(
-            color: t.textPrimary,
-            fontSize: isMobile ? 12 : 14,
-            fontWeight: FontWeight.w800,
+      ),
+      const SizedBox(width: 8),
+      Expanded(
+        child: _vitalStatCard(
+          title: 'Weight',
+          value: primaryWeight,
+          subValue: subWeight,
+          color: primaryWeight != '—' ? const Color(0xFF2563EB) : (isDark ? Colors.white54 : Colors.grey),
+          isDark: isDark,
+          isMobile: isMobile,
+        ),
+      ),
+      const SizedBox(width: 8),
+      Expanded(
+        child: _vitalStatCard(
+          title: 'Blood sugar',
+          value: primarySugar,
+          subValue: subSugar,
+          color: primarySugar != '—' ? const Color(0xFF0D9488) : (isDark ? Colors.white54 : Colors.grey),
+          isDark: isDark,
+          isMobile: isMobile,
+        ),
+      ),
+      if (hasTemp) ...[
+        const SizedBox(width: 8),
+        Expanded(
+          child: _vitalStatCard(
+            title: 'Temperature',
+            value: primaryTemp,
+            subValue: subTemp,
+            color: primaryTemp != '—' ? const Color(0xFFD97706) : (isDark ? Colors.white54 : Colors.grey),
+            isDark: isDark,
+            isMobile: isMobile,
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildVitalsCard(Map<String, dynamic> vitals, RoleThemeData t, {required bool isMobile, required bool isVitalsOnly}) {
-    final bp = (vitals['bp'] ?? 'N/A').toString();
-    final temp = (vitals['temp'] ?? 'N/A').toString();
-    final weight = (vitals['weight'] ?? 'N/A').toString();
-    final sugar = (vitals['sugar'] ?? 'N/A').toString();
+    ];
 
     return Container(
       margin: const EdgeInsets.only(top: 12),
-      padding: EdgeInsets.all(isMobile ? 12 : 16),
-      decoration: BoxDecoration(
-        color: isVitalsOnly ? const Color(0xFFF3E8FF) : const Color(0xFFE6FFFA),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: isVitalsOnly ? const Color(0xFFD8B4FE) : const Color(0xFF99F6E4)),
-      ),
-      child: Column(
+      child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(
-                isVitalsOnly ? Icons.health_and_safety_rounded : Icons.monitor_heart_rounded,
-                color: isVitalsOnly ? const Color(0xFF7E22CE) : const Color(0xFF0F766E),
-                size: 20,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                isVitalsOnly ? '🩺 Vitals Inspection Token (Vital Signs)' : '🩺 Patient Vital Signs',
-                style: TextStyle(
-                  fontSize: isMobile ? 13 : 15,
-                  fontWeight: FontWeight.bold,
-                  color: isVitalsOnly ? const Color(0xFF6B21A8) : const Color(0xFF0F766E),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Row(
-            children: [
-              Expanded(
-                child: _vitalBadge(
-                  label: 'Blood Pressure',
-                  value: (bp.isEmpty || bp == 'N/A') ? 'N/A' : bp,
-                  icon: Icons.favorite_rounded,
-                  color: const Color(0xFFDC2626),
-                  isMobile: isMobile,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _vitalBadge(
-                  label: 'Temperature',
-                  value: (temp.isEmpty || temp == 'N/A') ? 'N/A' : '$temp °C',
-                  icon: Icons.thermostat_rounded,
-                  color: const Color(0xFFD97706),
-                  isMobile: isMobile,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _vitalBadge(
-                  label: 'Weight',
-                  value: (weight.isEmpty || weight == 'N/A') ? 'N/A' : '$weight kg',
-                  icon: Icons.scale_rounded,
-                  color: const Color(0xFF2563EB),
-                  isMobile: isMobile,
-                ),
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: _vitalBadge(
-                  label: 'Blood Sugar',
-                  value: (sugar.isEmpty || sugar == 'N/A') ? 'N/A' : '$sugar mg/dL',
-                  icon: Icons.water_drop_rounded,
-                  color: const Color(0xFF0D9488),
-                  isMobile: isMobile,
-                ),
-              ),
-            ],
-          ),
-        ],
+        children: statCards,
       ),
     );
   }
 
-  Widget _vitalBadge({
-    required String label,
+  Widget _vitalStatCard({
+    required String title,
     required String value,
-    required IconData icon,
+    String? subValue,
     required Color color,
+    required bool isDark,
     required bool isMobile,
   }) {
-    final isDark = _isDark;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+      padding: EdgeInsets.symmetric(horizontal: 6, vertical: isMobile ? 10 : 12),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A) : Colors.white,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: isDark ? const Color(0xFF334155) : color.withValues(alpha: 0.25)),
+        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
       ),
       child: Column(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.center,
         children: [
-          Icon(icon, size: isMobile ? 14 : 16, color: color),
-          const SizedBox(height: 2),
           Text(
-            label,
-            style: TextStyle(
-              fontSize: isMobile ? 8.5 : 10,
-              fontWeight: FontWeight.w600,
-              color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700,
-            ),
+            title,
             textAlign: TextAlign.center,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: isMobile ? 11 : 12.5,
+              fontWeight: FontWeight.w500,
+              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+            ),
           ),
-          const SizedBox(height: 2),
+          const SizedBox(height: 4),
           Text(
             value,
+            textAlign: TextAlign.center,
             style: TextStyle(
-              fontSize: isMobile ? 10.5 : 12,
-              fontWeight: FontWeight.bold,
+              fontSize: isMobile ? 15 : 18,
+              fontWeight: FontWeight.w800,
               color: color,
             ),
-            textAlign: TextAlign.center,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
           ),
+          if (subValue != null && subValue.isNotEmpty) ...[
+            const SizedBox(height: 2),
+            Text(
+              subValue,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: isMobile ? 9.5 : 10.5,
+                fontWeight: FontWeight.w500,
+                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -2652,14 +3033,6 @@ class _PatientFormState extends State<PatientForm> {
     final labTests = _getLabResultsList();
     final diagnosis = _getDiagnosisText();
     final patientName = _getResolvedPatientName();
-    
-    final serial = _resolvedSerial;
-    final genderStr = _resolveGender();
-    final ageVal = _resolveAge();
-    final ageDisplay = ageVal != 'N/A' ? '$ageVal Years' : 'N/A';
-    final cnic = _getResolvedCnic();
-    final queueType = _resolvedQueueType.toUpperCase();
-
     final rawVitals = widget.queueEntry['vitals'] ?? _data['vitals'];
     final vitals = (rawVitals is Map) ? Map<String, dynamic>.from(rawVitals) : <String, dynamic>{};
     final isVitalsOnly = widget.queueEntry['isVitalsOnly'] == true ||
@@ -2683,121 +3056,84 @@ class _PatientFormState extends State<PatientForm> {
     
     final basePadding = isMobile ? 16.0 : 32.0;
 
-    Widget patientInfoCard = Container(
-      padding: EdgeInsets.all(isMobile ? 12 : 16),
-      decoration: BoxDecoration(
-        color: t.bgCardAlt.withValues(alpha: 0.25),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: t.bgRule.withValues(alpha: 0.7)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    final serial = _resolvedSerial;
+    final genderStr = _resolveGender();
+    final ageVal = _resolveAge();
+    final ageDisplay = ageVal != 'N/A' ? '$ageVal yrs' : '';
+    final genderAgeText = [if (genderStr != 'N/A') genderStr, if (ageDisplay.isNotEmpty) ageDisplay].join(', ');
+    final cnic = _getResolvedCnic();
+
+    final isDark = _isDark;
+
+    Widget patientInfoCard = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              CircleAvatar(
-                radius: isMobile ? 20 : 24,
-                backgroundColor: t.accent.withValues(alpha: 0.1),
-                child: Icon(Icons.person, color: t.accent, size: isMobile ? 20 : 26),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      patientName,
-                      style: TextStyle(
-                        color: t.textPrimary,
-                        fontSize: isMobile ? 16 : 19,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'CNIC: $cnic',
-                      style: TextStyle(
-                        color: t.textTertiary,
-                        fontSize: isMobile ? 11 : 13,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ],
+              Text(
+                patientName,
+                style: TextStyle(
+                  color: t.textPrimary,
+                  fontSize: isMobile ? 18 : 22,
+                  fontWeight: FontWeight.w800,
                 ),
               ),
-              if (isVitalsOnly)
-                Container(
-                  margin: const EdgeInsets.only(right: 6),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF3E8FF),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: const Color(0xFFC084FC)),
-                  ),
-                  child: const Text(
-                    '🩺 VITALS',
-                    style: TextStyle(
-                      color: Color(0xFF7E22CE),
-                      fontWeight: FontWeight.bold,
-                      fontSize: 11,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-                ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: _resolvedQueueType == 'zakat'
-                      ? t.zakat.withValues(alpha: 0.15)
-                      : _resolvedQueueType == 'non-zakat'
-                          ? t.nonZakat.withValues(alpha: 0.15)
-                          : t.gmwf.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(
-                    color: _resolvedQueueType == 'zakat'
-                        ? t.zakat
-                        : _resolvedQueueType == 'non-zakat'
-                            ? t.nonZakat
-                            : t.gmwf,
-                  ),
-                ),
-                child: Text(
-                  queueType,
-                  style: TextStyle(
-                    color: _resolvedQueueType == 'zakat'
-                        ? t.zakat
-                        : _resolvedQueueType == 'non-zakat'
-                            ? t.nonZakat
-                            : t.gmwf,
-                    fontWeight: FontWeight.bold,
-                    fontSize: isMobile ? 10 : 12,
-                    letterSpacing: 0.5,
-                  ),
+              const SizedBox(height: 2),
+              Text(
+                'CNIC  $cnic',
+                style: TextStyle(
+                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                  fontSize: isMobile ? 12 : 14,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
             ],
           ),
-          const Divider(height: 24),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              _infoTile(Icons.wc, 'GENDER', genderStr, t, isMobile),
-              _infoTile(Icons.cake, 'AGE', ageDisplay, t, isMobile),
-              _infoTile(Icons.tag, 'TOKEN SERIAL', serial, t, isMobile),
+        ),
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+              ),
+              child: Text(
+                serial,
+                style: TextStyle(
+                  color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+                  fontWeight: FontWeight.w600,
+                  fontSize: isMobile ? 12 : 13.5,
+                ),
+              ),
+            ),
+            if (genderAgeText.isNotEmpty) ...[
+              const SizedBox(height: 4),
+              Text(
+                genderAgeText,
+                style: TextStyle(
+                  color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF334155),
+                  fontWeight: FontWeight.w700,
+                  fontSize: isMobile ? 13 : 15,
+                ),
+              ),
             ],
-          ),
-        ],
-      ),
+          ],
+        ),
+      ],
     );
 
     Widget medicineBody = Column(
       crossAxisAlignment: CrossAxisAlignment.start, 
       children: [
-        _buildDaysBanner(t, isMobile: isMobile),
-        const SizedBox(height: 12),
         patientInfoCard,
         if (hasAnyVitals || isVitalsOnly)
           _buildVitalsCard(vitals, t, isMobile: isMobile, isVitalsOnly: isVitalsOnly),
+        _buildLabAndDurationSection(labTests, t, isMobile: isMobile),
         if (isVitalsOnly && prescriptions.isEmpty)
           Container(
             width: double.infinity,
@@ -2859,12 +3195,6 @@ class _PatientFormState extends State<PatientForm> {
             ),
           ),
         ],
-        if (isMobile && labTests.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          _buildLabOrPhysioSection(labTests, t, isMobile: true),
-          const SizedBox(height: 12),
-          Divider(color: Colors.grey.shade200, height: 20),
-        ],
         if (inventoryMeds.isNotEmpty) ...[
           SizedBox(height: isMobile ? 12 : 20),
           _sectionTitle('Inventory Medicines', Icons.medication, t, isMobile: isMobile),
@@ -2892,21 +3222,16 @@ class _PatientFormState extends State<PatientForm> {
       ],
     );
 
-    final isDark = _isDark;
     return Container(
       color: isDark ? const Color(0xFF0F172A) : Colors.white,
       padding: EdgeInsets.all(basePadding),
-      child: isMobile
-          ? Column(crossAxisAlignment: CrossAxisAlignment.start,
-              children: [medicineBody, const SizedBox(height: 20)])
-          : IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              if (labTests.isNotEmpty) ...[
-                Expanded(flex: 3, child: _buildLabOrPhysioSection(labTests, t, isMobile: false)),
-                Container(width: 1, color: isDark ? const Color(0xFF334155) : Colors.grey.shade300,
-                    margin: const EdgeInsets.symmetric(horizontal: 20)),
-              ],
-              Expanded(flex: 7, child: medicineBody),
-            ])),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          medicineBody,
+          const SizedBox(height: 20),
+        ],
+      ),
     );
   }
 
@@ -2922,8 +3247,7 @@ class _PatientFormState extends State<PatientForm> {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isMobile = screenWidth < 700;
+    final isMobile = GBreakpoint.isMobile(context);
     final isDark = _isDark;
     
     // Curated GMWF Brand Clinical Theme (Dark Mode Adaptive)
@@ -3042,79 +3366,6 @@ class _PatientFormState extends State<PatientForm> {
         ),
         _buildActionBar(t, isMobile: isMobile),
       ]),
-    );
-  }
-
-  Widget _buildLabOrPhysioSection(List labTests, RoleThemeData t, {required bool isMobile}) {
-    if (labTests.isEmpty) return const SizedBox.shrink();
-    
-    final isPhysio = _data['isPhysiotherapist'] == true ||
-        _data['isPhysiotherapy'] == true ||
-        _data['department']?.toString().toLowerCase().contains('physio') == true ||
-        _data['dpt']?.toString().toLowerCase().contains('physio') == true ||
-        labTests.any((item) {
-          final name = (item['name'] ?? '').toString().toLowerCase();
-          return name.contains('therapy') ||
-              name.contains('tens') ||
-              name.contains('traction') ||
-              name.contains('swd') ||
-              name.contains('exercise') ||
-              name.contains('diathermy') ||
-              name.contains('pack') ||
-              name.contains('massage') ||
-              name.contains('ultrasound');
-        });
-
-    final title = isPhysio ? 'Physiotherapies' : 'Lab Tests';
-    final icon = isPhysio ? Icons.accessibility_new_rounded : Icons.biotech_rounded;
-    final themeColor = isPhysio ? Colors.indigo : t.accent;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _sectionTitle(title, icon, t, isMobile: isMobile),
-        const SizedBox(height: 6),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: labTests.map((item) {
-            final name = item['name']?.toString() ?? 'Unknown';
-            return Container(
-              padding: EdgeInsets.symmetric(
-                horizontal: isMobile ? 10 : 14,
-                vertical: isMobile ? 6 : 8,
-              ),
-              decoration: BoxDecoration(
-                color: themeColor.withValues(alpha: 0.05),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(
-                  color: themeColor.withValues(alpha: 0.2),
-                  width: 1,
-                ),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    isPhysio ? Icons.spa_rounded : Icons.science_rounded,
-                    color: themeColor,
-                    size: isMobile ? 14 : 16,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    name,
-                    style: TextStyle(
-                      fontSize: isMobile ? 12 : 14,
-                      fontWeight: FontWeight.w700,
-                      color: themeColor.withValues(alpha: 0.9),
-                    ),
-                  ),
-                ],
-              ),
-            );
-          }).toList(),
-        ),
-      ],
     );
   }
 }

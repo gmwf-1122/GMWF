@@ -1,5 +1,6 @@
 // lib/pages/office/employee_detail_page.dart
 
+import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -56,6 +57,183 @@ class _EmployeeDetailPageState extends State<EmployeeDetailPage> with SingleTick
         SnackBar(content: Text('${emp['name'] ?? 'Employee'} has been offboarded.')),
       );
     }
+  }
+
+  void _showTransferBranchDialog(BuildContext context, Map<String, dynamic> emp) {
+    final currentBranchId = emp['branchId']?.toString() ?? 'karachi';
+    final allBranches = FinanceLocalStorage.getAllKnownBranches([]);
+    final t = RoleThemeScope.dataOf(context);
+    final empName = emp['name']?.toString() ?? 'Employee';
+    String targetBranchId = allBranches.firstWhereOrNull((b) => b['id'] != currentBranchId)?['id']?.toString() ?? currentBranchId;
+    final reasonController = TextEditingController();
+    bool isTransferring = false;
+
+    showDialog(
+      context: context,
+      builder: (dlgCtx) => StatefulBuilder(
+        builder: (c, setDlgState) {
+          String fromName = allBranches.firstWhereOrNull((b) => b['id'] == currentBranchId)?['name']?.toString() ?? currentBranchId;
+          if (currentBranchId == 'karachi-1' || currentBranchId == 'karachi1') fromName = 'Karachi';
+
+          return AlertDialog(
+            backgroundColor: t.bgCard,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: t.bgRule)),
+            title: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: t.accent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(Icons.swap_horiz_rounded, color: t.accent, size: 22),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Transfer Employee Branch',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: t.textPrimary),
+                  ),
+                ),
+              ],
+            ),
+            content: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 420),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Transfer $empName to a different branch location.',
+                    style: TextStyle(fontSize: 12.5, color: t.textSecondary),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: t.bgCardAlt,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: t.bgRule),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Current Branch', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: t.textTertiary)),
+                              const SizedBox(height: 2),
+                              Text(fromName, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: t.textPrimary)),
+                            ],
+                          ),
+                        ),
+                        Icon(Icons.arrow_forward_rounded, color: t.accent, size: 18),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Destination Branch', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: t.textTertiary)),
+                              const SizedBox(height: 2),
+                              DropdownButton<String>(
+                                value: targetBranchId,
+                                isDense: true,
+                                isExpanded: true,
+                                underline: const SizedBox.shrink(),
+                                dropdownColor: t.bgCard,
+                                style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: t.accent),
+                                items: allBranches.map((b) {
+                                  final id = b['id']?.toString() ?? '';
+                                  String name = b['name']?.toString() ?? id;
+                                  if (id == 'karachi-1' || id == 'karachi1') name = 'Karachi';
+                                  return DropdownMenuItem(value: id, child: Text('$name ($id)'));
+                                }).toList(),
+                                onChanged: (val) {
+                                  if (val != null) setDlgState(() => targetBranchId = val);
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  TextField(
+                    controller: reasonController,
+                    style: TextStyle(fontSize: 12.5, color: t.textPrimary),
+                    decoration: InputDecoration(
+                      labelText: 'Transfer Reason / Notes (Optional)',
+                      labelStyle: TextStyle(fontSize: 12, color: t.textSecondary),
+                      hintText: 'e.g. Relocation, Staff Rebalancing',
+                      hintStyle: TextStyle(fontSize: 11.5, color: t.textTertiary),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: t.bgRule)),
+                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: t.bgRule)),
+                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Row(
+                    children: [
+                      Icon(Icons.info_outline_rounded, size: 14, color: t.accentLight),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: Text(
+                          'Updates active records, biometric device routes, and cleans up cloud documents from old branch.',
+                          style: TextStyle(fontSize: 10.5, color: t.textTertiary),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: isTransferring ? null : () => Navigator.pop(dlgCtx),
+                child: Text('Cancel', style: TextStyle(color: t.textSecondary)),
+              ),
+              ElevatedButton.icon(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: t.accent,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                ),
+                icon: isTransferring
+                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    : const Icon(Icons.swap_horiz_rounded, size: 16),
+                label: Text(isTransferring ? 'Transferring...' : 'Confirm Transfer', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
+                onPressed: isTransferring || targetBranchId == currentBranchId
+                    ? null
+                    : () async {
+                        setDlgState(() => isTransferring = true);
+                        try {
+                          await FinanceLocalStorage.transferEmployee(
+                            employeeId: widget.employeeId,
+                            fromBranchId: currentBranchId,
+                            toBranchId: targetBranchId,
+                            performedBy: widget.userRole,
+                            reason: reasonController.text.trim().isNotEmpty ? reasonController.text.trim() : null,
+                          );
+                          if (mounted) setState(() {});
+                          if (dlgCtx.mounted) Navigator.pop(dlgCtx);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('✅ $empName transferred to $targetBranchId successfully!')),
+                          );
+                        } catch (e) {
+                          setDlgState(() => isTransferring = false);
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('Transfer failed: $e'), backgroundColor: Colors.red),
+                          );
+                        }
+                      },
+              ),
+            ],
+          );
+        },
+      ),
+    );
   }
 
   @override
@@ -131,6 +309,12 @@ class _EmployeeDetailPageState extends State<EmployeeDetailPage> with SingleTick
                       );
                     }
                   },
+                ),
+
+                IconButton(
+                  icon: const Icon(Icons.swap_horiz_rounded, color: Colors.amber),
+                  tooltip: 'Transfer Branch',
+                  onPressed: () => _showTransferBranchDialog(context, emp),
                 ),
 
                 IconButton(

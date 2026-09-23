@@ -10,6 +10,8 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../constants/colors.dart';
 import '../../../models/donation_models.dart';
+import '../../../theme/app_theme.dart';
+import '../../../theme/role_theme_provider.dart';
 import '../donations_shared.dart';
 import '../donors_registry.dart';
 import 'edit_donation_dialog.dart';
@@ -39,6 +41,7 @@ class _TransactionCardState extends State<TransactionCard> {
 
   @override
   Widget build(BuildContext context) {
+    final t = RoleThemeScope.dataOf(context);
     final donation = widget.donation;
     final cat = donation.category;
     final displayDate = donation.timestamp != null
@@ -60,12 +63,12 @@ class _TransactionCardState extends State<TransactionCard> {
         curve: Curves.easeInOut,
         margin: const EdgeInsets.only(bottom: 10),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: t.bgCard,
           borderRadius: BorderRadius.circular(14),
           border: Border.all(
             color: _isHovered
-                ? displayColor.withValues(alpha: 0.4)
-                : (isEdited ? Colors.orange.shade200 : const Color(0xFFE8EEF4)),
+                ? displayColor.withValues(alpha: 0.5)
+                : (isEdited ? Colors.orange.shade300 : t.bgRule),
             width: _isHovered || isEdited ? 1.5 : 1.0,
           ),
           boxShadow: [
@@ -143,21 +146,21 @@ class _TransactionCardState extends State<TransactionCard> {
                             Flexible(
                               child: Text(
                                 donation.donorName,
-                                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: AppColors.gray900, letterSpacing: -0.2),
+                                style: TextStyle(fontSize: 14, fontWeight: FontWeight.w800, color: t.textPrimary, letterSpacing: -0.2),
                                 maxLines: 1, overflow: TextOverflow.ellipsis,
                               ),
                             ),
                             if (donation.donorId != 'anonymous' && !donation.donorId.startsWith('guest_') && donation.donorName.trim().isNotEmpty && donation.phone.trim().isNotEmpty)
-                              const Padding(
-                                padding: EdgeInsets.only(left: 4),
-                                child: Icon(Icons.verified_rounded, size: 13, color: AppColors.primary),
+                              Padding(
+                                padding: const EdgeInsets.only(left: 4),
+                                child: Icon(Icons.verified_rounded, size: 13, color: t.accent),
                               ),
                           ],
                         ),
                         const SizedBox(height: 3),
                         Text(
                           '${cleanReceiptNumber(donation.receiptNo)} • ${donation.branchName.isNotEmpty ? donation.branchName : donation.branchId}',
-                          style: const TextStyle(fontSize: 10, color: AppColors.gray500),
+                          style: TextStyle(fontSize: 10, color: t.textSecondary),
                           maxLines: 1, overflow: TextOverflow.ellipsis,
                         ),
                       ],
@@ -181,7 +184,7 @@ class _TransactionCardState extends State<TransactionCard> {
                       else
                         Text(
                           'PKR ${NumberFormat('#,##0').format(donation.amount)}',
-                          style: GoogleFonts.dmMono(fontSize: 14, fontWeight: FontWeight.w900, color: AppColors.gray900),
+                          style: GoogleFonts.dmMono(fontSize: 14, fontWeight: FontWeight.w900, color: t.textPrimary),
                         ),
                       const SizedBox(height: 5),
                       _statusPill(donation.isGoods ? DonationStatus.received : donation.status),
@@ -340,7 +343,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
     );
   }
 
-  Widget _detailBlock(String label, String value) {
+  Widget _detailBlock(String label, String value, RoleThemeData t) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -349,7 +352,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
           style: GoogleFonts.plusJakartaSans(
             fontSize: 9.5,
             fontWeight: FontWeight.w800,
-            color: AppColors.gray400,
+            color: t.textTertiary,
             letterSpacing: 0.8,
           ),
         ),
@@ -359,7 +362,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
           style: GoogleFonts.plusJakartaSans(
             fontSize: 13,
             fontWeight: FontWeight.w600,
-            color: AppColors.gray800,
+            color: t.textPrimary,
             letterSpacing: -0.1,
           ),
         ),
@@ -401,19 +404,22 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
 
   @override
   Widget build(BuildContext context) {
+    final t = RoleThemeScope.dataOf(context);
     final d = _donation;
     final isEdited = d.isEdited;
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       elevation: 16,
+      backgroundColor: Colors.transparent,
       child: Container(
         width: 460,
         constraints: const BoxConstraints(maxHeight: 720),
         padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: t.bgCard,
           borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: t.bgRule),
         ),
         child: SingleChildScrollView(
           child: Column(
@@ -426,10 +432,10 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: d.isGoods ? Colors.blue.withOpacity(0.06) : AppColors.primary.withOpacity(0.06),
+                      color: d.isGoods ? Colors.blue.withOpacity(0.06) : t.accent.withOpacity(0.08),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: d.isGoods ? Colors.blue.withOpacity(0.15) : AppColors.primary.withOpacity(0.15),
+                        color: d.isGoods ? Colors.blue.withOpacity(0.15) : t.accent.withOpacity(0.2),
                         width: 1,
                       ),
                     ),
@@ -438,7 +444,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 9, 
                         fontWeight: FontWeight.w800, 
-                        color: d.isGoods ? Colors.blue : AppColors.primary, 
+                        color: d.isGoods ? Colors.blue : t.accent, 
                         letterSpacing: 1.0,
                       ),
                     ),
@@ -453,7 +459,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
 
               const SizedBox(height: 24),
 
-              // Sophisticated Geometric Amount Header (replacing old green monospace)
+              // Amount Header
               if (d.isGoods)
                 Text(
                   (d.probableAmount ?? 0) > 0 
@@ -462,7 +468,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 22, 
                     fontWeight: FontWeight.w800, 
-                    color: AppColors.gray900,
+                    color: t.textPrimary,
                     letterSpacing: -0.5,
                   ), 
                   textAlign: TextAlign.center,
@@ -476,18 +482,18 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                     Text(
                       'PKR ',
                       style: GoogleFonts.plusJakartaSans(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.gray500,
+                        fontSize: 16, 
+                        fontWeight: FontWeight.w700, 
+                        color: t.textSecondary,
                         letterSpacing: 0.5,
                       ),
                     ),
                     Text(
                       NumberFormat('#,##0').format(d.amount),
                       style: GoogleFonts.plusJakartaSans(
-                        fontSize: 34,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.gray900,
+                        fontSize: 34, 
+                        fontWeight: FontWeight.w800, 
+                        color: t.textPrimary,
                         letterSpacing: -1.0,
                       ),
                     ),
@@ -498,8 +504,8 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                 'RECEIPT: ${cleanReceiptNumber(d.receiptNo)}', 
                 style: GoogleFonts.plusJakartaSans(
                   fontSize: 11, 
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.gray400,
+                  fontWeight: FontWeight.w700, 
+                  color: t.textTertiary,
                   letterSpacing: 0.8,
                 ),
               ),
@@ -539,94 +545,187 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                   EditHistoryViewer(donation: d),
               ],
 
-              const Padding(padding: EdgeInsets.symmetric(vertical: 18), child: Divider(height: 1, color: AppColors.gray200)),
+              Padding(padding: const EdgeInsets.symmetric(vertical: 18), child: Divider(height: 1, color: t.bgRule)),
 
               // Details Grid
               Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Expanded(child: _detailBlock('Donor Name', d.donorName)),
-                Expanded(child: _detailBlock('Phone', d.phone.isEmpty ? 'N/A' : d.phone)),
+                Expanded(child: _detailBlock('Donor Name', d.donorName, t)),
+                Expanded(child: _detailBlock('Phone', d.phone.isEmpty ? 'N/A' : d.phone, t)),
               ]),
               const SizedBox(height: 18),
               Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Expanded(child: _detailBlock('Category', widget.categoryLabel)),
-                Expanded(child: _detailBlock('Date', widget.dateStr)),
+                Expanded(child: _detailBlock('Category', widget.categoryLabel, t)),
+                Expanded(child: _detailBlock('Date', widget.dateStr, t)),
               ]),
               const SizedBox(height: 18),
               Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Expanded(child: _detailBlock('Branch', d.branchName.isNotEmpty ? d.branchName : (d.branchId.isNotEmpty ? d.branchId : 'N/A'))),
-                Expanded(child: _detailBlock('Collected By', d.recordedBy.isEmpty ? 'Unknown' : d.recordedBy)),
+                Expanded(child: _detailBlock('Branch', d.branchName.isNotEmpty ? d.branchName : (d.branchId.isNotEmpty ? d.branchId : 'N/A'), t)),
+                Expanded(child: _detailBlock('Collected By', d.recordedBy.isEmpty ? 'Unknown' : d.recordedBy, t)),
               ]),
               if (d.bookReceiptNo != null && d.bookReceiptNo!.isNotEmpty) ...[
                 const SizedBox(height: 18),
                 Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Expanded(child: _detailBlock('Book Receipt #', d.bookReceiptNo!)),
+                  Expanded(child: _detailBlock('Book Receipt #', d.bookReceiptNo!, t)),
                   const Spacer(),
                 ]),
               ],
               if (d.notes.isNotEmpty) ...[
                 const SizedBox(height: 18),
                 Row(children: [
-                  Expanded(child: _detailBlock('Notes', d.notes)),
+                  Expanded(child: _detailBlock('Notes', d.notes, t)),
                   const Spacer(),
                 ]),
               ],
 
-              const Padding(padding: EdgeInsets.symmetric(vertical: 20), child: Divider(height: 1, color: AppColors.gray200)),
-
-              // Actions capsule toolbar dock
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                physics: const BouncingScrollPhysics(),
-                child: Row(
-                  children: [
-                    _actionBtn(Icons.share_rounded, 'Share', AppColors.primary, () => showReceiptShareSheet(context, d.toMap())),
-                    const SizedBox(width: 8),
-                    _actionBtn(Icons.picture_as_pdf_rounded, 'PDF', Colors.redAccent, () => downloadReceiptPdf(d, context)),
-                    const SizedBox(width: 8),
-                    if (d.status == DonationStatus.pending && widget.currentUserRole.canMarkReceived) ...[
-                      _actionBtn(Icons.check_circle_rounded, 'Received', Colors.green, () async {
-                        await DonationsLocalStorage.updateDonationStatus(
-                          branchId: d.branchId, localId: d.localId, date: d.date, newStatus: DonationStatus.received, firestoreId: d.firestoreId,
-                        );
-                        if (context.mounted) { Navigator.pop(context); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Marked as Received'))); }
-                      }),
-                      const SizedBox(width: 8),
-                    ],
-                    if (d.donorId != 'anonymous' && !d.donorId.startsWith('guest_') && widget.currentUserRole.canApprove) ...[
-                      _actionBtn(Icons.person_rounded, 'Edit Donor', Colors.indigo, () async {
-                        Navigator.pop(context);
-                        final donors = DonationsLocalStorage.getAllDonors('all');
-                        final matches = donors.where((donor) => donor.id == d.donorId).toList();
-                        if (matches.isNotEmpty && context.mounted) {
-                          showEditDonorDialog(context, matches.first);
-                        } else if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Donor details not available locally')));
-                        }
-                      }),
-                      const SizedBox(width: 8),
-                    ],
-                    if (widget.currentUserRole.canApprove) ...[
-                      _actionBtn(Icons.edit_rounded, 'Edit', Colors.orange.shade700, () async {
-                        Navigator.pop(context);
-                        await showDialog<bool>(
-                          context: context,
-                          barrierDismissible: false,
-                          builder: (_) => EditDonationDialog(
-                            donation: d,
-                            currentUsername: widget.currentUsername,
-                            currentUserRole: widget.currentUserRole,
+              const SizedBox(height: 16),
+              // Overall donor contributions
+              FutureBuilder<Map<String, dynamic>>(
+                future: DonationsLocalStorage.getDonorLifetimeStats(d.donorId),
+                builder: (context, snap) {
+                  final stats = snap.data;
+                  final lifetimeTotal = (stats?['total'] as num?)?.toDouble() ?? d.amount;
+                  final lifetimeCount = (stats?['count'] as int?) ?? 1;
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: t.accent.withValues(alpha: 0.05),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: t.accent.withValues(alpha: 0.15)),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.volunteer_activism_rounded, size: 16, color: t.accent),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Donor Lifetime Total:',
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700,
+                                color: t.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                        Text(
+                          'PKR ${NumberFormat('#,##0').format(lifetimeTotal)} ($lifetimeCount total gifts)',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w800,
+                            color: t.accent,
                           ),
-                        );
-                      }),
-                      const SizedBox(width: 8),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+
+              Padding(padding: const EdgeInsets.symmetric(vertical: 18), child: Divider(height: 1, color: t.bgRule)),
+
+              // Actions row: primary buttons + overflow menu
+              Row(
+                children: [
+                  _actionBtn(Icons.share_rounded, 'Share', AppColors.primary, () => showReceiptShareSheet(context, d.toMap())),
+                  const SizedBox(width: 8),
+                  _actionBtn(Icons.picture_as_pdf_rounded, 'PDF', Colors.redAccent, () => downloadReceiptPdf(d, context)),
+                  const Spacer(),
+                  // 3-dot overflow menu for remaining actions
+                  PopupMenuButton<String>(
+                    icon: Icon(Icons.more_vert_rounded, color: t.textSecondary, size: 22),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    color: t.bgCard,
+                    elevation: 8,
+                    offset: const Offset(0, 40),
+                    onSelected: (value) async {
+                      switch (value) {
+                        case 'received':
+                          await DonationsLocalStorage.updateDonationStatus(
+                            branchId: d.branchId, localId: d.localId, date: d.date, newStatus: DonationStatus.received, firestoreId: d.firestoreId,
+                          );
+                          if (context.mounted) { Navigator.pop(context); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Marked as Received'))); }
+                          break;
+                        case 'edit_donor':
+                          Navigator.pop(context);
+                          final donors = DonationsLocalStorage.getAllDonors('all');
+                          final matches = donors.where((donor) => donor.id == d.donorId).toList();
+                          if (matches.isNotEmpty && context.mounted) {
+                            showEditDonorDialog(context, matches.first);
+                          } else if (context.mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Donor details not available locally')));
+                          }
+                          break;
+                        case 'edit':
+                          Navigator.pop(context);
+                          await showDialog<bool>(
+                            context: context,
+                            barrierDismissible: false,
+                            builder: (_) => EditDonationDialog(
+                              donation: d,
+                              currentUsername: widget.currentUsername,
+                              currentUserRole: widget.currentUserRole,
+                            ),
+                          );
+                          break;
+                        case 'delete':
+                          _confirmDelete(context);
+                          break;
+                        case 'close':
+                          Navigator.pop(context);
+                          break;
+                      }
+                    },
+                    itemBuilder: (ctx) => [
+                      if (d.status == DonationStatus.pending && widget.currentUserRole.canMarkReceived)
+                        PopupMenuItem(
+                          value: 'received',
+                          child: Row(children: [
+                            Icon(Icons.check_circle_rounded, size: 16, color: Colors.green),
+                            const SizedBox(width: 10),
+                            Text('Mark Received', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600)),
+                          ]),
+                        ),
+                      if (d.donorId != 'anonymous' && !d.donorId.startsWith('guest_') && widget.currentUserRole.canApprove)
+                        PopupMenuItem(
+                          value: 'edit_donor',
+                          child: Row(children: [
+                            Icon(Icons.person_rounded, size: 16, color: Colors.indigo),
+                            const SizedBox(width: 10),
+                            Text('Edit Donor', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600)),
+                          ]),
+                        ),
+                      if (widget.currentUserRole.canApprove)
+                        PopupMenuItem(
+                          value: 'edit',
+                          child: Row(children: [
+                            Icon(Icons.edit_rounded, size: 16, color: Colors.orange.shade700),
+                            const SizedBox(width: 10),
+                            Text('Edit Donation', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600)),
+                          ]),
+                        ),
+                      if (widget.currentUserRole.isChairman || widget.currentUserRole.isHqManager)
+                        PopupMenuItem(
+                          value: 'delete',
+                          child: Row(children: [
+                            const Icon(Icons.delete_forever_rounded, size: 16, color: Colors.red),
+                            const SizedBox(width: 10),
+                            Text('Delete', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.red)),
+                          ]),
+                        ),
+                      const PopupMenuDivider(),
+                      PopupMenuItem(
+                        value: 'close',
+                        child: Row(children: [
+                          Icon(Icons.close_rounded, size: 16, color: AppColors.gray500),
+                          const SizedBox(width: 10),
+                          Text('Close', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.gray500)),
+                        ]),
+                      ),
                     ],
-                    if (widget.currentUserRole.isChairman || widget.currentUserRole.isHqManager) ...[
-                      _actionBtn(Icons.delete_forever_rounded, 'Delete', Colors.red, () => _confirmDelete(context)),
-                      const SizedBox(width: 8),
-                    ],
-                    _actionBtn(Icons.close_rounded, 'Close', AppColors.gray500, () => Navigator.pop(context)),
-                  ],
-                ),
+                  ),
+                ],
               ),
             ],
           ),

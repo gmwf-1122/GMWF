@@ -57,18 +57,18 @@ class DashboardEmptyState extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 32),
-            const Text('No Transactions Found',
+            Text('No Transactions Found',
                 style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.w800,
-                    color: AppColors.gray900,
+                    color: t.textPrimary,
                     letterSpacing: -0.5)),
             const SizedBox(height: 8),
-            const Text(
+            Text(
               'We couldn\'t find any donations matching your current filters.',
               textAlign: TextAlign.center,
               style: TextStyle(
-                  fontSize: 14, color: AppColors.gray500, height: 1.5),
+                  fontSize: 14, color: t.textSecondary, height: 1.5),
             ),
             const SizedBox(height: 32),
             if (selectedCategory != DonationCategory.all ||

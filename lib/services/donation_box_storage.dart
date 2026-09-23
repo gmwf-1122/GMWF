@@ -2,6 +2,7 @@
 //
 // Hive-based local storage + Firestore sync for donation boxes and openings.
 
+import 'dart:async';
 import 'dart:io';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:excel/excel.dart' hide Border;
@@ -12,7 +13,11 @@ import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
 
 import 'local_storage_service.dart';
+import 'sync_service.dart';
+import 'network_health_service.dart';
 import '../models/donation_box_models.dart';
+import '../realtime/realtime_manager.dart';
+import '../realtime/realtime_events.dart';
 
 class DonationBoxStorage {
   static const String boxesBoxName   = 'local_donation_boxes';
@@ -36,7 +41,7 @@ class DonationBoxStorage {
     final hiveBox = Hive.box(boxesBoxName);
     await hiveBox.put(box.id, box.toMap());
     await hiveBox.flush();
-    _enqueueBoxSync(box);
+    await _enqueueBoxSync(box);
     debugPrint('[DonationBoxStorage] Saved box ${box.boxNumber} locally');
     return box;
   }
@@ -242,7 +247,7 @@ class DonationBoxStorage {
       ));
     }
 
-    _enqueueOpeningSync(opening);
+    await _enqueueOpeningSync(opening);
     debugPrint('[DonationBoxStorage] Saved opening for ${opening.boxNumber} on ${opening.openDate}');
     return opening;
   }
@@ -732,32 +737,76 @@ class DonationBoxStorage {
     }
   }
 
-  static void _enqueueBoxSync(DonationBox box) {
+  static Future<void> _enqueueBoxSync(DonationBox box) async {
     try {
-      final syncBox = Hive.box(LocalStorageService.syncBox);
-      syncBox.put('dbox_${box.id}', {
-        'event_type': 'save_donation_box',
-        'data': box.toMap(),
+      await LocalStorageService.enqueueSync({
+        'type': 'save_donation_box',
+        'entityId': box.id,
         'boxId': box.id,
         'branchId': box.branchId,
+        'data': box.toMap(),
         'timestamp': DateTime.now().toIso8601String(),
       });
+      if (RealtimeManager().isConnected) {
+        RealtimeManager().sendMessage(
+          RealtimeEvents.payload(
+            type: RealtimeEvents.saveDonationBox,
+            data: box.toMap(),
+          ),
+        );
+      }
+      // Direct cloud push fallback if online
+      try {
+        if (NetworkHealthService().isStableOnline) {
+          final bId = LocalStorageService.sanitizeBranchId(box.branchId, fallback: 'karachi');
+          unawaited(FirebaseFirestore.instance
+              .collection('branches')
+              .doc(bId)
+              .collection('donation_boxes')
+              .doc(box.id)
+              .set(box.toMap()..remove('syncStatus'), SetOptions(merge: true))
+              .catchError((_) {}));
+        }
+      } catch (_) {}
+      SyncService().triggerUpload(force: true);
     } catch (e) {
       debugPrint('[DonationBoxStorage] Enqueue box sync failed: $e');
     }
   }
 
-  static void _enqueueOpeningSync(BoxOpening opening) {
+  static Future<void> _enqueueOpeningSync(BoxOpening opening) async {
     try {
-      final syncBox = Hive.box(LocalStorageService.syncBox);
-      syncBox.put('dbox_open_${opening.id}', {
-        'event_type': 'save_box_opening',
-        'data': opening.toMap(),
+      await LocalStorageService.enqueueSync({
+        'type': 'save_box_opening',
+        'entityId': opening.id,
         'openingId': opening.id,
         'boxId': opening.boxId,
         'branchId': opening.branchId,
+        'data': opening.toMap(),
         'timestamp': DateTime.now().toIso8601String(),
       });
+      if (RealtimeManager().isConnected) {
+        RealtimeManager().sendMessage(
+          RealtimeEvents.payload(
+            type: RealtimeEvents.saveBoxOpening,
+            data: opening.toMap(),
+          ),
+        );
+      }
+      // Direct cloud push fallback if online
+      try {
+        if (NetworkHealthService().isStableOnline) {
+          final bId = LocalStorageService.sanitizeBranchId(opening.branchId, fallback: 'karachi');
+          unawaited(FirebaseFirestore.instance
+              .collection('branches')
+              .doc(bId)
+              .collection('donation_box_openings')
+              .doc(opening.id)
+              .set(opening.toMap()..remove('syncStatus'), SetOptions(merge: true))
+              .catchError((_) {}));
+        }
+      } catch (_) {}
+      SyncService().triggerUpload(force: true);
     } catch (e) {
       debugPrint('[DonationBoxStorage] Enqueue opening sync failed: $e');
     }
@@ -766,24 +815,43 @@ class DonationBoxStorage {
   /// Sync a box to Firestore (called by ServerSyncManager or SyncService)
   static Future<bool> syncBoxToFirestore(Map<String, dynamic> data) async {
     try {
-      final branchId = data['branchId'] as String?;
-      if (branchId == null || branchId.isEmpty) return false;
+      final branchId = (data['branchId']?.toString() ?? '').toLowerCase().trim();
+      if (branchId.isEmpty) return false;
 
       final db = FirebaseFirestore.instance;
-      final boxData = data['data'] as Map<String, dynamic>? ?? data;
-      final boxNumber = boxData['boxNumber'] as String? ?? '';
+      final boxData = data['data'] is Map ? Map<String, dynamic>.from(data['data']) : Map<String, dynamic>.from(data);
+      final boxNumber = boxData['boxNumber']?.toString() ?? '';
+      final boxId = boxData['id']?.toString() ?? data['boxId']?.toString() ?? '';
+      final docId = (boxData['firestoreId']?.toString() ?? '').isNotEmpty
+          ? boxData['firestoreId'].toString()
+          : (boxNumber.isNotEmpty ? boxNumber : boxId);
+
+      if (docId.isEmpty) return false;
 
       final docRef = db
           .collection('branches')
           .doc(branchId)
           .collection('donation_boxes')
-          .doc(boxNumber.isNotEmpty ? boxNumber : null);
+          .doc(docId);
 
       await docRef.set({
         ...boxData,
         'syncedAt': FieldValue.serverTimestamp(),
       }, SetOptions(merge: true));
 
+      // Mark locally as synced
+      if (boxId.isNotEmpty && Hive.isBoxOpen(boxesBoxName)) {
+        final hiveBox = Hive.box(boxesBoxName);
+        final raw = hiveBox.get(boxId);
+        if (raw is Map) {
+          final updated = Map<String, dynamic>.from(raw)
+            ..['syncStatus'] = 'synced'
+            ..['firestoreId'] = docId;
+          await hiveBox.put(boxId, updated);
+        }
+      }
+
+      debugPrint('[DonationBoxStorage] ✅ Box $docId synced to Firestore');
       return true;
     } catch (e) {
       debugPrint('[DonationBoxStorage] syncBoxToFirestore failed: $e');
@@ -794,16 +862,15 @@ class DonationBoxStorage {
   /// Sync an opening to Firestore
   static Future<bool> syncOpeningToFirestore(Map<String, dynamic> data) async {
     try {
-      final branchId = data['branchId'] as String?;
-      final boxId = data['boxId'] as String?;
-      if (branchId == null || branchId.isEmpty) return false;
+      final branchId = (data['branchId']?.toString() ?? '').toLowerCase().trim();
+      final boxId = data['boxId']?.toString() ?? '';
+      if (branchId.isEmpty) return false;
 
       final db = FirebaseFirestore.instance;
-      final openData = data['data'] as Map<String, dynamic>? ?? data;
-      final boxNumber = openData['boxNumber'] as String? ?? '';
-
-      // Find or use the box number as the parent doc ID
-      final parentDocId = boxNumber.isNotEmpty ? boxNumber : (boxId ?? 'unknown');
+      final openData = data['data'] is Map ? Map<String, dynamic>.from(data['data']) : Map<String, dynamic>.from(data);
+      final boxNumber = openData['boxNumber']?.toString() ?? '';
+      final parentDocId = boxNumber.isNotEmpty ? boxNumber : (boxId.isNotEmpty ? boxId : 'unknown');
+      final openingId = openData['id']?.toString() ?? data['openingId']?.toString() ?? '';
 
       final docRef = db
           .collection('branches')
@@ -811,17 +878,73 @@ class DonationBoxStorage {
           .collection('donation_boxes')
           .doc(parentDocId)
           .collection('openings')
-          .doc();
+          .doc(openingId.isNotEmpty ? openingId : null);
 
       await docRef.set({
         ...openData,
         'syncedAt': FieldValue.serverTimestamp(),
-      });
+      }, SetOptions(merge: true));
 
+      // Mark locally as synced
+      if (openingId.isNotEmpty && Hive.isBoxOpen(openingsBoxName)) {
+        final openingsBox = Hive.box(openingsBoxName);
+        final raw = openingsBox.get(openingId);
+        if (raw is Map) {
+          final updated = Map<String, dynamic>.from(raw)
+            ..['syncStatus'] = 'synced'
+            ..['firestoreId'] = docRef.id;
+          await openingsBox.put(openingId, updated);
+        }
+      }
+
+      debugPrint('[DonationBoxStorage] ✅ Opening ${docRef.id} for $parentDocId synced to Firestore');
       return true;
     } catch (e) {
       debugPrint('[DonationBoxStorage] syncOpeningToFirestore failed: $e');
       return false;
+    }
+  }
+
+  /// Backfill any unsynced donation boxes or openings into the sync queue
+  static Future<void> backfillUnsyncedBoxes([String? branchId]) async {
+    try {
+      if (!Hive.isBoxOpen(boxesBoxName) || !Hive.isBoxOpen(openingsBoxName)) return;
+      final hiveBox = Hive.box(boxesBoxName);
+      final openingsBox = Hive.box(openingsBoxName);
+      final normBranch = (branchId ?? '').toLowerCase().trim();
+
+      int boxedQueued = 0;
+      for (var key in hiveBox.keys) {
+        final raw = hiveBox.get(key);
+        if (raw is Map) {
+          final box = DonationBox.fromMap(raw, key.toString());
+          if (normBranch.isNotEmpty && normBranch != 'all' && box.branchId.toLowerCase().trim() != normBranch) continue;
+          if (box.syncStatus != 'synced') {
+            await _enqueueBoxSync(box);
+            boxedQueued++;
+          }
+        }
+      }
+
+      int openingsQueued = 0;
+      for (var key in openingsBox.keys) {
+        final raw = openingsBox.get(key);
+        if (raw is Map) {
+          final opening = BoxOpening.fromMap(raw, key.toString());
+          if (normBranch.isNotEmpty && normBranch != 'all' && opening.branchId.toLowerCase().trim() != normBranch) continue;
+          if (opening.syncStatus != 'synced') {
+            await _enqueueOpeningSync(opening);
+            openingsQueued++;
+          }
+        }
+      }
+
+      if (boxedQueued > 0 || openingsQueued > 0) {
+        debugPrint('[DonationBoxStorage] Backfilled $boxedQueued boxes and $openingsQueued openings into sync queue');
+        SyncService().triggerUpload(force: true);
+      }
+    } catch (e) {
+      debugPrint('[DonationBoxStorage] backfillUnsyncedBoxes error: $e');
     }
   }
 }

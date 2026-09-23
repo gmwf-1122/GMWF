@@ -3,7 +3,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
-import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:collection/collection.dart';
 import 'package:image_picker/image_picker.dart';
@@ -14,11 +13,14 @@ import '../../theme/app_theme.dart';
 import '../../services/finance_local_storage.dart';
 import '../../services/finance_ledger_storage.dart';
 import '../../services/zkteco_network_service.dart';
-import '../../services/local_storage_service.dart';
 import '../../services/image_upload_service.dart';
 import '../../utils/formatters.dart';
 import '../../services/user_theme_service.dart';
+import '../../services/local_storage_service.dart';
+import '../../services/network_health_service.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'shared_widgets.dart';
+import '../../design/design_system.dart';
 
 void openEmployeeFormSheet(
   BuildContext context, {
@@ -86,7 +88,14 @@ void openEmployeeFormSheet(
         );
 
   final isEdit = employeeId != null;
-  final Map<String, dynamic> existing = isEdit ? (FinanceLocalStorage.getEmployee(employeeId) ?? {}) : {};
+  final Map<String, dynamic> existing = isEdit
+      ? (FinanceLocalStorage.getEmployee(employeeId) ??
+          (FinanceLocalStorage.employeesBox.values.firstWhereOrNull(
+                  (v) => v is Map && (v['localId']?.toString() == employeeId || v['id']?.toString() == employeeId))
+              as Map?)
+              ?.cast<String, dynamic>() ??
+          {})
+      : {};
 
   final String initialBank = existing['bankName']?.toString() ??
       (isEdit
@@ -132,7 +141,7 @@ void openEmployeeFormSheet(
           ? DateFormat('yyyy-MM-dd').format(DateTime.parse(existing['joiningDate']))
           : DateFormat('yyyy-MM-dd').format(DateTime.now()));
 
-  final existingCred = isEdit ? ZkTecoNetworkService.getCredentialByEntityId(employeeId!) : null;
+  final existingCred = isEdit ? ZkTecoNetworkService.getCredentialByEntityId(employeeId) : null;
   final initialPin = existingCred?.biometricPin ?? existing['biometricPin']?.toString() ?? '';
   final biometricPinController = TextEditingController(text: initialPin);
 
@@ -149,6 +158,42 @@ void openEmployeeFormSheet(
           : 'Bank Transfer')
       : 'Bank Transfer';
   String selectedBank = initialBank;
+
+  final List<String> availableCamps = ['Saddar Camp', 'Haji Camp', 'Central Office'];
+  final List<String> selectedCamps = List<String>.from(
+    existing['camps'] is List
+        ? (existing['camps'] as List).map((e) => e.toString())
+        : (existing['camp'] != null ? [existing['camp'].toString()] : ['Saddar Camp', 'Haji Camp']),
+  );
+
+  final List<Map<String, String>> employeeSessions = List<Map<String, dynamic>>.from(existing['sessions'] ?? [])
+      .map((s) => {
+            'camp': s['camp']?.toString() ?? 'Saddar Camp',
+            'session': s['session']?.toString() ?? 'Morning',
+            'startTime': s['startTime']?.toString() ?? '09:00 AM',
+            'endTime': s['endTime']?.toString() ?? '01:00 PM',
+          })
+      .toList();
+
+  // If no sessions yet and camps selected, pre-populate default camps & sessions
+  if (employeeSessions.isEmpty) {
+    if (selectedCamps.contains('Saddar Camp')) {
+      employeeSessions.add({
+        'camp': 'Saddar Camp',
+        'session': 'Morning',
+        'startTime': '09:00 AM',
+        'endTime': '01:00 PM',
+      });
+    }
+    if (selectedCamps.contains('Haji Camp')) {
+      employeeSessions.add({
+        'camp': 'Haji Camp',
+        'session': 'Evening',
+        'startTime': '04:00 PM',
+        'endTime': '08:00 PM',
+      });
+    }
+  }
 
   final winterShiftController = TextEditingController(text: existing['workScheduleOverride']?['winter'] ?? '');
   final summerShiftController = TextEditingController(text: existing['workScheduleOverride']?['summer'] ?? '');
@@ -181,7 +226,7 @@ void openEmployeeFormSheet(
         role: RoleTheme.admin,
         child: StatefulBuilder(
           builder: (ctx, setState) {
-            final isNarrow = MediaQuery.of(ctx).size.width < 640;
+            final isNarrow = GBreakpoint.isMobile(ctx);
 
             final List<String> rolesList = List<String>.from(FinanceLocalStorage.getRolesForDepartment(department));
             final curUserRole = RoleThemeScope.dataOf(context).roleLabel.toLowerCase().trim();
@@ -198,11 +243,7 @@ void openEmployeeFormSheet(
             if (!deptsList.contains(department)) deptsList.add(department);
             if (!deptsList.contains('+ Add Custom Department...')) deptsList.add('+ Add Custom Department...');
 
-            final allBranches = FinanceLocalStorage.getAllBranches(branches)
-                .where((b) {
-                  final id = b['id']?.toString() ?? '';
-                  return id != 'karachi-2' && id != 'karachi2';
-                }).toList();
+            final allBranches = FinanceLocalStorage.getAllKnownBranches(branches);
 
             final List<String> branchDropdownItems = allBranches.map((b) => b['id']?.toString() ?? '').toList();
             if (!branchDropdownItems.contains('+ Add Custom Branch...')) {
@@ -561,13 +602,61 @@ void openEmployeeFormSheet(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Icon(Icons.business_rounded, color: t.accent, size: 16),
-                            const SizedBox(width: 6),
-                            Text(
-                              'Assigned Branch *',
-                              style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 11.5),
+                            Row(
+                              children: [
+                                Icon(Icons.business_rounded, color: t.accent, size: 16),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Assigned Branch *',
+                                  style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 11.5),
+                                ),
+                              ],
                             ),
+                            if (isEdit)
+                              InkWell(
+                                onTap: () => _showBranchTransferDialog(
+                                  ctx: ctx,
+                                  theme: t,
+                                  isDark: isDark,
+                                  employeeId: employeeId,
+                                  employeeName: nameController.text.trim().isNotEmpty
+                                      ? nameController.text.trim()
+                                      : (existing['name']?.toString() ?? 'Employee'),
+                                  currentBranchId: selectedBranchId,
+                                  branches: allBranches,
+                                  currentUser: RoleThemeScope.dataOf(context).roleLabel,
+                                  onTransferred: (newBranchId) {
+                                    setState(() => selectedBranchId = newBranchId);
+                                  },
+                                  onSaved: onSaved,
+                                ),
+                                borderRadius: BorderRadius.circular(6),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: t.accent.withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(color: t.accent.withValues(alpha: 0.3)),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.swap_horiz_rounded, size: 14, color: t.accent),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        'Transfer Branch',
+                                        style: TextStyle(
+                                          color: t.accent,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 11,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
                           ],
                         ),
                         const SizedBox(height: 6),
@@ -599,21 +688,19 @@ void openEmployeeFormSheet(
                             if (id == 'karachi-1' || id == 'karachi1') name = 'Karachi';
                             return DropdownMenuItem(value: id, child: Text('$name ($id)'));
                           }).toList(),
-                          onChanged: isEdit
-                              ? null
-                              : (val) {
-                                  if (val == '+ Add Custom Branch...') {
-                                    showCustomBranchDialog(
-                                      context: ctx,
-                                      theme: t,
-                                      onAdded: (newId, newName) {
-                                        setState(() => selectedBranchId = newId);
-                                      },
-                                    );
-                                  } else if (val != null) {
-                                    setState(() => selectedBranchId = val);
-                                  }
+                          onChanged: (val) {
+                            if (val == '+ Add Custom Branch...') {
+                              showCustomBranchDialog(
+                                context: ctx,
+                                theme: t,
+                                onAdded: (newId, newName) {
+                                  setState(() => selectedBranchId = newId);
                                 },
+                              );
+                            } else if (val != null) {
+                              setState(() => selectedBranchId = val);
+                            }
+                          },
                         ),
                       ],
                     ),
@@ -1021,6 +1108,233 @@ void openEmployeeFormSheet(
 
                   const SizedBox(height: 12),
 
+                  // Camps & Multi-Session Shift Schedule (Karachi Saddar / Haji Camp / etc.)
+                  Container(
+                    margin: const EdgeInsets.only(top: 4, bottom: 12),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: t.bgCardAlt,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: t.bgRule),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.holiday_village_rounded, color: t.accent, size: 16),
+                                const SizedBox(width: 6),
+                                Text(
+                                  'Camps & Shift Sessions (Multi-Camp)',
+                                  style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 12),
+                                ),
+                              ],
+                            ),
+                            TextButton.icon(
+                              onPressed: () {
+                                setState(() {
+                                  employeeSessions.add({
+                                    'camp': selectedCamps.isNotEmpty ? selectedCamps.last : 'Haji Camp',
+                                    'session': 'Evening',
+                                    'startTime': '04:00 PM',
+                                    'endTime': '08:00 PM',
+                                  });
+                                });
+                              },
+                              icon: const Icon(Icons.add_rounded, size: 14),
+                              label: const Text('Add Session', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                              style: TextButton.styleFrom(
+                                foregroundColor: t.accent,
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Configure which camps this employee works at (e.g. Saddar Morning vs Haji Camp Evening) and joining/shift times.',
+                          style: TextStyle(color: t.textSecondary, fontSize: 10.5),
+                        ),
+                        const SizedBox(height: 10),
+
+                        // Camp Selection Chips
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: availableCamps.map((c) {
+                            final isSel = selectedCamps.contains(c);
+                            return FilterChip(
+                              label: Text(
+                                c,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: isSel ? Colors.white : t.textPrimary,
+                                  fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                                ),
+                              ),
+                              selected: isSel,
+                              selectedColor: t.accent,
+                              checkmarkColor: Colors.white,
+                              backgroundColor: t.bgCard,
+                              onSelected: (selected) {
+                                setState(() {
+                                  if (selected) {
+                                    if (!selectedCamps.contains(c)) selectedCamps.add(c);
+                                  } else {
+                                    selectedCamps.remove(c);
+                                  }
+                                });
+                              },
+                            );
+                          }).toList(),
+                        ),
+                        const SizedBox(height: 10),
+
+                        // Sessions list
+                        if (employeeSessions.isEmpty)
+                          Container(
+                            padding: const EdgeInsets.all(10),
+                            decoration: BoxDecoration(
+                              color: t.bgCard,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: t.bgRule),
+                            ),
+                            child: Row(
+                              children: [
+                                Icon(Icons.info_outline_rounded, size: 14, color: t.textTertiary),
+                                const SizedBox(width: 8),
+                                Expanded(
+                                  child: Text('No per-camp sessions configured. Standard working hours will be used.', style: TextStyle(color: t.textTertiary, fontSize: 11)),
+                                ),
+                              ],
+                            ),
+                          )
+                        else
+                          ...employeeSessions.asMap().entries.map((entry) {
+                            final idx = entry.key;
+                            final s = entry.value;
+                            return Container(
+                              margin: const EdgeInsets.only(bottom: 8),
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: t.bgCard,
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: t.bgRule),
+                              ),
+                              child: Row(
+                                children: [
+                                  // Camp selector
+                                  Expanded(
+                                    flex: 3,
+                                    child: DropdownButtonFormField<String>(
+                                      value: availableCamps.contains(s['camp']) ? s['camp'] : availableCamps.first,
+                                      dropdownColor: t.bgCard,
+                                      decoration: InputDecoration(
+                                        labelText: 'Camp',
+                                        isDense: true,
+                                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: t.bgRule)),
+                                      ),
+                                      style: TextStyle(color: t.textPrimary, fontSize: 11),
+                                      items: availableCamps.map((c) => DropdownMenuItem(value: c, child: Text(c, style: const TextStyle(fontSize: 11)))).toList(),
+                                      onChanged: (val) {
+                                        if (val != null) setState(() => s['camp'] = val);
+                                      },
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  // Session (Morning, Evening, etc.)
+                                  Expanded(
+                                    flex: 2,
+                                    child: TextFormField(
+                                      initialValue: s['session'],
+                                      decoration: InputDecoration(
+                                        labelText: 'Session',
+                                        isDense: true,
+                                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: t.bgRule)),
+                                      ),
+                                      style: TextStyle(color: t.textPrimary, fontSize: 11),
+                                      onChanged: (val) => s['session'] = val,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  // Joining / Start Time
+                                  InkWell(
+                                    onTap: () async {
+                                      final picked = await showTimePicker(context: ctx, initialTime: TimeOfDay.now());
+                                      if (picked != null) {
+                                        final now = DateTime.now();
+                                        final dt = DateTime(now.year, now.month, now.day, picked.hour, picked.minute);
+                                        setState(() => s['startTime'] = DateFormat('hh:mm a').format(dt));
+                                      }
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                                      decoration: BoxDecoration(
+                                        border: Border.all(color: t.bgRule),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.login_rounded, size: 12, color: t.accent),
+                                          const SizedBox(width: 3),
+                                          Text(s['startTime'] ?? '09:00 AM', style: TextStyle(fontSize: 11, color: t.textPrimary, fontWeight: FontWeight.bold)),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  // Exit / End Time
+                                  InkWell(
+                                    onTap: () async {
+                                      final picked = await showTimePicker(context: ctx, initialTime: TimeOfDay.now());
+                                      if (picked != null) {
+                                        final now = DateTime.now();
+                                        final dt = DateTime(now.year, now.month, now.day, picked.hour, picked.minute);
+                                        setState(() => s['endTime'] = DateFormat('hh:mm a').format(dt));
+                                      }
+                                    },
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                                      decoration: BoxDecoration(
+                                        border: Border.all(color: t.bgRule),
+                                        borderRadius: BorderRadius.circular(6),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          Icon(Icons.logout_rounded, size: 12, color: t.danger),
+                                          const SizedBox(width: 3),
+                                          Text(s['endTime'] ?? '01:00 PM', style: TextStyle(fontSize: 11, color: t.textPrimary, fontWeight: FontWeight.bold)),
+                                        ],
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 4),
+                                  // Delete session
+                                  IconButton(
+                                    icon: Icon(Icons.close_rounded, size: 15, color: t.danger),
+                                    padding: EdgeInsets.zero,
+                                    constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                                    onPressed: () {
+                                      setState(() => employeeSessions.removeAt(idx));
+                                    },
+                                  ),
+                                ],
+                              ),
+                            );
+                          }),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
                   // Work Schedule Timings
                   const Text(
                     'Work Schedule (Optional)',
@@ -1218,6 +1532,24 @@ void openEmployeeFormSheet(
                     .where((c) => (c['name']?.isNotEmpty == true) && (c['phone']?.isNotEmpty == true))
                     .toList();
 
+                final List<String> computedCamps = employeeSessions
+                    .map((s) => s['camp'] ?? '')
+                    .where((c) => c.isNotEmpty)
+                    .toSet()
+                    .toList();
+                if (computedCamps.isEmpty && selectedCamps.isNotEmpty) {
+                  computedCamps.addAll(selectedCamps);
+                }
+
+                String formattedShiftHours = '09:00 AM - 05:00 PM';
+                if (employeeSessions.isNotEmpty) {
+                  formattedShiftHours = employeeSessions
+                      .map((s) => '${s['camp']}: ${s['startTime']} - ${s['endTime']}')
+                      .join(' | ');
+                } else if (winterShiftController.text.trim().isNotEmpty) {
+                  formattedShiftHours = winterShiftController.text.trim();
+                }
+
                 final employeeData = <String, dynamic>{
                   if (isEdit) 'id': employeeId,
                   if (isEdit) 'localId': employeeId,
@@ -1243,6 +1575,11 @@ void openEmployeeFormSheet(
                   'currentAddress': addressController.text.trim().isNotEmpty ? addressController.text.trim() : null,
                   'emergencyContacts': validContacts,
                   'workScheduleOverride': scheduleOverride,
+                  'camps': computedCamps,
+                  'sessions': employeeSessions,
+                  'shiftHours': formattedShiftHours,
+                  'workingHours': formattedShiftHours,
+                  'allowedBranches': ['karachi', 'saddar', 'haji_camp', selectedBranchId],
                   'isActive': existing['isActive'] ?? true,
                   'biometricPin': enteredPin.isNotEmpty ? enteredPin : null,
                   'monthlyAdvanceInstallment': monthlyInstallmentController.text.trim().isNotEmpty
@@ -1257,7 +1594,7 @@ void openEmployeeFormSheet(
                   'identificationBackPath': idBackPath,
                 };
 
-                final targetBranchId = isEdit ? (existing['branchId']?.toString() ?? activeBranchId) : selectedBranchId;
+                final targetBranchId = selectedBranchId.isNotEmpty ? selectedBranchId : (existing['branchId']?.toString() ?? activeBranchId);
 
                 // 1. Instant local save (Hive) + Local audit trail + Biometric cred mapping + Server sync enqueue + LAN WebSocket + Background upload
                 final empLocalId = await FinanceLocalStorage.saveEmployee(
@@ -1265,6 +1602,21 @@ void openEmployeeFormSheet(
                   data: employeeData,
                   performedBy: curUser,
                 );
+
+                // Direct cloud write fallback if device is online
+                try {
+                  if (NetworkHealthService().isStableOnline) {
+                    final bId = LocalStorageService.sanitizeBranchId(targetBranchId, fallback: 'karachi');
+                    final fsData = Map<String, dynamic>.from(employeeData)..remove('syncStatus');
+                    unawaited(FirebaseFirestore.instance
+                        .collection('branches')
+                        .doc(bId)
+                        .collection('employees')
+                        .doc(empLocalId)
+                        .set(fsData, SetOptions(merge: true))
+                        .catchError((_) {}));
+                  }
+                } catch (_) {}
 
                 // 2. Initial / Updated Salary History (Safe & local)
                 try {
@@ -1704,6 +2056,187 @@ Widget _buildMediaPickerRow({
           ),
         ],
       ],
+    ),
+  );
+}
+
+void _showBranchTransferDialog({
+  required BuildContext ctx,
+  required RoleThemeData theme,
+  required bool isDark,
+  required String employeeId,
+  required String employeeName,
+  required String currentBranchId,
+  required List<Map<String, dynamic>> branches,
+  required String currentUser,
+  required ValueChanged<String> onTransferred,
+  VoidCallback? onSaved,
+}) {
+  String targetBranchId = branches.firstWhereOrNull((b) => b['id'] != currentBranchId)?['id']?.toString() ?? currentBranchId;
+  final reasonController = TextEditingController();
+  bool isTransferring = false;
+
+  showDialog(
+    context: ctx,
+    builder: (dlgCtx) => StatefulBuilder(
+      builder: (context, setDlgState) {
+        String fromName = branches.firstWhereOrNull((b) => b['id'] == currentBranchId)?['name']?.toString() ?? currentBranchId;
+        if (currentBranchId == 'karachi-1' || currentBranchId == 'karachi1') fromName = 'Karachi';
+
+        return AlertDialog(
+          backgroundColor: theme.bgCard,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: BorderSide(color: theme.bgRule)),
+          title: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: theme.accent.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(Icons.swap_horiz_rounded, color: theme.accent, size: 22),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Transfer Branch',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: theme.textPrimary),
+                ),
+              ),
+            ],
+          ),
+          content: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Transfer $employeeName to a different branch location.',
+                  style: TextStyle(fontSize: 12.5, color: theme.textSecondary),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: theme.bgCardAlt,
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: theme.bgRule),
+                  ),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Current Branch', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: theme.textTertiary)),
+                            const SizedBox(height: 2),
+                            Text(fromName, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: theme.textPrimary)),
+                          ],
+                        ),
+                      ),
+                      Icon(Icons.arrow_forward_rounded, color: theme.accent, size: 18),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Destination Branch', style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: theme.textTertiary)),
+                            const SizedBox(height: 2),
+                            DropdownButton<String>(
+                              value: targetBranchId,
+                              isDense: true,
+                              isExpanded: true,
+                              underline: const SizedBox.shrink(),
+                              dropdownColor: theme.bgCard,
+                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: theme.accent),
+                              items: branches.map((b) {
+                                final id = b['id']?.toString() ?? '';
+                                String name = b['name']?.toString() ?? id;
+                                if (id == 'karachi-1' || id == 'karachi1') name = 'Karachi';
+                                return DropdownMenuItem(value: id, child: Text('$name ($id)'));
+                              }).toList(),
+                              onChanged: (val) {
+                                if (val != null) setDlgState(() => targetBranchId = val);
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+                TextField(
+                  controller: reasonController,
+                  style: TextStyle(fontSize: 12.5, color: theme.textPrimary),
+                  decoration: InputDecoration(
+                    labelText: 'Transfer Reason / Notes (Optional)',
+                    labelStyle: TextStyle(fontSize: 12, color: theme.textSecondary),
+                    hintText: 'e.g. Relocation, Branch Staff Rebalancing',
+                    hintStyle: TextStyle(fontSize: 11.5, color: theme.textTertiary),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: theme.bgRule)),
+                    enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: theme.bgRule)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Icon(Icons.info_outline_rounded, size: 14, color: theme.accentLight),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        'Updates active records, biometric device routes, and cleans up cloud documents from old branch.',
+                        style: TextStyle(fontSize: 10.5, color: theme.textTertiary),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: isTransferring ? null : () => Navigator.pop(dlgCtx),
+              child: Text('Cancel', style: TextStyle(color: theme.textSecondary)),
+            ),
+            ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: theme.accent,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              ),
+              icon: isTransferring
+                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Icon(Icons.swap_horiz_rounded, size: 16),
+              label: Text(isTransferring ? 'Transferring...' : 'Confirm Transfer', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
+              onPressed: isTransferring || targetBranchId == currentBranchId
+                  ? null
+                  : () async {
+                      setDlgState(() => isTransferring = true);
+                      try {
+                        await FinanceLocalStorage.transferEmployee(
+                          employeeId: employeeId,
+                          fromBranchId: currentBranchId,
+                          toBranchId: targetBranchId,
+                          performedBy: currentUser,
+                          reason: reasonController.text.trim().isNotEmpty ? reasonController.text.trim() : null,
+                        );
+                        onTransferred(targetBranchId);
+                        if (onSaved != null) onSaved();
+                        if (dlgCtx.mounted) Navigator.pop(dlgCtx);
+                        showCustomSnackBar(ctx, '✅ $employeeName transferred to $targetBranchId successfully!');
+                      } catch (e) {
+                        setDlgState(() => isTransferring = false);
+                        showCustomSnackBar(ctx, 'Transfer failed: $e', error: true);
+                      }
+                    },
+            ),
+          ],
+        );
+      },
     ),
   );
 }

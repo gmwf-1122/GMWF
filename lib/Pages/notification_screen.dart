@@ -58,6 +58,10 @@ class _NotificationScreenState extends State<NotificationScreen> {
     final isSuperOrAdmin = currentRole == 'superadmin' ||
         currentRole == 'admin' ||
         currentRole == 'manager' ||
+        currentRole == 'hq manager' ||
+        currentRole == 'hqmanager' ||
+        currentRole == 'ceo' ||
+        currentRole == 'chairman' ||
         currentRole == 'developer';
 
     // 1. User ID targeting
@@ -462,7 +466,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                 onTap: () async {
                   Navigator.pop(ctx);
                   await CloudMessagingService().dispatchAppUpdateAlert(
-                    newVersion: '1.5.0',
+                    newVersion: '1.5.4',
                     releaseNotes: 'Performance improvements, real-time sync upgrades, and enhanced notifications.',
                   );
                 },

@@ -55,7 +55,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb, ValueNotifier;
+import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb, ValueNotifier, VoidCallback;
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -140,10 +140,14 @@ class RealtimeManager {
   bool    get isConnected          => _isConnected;
   bool    get isServerIdentified   => _serverIdentified;
   bool    get isLanHealthy         => isLanHealthyNotifier.value;
+  bool    get isReconnecting       => _reconnectTimer != null && _reconnectTimer!.isActive;
+  int     get reconnectAttempts    => _reconnectAttempts;
   String? get role                 => _role;
   String? get branchId             => _branchId;
   String? get username             => _username;
   String? get clientId             => _clientId;
+
+  VoidCallback? onNeedRediscovery;
 
   void _recordHealthSuccess() {
     _consecutivePingSuccesses++;
@@ -183,6 +187,7 @@ class RealtimeManager {
         sendMessage({
           'event_type': 'request_catch_up',
           'branchId': _branchId,
+          'forceAll': true,
         });
       }
     } catch (e) {
@@ -306,14 +311,39 @@ class RealtimeManager {
     if (raw == null) return;
     _lastPong = DateTime.now();
     _recordHealthSuccess();
-    final msg = raw as String;
+    final msg = raw.toString();
 
-    if (msg == 'pong' || msg == '{"type":"pong"}') {
+    // Immediate ping response
+    if (msg == 'ping' || msg == '{"type":"ping"}' || msg == '{"event_type":"ping"}') {
+      try {
+        _channel?.sink.add(jsonEncode({
+          'type': 'pong',
+          'event_type': 'pong',
+          '_clientId': _clientId,
+          '_timestamp': DateTime.now().millisecondsSinceEpoch,
+        }));
+      } catch (_) {}
+      return;
+    }
+
+    if (msg == 'pong' || msg == '{"type":"pong"}' || msg == '{"event_type":"pong"}') {
       return;
     }
 
     try {
       final decoded = jsonDecode(msg) as Map<String, dynamic>;
+
+      if (decoded['event_type'] == 'ping' || decoded['type'] == 'ping') {
+        try {
+          _channel?.sink.add(jsonEncode({
+            'type': 'pong',
+            'event_type': 'pong',
+            '_clientId': _clientId,
+            '_timestamp': DateTime.now().millisecondsSinceEpoch,
+          }));
+        } catch (_) {}
+        return;
+      }
 
       if (decoded['event_type'] == 'pong' || decoded['type'] == 'pong') {
         return;
@@ -423,11 +453,12 @@ class RealtimeManager {
   // ── Ping / pong ────────────────────────────────────────────────────────────
   void _startPingTimer() {
     _pingTimer?.cancel();
-    _pingTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+    _pingTimer = Timer.periodic(const Duration(seconds: 12), (_) {
       if (!_isConnected || _channel == null) return;
-      if (_lastPong != null &&
-          DateTime.now().difference(_lastPong!).inSeconds > 50) {
-        if (kDebugMode) print('[RealtimeManager] Pong timeout → reconnecting');
+      final now = DateTime.now();
+      // If no pong has been received within 25 seconds (2 missed pings), tear down dead socket
+      if (_lastPong != null && now.difference(_lastPong!).inSeconds > 25) {
+        if (kDebugMode) print('[RealtimeManager] ⚠️ Pong timeout (>25s) → tearing down half-dead socket');
         _recordHealthFailure();
         _handleDisconnect();
         return;
@@ -437,9 +468,13 @@ class RealtimeManager {
           'type': 'ping',
           'event_type': 'ping',
           '_clientId': _clientId,
-          '_timestamp': DateTime.now().millisecondsSinceEpoch,
+          '_timestamp': now.millisecondsSinceEpoch,
         }));
-      } catch (_) {}
+      } catch (e) {
+        if (kDebugMode) print('[RealtimeManager] ⚠️ Ping send exception: $e');
+        _recordHealthFailure();
+        _handleDisconnect();
+      }
     });
   }
 
@@ -522,6 +557,20 @@ class RealtimeManager {
     if (kDebugMode) {
       print('[RealtimeManager] Disconnected. Reconnecting in ${delaySeconds}s '
           '(attempt $_reconnectAttempts)');
+    }
+
+    // If we've failed to reconnect to this specific server IP 3 times,
+    // notify ConnectionManager to run full LAN discovery (UDP/subnet/Firestore probe)
+    // in case the server IP changed or machine restarted with a new DHCP address.
+    if (_reconnectAttempts >= 3 && onNeedRediscovery != null) {
+      if (kDebugMode) {
+        print('[RealtimeManager] Reconnect attempts reached $_reconnectAttempts → notifying ConnectionManager to trigger rediscovery');
+      }
+      try {
+        onNeedRediscovery!();
+      } catch (e) {
+        if (kDebugMode) print('[RealtimeManager] onNeedRediscovery error: $e');
+      }
     }
 
     _reconnectTimer?.cancel();
@@ -875,9 +924,10 @@ class RealtimeManager {
         myBranch == null ||
         myBranch.isEmpty ||
         myBranch == 'all' ||
-        myBranch == 'default';
+        myBranch == 'default' ||
+        CampSessionService.areBranchesMatching(msgBranch, myBranch);
 
-    if (!isUniversalBranch && msgBranch != myBranch && !msgBranch.contains(myBranch) && !myBranch.contains(msgBranch)) {
+    if (!isUniversalBranch) {
       return;
     }
 

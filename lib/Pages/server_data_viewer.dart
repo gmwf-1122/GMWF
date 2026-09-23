@@ -150,16 +150,28 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Scaffold(
-      backgroundColor: const Color(0xFF0B0F19),
+      backgroundColor: isDark ? const Color(0xFF070D18) : const Color(0xFFF1F5F9),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF1F2937),
+        backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
         elevation: 0,
-        title: const Text('Server Data Archive', style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
-        iconTheme: const IconThemeData(color: Colors.white),
+        scrolledUnderElevation: 0,
+        title: Text(
+          'Server Data Archive',
+          style: TextStyle(
+            fontWeight: FontWeight.bold,
+            color: isDark ? Colors.white : const Color(0xFF0F172A),
+          ),
+        ),
+        iconTheme: IconThemeData(color: isDark ? Colors.white : const Color(0xFF0F172A)),
         actions: [
           IconButton(
-            icon: Icon(_sortNewestFirst ? Icons.sort_rounded : Icons.history_rounded, color: Colors.white70),
+            icon: Icon(
+              _sortNewestFirst ? Icons.sort_rounded : Icons.history_rounded,
+              color: isDark ? Colors.white70 : const Color(0xFF475569),
+            ),
             tooltip: _sortNewestFirst ? 'Sorting: Newest First' : 'Sorting: Oldest First',
             onPressed: () {
               setState(() {
@@ -195,10 +207,10 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
           final sortedDates = grouped.keys.toList()..sort((a, b) => _sortNewestFirst ? b.compareTo(a) : a.compareTo(b));
 
           if (sortedDates.isEmpty) {
-            return const Center(
+            return Center(
               child: Text(
                 'No data saved on this server yet.',
-                style: TextStyle(color: Colors.white54, fontSize: 16),
+                style: TextStyle(color: isDark ? Colors.white54 : const Color(0xFF94A3B8), fontSize: 16),
               ),
             );
           }
@@ -237,21 +249,29 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
             children: [
               // Top Bar Filters: Category Chips + Search Bar
               Container(
-                color: const Color(0xFF1F2937),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                  border: Border(
+                    bottom: BorderSide(
+                      color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                      width: 1,
+                    ),
+                  ),
+                ),
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 child: Column(
                   children: [
                     // Search Bar
                     TextField(
                       controller: _searchController,
-                      style: const TextStyle(color: Colors.white, fontSize: 14),
+                      style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A), fontSize: 14),
                       decoration: InputDecoration(
                         hintText: 'Search by serial #, patient, staff, or category...',
-                        hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
-                        prefixIcon: const Icon(Icons.search_rounded, color: Colors.white54, size: 20),
+                        hintStyle: TextStyle(color: isDark ? Colors.white38 : const Color(0xFF94A3B8), fontSize: 13),
+                        prefixIcon: Icon(Icons.search_rounded, color: isDark ? Colors.white54 : const Color(0xFF64748B), size: 20),
                         suffixIcon: _searchQuery.isNotEmpty
                             ? IconButton(
-                                icon: const Icon(Icons.clear_rounded, color: Colors.white54, size: 18),
+                                icon: Icon(Icons.clear_rounded, color: isDark ? Colors.white54 : const Color(0xFF64748B), size: 18),
                                 onPressed: () {
                                   _searchController.clear();
                                   setState(() => _searchQuery = '');
@@ -259,9 +279,16 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                               )
                             : null,
                         filled: true,
-                        fillColor: const Color(0xFF0B0F19),
+                        fillColor: isDark ? const Color(0xFF070D18) : const Color(0xFFF8FAFC),
                         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0)),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(12),
+                          borderSide: BorderSide(color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0)),
+                        ),
                       ),
                       onChanged: (val) {
                         setState(() => _searchQuery = val.trim());
@@ -283,14 +310,21 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                             label: Text(
                               cat['label']!,
                               style: TextStyle(
-                                color: isSelected ? Colors.white : Colors.white70,
+                                color: isSelected
+                                    ? (isDark ? Colors.white : const Color(0xFF065F46))
+                                    : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569)),
                                 fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                                 fontSize: 12,
                               ),
                             ),
                             selected: isSelected,
-                            selectedColor: Colors.blueAccent,
-                            backgroundColor: const Color(0xFF0B0F19),
+                            selectedColor: isDark ? const Color(0xFF0F766E).withOpacity(0.35) : const Color(0xFFECFDF5),
+                            backgroundColor: isDark ? const Color(0xFF070D18) : const Color(0xFFF1F5F9),
+                            side: BorderSide(
+                              color: isSelected
+                                  ? const Color(0xFF10B981)
+                                  : (isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
+                            ),
                             onSelected: (_) {
                               setState(() => _selectedCategory = cat['id']!);
                             },
@@ -309,7 +343,7 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                     // Sidebar for Dates
                     Container(
                       width: 230,
-                      color: const Color(0xFF1F2937).withValues(alpha: 0.5),
+                      color: isDark ? const Color(0xFF0A101D) : Colors.white,
                       child: ListView.builder(
                         itemCount: sortedDates.length,
                         itemBuilder: (context, index) {
@@ -322,26 +356,36 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                             title: Text(
                               date,
                               style: TextStyle(
-                                color: isSelected ? Colors.blueAccent : Colors.white70,
+                                color: isSelected
+                                    ? (isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7))
+                                    : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF334155)),
                                 fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                               ),
                             ),
                             trailing: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
-                                color: isSelected ? Colors.blueAccent.withValues(alpha: 0.2) : Colors.white10,
+                                color: isSelected
+                                    ? const Color(0xFF0284C7).withOpacity(0.15)
+                                    : (isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
                                 borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: isSelected ? const Color(0xFF0284C7).withOpacity(0.4) : Colors.transparent,
+                                ),
                               ),
                               child: Text(
                                 '$count',
                                 style: TextStyle(
-                                  color: isSelected ? Colors.blueAccent : Colors.white54,
+                                  color: isSelected
+                                      ? (isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7))
+                                      : (isDark ? const Color(0xFF64748B) : const Color(0xFF64748B)),
                                   fontSize: 11,
+                                  fontWeight: FontWeight.bold,
                                 ),
                               ),
                             ),
                             selected: isSelected,
-                            selectedTileColor: Colors.blueAccent.withValues(alpha: 0.1),
+                            selectedTileColor: isDark ? const Color(0xFF0284C7).withOpacity(0.1) : const Color(0xFFF0F9FF),
                             onTap: () {
                               setState(() {
                                 _selectedDateKey = date;
@@ -351,7 +395,7 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                         },
                       ),
                     ),
-                    const VerticalDivider(width: 1, color: Colors.white10),
+                    VerticalDivider(width: 1, color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0)),
 
                     // Content Area for Selected Date & Filters
                     Expanded(
@@ -360,13 +404,13 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                               child: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  const Icon(Icons.folder_open_rounded, size: 48, color: Colors.white24),
+                                  Icon(Icons.folder_open_rounded, size: 48, color: isDark ? Colors.white24 : const Color(0xFFCBD5E1)),
                                   const SizedBox(height: 12),
                                   Text(
                                     _searchQuery.isNotEmpty
                                         ? 'No records matching "$_searchQuery"'
                                         : 'No records found for this category/date.',
-                                    style: const TextStyle(color: Colors.white54, fontSize: 14),
+                                    style: TextStyle(color: isDark ? Colors.white54 : const Color(0xFF64748B), fontSize: 14),
                                   ),
                                 ],
                               ),
@@ -378,7 +422,7 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                                 final entry = filteredList[index];
                                 final category = _detectCategory(entry);
                                 final serial = entry['serial']?.toString() ?? 'N/A';
-                                final name = entry['patientName'] ?? entry['name'] ?? entry['title'] ?? 'Record Payload';
+                                final name = (entry['patientName'] ?? entry['name'] ?? entry['title'] ?? 'Record Payload').toString();
                                 final byRaw = entry['performedBy'] ??
                                               entry['createdByName'] ??
                                               entry['createdBy'] ??
@@ -400,21 +444,23 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                                   } catch (_) {}
                                 }
 
-                                Color statusColor = Colors.orangeAccent;
-                                if (status == 'completed') statusColor = Colors.greenAccent;
+                                Color statusColor = const Color(0xFFF59E0B);
+                                if (status == 'completed' || status == 'dispensed') statusColor = const Color(0xFF10B981);
 
                                 final catIcon = _categories.firstWhere((c) => c['id'] == category, orElse: () => _categories.first)['icon']!;
 
                                 return InkWell(
                                   onTap: () => _showEntryDetails(context, entry),
-                                  borderRadius: BorderRadius.circular(16),
+                                  borderRadius: BorderRadius.circular(14),
                                   child: Card(
-                                    color: const Color(0xFF1F2937).withValues(alpha: 0.8),
-                                    margin: const EdgeInsets.only(bottom: 12),
+                                    color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                                    margin: const EdgeInsets.only(bottom: 10),
                                     shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(16),
-                                      side: BorderSide(color: Colors.white.withValues(alpha: 0.05)),
+                                      borderRadius: BorderRadius.circular(14),
+                                      side: BorderSide(color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0)),
                                     ),
+                                    elevation: isDark ? 0 : 1,
+                                    shadowColor: Colors.black.withOpacity(0.04),
                                     child: Padding(
                                       padding: const EdgeInsets.all(16),
                                       child: Column(
@@ -427,29 +473,33 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                                               Container(
                                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                                 decoration: BoxDecoration(
-                                                  color: Colors.blueAccent.withValues(alpha: 0.1),
+                                                  color: const Color(0xFF0284C7).withOpacity(0.12),
                                                   borderRadius: BorderRadius.circular(6),
-                                                  border: Border.all(color: Colors.blueAccent.withValues(alpha: 0.3)),
+                                                  border: Border.all(color: const Color(0xFF0284C7).withOpacity(0.35)),
                                                 ),
                                                 child: Text(
                                                   '#$serial',
-                                                  style: const TextStyle(color: Colors.blueAccent, fontWeight: FontWeight.bold, fontSize: 12),
+                                                  style: const TextStyle(color: Color(0xFF0284C7), fontWeight: FontWeight.bold, fontSize: 12),
                                                 ),
                                               ),
                                               const SizedBox(width: 12),
                                               Expanded(
                                                 child: Text(
                                                   name,
-                                                  style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+                                                  style: TextStyle(
+                                                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                                    fontSize: 15,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
                                                   overflow: TextOverflow.ellipsis,
                                                 ),
                                               ),
                                               Container(
                                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                                 decoration: BoxDecoration(
-                                                  color: statusColor.withValues(alpha: 0.1),
+                                                  color: statusColor.withOpacity(0.12),
                                                   borderRadius: BorderRadius.circular(6),
-                                                  border: Border.all(color: statusColor.withValues(alpha: 0.3)),
+                                                  border: Border.all(color: statusColor.withOpacity(0.35)),
                                                 ),
                                                 child: Text(
                                                   status.toUpperCase(),

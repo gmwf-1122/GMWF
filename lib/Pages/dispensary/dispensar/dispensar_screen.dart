@@ -25,6 +25,7 @@ import '../user_settings_dialog.dart';
 import 'inventory.dart';
 import 'patient_form.dart';
 import 'patient_list.dart';
+import 'package:gmwf/design/design_system.dart';
 
 class DispensarScreen extends StatefulWidget {
   final String branchId;
@@ -77,6 +78,9 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
 
   static const Color _teal = Color(0xFF00695C);
 
+  StreamSubscription? _restockSub;
+  List<Map<String, dynamic>> _pendingRestockAlerts = [];
+
   @override
   void initState() {
     super.initState();
@@ -86,6 +90,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
     }
     _listenConnectivity();
     _startLiveInventoryListener();
+    _listenPendingRestockRequests();
 
     // [FIX-USERNAME] Load name first, then start ConnectionManager with it.
     // We do NOT call ConnectionManager().start() in postFrameCallback anymore
@@ -224,16 +229,84 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
     if (branch.isNotEmpty && branch != widget.branchId.toLowerCase().trim()) return;
 
     // ── Handle INVENTORY events (no patient serial) ───────────────────────────
-    if (type == RealtimeEvents.saveStockItem || type == 'save_stock_item' || type == 'medicine_registered') {
-      // RealtimeRouter._handleSaveStockItem already ran (before this stream listener fires)
-      // and correctly persisted the stock update to Hive (with delta handling).
-      // We only refresh the UI state here to avoid applying the delta twice.
+    if (type == RealtimeEvents.saveStockItem || type == 'save_stock_item' || type == 'medicine_registered' || type == 'inventory_stock_sync') {
+      // RealtimeRouter._handleSaveStockItem / _handleInventoryStockSync already ran (before this stream listener fires)
+      // and correctly persisted the stock update to Hive.
+      // We refresh the UI state here.
       if (mounted) setState(() {});
       return;
     } else if (type == RealtimeEvents.deleteStockItem || type == 'delete_stock_item') {
       final mId = (data['id'] ?? data['medicineId'])?.toString();
       if (mId != null) LocalStorageService.deleteLocalStockItem(mId);
       if (mounted) setState(() {});
+      return;
+    } else if (type == RealtimeEvents.restockRequest || type == 'restock_request') {
+      final medName = (data['medicineName'] ?? data['name'] ?? 'Medicine').toString();
+      final currentQty = data['currentQty'] ?? data['quantity'] ?? 'low';
+      final doctor = (data['requestedBy'] ?? 'Doctor').toString();
+      final notes = (data['notes'] ?? '').toString();
+      final reqId = data['id']?.toString() ?? 'restock_${DateTime.now().millisecondsSinceEpoch}';
+
+      final exists = _pendingRestockAlerts.any((r) => r['id'] == reqId || (r['medicineName'] == medName && r['status'] == 'pending'));
+      if (!exists) {
+        _pendingRestockAlerts.insert(0, {
+          'id': reqId,
+          'medicineName': medName,
+          'currentQty': currentQty,
+          'requestedBy': doctor,
+          'notes': notes,
+          'status': 'pending',
+        });
+      }
+      if (mounted) setState(() {});
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.warning_amber_rounded, color: Colors.amberAccent, size: 28),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'RESTOCK ALERT: $medName',
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
+                      ),
+                      Text(
+                        '$doctor reported low stock (Current: $currentQty). Please restock soon!${notes.isNotEmpty ? ' ($notes)' : ''}',
+                        style: const TextStyle(fontSize: 12, color: Colors.white70),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: const Color(0xFFB91C1C),
+            behavior: SnackBarBehavior.floating,
+            duration: const Duration(seconds: 8),
+            action: SnackBarAction(
+              label: 'OPEN INVENTORY',
+              textColor: Colors.amberAccent,
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => InventoryPage(
+                      branchId: widget.branchId,
+                      isDispenser: true,
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        );
+      }
       return;
     }
 
@@ -453,6 +526,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
 
   PreferredSizeWidget _buildAppBar(bool isMobile) {
     return GmwfAppBar(
+      isFloating: false,
       title: 'Dispensary – ${_dispenserName ?? widget.dispenserName ?? 'Loading...'}',
       subtitle: CampSessionService.getBranchAndCampDisplayName(
         branchName: _branchName ?? 'Free Dispensary',
@@ -473,45 +547,22 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
       isSyncing: _isSyncing,
       onSync: _forceSync,
       onLogout: _logout,
-      extraActions: [
-        Tooltip(
-          message: 'Medicine Inventory',
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(12),
-              onTap: () => Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => InventoryPage(
-                    branchId: widget.branchId,
-                    isDispenser: true,
-                  ),
-                ),
-              ),
-              child: Container(
-                width: 38,
-                height: 38,
-                decoration: BoxDecoration(
-                  color: _isDark ? const Color(0xFF1E293B) : Colors.white,
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: _isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
-                    width: 1,
-                  ),
-                ),
-                child: Center(
-                  child: Icon(
-                    Icons.inventory_2_outlined,
-                    size: 18,
-                    color: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF0F5B46),
-                  ),
-                ),
-              ),
-            ),
+      onInventory: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => InventoryPage(
+            branchId: widget.branchId,
+            isDispenser: true,
           ),
         ),
-      ],
+      ),
+      onUserSettings: () => DispensaryUserSettingsDialog.show(
+        context,
+        branchId: widget.branchId,
+        onUserUpdated: () {
+          if (mounted) setState(() { _fetchDispenserName(); });
+        },
+      ),
     );
   }
 
@@ -527,8 +578,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
   @override
   Widget build(BuildContext context) {
     super.build(context);
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isMobile = screenWidth < 700;
+    final isMobile = GBreakpoint.isMobile(context);
 
     return ValueListenableBuilder<Box>(
       valueListenable: Hive.box('app_settings').listenable(keys: ['is_dark_mode']),
@@ -548,6 +598,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
           child: Column(
             children: [
               ClockSkewWarningBanner(branchId: widget.branchId),
+              _buildRestockBanner(isDark),
               Expanded(
                 child: isMobile ? _buildMobileLayout() : _buildDesktopLayout(),
               ),
@@ -698,9 +749,185 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
     });
   }
 
+  void _listenPendingRestockRequests() {
+    if (widget.branchId.isEmpty) return;
+    try {
+      // 1. Initial load from local Hive (instant, works offline or while LAN is searching)
+      _pendingRestockAlerts = LocalStorageService.getPendingRestockRequests(widget.branchId);
+
+      _restockSub?.cancel();
+      _restockSub = FirebaseFirestore.instance
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('restock_requests')
+          .where('status', isEqualTo: 'pending')
+          .snapshots()
+          .listen((snap) {
+        if (!mounted) return;
+        final alerts = snap.docs.map((d) {
+          final data = Map<String, dynamic>.from(d.data());
+          data['id'] = d.id;
+          LocalStorageService.saveRestockRequest(widget.branchId, data);
+          return data;
+        }).toList();
+        setState(() {
+          _pendingRestockAlerts = alerts;
+        });
+      }, onError: (e) {
+        debugPrint('[DispensarScreen] Restock requests stream error: $e');
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _dismissRestockAlert(String reqId) async {
+    setState(() {
+      _pendingRestockAlerts.removeWhere((r) => r['id'] == reqId);
+    });
+    await LocalStorageService.updateRestockRequestStatus(widget.branchId, reqId, 'acknowledged');
+    try {
+      await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(widget.branchId)
+          .collection('restock_requests')
+          .doc(reqId)
+          .update({'status': 'acknowledged', 'acknowledgedAt': FieldValue.serverTimestamp()});
+    } catch (_) {}
+  }
+
+  Widget _buildRestockBanner(bool isDark) {
+    if (_pendingRestockAlerts.isEmpty) return const SizedBox.shrink();
+
+    // Auto-dismiss alerts for medicines that have already been restocked in stockBox
+    if (Hive.isBoxOpen(LocalStorageService.stockBox)) {
+      final stockBox = Hive.box(LocalStorageService.stockBox);
+      final normBranch = widget.branchId.toLowerCase().trim();
+      final toRemove = <String>[];
+
+      for (final alert in _pendingRestockAlerts) {
+        final alertMed = (alert['medicineName'] ?? alert['name'] ?? '').toString().toLowerCase().trim();
+        if (alertMed.isEmpty) continue;
+        double liveQty = 0;
+        for (final val in stockBox.values) {
+          if (val is Map) {
+            final b = (val['branchId'] ?? '').toString().toLowerCase().trim();
+            if (b.isNotEmpty && normBranch.isNotEmpty && b != normBranch && !b.contains(normBranch) && !normBranch.contains(b)) continue;
+            final vName = (val['name'] ?? val['formula'] ?? '').toString().toLowerCase().trim();
+            if (vName == alertMed || (alertMed.length > 3 && vName.contains(alertMed)) || (vName.length > 3 && alertMed.contains(vName))) {
+              final q = val['quantity'] ?? val['stock'] ?? 0;
+              liveQty += (q is num ? q.toDouble() : double.tryParse(q.toString()) ?? 0.0);
+            }
+          }
+        }
+        // If stock is now replenished (> 15), auto-dismiss
+        if (liveQty >= 15) {
+          final id = alert['id']?.toString();
+          if (id != null) {
+            toRemove.add(id);
+            _dismissRestockAlert(id);
+          }
+        } else {
+          alert['liveQty'] = liveQty.toInt();
+        }
+      }
+
+      if (toRemove.isNotEmpty) {
+        _pendingRestockAlerts.removeWhere((a) => toRemove.contains(a['id']?.toString()));
+      }
+    }
+
+    if (_pendingRestockAlerts.isEmpty) return const SizedBox.shrink();
+
+    final first = _pendingRestockAlerts.first;
+    final count = _pendingRestockAlerts.length;
+    final medName = first['medicineName'] ?? first['name'] ?? 'Medicine';
+    final doctor = first['requestedBy'] ?? 'Doctor';
+    final currentQty = first['liveQty'] ?? first['currentQty'] ?? first['quantity'] ?? '0';
+
+    return Container(
+      width: double.infinity,
+      margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        color: isDark ? const Color(0xFF451A03) : const Color(0xFFFFFBEB),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFF59E0B), width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.warning_amber_rounded, color: Color(0xFFD97706), size: 24),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  count > 1
+                      ? '⚠️ Restock Requests ($count pending): $medName and ${count - 1} more'
+                      : '⚠️ Restock Alert: $medName (Qty: $currentQty)',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    color: isDark ? const Color(0xFFFDE68A) : const Color(0xFF92400E),
+                  ),
+                ),
+                Text(
+                  '$doctor reported stock is running low. Please restock soon.',
+                  style: TextStyle(
+                    fontSize: 11.5,
+                    color: isDark ? const Color(0xFFD1D5DB) : const Color(0xFF78350F),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => InventoryPage(
+                    branchId: widget.branchId,
+                    isDispenser: true,
+                  ),
+                ),
+              );
+            },
+            style: TextButton.styleFrom(
+              backgroundColor: const Color(0xFFD97706),
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+            child: const Text('Open Inventory', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+          ),
+          const SizedBox(width: 4),
+          IconButton(
+            icon: const Icon(Icons.close, size: 18),
+            color: isDark ? Colors.white70 : Colors.black54,
+            tooltip: 'Dismiss alert',
+            onPressed: () {
+              final id = first['id']?.toString();
+              if (id != null) _dismissRestockAlert(id);
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _syncDebounce?.cancel();
+    _restockSub?.cancel();
     for (final s in _inventoryLiveSubs) {
       s.cancel();
     }

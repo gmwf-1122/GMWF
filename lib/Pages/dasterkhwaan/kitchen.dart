@@ -151,9 +151,10 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
       ..forward();
     _role = widget.role;
 
-    if (widget.branchId != null) {
+    if (widget.branchId != null && widget.branchId!.isNotEmpty && widget.branchId != 'all') {
       _branchId = widget.branchId;
       _username = widget.username ?? 'Kitchen Staff';
+      SyncService().start(_branchId!);
       _loadAllStockItems().then((_) => _applyPreviousDaySaved());
     } else {
       _loadUserAndBranch();
@@ -171,6 +172,40 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
   Future<void> _loadUserAndBranch() async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) return;
+
+    // Check local Hive cache first (0 cloud reads)
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final box = Hive.box('app_settings');
+        final u = box.get('user_data') ?? box.get('currentUser');
+        if (u is Map) {
+          final b = (u['branchId'] ?? u['branch'] ?? u['selectedBranchId'])?.toString();
+          if (b != null && b.isNotEmpty && b != 'all') {
+            SyncService().start(b);
+            setState(() {
+              _username = (u['username'] ?? u['name'] ?? user.email?.split('@').first ?? 'Kitchen Staff').toString();
+              _branchId = b;
+              _role ??= u['role']?.toString();
+            });
+            await _loadAllStockItems();
+            await _applyPreviousDaySaved();
+            return;
+          }
+        }
+        final cb = box.get('current_branch_id')?.toString();
+        if (cb != null && cb.isNotEmpty && cb != 'all') {
+          SyncService().start(cb);
+          setState(() {
+            _username = user.email?.split('@').first ?? 'Kitchen Staff';
+            _branchId = cb;
+          });
+          await _loadAllStockItems();
+          await _applyPreviousDaySaved();
+          return;
+        }
+      }
+    } catch (_) {}
+
     final branches =
         await FirebaseFirestore.instance.collection('branches').get();
     for (final branch in branches.docs) {
@@ -178,6 +213,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
           await branch.reference.collection('users').doc(user.uid).get();
       if (doc.exists) {
         final data = doc.data()!;
+        SyncService().start(branch.id);
         setState(() {
           _username = data['username'] ??
               user.email?.split('@').first ??

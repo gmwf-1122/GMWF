@@ -1,12 +1,14 @@
 // lib/pages/donations/donations_screen.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 
 import '../../services/local_storage_service.dart';
+import '../../services/donations_local_storage.dart';
 import '../../services/user_theme_service.dart';
 import '../../theme/role_theme_provider.dart';
 import '../../theme/app_theme.dart';
@@ -14,9 +16,12 @@ import 'donations_shared.dart';
 import 'donations_dashboard.dart';
 import 'donors_registry.dart';
 import 'donation_boxes_screen.dart';
+import 'donation_pagination_provider.dart';
 import 'widgets/add_donation_wizard.dart';
 import '../../models/donation_models.dart';
+import '../../services/sync_service.dart';
 import '../../widgets/global_module_wrapper.dart';
+import '../../design/design_system.dart';
 import 'package:motion_tab_bar_v2/motion-tab-bar.dart';
 import 'package:motion_tab_bar_v2/motion-tab-controller.dart';
 
@@ -47,7 +52,7 @@ class DonDS {
 // DONATIONS SCREEN
 // ─────────────────────────────────────────────────────────────────────────────
 
-class DonationsScreen extends StatefulWidget {
+class DonationsScreen extends ConsumerStatefulWidget {
   final String   branchId, username, branchName, userId;
   final UserRole role;
   final List<String> allBranchIds;
@@ -96,10 +101,10 @@ class DonationsScreen extends StatefulWidget {
   );
 
   @override
-  State<DonationsScreen> createState() => _DonationsScreenState();
+  ConsumerState<DonationsScreen> createState() => _DonationsScreenState();
 }
 
-class _DonationsScreenState extends State<DonationsScreen> with TickerProviderStateMixin {
+class _DonationsScreenState extends ConsumerState<DonationsScreen> with TickerProviderStateMixin {
   MotionTabBarController? _motionTabController;
   TabController? _mobileTabController;
   int _selectedDesktopTab = 0;
@@ -136,36 +141,85 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
     super.initState();
     _initControllers();
 
-    final isGlobal = widget.branchId.isEmpty ||
-        widget.branchId == 'global' ||
-        widget.branchId == 'all';
+    final isExplicitBranch = widget.branchId.isNotEmpty &&
+        widget.branchId != 'global' &&
+        widget.branchId != 'all';
 
-    // Handle global / consolidated view for high-level roles or unassigned branch
-    if (isGlobal || widget.role.canSeeAllBranches) {
-      _viewingBranchId = 'all';
-      _viewingBranchName = 'All Branches (Consolidated)';
-    } else if (widget.allBranchIds.isNotEmpty) {
-      _viewingBranchId   = widget.allBranchIds.first;
-      _viewingBranchName = widget.allBranchNames.isNotEmpty
-          ? widget.allBranchNames.first
-          : _viewingBranchId;
-    } else if (widget.branchId.isNotEmpty && widget.branchId != 'all') {
+    if (isExplicitBranch) {
       _viewingBranchId   = widget.branchId;
       _viewingBranchName = widget.branchName.isNotEmpty
           ? widget.branchName
           : resolveBranchName(widget.branchId);
+    } else if (widget.allBranchIds.isNotEmpty && !widget.role.canSeeAllBranches) {
+      _viewingBranchId   = widget.allBranchIds.first;
+      _viewingBranchName = widget.allBranchNames.isNotEmpty
+          ? widget.allBranchNames.first
+          : _viewingBranchId;
     } else {
       _viewingBranchId   = 'all';
       _viewingBranchName = 'All Branches (Consolidated)';
     }
 
+    final effectiveSyncBranch = _viewingBranchId != 'all' ? _viewingBranchId : (widget.allBranchIds.isNotEmpty ? widget.allBranchIds.first : 'karachi');
+    SyncService().start(effectiveSyncBranch, authorizedBranches: widget.allBranchIds);
+
     _loadAllBranches();
+  }
+
+  @override
+  void didUpdateWidget(covariant DonationsScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.branchId != widget.branchId || oldWidget.branchName != widget.branchName) {
+      final isExplicitBranch = widget.branchId.isNotEmpty &&
+          widget.branchId != 'global' &&
+          widget.branchId != 'all';
+      setState(() {
+        if (isExplicitBranch) {
+          _viewingBranchId   = widget.branchId;
+          _viewingBranchName = widget.branchName.isNotEmpty
+              ? widget.branchName
+              : resolveBranchName(widget.branchId);
+        } else {
+          _viewingBranchId   = 'all';
+          _viewingBranchName = 'All Branches (Consolidated)';
+        }
+      });
+    }
   }
 
   Future<void> _loadAllBranches() async {
     if (_fetchingBranches) return;
     setState(() => _fetchingBranches = true);
     try {
+      // 1. Check local cached branches first (0 Firestore reads)
+      final local = LocalStorageService.getLocalBranchesList();
+      if (local.isNotEmpty) {
+        final branches = local.map((d) {
+          final id = d['id'] as String;
+          final name = (d['name'] as String? ?? id);
+          return (id: id, name: name);
+        }).toList()
+          ..sort((a, b) => a.name.compareTo(b.name));
+
+        if (mounted) {
+          setState(() {
+            _fetchedBranches = branches;
+            if (_viewingBranchId.isEmpty || _viewingBranchId == 'global') {
+              if (widget.branchId == 'all' || widget.branchId.isEmpty || widget.branchId == 'global') {
+                _viewingBranchId = 'all';
+                _viewingBranchName = 'All Branches (Consolidated)';
+              } else if (branches.isNotEmpty) {
+                _viewingBranchId   = branches.first.id;
+                _viewingBranchName = branches.first.name;
+              }
+            } else if (_viewingBranchId == 'all') {
+              _viewingBranchName = 'All Branches (Consolidated)';
+            }
+          });
+          return;
+        }
+      }
+
       final snap = await FirebaseFirestore.instance.collection('branches').get();
       final branches = snap.docs.map((d) {
         final name = (d.data()['name'] as String? ?? d.id);
@@ -178,7 +232,7 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
         _fetchedBranches = branches;
         // If we had no valid branch selected yet, pick the first one or 'all'
         if (_viewingBranchId.isEmpty || _viewingBranchId == 'global') {
-          if (widget.role.canSeeAllBranches || widget.branchId == 'all' || widget.branchId.isEmpty) {
+          if (widget.branchId == 'all' || widget.branchId.isEmpty || widget.branchId == 'global') {
             _viewingBranchId = 'all';
             _viewingBranchName = 'All Branches (Consolidated)';
           } else if (branches.isNotEmpty) {
@@ -196,7 +250,60 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
     }
   }
 
+  bool _isSyncing = false;
 
+  Future<void> _performSync() async {
+    if (_isSyncing) return;
+    setState(() => _isSyncing = true);
+
+    try {
+      // 1. Flush any pending local changes first
+      try {
+        SyncService().triggerUpload();
+      } catch (e) {
+        debugPrint('[DonationsScreen] triggerUpload error: $e');
+      }
+
+      final isHQOrAdmin = widget.role.canSeeAllBranches ||
+          widget.role == UserRole.hqManager ||
+          widget.role == UserRole.chairman ||
+          widget.role == UserRole.manager;
+
+      int count = 0;
+      if (isHQOrAdmin) {
+        // Download all donations across branches or current branch and save permanently to Hive
+        count = await DonationsLocalStorage.downloadAllDonations(
+          _viewingBranchId,
+          force: true,
+          allTime: true,
+        );
+        // Also download donors
+        await DonationsLocalStorage.downloadDonors(_viewingBranchId, force: true);
+      } else {
+        // Download only this user's collected donations and save locally forever
+        count = await DonationsLocalStorage.downloadUserDonations(
+          branchId: _viewingBranchId,
+          username: _effectiveUsername,
+          userId: widget.userId,
+        );
+      }
+
+      ref.refresh(donationPaginationFamily(DonationFetchConfig(branchId: _viewingBranchId)));
+
+      if (mounted) {
+        final msg = isHQOrAdmin
+            ? 'Sync Complete: $count donations saved permanently to local storage.'
+            : 'Sync Complete: $count of your collected donations saved locally.';
+        AppFeedback.showSuccess(context, msg);
+      }
+    } catch (e) {
+      if (mounted) {
+        AppFeedback.showError(context, 'Sync error: $e');
+      }
+    } finally {
+      if (mounted) setState(() => _isSyncing = false);
+    }
+  }
 
   String get _today => DateFormat('yyyy-MM-dd').format(DateTime.now());
 
@@ -293,7 +400,7 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
       valueListenable: UserThemeService.listenable(),
       builder: (context, _, child) {
         final t = RoleThemeScope.dataOf(context);
-        final isMobile = MediaQuery.of(context).size.width < 850;
+        final isMobile = GBreakpoint.isCompact(context);
 
         final displayUser = _effectiveUsername;
         final displayBranch = _effectiveBranchName;
@@ -515,6 +622,30 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
                 const SizedBox(width: 16),
                 _buildHeaderTabPills(t),
                 const SizedBox(width: 16),
+                OutlinedButton.icon(
+                  onPressed: _isSyncing ? null : _performSync,
+                  icon: _isSyncing
+                      ? SizedBox(
+                          width: 14,
+                          height: 14,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: t.accent),
+                        )
+                      : Icon(Icons.sync_rounded, size: 16, color: t.accent),
+                  label: Text(
+                    _isSyncing
+                        ? 'Syncing...'
+                        : (widget.role.canSeeAllBranches ? 'Sync All' : 'Sync My Data'),
+                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: t.textPrimary),
+                  ),
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: t.textPrimary,
+                    side: BorderSide(color: t.bgRule, width: 1.2),
+                    backgroundColor: t.bgCardAlt,
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+                const SizedBox(width: 10),
                 ElevatedButton.icon(
                   onPressed: _onAddTap,
                   icon: const Icon(Icons.add_rounded, size: 18),
@@ -531,7 +662,21 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
                 _RolePill(role: widget.role),
               ],
               if (isMobile) ...[
-                const SizedBox(width: 8),
+                const SizedBox(width: 4),
+                IconButton(
+                  onPressed: _isSyncing ? null : _performSync,
+                  icon: _isSyncing
+                      ? SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: t.accent),
+                        )
+                      : Icon(Icons.sync_rounded, color: t.accent, size: 22),
+                  tooltip: widget.role.canSeeAllBranches
+                      ? 'Sync All Donations (Local Save)'
+                      : 'Sync My Collected Donations (Local Save)',
+                ),
+                const SizedBox(width: 4),
                 _RolePill(role: widget.role),
               ],
             ],
@@ -621,6 +766,8 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
     selectedCategory:  _selectedCategory,
     onCatChanged:      (c) => setState(() => _selectedCategory = c),
     onAddTap:          _onAddTap,
+    onSyncTap:         _performSync,
+    isSyncing:         _isSyncing,
   );
 
   Future<void> _onAddTap() async {
@@ -628,8 +775,8 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
       context: context,
       barrierDismissible: true,
       builder: (ctx) => AddDonationWizard(
-        branchId: widget.branchId,
-        branchName: widget.branchName,
+        branchId: _viewingBranchId.isNotEmpty ? _viewingBranchId : widget.branchId,
+        branchName: _viewingBranchName.isNotEmpty ? _viewingBranchName : widget.branchName,
         currentUsername: widget.username,
         userId: widget.userId,
         currentUserRole: widget.role,
@@ -637,13 +784,7 @@ class _DonationsScreenState extends State<DonationsScreen> with TickerProviderSt
     );
 
     if (result != null && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Donation recorded: ${result.receiptNo}'),
-          backgroundColor: Colors.green,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      AppFeedback.showSuccess(context, 'Donation recorded: ${result.receiptNo}');
     }
   }
 }

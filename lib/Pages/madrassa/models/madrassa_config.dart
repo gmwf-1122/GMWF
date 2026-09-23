@@ -60,8 +60,16 @@ class MadrassaConfig {
     );
   }
 
-  factory MadrassaConfig.fromMap(Map<String, dynamic> data, {String id = 'current'}) {
+  factory MadrassaConfig.fromMap(Map<dynamic, dynamic> data, {String id = 'current'}) {
     final now = DateTime.now();
+    final rawAudit = data['auditLog'];
+    final List<Map<String, dynamic>> parsedAuditLog = (rawAudit is List)
+        ? rawAudit
+            .whereType<Map>()
+            .map((e) => Map<String, dynamic>.from(e))
+            .toList()
+        : const [];
+
     return MadrassaConfig(
       id: id,
       year: (data['year'] as num?)?.toInt() ?? now.year,
@@ -74,12 +82,13 @@ class MadrassaConfig {
       ptmDay: (data['ptmDay'] as num?)?.toInt() ?? 0,
       allowStudentLeave: data['allowStudentLeave'] == true,
       enableFees: data['enableFees'] != false,
-      auditLog: List<Map<String, dynamic>>.from(data['auditLog'] ?? []),
+      auditLog: parsedAuditLog,
     );
   }
 
   factory MadrassaConfig.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>? ?? {};
+    final raw = doc.data();
+    final data = raw is Map ? raw : const {};
     return MadrassaConfig.fromMap(data, id: doc.id);
   }
 

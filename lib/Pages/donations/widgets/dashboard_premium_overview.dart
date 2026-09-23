@@ -4,6 +4,7 @@ import '../../../models/donation_models.dart';
 import '../../../theme/app_theme.dart';
 import '../../../theme/role_theme_provider.dart';
 import '../../../services/user_theme_service.dart';
+import '../../../services/donations_local_storage.dart';
 import '../donations_shared.dart';
 import '../donors_registry.dart';
 import '../global_audit_trail.dart';
@@ -18,6 +19,8 @@ class DashboardPremiumOverview extends StatelessWidget {
   final VoidCallback onSummaryTap;
   final bool isAnalyticsActive;
   final VoidCallback? onImportTap;
+  final VoidCallback? onSyncTap;
+  final bool isSyncing;
 
   const DashboardPremiumOverview({
     super.key,
@@ -30,6 +33,8 @@ class DashboardPremiumOverview extends StatelessWidget {
     required this.onSummaryTap,
     required this.isAnalyticsActive,
     this.onImportTap,
+    this.onSyncTap,
+    this.isSyncing = false,
   });
 
   @override
@@ -42,7 +47,15 @@ class DashboardPremiumOverview extends StatelessWidget {
     double topAmount = 0;
     String topDonor = '—';
 
-    for (var d in currentDonations) {
+    // Retrieve overall historical records stored permanently in local Hive
+    final allLocal = DonationsLocalStorage.getAllDonations(branchId)
+        .where((d) => d.syncStatus != 'deleted')
+        .toList();
+
+    // Use full local storage archive whenever available so cards display the overall total
+    final computationPool = allLocal.length >= currentDonations.length ? allLocal : currentDonations;
+
+    for (var d in computationPool) {
       final amt = d.amount > 0 ? d.amount : (d.probableAmount ?? 0.0);
       total += amt;
       if (amt > topAmount) {
@@ -75,18 +88,17 @@ class DashboardPremiumOverview extends StatelessWidget {
       }
     }
 
-    final avgAmount = currentDonations.isNotEmpty ? (total / currentDonations.length).roundToDouble() : 0.0;
+    final avgAmount = computationPool.isNotEmpty ? (total / computationPool.length).roundToDouble() : 0.0;
     final fmt = NumberFormat('#,##0');
 
     return LayoutBuilder(builder: (context, constraints) {
       final t = RoleThemeScope.dataOf(context);
       final isWide = constraints.maxWidth > 1000;
-      final isMedium = constraints.maxWidth > 650;
-      final cardWidth = isWide
-          ? (constraints.maxWidth - 48) / 4
-          : (isMedium ? (constraints.maxWidth - 16) / 2 : constraints.maxWidth);
+      final isMobile = constraints.maxWidth <= 650;
+      final gridSpacing = isMobile ? 12.0 : 16.0;
 
       return Column(
+        mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // ── Action Buttons (Hidden for Office Boy) ──
@@ -95,6 +107,18 @@ class DashboardPremiumOverview extends StatelessWidget {
               spacing: 10,
               runSpacing: 10,
               children: [
+                if (onSyncTap != null)
+                  _buildActionPill(
+                    context: context,
+                    t: t,
+                    icon: Icons.sync_rounded,
+                    label: isSyncing
+                        ? 'Syncing...'
+                        : (role.canSeeAllBranches ? 'Sync All (Permanent Local Save)' : 'Sync My Collections (Local Save)'),
+                    color: const Color(0xFF0284C7),
+                    isActive: isSyncing,
+                    onTap: onSyncTap!,
+                  ),
                 _buildActionPill(
                   context: context,
                   t: t,
@@ -152,81 +176,129 @@ class DashboardPremiumOverview extends StatelessWidget {
           ],
 
           // ── Top 4 KPI Summary Cards matching branches.dart ──
-          Wrap(
-            spacing: 16,
-            runSpacing: 16,
-            children: [
-              SizedBox(
-                width: cardWidth,
-                child: _buildKpiCard(
-                  title: "Total Volume",
-                  mainCount: "PKR ${fmt.format(total)}",
-                  trendText: "${currentDonations.length} records",
-                  isPositiveTrend: true,
-                  badgeColor: const Color(0xFF6366F1),
-                  badgeIcon: Icons.account_balance_wallet_rounded,
-                  symbolIcon: Icons.payments_rounded,
-                  subItems: [
-                    {'label': 'GMWF', 'val': 'PKR ${fmt.format(gmwfTotal)}'},
-                    {'label': 'Jamia', 'val': 'PKR ${fmt.format(jamiaTotal)}'},
-                    {'label': 'Boxes', 'val': 'PKR ${fmt.format(boxTotal)}'},
-                  ],
-                  t: t,
-                ),
-              ),
-              SizedBox(
-                width: cardWidth,
-                child: _buildKpiCard(
-                  title: "Received",
-                  mainCount: "PKR ${fmt.format(received)}",
-                  trendText: "$receivedCount verified",
-                  isPositiveTrend: true,
-                  badgeColor: const Color(0xFF10B981),
-                  badgeIcon: Icons.check_circle_rounded,
-                  symbolIcon: Icons.verified_rounded,
-                  subItems: [
-                    {'label': 'Cash', 'val': 'PKR ${fmt.format(cashTotal)}'},
-                    {'label': 'Bank/Online', 'val': 'PKR ${fmt.format(bankTotal)}'},
-                  ],
-                  t: t,
-                ),
-              ),
-              SizedBox(
-                width: cardWidth,
-                child: _buildKpiCard(
-                  title: "Pending Verification",
-                  mainCount: "PKR ${fmt.format(pending)}",
-                  trendText: "$pendingCount pending",
-                  isPositiveTrend: pendingCount == 0,
-                  badgeColor: const Color(0xFFF59E0B),
-                  badgeIcon: Icons.hourglass_top_rounded,
-                  symbolIcon: Icons.pending_actions_rounded,
-                  subItems: [
-                    {'label': 'Pending', 'val': 'PKR ${fmt.format(pending)}'},
-                    {'label': 'Count', 'val': '$pendingCount recs'},
-                  ],
-                  t: t,
-                ),
-              ),
-              SizedBox(
-                width: cardWidth,
-                child: _buildKpiCard(
-                  title: "Peak Contribution",
-                  mainCount: "PKR ${fmt.format(topAmount)}",
-                  trendText: currentDonations.isNotEmpty ? "Highest Single" : "No records",
-                  isPositiveTrend: true,
-                  badgeColor: const Color(0xFFD97706),
-                  badgeIcon: Icons.emoji_events_rounded,
-                  symbolIcon: Icons.auto_awesome_rounded,
-                  subItems: [
-                    {'label': 'Top Donor', 'val': topDonor.length > 12 ? '${topDonor.substring(0, 10)}...' : topDonor},
-                    {'label': 'Avg / Receipt', 'val': 'PKR ${fmt.format(avgAmount)}'},
-                  ],
-                  t: t,
-                ),
-              ),
-            ],
-          ),
+          Builder(builder: (context) {
+            final card1 = _buildKpiCard(
+              title: "Total Volume",
+              mainCount: "PKR ${fmt.format(total)}",
+              trendText: "${computationPool.length} recs",
+              subtitle: allLocal.length > currentDonations.length ? "Overall total" : "All time",
+              isPositiveTrend: true,
+              badgeColor: const Color(0xFF6366F1),
+              badgeIcon: Icons.account_balance_wallet_rounded,
+              symbolIcon: Icons.payments_rounded,
+              subItems: [
+                {'label': 'GMWF', 'val': 'PKR ${fmt.format(gmwfTotal)}'},
+                {'label': 'Jamia', 'val': 'PKR ${fmt.format(jamiaTotal)}'},
+                {'label': 'Boxes', 'val': 'PKR ${fmt.format(boxTotal)}'},
+              ],
+              t: t,
+              isMobile: isMobile,
+            );
+            final card2 = _buildKpiCard(
+              title: "Received",
+              mainCount: "PKR ${fmt.format(received)}",
+              trendText: "$receivedCount verified",
+              subtitle: "Verified collections",
+              isPositiveTrend: true,
+              badgeColor: const Color(0xFF10B981),
+              badgeIcon: Icons.check_circle_rounded,
+              symbolIcon: Icons.verified_rounded,
+              subItems: [
+                {'label': 'Cash', 'val': 'PKR ${fmt.format(cashTotal)}'},
+                {'label': 'Bank/Online', 'val': 'PKR ${fmt.format(bankTotal)}'},
+              ],
+              t: t,
+              isMobile: isMobile,
+            );
+            final card3 = _buildKpiCard(
+              title: "Pending",
+              mainCount: "PKR ${fmt.format(pending)}",
+              trendText: "$pendingCount pending",
+              subtitle: "Awaiting review",
+              isPositiveTrend: pendingCount == 0,
+              badgeColor: const Color(0xFFF59E0B),
+              badgeIcon: Icons.hourglass_top_rounded,
+              symbolIcon: Icons.pending_actions_rounded,
+              subItems: [
+                {'label': 'Pending', 'val': 'PKR ${fmt.format(pending)}'},
+                {'label': 'Count', 'val': '$pendingCount recs'},
+              ],
+              t: t,
+              isMobile: isMobile,
+            );
+            final card4 = _buildKpiCard(
+              title: "Peak Record",
+              mainCount: "PKR ${fmt.format(topAmount)}",
+              trendText: computationPool.isNotEmpty ? "Highest" : "No records",
+              subtitle: topDonor.isNotEmpty && topDonor != '—' ? topDonor : "Highest single",
+              isPositiveTrend: true,
+              badgeColor: const Color(0xFFD97706),
+              badgeIcon: Icons.emoji_events_rounded,
+              symbolIcon: Icons.auto_awesome_rounded,
+              subItems: [
+                {'label': 'Top Donor', 'val': topDonor.length > 12 ? '${topDonor.substring(0, 10)}...' : topDonor},
+                {'label': 'Avg / Receipt', 'val': 'PKR ${fmt.format(avgAmount)}'},
+              ],
+              t: t,
+              isMobile: isMobile,
+            );
+
+            if (isMobile) {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(child: card1),
+                      SizedBox(width: gridSpacing),
+                      Expanded(child: card2),
+                    ],
+                  ),
+                  SizedBox(height: gridSpacing),
+                  Row(
+                    children: [
+                      Expanded(child: card3),
+                      SizedBox(width: gridSpacing),
+                      Expanded(child: card4),
+                    ],
+                  ),
+                ],
+              );
+            } else if (isWide) {
+              return Row(
+                children: [
+                  Expanded(child: card1),
+                  const SizedBox(width: 16),
+                  Expanded(child: card2),
+                  const SizedBox(width: 16),
+                  Expanded(child: card3),
+                  const SizedBox(width: 16),
+                  Expanded(child: card4),
+                ],
+              );
+            } else {
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(child: card1),
+                      const SizedBox(width: 16),
+                      Expanded(child: card2),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(child: card3),
+                      const SizedBox(width: 16),
+                      Expanded(child: card4),
+                    ],
+                  ),
+                ],
+              );
+            }
+          }),
         ],
       );
     });
@@ -242,8 +314,135 @@ class DashboardPremiumOverview extends StatelessWidget {
     required IconData symbolIcon,
     required List<Map<String, String>> subItems,
     required RoleThemeData t,
+    String? subtitle,
+    bool isMobile = false,
   }) {
     final isDark = t.isDarkCanvas || UserThemeService.isDarkMode();
+
+    if (isMobile) {
+      final effectiveSubtitle = subtitle ?? (subItems.isNotEmpty ? subItems.first['label'] ?? '' : '');
+
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: t.bgCard,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: t.bgRule.withValues(alpha: 0.8), width: 1),
+          boxShadow: [
+            BoxShadow(
+              color: isDark ? Colors.black.withValues(alpha: 0.25) : badgeColor.withValues(alpha: 0.04),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Top Row: Icon on left, Pill badge on right
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        badgeColor.withValues(alpha: 0.18),
+                        badgeColor.withValues(alpha: 0.06),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: badgeColor.withValues(alpha: 0.25), width: 1),
+                  ),
+                  child: Icon(badgeIcon, color: badgeColor, size: 20),
+                ),
+                if (trendText.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
+                    decoration: BoxDecoration(
+                      color: (isPositiveTrend ? const Color(0xFF10B981) : Colors.amber).withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          isPositiveTrend ? Icons.arrow_upward_rounded : Icons.schedule_rounded,
+                          size: 10,
+                          color: isPositiveTrend ? const Color(0xFF10B981) : Colors.amber[800],
+                        ),
+                        const SizedBox(width: 3),
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 75),
+                          child: Text(
+                            trendText,
+                            style: TextStyle(
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w700,
+                              color: isPositiveTrend ? const Color(0xFF10B981) : Colors.amber[800],
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 14),
+
+            // Large Value
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                mainCount,
+                style: TextStyle(
+                  fontSize: 19,
+                  fontWeight: FontWeight.w900,
+                  color: t.textPrimary,
+                  letterSpacing: -0.5,
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+
+            // Label / Title
+            Text(
+              title,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: t.textSecondary,
+                letterSpacing: 0.1,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 2),
+
+            // Subtitle / context
+            Text(
+              effectiveSubtitle,
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w500,
+                color: t.textTertiary,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      );
+    }
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
@@ -366,15 +565,25 @@ class DashboardPremiumOverview extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceAround,
               children: subItems.map((item) {
-                return Column(
-                  children: [
-                    Text(item['label'] ?? '', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w500, color: t.textTertiary)),
-                    const SizedBox(height: 2),
-                    Text(
-                      item['val'] ?? '0',
-                      style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w800, color: t.textPrimary),
-                    ),
-                  ],
+                return Expanded(
+                  child: Column(
+                    children: [
+                      Text(
+                        item['label'] ?? '',
+                        style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w500, color: t.textTertiary),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 2),
+                      FittedBox(
+                        fit: BoxFit.scaleDown,
+                        child: Text(
+                          item['val'] ?? '0',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: t.textPrimary),
+                        ),
+                      ),
+                    ],
+                  ),
                 );
               }).toList(),
             ),

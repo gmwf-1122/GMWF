@@ -5,7 +5,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../services/offline_auth_service.dart';
-import '../../services/user_theme_service.dart';
 
 class DispensaryUserSettingsDialog {
   static Future<void> show(
@@ -20,7 +19,6 @@ class DispensaryUserSettingsDialog {
     final confirmPassCtrl = TextEditingController();
 
     bool isSubmitting = false;
-    bool isDarkMode = false;
     String initialName = '';
     String? currentUid;
 
@@ -33,7 +31,6 @@ class DispensaryUserSettingsDialog {
 
       if (Hive.isBoxOpen('app_settings')) {
         final box = Hive.box('app_settings');
-        isDarkMode = box.get('is_dark_mode', defaultValue: false) == true;
         final uData = box.get('user_data') ?? box.get('currentUser');
         if (uData is Map) {
           initialName = (uData['username'] ?? uData['name'] ?? '').toString();
@@ -95,7 +92,7 @@ class DispensaryUserSettingsDialog {
                                   style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
                                 ),
                                 Text(
-                                  'Change name, password & theme',
+                                  'Change name & password',
                                   style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
                                 ),
                               ],
@@ -182,27 +179,7 @@ class DispensaryUserSettingsDialog {
                         },
                       ),
 
-                      const SizedBox(height: 20),
-                      const Divider(),
-                      const SizedBox(height: 8),
 
-                      // Dark Mode Switch
-                      Container(
-                        decoration: BoxDecoration(
-                          color: isDarkMode ? Colors.grey.shade800 : Colors.grey.shade100,
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: SwitchListTile(
-                          title: const Text('Dark Mode', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                          subtitle: const Text('Toggle dark theme mode preference', style: TextStyle(fontSize: 11)),
-                          secondary: Icon(isDarkMode ? Icons.dark_mode_rounded : Icons.light_mode_rounded, color: Colors.teal),
-                          value: isDarkMode,
-                          activeColor: Colors.teal,
-                          onChanged: (val) {
-                            setS(() => isDarkMode = val);
-                          },
-                        ),
-                      ),
 
                       const SizedBox(height: 24),
                       Row(
@@ -250,10 +227,7 @@ class DispensaryUserSettingsDialog {
                                           }
                                         }
 
-                                        // 2. Save dark mode preference
-                                        await UserThemeService.setDarkMode(isDarkMode);
-
-                                        // 3. Name update if changed
+                                        // 2. Name update if changed
                                         if (newName != initialName && newName.isNotEmpty) {
                                           if (user != null) {
                                             await user.updateDisplayName(newName).catchError((_) {});

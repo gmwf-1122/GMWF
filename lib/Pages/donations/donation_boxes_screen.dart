@@ -18,6 +18,7 @@ import '../../services/donation_box_storage.dart';
 import '../../services/donations_local_storage.dart';
 import '../../theme/role_theme_provider.dart';
 import '../../theme/app_theme.dart';
+import '../../design/design_system.dart';
 import 'donations_shared.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -156,7 +157,7 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
   @override
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
-    final isMobile = MediaQuery.of(context).size.width < 600;
+    final isMobile = GBreakpoint.isMobile(context);
 
     if (_loading) {
       return Center(
@@ -189,7 +190,7 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                 const SizedBox(height: 16),
 
                 // ── View Switcher Tab ──
-                _buildViewSwitcher(t),
+                _buildViewSwitcher(t, isMobile),
                 const SizedBox(height: 16),
 
                 // ── Search Bar ──
@@ -367,7 +368,7 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
     );
   }
 
-  Widget _buildViewSwitcher(RoleThemeData t) {
+  Widget _buildViewSwitcher(RoleThemeData t, bool isMobile) {
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
@@ -383,7 +384,7 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
               borderRadius: BorderRadius.circular(9),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
-                padding: const EdgeInsets.symmetric(vertical: 9),
+                padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 4),
                 decoration: BoxDecoration(
                   color: _selectedView == 0 ? t.accent : Colors.transparent,
                   borderRadius: BorderRadius.circular(9),
@@ -392,13 +393,17 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(Icons.inventory_2_rounded, size: 16, color: _selectedView == 0 ? Colors.white : t.textSecondary),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Box Registry (${_boxes.length})',
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
-                        color: _selectedView == 0 ? Colors.white : t.textSecondary,
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        'Box Registry (${_boxes.length})',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: isMobile ? 12 : 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: _selectedView == 0 ? Colors.white : t.textSecondary,
+                        ),
                       ),
                     ),
                   ],
@@ -413,7 +418,7 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
               borderRadius: BorderRadius.circular(9),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 180),
-                padding: const EdgeInsets.symmetric(vertical: 9),
+                padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 4),
                 decoration: BoxDecoration(
                   color: _selectedView == 1 ? t.accent : Colors.transparent,
                   borderRadius: BorderRadius.circular(9),
@@ -422,13 +427,17 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Icon(Icons.analytics_rounded, size: 16, color: _selectedView == 1 ? Colors.white : t.textSecondary),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Person Audit & Risk Matrix',
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        fontWeight: FontWeight.w700,
-                        color: _selectedView == 1 ? Colors.white : t.textSecondary,
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        isMobile ? 'Person Audit' : 'Person Audit & Risk Matrix',
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: isMobile ? 12 : 12.5,
+                          fontWeight: FontWeight.w700,
+                          color: _selectedView == 1 ? Colors.white : t.textSecondary,
+                        ),
                       ),
                     ),
                   ],
@@ -631,6 +640,10 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
         icon: Icons.inventory_2_rounded,
         color: const Color(0xFF047857),
         t: t,
+        trendText: 'Active',
+        subtitle: 'Deployed in field',
+        isPositiveTrend: true,
+        isMobile: isMobile,
       ),
       _SummaryMiniCard(
         label: 'Overdue (30d+)',
@@ -638,6 +651,10 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
         icon: Icons.warning_amber_rounded,
         color: overdueCount > 0 ? const Color(0xFFDC2626) : const Color(0xFF6B7280),
         t: t,
+        trendText: overdueCount > 0 ? '$overdueCount urgent' : 'All clear',
+        subtitle: 'Opening due',
+        isPositiveTrend: overdueCount == 0,
+        isMobile: isMobile,
       ),
       _SummaryMiniCard(
         label: 'Total Collected',
@@ -645,27 +662,44 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
         icon: Icons.payments_rounded,
         color: const Color(0xFF1D4ED8),
         t: t,
+        trendText: 'All time',
+        subtitle: 'Box collections',
+        isPositiveTrend: true,
+        isMobile: isMobile,
       ),
       _SummaryMiniCard(
-        label: 'Incidents / Compromised',
+        label: 'Incidents / Risk',
         value: '$incidentsCount',
         icon: Icons.report_problem_rounded,
         color: incidentsCount > 0 ? const Color(0xFFDC2626) : const Color(0xFF10B981),
         t: t,
+        trendText: incidentsCount > 0 ? 'Alert' : 'Normal',
+        subtitle: 'Integrity check',
+        isPositiveTrend: incidentsCount == 0,
+        isMobile: isMobile,
       ),
     ];
 
     if (isMobile) {
-      return SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        clipBehavior: Clip.none,
-        physics: const BouncingScrollPhysics(),
-        child: Row(
-          children: cards.map((c) => Padding(
-            padding: const EdgeInsets.only(right: 10),
-            child: SizedBox(width: 160, child: c),
-          )).toList(),
-        ),
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              Expanded(child: cards[0]),
+              const SizedBox(width: 12),
+              Expanded(child: cards[1]),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(child: cards[2]),
+              const SizedBox(width: 12),
+              Expanded(child: cards[3]),
+            ],
+          ),
+        ],
       );
     }
 
@@ -2171,7 +2205,7 @@ class _BoxDetailDialogState extends State<_BoxDetailDialog> {
     final box = widget.box;
     final fmt = NumberFormat('#,##0');
     final totalCollected = _openings.fold<double>(0, (sum, o) => sum + o.amount);
-    final isMobile = MediaQuery.of(context).size.width < 600;
+    final isMobile = GBreakpoint.isMobile(context);
 
     return Dialog(
       backgroundColor: t.bgCard,
@@ -2646,6 +2680,10 @@ class _SummaryMiniCard extends StatelessWidget {
   final IconData icon;
   final Color color;
   final RoleThemeData t;
+  final String? trendText;
+  final String? subtitle;
+  final bool isPositiveTrend;
+  final bool isMobile;
 
   const _SummaryMiniCard({
     required this.label,
@@ -2653,10 +2691,139 @@ class _SummaryMiniCard extends StatelessWidget {
     required this.icon,
     required this.color,
     required this.t,
+    this.trendText,
+    this.subtitle,
+    this.isPositiveTrend = true,
+    this.isMobile = false,
   });
 
   @override
   Widget build(BuildContext context) {
+    final isDark = t.isDarkCanvas;
+
+    if (isMobile) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: t.bgCard,
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(color: t.bgRule.withValues(alpha: 0.8), width: 1),
+          boxShadow: [
+            BoxShadow(
+              color: isDark ? Colors.black.withValues(alpha: 0.25) : color.withValues(alpha: 0.04),
+              blurRadius: 10,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Top Row: Icon on left, Pill badge on right
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Container(
+                  width: 38,
+                  height: 38,
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        color.withValues(alpha: 0.18),
+                        color.withValues(alpha: 0.06),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: color.withValues(alpha: 0.25), width: 1),
+                  ),
+                  child: Icon(icon, color: color, size: 20),
+                ),
+                if (trendText != null && trendText!.isNotEmpty)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
+                    decoration: BoxDecoration(
+                      color: (isPositiveTrend ? const Color(0xFF10B981) : Colors.amber).withValues(alpha: 0.14),
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          isPositiveTrend ? Icons.arrow_upward_rounded : Icons.schedule_rounded,
+                          size: 10,
+                          color: isPositiveTrend ? const Color(0xFF10B981) : Colors.amber[800],
+                        ),
+                        const SizedBox(width: 3),
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 75),
+                          child: Text(
+                            trendText!,
+                            style: TextStyle(
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.w700,
+                              color: isPositiveTrend ? const Color(0xFF10B981) : Colors.amber[800],
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 14),
+
+            // Large Value
+            FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerLeft,
+              child: Text(
+                value,
+                style: TextStyle(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w900,
+                  color: t.textPrimary,
+                  letterSpacing: -0.5,
+                ),
+              ),
+            ),
+            const SizedBox(height: 4),
+
+            // Label
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: t.textSecondary,
+                letterSpacing: 0.1,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+            const SizedBox(height: 2),
+
+            // Subtitle
+            Text(
+              subtitle ?? '',
+              style: TextStyle(
+                fontSize: 10.5,
+                fontWeight: FontWeight.w500,
+                color: t.textTertiary,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      );
+    }
+
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(

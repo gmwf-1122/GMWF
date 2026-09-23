@@ -9,6 +9,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../theme/app_theme.dart';
 import '../theme/role_theme_provider.dart';
+import '../design/design_system.dart';
 import '../utils/localization_helper.dart';
 import '../services/local_storage_service.dart';
 import '../utils/formatters.dart';
@@ -896,7 +897,7 @@ class _SettingsPageState extends State<SettingsPage> {
         ]),
         builder: (context, Box box, child) {
           final t = RoleThemeScope.dataOf(context);
-          final isDesktop = MediaQuery.of(context).size.width >= 900;
+          final isDesktop = GBreakpoint.isDesktop(context);
           final userName = resolveUserDisplayName(widget.userData);
           final email = widget.userData['email'] ?? 'No email set';
           final rawRole = widget.userData['role'] as String? ?? 'staff';

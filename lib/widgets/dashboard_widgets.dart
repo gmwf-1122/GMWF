@@ -19,15 +19,18 @@ import '../services/home_dashboard_service.dart';
 import '../services/branch_record_service.dart';
 import '../pages/donations/donations_shared.dart' as don;
 import '../theme/role_theme_provider.dart';
+import '../design/design_system.dart';
 
 
 // ── Design System Tokens ──────────────────────────────────────────────────────
+// DS constants now delegate to the canonical Gsp / Gr token classes.
+// All existing DS.s1, DS.r2 etc. calls continue to compile unchanged.
 class DS {
-  // Spacing — strict 8pt grid
-  static const double s1 = 8.0;
-  static const double s2 = 16.0;
-  static const double s3 = 24.0;
-  static const double s4 = 32.0;
+  // Spacing — 8pt grid (subset of Gsp 4pt grid — values are identical)
+  static const double s1 = Gsp.sp2;  // 8.0
+  static const double s2 = Gsp.sp4;  // 16.0
+  static const double s3 = Gsp.sp6;  // 24.0
+  static const double s4 = Gsp.sp8;  // 32.0
 
   // Semantic colors — Role Based Decisions
   static const Color zakat        = Color(0xFF16A34A); // Green — Zakat (Revenue/Money)
@@ -36,17 +39,17 @@ class DS {
   static const Color danger       = Color(0xFFDC2626); // Red — Alerts / Critical
 
   // UI Utilities
-  static const Color blue        = Color(0xFF2563EB); 
-  static const Color blueMuted   = Color(0xFFEFF6FF); 
-  static const Color green       = Color(0xFF16A34A); 
-  static const Color greenMuted  = Color(0xFFDCFCE7); 
-  static const Color purple      = Color(0xFF7C3AED); 
-  static const Color purpleMuted = Color(0xFFF5F3FF); 
-  static const Color orange      = Color(0xFFEA580C); 
-  static const Color orangeMuted = Color(0xFFFFF7ED); 
-  static const Color neutral     = Color(0xFF6B7280); 
-  static const Color neutralBg   = Color(0xFFF9FAFB); 
-  static const Color border      = Color(0xFFE5E7EB); 
+  static const Color blue        = Color(0xFF2563EB);
+  static const Color blueMuted   = Color(0xFFEFF6FF);
+  static const Color green       = Color(0xFF16A34A);
+  static const Color greenMuted  = Color(0xFFDCFCE7);
+  static const Color purple      = Color(0xFF7C3AED);
+  static const Color purpleMuted = Color(0xFFF5F3FF);
+  static const Color orange      = Color(0xFFEA580C);
+  static const Color orangeMuted = Color(0xFFFFF7ED);
+  static const Color neutral     = Color(0xFF6B7280);
+  static const Color neutralBg   = Color(0xFFF9FAFB);
+  static const Color border      = Color(0xFFE5E7EB);
 
   // Typography sizes
   static const double h1 = 40.0;
@@ -54,11 +57,11 @@ class DS {
   static const double body = 13.0;
   static const double caption = 11.0;
 
-  // Corner radii
-  static const double r1 = 8.0;
-  static const double r2 = 16.0;
-  static const double r3 = 20.0;
-  static const double r4 = 24.0;
+  // Corner radii — now delegating to Gr tokens (values unchanged)
+  static const double r1 = Gr.r2;  // 8.0
+  static const double r2 = Gr.r4;  // 16.0
+  static const double r3 = Gr.r5;  // 20.0
+  static const double r4 = Gr.r6;  // 24.0
 }
 
 // ── Dashboard Filter System ──────────────────────────────────────────────────

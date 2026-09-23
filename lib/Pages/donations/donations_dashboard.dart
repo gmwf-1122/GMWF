@@ -9,9 +9,7 @@ import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
-import 'package:shimmer/shimmer.dart';
 import 'package:archive/archive.dart';
-import 'package:collection/collection.dart';
 import '../../constants/colors.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/role_theme_provider.dart';
@@ -22,6 +20,8 @@ import '../../models/donation_models.dart';
 import '../../services/donations_local_storage.dart';
 import '../../services/local_storage_service.dart';
 import 'package:file_picker/file_picker.dart';
+import '../../design/design_system.dart';
+import '../../services/sync_service.dart';
 import 'widgets/dashboard_premium_overview.dart';
 import 'widgets/dashboard_analytics_panel.dart';
 import 'widgets/dashboard_empty_state.dart';
@@ -42,6 +42,8 @@ class DashboardTab extends ConsumerStatefulWidget {
   final ValueChanged<DonationCategory> onCatChanged;
   final VoidCallback onAddTap;
   final Function(double total, double received, double pending, int count)? onStatsChanged;
+  final VoidCallback? onSyncTap;
+  final bool isSyncing;
 
   const DashboardTab({
     super.key,
@@ -57,6 +59,8 @@ class DashboardTab extends ConsumerStatefulWidget {
     required this.onCatChanged,
     required this.onAddTap,
     this.onStatsChanged,
+    this.onSyncTap,
+    this.isSyncing = false,
   });
 
   @override
@@ -147,10 +151,102 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
     ref.refresh(donationPaginationFamily(DonationFetchConfig(branchId: widget.branchId)));
   }
 
+  bool _isLocalSyncing = false;
+
+  Future<void> _performLocalSync() async {
+    if (_isLocalSyncing) return;
+    setState(() => _isLocalSyncing = true);
+    try {
+      try {
+        SyncService().triggerUpload();
+      } catch (e) {
+        debugPrint('[DashboardTab] triggerUpload error: $e');
+      }
+
+      final isHQOrAdmin = widget.role.canSeeAllBranches ||
+          widget.role == UserRole.hqManager ||
+          widget.role == UserRole.chairman ||
+          widget.role == UserRole.manager;
+
+      int count = 0;
+      if (isHQOrAdmin) {
+        count = await DonationsLocalStorage.downloadAllDonations(
+          widget.branchId,
+          force: true,
+          allTime: true,
+        );
+        await DonationsLocalStorage.downloadDonors(widget.branchId, force: true);
+      } else {
+        count = await DonationsLocalStorage.downloadUserDonations(
+          branchId: widget.branchId,
+          username: widget.username,
+          userId: widget.userId,
+        );
+      }
+
+      ref.refresh(donationPaginationFamily(DonationFetchConfig(branchId: widget.branchId)));
+
+      if (mounted) {
+        final msg = isHQOrAdmin
+            ? 'Sync Complete: $count donations saved permanently to local storage.'
+            : 'Sync Complete: $count of your collected donations saved locally.';
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+                const SizedBox(width: 8),
+                Expanded(child: Text(msg)),
+              ],
+            ),
+            backgroundColor: const Color(0xFF10B981),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Sync error: $e'),
+            backgroundColor: Colors.redAccent,
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isLocalSyncing = false);
+    }
+  }
+
   /// Apply all active client-side filters to the raw donation list.
   List<DonationRecord> _applyFilters(List<DonationRecord> raw) {
     final q = _searchCtrl.text.toLowerCase();
     return raw.where((d) {
+      // Branch scoping: when a specific branch is selected, strictly exclude other branches
+      if (widget.branchId != 'all' && widget.branchId.isNotEmpty) {
+        final target = widget.branchId.toLowerCase().trim();
+        final bId = d.branchId.toLowerCase().trim();
+        final bName = d.branchName.toLowerCase().trim();
+
+        if (bId.isNotEmpty && bId != target && bId != 'all') {
+          return false;
+        }
+        if (bName.isNotEmpty && bName != target && bName != 'all' && !bName.contains(target)) {
+          if (target == 'gujrat' && (bName.contains('karachi') || bName.contains('dasterkhwaan'))) {
+            return false;
+          }
+        }
+        final rNo = d.receiptNo.toLowerCase();
+        if (target == 'gujrat' && (rNo.contains('-khi-') || rNo.contains('_khi_'))) {
+          return false;
+        }
+        if (target == 'karachi' && (rNo.contains('-grt-') || rNo.contains('-gjt-') || rNo.contains('_grt_'))) {
+          return false;
+        }
+      }
+
       // date range
       if (_startDate != null || _endDate != null) {
         final date = DateTime.tryParse(d.date) ?? DateTime.now();
@@ -195,14 +291,13 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
       if (_minAmount != null && amt < _minAmount!) return false;
       if (_maxAmount != null && amt > _maxAmount!) return false;
       // role-based visibility
-      if (widget.role == UserRole.chairman || widget.role == UserRole.hqManager || widget.role == UserRole.manager) return true;
-      if (widget.role == UserRole.officeBoy) {
-        final matchesUser = (widget.userId.isNotEmpty && d.collectorId == widget.userId) ||
-            (widget.username.isNotEmpty && d.recordedBy.toLowerCase().trim() == widget.username.toLowerCase().trim()) ||
-            (d.collectorId == null || d.collectorId!.isEmpty);
-        return matchesUser;
+      if (widget.role.canSeeAllBranches || widget.role == UserRole.chairman || widget.role == UserRole.hqManager || widget.role == UserRole.manager) return true;
+      final matchesUser = (widget.userId.isNotEmpty && d.collectorId == widget.userId) ||
+          (widget.username.isNotEmpty && d.recordedBy.toLowerCase().trim() == widget.username.toLowerCase().trim());
+      if (matchesUser) return true;
+      if (widget.role == UserRole.officeBoy && (d.collectorId == null || d.collectorId!.isEmpty)) {
+        return true;
       }
-      if (d.collectorId == widget.userId) return true;
       return false;
     }).toList()
       ..sort((a, b) {
@@ -231,6 +326,8 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
     // ConsumerStatefulWidget already provides `ref` — no nested Consumer needed.
     final donationState = ref.watch(donationPaginationFamily(DonationFetchConfig(branchId: widget.branchId)));
 
+    final isMobile = GBreakpoint.isMobile(context);
+
     return NotificationListener<ScrollNotification>(
       onNotification: (notification) {
         if (notification.metrics.pixels >= notification.metrics.maxScrollExtent * 0.8) {
@@ -244,7 +341,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
           // ── Header block (overview + filters) ────────────────────────────
           SliverToBoxAdapter(
             child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
+              padding: EdgeInsets.fromLTRB(isMobile ? 16 : 24, isMobile ? 16 : 24, isMobile ? 16 : 24, 0),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -258,6 +355,8 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                     onSummaryTap: _showAnalyticsDialog,
                     isAnalyticsActive: false,
                     onImportTap: _importDonations,
+                    onSyncTap: widget.onSyncTap ?? _performLocalSync,
+                    isSyncing: widget.isSyncing || _isLocalSyncing,
                   ),
                   const SizedBox(height: 24),
                   _buildSearchAndFilterBar(),
@@ -352,7 +451,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
               }
 
               return SliverPadding(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
+                padding: EdgeInsets.symmetric(horizontal: isMobile ? 16 : 24),
                 sliver: SliverList(
                   delegate: SliverChildBuilderDelegate(
                     (ctx, index) {
@@ -384,15 +483,64 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                 child: Center(child: CircularProgressIndicator()),
               ),
             ),
-            error: (err, _) => SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.all(24),
-                child: Center(child: Text('Error loading donations: $err')),
-              ),
-            ),
+            error: (err, _) {
+              final isIndexError = err.toString().contains('index') || err.toString().contains('failed-precondition');
+              return SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                  child: Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.shade50,
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: Colors.amber.shade300),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(isIndexError ? Icons.sync_problem_rounded : Icons.cloud_off_rounded, color: Colors.amber.shade900, size: 22),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Text(
+                                isIndexError ? 'Consolidated Cloud Index Synchronizing' : 'Cloud Sync Notice',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.amber.shade900),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          isIndexError
+                              ? 'The multi-branch consolidated query index is being established in Firebase. Local offline donations are displayed safely.'
+                              : 'Unable to connect to cloud database: $err. Showing local offline data.',
+                          style: TextStyle(fontSize: 12.5, color: Colors.amber.shade900),
+                        ),
+                        const SizedBox(height: 12),
+                        ElevatedButton.icon(
+                          onPressed: () {
+                            ref.read(donationPaginationFamily(DonationFetchConfig(branchId: widget.branchId)).notifier).loadAllPages();
+                          },
+                          icon: const Icon(Icons.refresh_rounded, size: 16),
+                          label: const Text('Retry Connection'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.amber.shade800,
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              );
+            },
           ),
 
-          const SliverToBoxAdapter(child: SizedBox(height: 100)),
+          const SliverToBoxAdapter(child: SizedBox(height: 120)),
         ],
       ),
     );
@@ -410,6 +558,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
   }
 
   Widget _buildDateHeader(String dateStr) {
+    final t = RoleThemeScope.dataOf(context);
     final now = DateTime.now();
     final todayStr = DateFormat('yyyy-MM-dd').format(now);
     final yesterdayStr =
@@ -432,14 +581,14 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
     final Color textColor;
     
     if (isToday) {
-      badgeColor = AppColors.primary.withValues(alpha: 0.1);
-      textColor = AppColors.primary;
+      badgeColor = t.accent.withValues(alpha: 0.12);
+      textColor = t.accent;
     } else if (isYesterday) {
-      badgeColor = AppColors.gray500.withValues(alpha: 0.1);
-      textColor = AppColors.gray700;
+      badgeColor = t.bgCardAlt;
+      textColor = t.textSecondary;
     } else {
-      badgeColor = AppColors.gray200.withValues(alpha: 0.5);
-      textColor = AppColors.gray500;
+      badgeColor = t.bgCardAlt.withValues(alpha: 0.6);
+      textColor = t.textTertiary;
     }
 
     return Padding(
@@ -452,7 +601,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
               color: badgeColor,
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                color: isToday ? AppColors.primary.withValues(alpha: 0.15) : Colors.transparent,
+                color: isToday ? t.accent.withValues(alpha: 0.25) : t.bgRule,
                 width: 1,
               ),
             ),
@@ -469,7 +618,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
           const SizedBox(width: 12),
           Expanded(
             child: Divider(
-              color: AppColors.gray200.withValues(alpha: 0.6),
+              color: t.bgRule,
               thickness: 1.0,
             ),
           ),
@@ -1607,22 +1756,28 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
   }
 
   void _showAdvancedFilterDialog() {
+    final t = RoleThemeScope.dataOf(context);
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setLocalState) => AlertDialog(
-          title: const Text('Filter Records',
-              style: TextStyle(fontWeight: FontWeight.w900)),
+          backgroundColor: t.bgCard,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(18),
+            side: BorderSide(color: t.bgRule),
+          ),
+          title: Text('Filter Records',
+              style: TextStyle(fontWeight: FontWeight.w900, color: t.textPrimary)),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Date Range',
+                Text('Date Range',
                     style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
-                        color: AppColors.gray500)),
+                        color: t.textSecondary)),
                 const SizedBox(height: 8),
                 InkWell(
                   onTap: () async {
@@ -1646,27 +1801,28 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                     padding: const EdgeInsets.symmetric(
                         horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
-                        border: Border.all(color: AppColors.gray200),
+                        color: t.bgCardAlt,
+                        border: Border.all(color: t.bgRule),
                         borderRadius: BorderRadius.circular(8)),
                     child: Row(children: [
-                      const Icon(Icons.calendar_today_rounded,
-                          size: 16, color: AppColors.gray600),
+                      Icon(Icons.calendar_today_rounded,
+                          size: 16, color: t.accent),
                       const SizedBox(width: 8),
                       Text(
                         _startDate != null
                             ? '${DateFormat('MMM d').format(_startDate!)} - ${DateFormat('MMM d').format(_endDate!)}'
                             : 'Select Dates',
-                        style: const TextStyle(fontSize: 13),
+                        style: TextStyle(fontSize: 13, color: t.textPrimary),
                       ),
                     ]),
                   ),
                 ),
                 const SizedBox(height: 20),
-                const Text('Category',
+                Text('Category',
                     style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
-                        color: AppColors.gray500)),
+                        color: t.textSecondary)),
                 const SizedBox(height: 8),
                 // ── FIX: safe dropdown with validated value ────────────────
                 _dropdownFilter(
@@ -1686,11 +1842,11 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                   },
                 ),
                 const SizedBox(height: 20),
-                const Text('Status',
+                Text('Status',
                     style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
-                        color: AppColors.gray500)),
+                        color: t.textSecondary)),
                 const SizedBox(height: 8),
                 // ── FIX: safe dropdown ─────────────────────────────────────
                 _dropdownFilter(
@@ -1701,11 +1857,11 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                       setLocalState(() => _statusFilter = v!),
                 ),
                 const SizedBox(height: 20),
-                const Text('Payment Method',
+                Text('Payment Method',
                     style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
-                        color: AppColors.gray500)),
+                        color: t.textSecondary)),
                 const SizedBox(height: 8),
                 // ── FIX: safe dropdown ─────────────────────────────────────
                 _dropdownFilter(
@@ -1716,11 +1872,11 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                       setLocalState(() => _paymentMethodFilter = v!),
                 ),
                 const SizedBox(height: 20),
-                const Text('Donation Entry Type',
+                Text('Donation Entry Type',
                     style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
-                        color: AppColors.gray500)),
+                        color: t.textSecondary)),
                 const SizedBox(height: 8),
                 _dropdownFilter(
                   value: _safeDropdownValue(
@@ -1730,21 +1886,24 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                       setLocalState(() => _entryTypeFilter = v!),
                 ),
                 const SizedBox(height: 20),
-                const Text('Amount Range (PKR)',
+                Text('Amount Range (PKR)',
                     style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
-                        color: AppColors.gray500)),
+                        color: t.textSecondary)),
                 const SizedBox(height: 8),
                 Row(
                   children: [
                     Expanded(
                       child: TextField(
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
+                        style: TextStyle(color: t.textPrimary),
+                        decoration: InputDecoration(
                             labelText: 'Min',
+                            labelStyle: TextStyle(color: t.textTertiary),
                             isDense: true,
-                            border: OutlineInputBorder()),
+                            enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: t.bgRule)),
+                            focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: t.accent))),
                         onChanged: (v) => _minAmount = double.tryParse(v),
                         controller: TextEditingController(
                             text: _minAmount?.toString() ?? ''),
@@ -1754,10 +1913,13 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                     Expanded(
                       child: TextField(
                         keyboardType: TextInputType.number,
-                        decoration: const InputDecoration(
+                        style: TextStyle(color: t.textPrimary),
+                        decoration: InputDecoration(
                             labelText: 'Max',
+                            labelStyle: TextStyle(color: t.textTertiary),
                             isDense: true,
-                            border: OutlineInputBorder()),
+                            enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: t.bgRule)),
+                            focusedBorder: OutlineInputBorder(borderSide: BorderSide(color: t.accent))),
                         onChanged: (v) => _maxAmount = double.tryParse(v),
                         controller: TextEditingController(
                             text: _maxAmount?.toString() ?? ''),
@@ -1784,7 +1946,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                 Navigator.pop(ctx);
               },
               child:
-                  const Text('Reset', style: TextStyle(color: Colors.red)),
+                  const Text('Reset', style: TextStyle(color: Colors.redAccent)),
             ),
             ElevatedButton(
               onPressed: () {
@@ -1792,9 +1954,10 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                 Navigator.pop(ctx);
               },
               style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.primary,
-                  foregroundColor: Colors.white),
-              child: const Text('Apply'),
+                  backgroundColor: t.accent,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
+              child: const Text('Apply', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
         ),

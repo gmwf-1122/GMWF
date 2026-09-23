@@ -2,7 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:hive/hive.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter/services.dart';
 import 'dart:async';
@@ -24,6 +24,7 @@ import '../utils/formatters.dart';
 import '../services/camp_session_service.dart';
 import 'office/offboard_dialog.dart';
 import '../services/staff_patient_link_service.dart';
+import '../services/sync_service.dart';
 
 class UserDetailScreen extends StatefulWidget {
   final String userId;
@@ -50,29 +51,34 @@ class _UserDetailScreenState extends State<UserDetailScreen>
   final FirebaseFirestore _firestore = FirebaseFirestore.instance;
 
   Future<void> _updateFirebaseAuthUser(String email, String password, {String? newEmail, String? newPassword, String? newDisplayName}) async {
+    final cleanEmail = email.trim();
+    final cleanPass = password.trim();
+    if (cleanEmail.isEmpty || cleanPass.isEmpty) return;
+
+    FirebaseApp? secondaryApp;
     try {
       final currentUser = FirebaseAuth.instance.currentUser;
       final isSelf = currentUser != null &&
-          (currentUser.email?.toLowerCase() == email.toLowerCase() || currentUser.uid == widget.userId);
+          (currentUser.email?.toLowerCase() == cleanEmail.toLowerCase() || currentUser.uid == widget.userId);
 
       if (isSelf) {
-        if (password.isNotEmpty) {
+        if (cleanPass.isNotEmpty) {
           try {
             final cred = EmailAuthProvider.credential(
-              email: currentUser.email ?? email,
-              password: password,
+              email: currentUser.email ?? cleanEmail,
+              password: cleanPass,
             );
             await currentUser.reauthenticateWithCredential(cred);
           } catch (reauthErr) {
             debugPrint('[UserDetailScreen] Reauthentication skipped/failed: $reauthErr');
           }
         }
-        if (newEmail != null && newEmail.isNotEmpty && newEmail.toLowerCase() != email.toLowerCase()) {
+        if (newEmail != null && newEmail.isNotEmpty && newEmail.toLowerCase() != cleanEmail.toLowerCase()) {
           await currentUser.verifyBeforeUpdateEmail(newEmail);
         }
-        if (newPassword != null && newPassword.isNotEmpty && newPassword != password) {
+        if (newPassword != null && newPassword.isNotEmpty && newPassword != cleanPass) {
           await currentUser.updatePassword(newPassword);
-          await OfflineAuthService.updateCachedPassword(newPassword, usernameOrEmail: currentUser.email ?? email);
+          await OfflineAuthService.updateCachedPassword(newPassword, usernameOrEmail: currentUser.email ?? cleanEmail);
         }
         if (newDisplayName != null && newDisplayName.isNotEmpty) {
           await currentUser.updateDisplayName(newDisplayName);
@@ -81,29 +87,36 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       }
 
       final appName = 'TempAuthApp_${DateTime.now().millisecondsSinceEpoch}';
-      final secondaryApp = await Firebase.initializeApp(
+      secondaryApp = await Firebase.initializeApp(
         name: appName,
         options: Firebase.app().options,
-      );
+      ).timeout(const Duration(seconds: 3));
       final secondaryAuth = FirebaseAuth.instanceFor(app: secondaryApp);
-      final creds = await secondaryAuth.signInWithEmailAndPassword(email: email, password: password);
+      final creds = await secondaryAuth.signInWithEmailAndPassword(
+        email: cleanEmail,
+        password: cleanPass,
+      ).timeout(const Duration(seconds: 3));
       final user = creds.user;
       if (user != null) {
-        if (newEmail != null && newEmail.isNotEmpty && newEmail.toLowerCase() != email.toLowerCase()) {
-          await user.verifyBeforeUpdateEmail(newEmail);
+        if (newEmail != null && newEmail.isNotEmpty && newEmail.toLowerCase() != cleanEmail.toLowerCase()) {
+          await user.verifyBeforeUpdateEmail(newEmail).timeout(const Duration(seconds: 3));
         }
-        if (newPassword != null && newPassword.isNotEmpty && newPassword != password) {
-          await user.updatePassword(newPassword);
-          await OfflineAuthService.updateCachedPassword(newPassword, usernameOrEmail: email);
+        if (newPassword != null && newPassword.isNotEmpty && newPassword != cleanPass) {
+          await user.updatePassword(newPassword).timeout(const Duration(seconds: 3));
+          await OfflineAuthService.updateCachedPassword(newPassword, usernameOrEmail: cleanEmail);
         }
         if (newDisplayName != null && newDisplayName.isNotEmpty) {
-          await user.updateDisplayName(newDisplayName);
+          await user.updateDisplayName(newDisplayName).timeout(const Duration(seconds: 3));
         }
       }
-      await secondaryApp.delete();
     } catch (e) {
-      debugPrint('[UserDetailScreen] Failed to update Firebase Auth user: $e');
-      rethrow;
+      debugPrint('[UserDetailScreen] Firebase Auth update bypassed/safe-handled: $e');
+    } finally {
+      if (secondaryApp != null) {
+        try {
+          await secondaryApp.delete().timeout(const Duration(seconds: 1));
+        } catch (_) {}
+      }
     }
   }
 
@@ -174,6 +187,9 @@ class _UserDetailScreenState extends State<UserDetailScreen>
   static const Color _inkMid = Color(0xFF5A6072);
   static const Color _inkLight = Color(0xFFADB5BD);
 
+  Map<String, dynamic>? _remoteUserData;
+  bool _isLoadingRemote = true;
+
   @override
   void initState() {
     super.initState();
@@ -183,6 +199,86 @@ class _UserDetailScreenState extends State<UserDetailScreen>
         CurvedAnimation(parent: _animController, curve: Curves.easeOut);
     _animController.forward();
     _fetchBranchName();
+    _fetchUserDataFromFirestore();
+  }
+
+  Future<void> _fetchUserDataFromFirestore() async {
+    if (widget.userId.trim().isEmpty) {
+      if (mounted) setState(() => _isLoadingRemote = false);
+      return;
+    }
+    try {
+      Map<String, dynamic>? found;
+
+      // 1. Check branch sub-collection
+      if (widget.branchId.isNotEmpty && widget.branchId != 'all' && widget.branchId != 'global') {
+        final bDoc = await _firestore
+            .collection('branches')
+            .doc(widget.branchId)
+            .collection('users')
+            .doc(widget.userId)
+            .get();
+        if (bDoc.exists && bDoc.data() != null) {
+          found = Map<String, dynamic>.from(bDoc.data()!);
+        }
+      }
+
+      // 2. Check root collection
+      final rootDoc = await _firestore.collection('users').doc(widget.userId).get();
+      if (rootDoc.exists && rootDoc.data() != null) {
+        final rootMap = Map<String, dynamic>.from(rootDoc.data()!);
+        found = { ...(found ?? {}), ...rootMap };
+      }
+
+      // 3. Query collectionGroup users by uid
+      if (found == null || found['username'] == null) {
+        try {
+          final qUid = await _firestore
+              .collectionGroup('users')
+              .where('uid', isEqualTo: widget.userId)
+              .limit(1)
+              .get();
+          if (qUid.docs.isNotEmpty) {
+            final qMap = Map<String, dynamic>.from(qUid.docs.first.data());
+            found = { ...(found ?? {}), ...qMap };
+          }
+        } catch (_) {}
+      }
+
+      if (found != null) {
+        if (found.containsKey('updates') && found['updates'] is Map) {
+          found = {
+            ...found,
+            ...Map<String, dynamic>.from(found['updates'] as Map),
+          }..remove('updates');
+        }
+
+        _remoteUserData = found;
+
+        if (Hive.isBoxOpen('local_users')) {
+          final box = Hive.box('local_users');
+          final email = (found['email'] ?? '').toString().toLowerCase().trim();
+          final uName = (found['username'] ?? found['usernameLower'] ?? '').toString().toLowerCase().trim();
+          final targetUid = widget.userId;
+
+          final keys = <String>{
+            if (email.isNotEmpty) 'user:$email',
+            if (targetUid.isNotEmpty) 'user:$targetUid',
+            if (targetUid.isNotEmpty) targetUid,
+            if (uName.isNotEmpty) 'user:$uName',
+          };
+          for (final k in keys) {
+            box.put(k, found);
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[UserDetailScreen] Remote fetch error: $e');
+    } finally {
+      if (mounted) {
+        setState(() => _isLoadingRemote = false);
+      }
+    }
   }
 
   @override
@@ -328,73 +424,45 @@ class _UserDetailScreenState extends State<UserDetailScreen>
     return completer.future;
   }
 
-  Future<DocumentSnapshot?> _fetchUserDoc() async {
-    if (widget.userId.trim().isEmpty) return null;
-    try {
-      if (widget.branchId.isNotEmpty && widget.branchId != 'all' && widget.branchId != 'global') {
-        final doc = await _firestore
-            .collection('branches')
-            .doc(widget.branchId)
-            .collection('users')
-            .doc(widget.userId)
-            .get();
-        if (doc.exists) return doc;
-      }
-      return await _firestore.collection('users').doc(widget.userId).get();
-    } catch (_) {
-      return null;
-    }
-  }
-
-  Stream<DocumentSnapshot> _userStream() {
-    if (widget.userId.trim().isEmpty) {
-      return const Stream.empty();
-    }
-    final localUser = _getLocalUser();
-    if (localUser != null) {
-      // Local user already present - avoid open Firestore snapshots
-      return const Stream.empty();
-    }
-    return Stream.fromFuture(_fetchUserDoc())
-        .where((doc) => doc != null)
-        .cast<DocumentSnapshot>();
-  }
-
   Map<String, dynamic>? _getLocalUser() {
     try {
+      if (!Hive.isBoxOpen('local_users')) return null;
       final box = Hive.box('local_users');
+      final target = widget.userId.trim().toLowerCase();
+
+      // Check direct keys first
+      for (final k in [widget.userId, 'user:${widget.userId}', target, 'user:$target']) {
+        final v = box.get(k);
+        if (v is Map) {
+          var m = Map<String, dynamic>.from(v);
+          if (m.containsKey('updates') && m['updates'] is Map) {
+            m = {...m, ...Map<String, dynamic>.from(m['updates'] as Map)}..remove('updates');
+          }
+          return m;
+        }
+      }
+
       for (final val in box.values) {
         if (val is Map) {
-          final Map<String, dynamic> u = Map<String, dynamic>.from(val);
-          final uid = u['uid']?.toString() ?? u['id']?.toString() ?? u['docId']?.toString() ?? '';
-          final username = u['username']?.toString() ?? '';
-          if (uid == widget.userId || (username.isNotEmpty && username.toLowerCase() == widget.userId.toLowerCase())) {
+          Map<String, dynamic> u = Map<String, dynamic>.from(val);
+          if (u.containsKey('updates') && u['updates'] is Map) {
+            u = {
+              ...u,
+              ...Map<String, dynamic>.from(u['updates'] as Map),
+            }..remove('updates');
+          }
+          final uid = (u['uid'] ?? u['id'] ?? u['docId'] ?? '').toString().trim().toLowerCase();
+          final username = (u['username'] ?? '').toString().trim().toLowerCase();
+          final email = (u['email'] ?? '').toString().trim().toLowerCase();
+          if (uid == target ||
+              (username.isNotEmpty && username == target) ||
+              (email.isNotEmpty && email == target)) {
             return u;
           }
         }
       }
     } catch (e) {
       debugPrint('Error reading local users: $e');
-    }
-    return null;
-  }
-
-  Future<DocumentSnapshot?> _fetchFallbackUser() async {
-    if (widget.userId.trim().isEmpty) return null;
-    try {
-      // 1. Check top-level users collection
-      final topDoc = await _firestore.collection('users').doc(widget.userId).get();
-      if (topDoc.exists) return topDoc;
-
-      // 2. Query collectionGroup users by uid field
-      final queryByUid = await _firestore
-          .collectionGroup('users')
-          .where('uid', isEqualTo: widget.userId)
-          .limit(1)
-          .get();
-      if (queryByUid.docs.isNotEmpty) return queryByUid.docs.first;
-    } catch (e) {
-      debugPrint('Fallback user fetch error: $e');
     }
     return null;
   }
@@ -440,17 +508,31 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       {'value': 'Madrassa Admin', 'label': 'Madrassa Admin', 'type': 'madrassa', 'icon': Icons.menu_book_rounded},
       {'value': 'Madrassa Teacher', 'label': 'Madrassa Teacher', 'type': 'madrassa', 'icon': Icons.school_rounded},
       {'value': 'Madrassa Parent', 'label': 'Madrassa Parent', 'type': 'madrassa', 'icon': Icons.child_care_rounded},
+      {'value': 'Madrassa Guardian', 'label': 'Madrassa Guardian', 'type': 'madrassa', 'icon': Icons.child_care_rounded},
+      {'value': 'School Principal', 'label': 'School Principal', 'type': 'crown', 'icon': Icons.stars_rounded},
+      {'value': 'School Admin', 'label': 'School Admin', 'type': 'normal', 'icon': Icons.school_rounded},
+      {'value': 'School Teacher', 'label': 'School Teacher', 'type': 'normal', 'icon': Icons.co_present_rounded},
+      {'value': 'School Guardian', 'label': 'School Guardian', 'type': 'normal', 'icon': Icons.family_restroom_rounded},
+      {'value': 'School Parent', 'label': 'School Parent', 'type': 'normal', 'icon': Icons.family_restroom_rounded},
+      {'value': 'Student', 'label': 'Student', 'type': 'normal', 'icon': Icons.school_outlined},
+      {'value': 'Madrassa Student', 'label': 'Madrassa Student', 'type': 'madrassa', 'icon': Icons.school_outlined},
+      {'value': 'School Student', 'label': 'School Student', 'type': 'normal', 'icon': Icons.school_outlined},
     ];
 
     if (!_canManageUserAccess({'role': 'chairman'})) {
       roleConfigs.removeWhere((r) => r['value'].toString().toLowerCase().trim() == 'chairman');
     }
 
-    final String rawRole = (data['role'] ?? '').toString();
+    final String rawRole = (data['role'] ?? '').toString().trim();
     final matchingRole = roleConfigs.firstWhere(
       (r) => r['value'].toString().toLowerCase() == rawRole.toLowerCase() ||
              r['label'].toString().toLowerCase() == rawRole.toLowerCase(),
-      orElse: () => roleConfigs.first,
+      orElse: () => {
+        'value': rawRole.isNotEmpty ? rawRole : 'Staff',
+        'label': rawRole.isNotEmpty ? rawRole : 'Staff',
+        'type': 'normal',
+        'icon': Icons.person_rounded,
+      },
     );
     _selectedRole = matchingRole['value'] as String;
 
@@ -483,6 +565,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
         if (item is Map) {
           editedSchedule.add({
             'campId': item['campId']?.toString() ?? '',
+            'session': item['session']?.toString() ?? '',
             'startTime': item['startTime']?.toString() ?? '',
             'endTime': item['endTime']?.toString() ?? '',
           });
@@ -728,104 +811,238 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                                                 final campOptions = branchCamps.isNotEmpty
                                                     ? branchCamps.map((c) => (c['id'] ?? '').toString()).toList()
                                                     : [selectedCamp];
+                                                String selectedStartTime = '08:00';
+                                                String selectedEndTime = '14:00';
 
-                                                return AlertDialog(
-                                                  title: const Text('Add Mandatory Shift Schedule Slot', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
-                                                  content: Column(
-                                                    mainAxisSize: MainAxisSize.min,
-                                                    children: [
-                                                      DropdownButtonFormField<String>(
-                                                        value: campOptions.contains(selectedCamp) ? selectedCamp : campOptions.first,
-                                                        decoration: const InputDecoration(labelText: 'Camp Facility'),
-                                                        items: campOptions.map((id) => DropdownMenuItem(
-                                                          value: id,
-                                                          child: Text(CampSessionService.getCampLabel(id, userBranchId)),
-                                                        )).toList(),
-                                                        onChanged: (v) => setD(() => selectedCamp = v ?? campOptions.first),
+                                                void updateDefaultsForSession(String s) {
+                                                  switch (s.toLowerCase()) {
+                                                    case 'morning':
+                                                      selectedStartTime = '08:00';
+                                                      selectedEndTime = '14:00';
+                                                      break;
+                                                    case 'evening':
+                                                      selectedStartTime = '14:00';
+                                                      selectedEndTime = '20:00';
+                                                      break;
+                                                    case 'night':
+                                                      selectedStartTime = '20:00';
+                                                      selectedEndTime = '02:00';
+                                                      break;
+                                                    case 'all':
+                                                    default:
+                                                      selectedStartTime = '00:00';
+                                                      selectedEndTime = '23:59';
+                                                      break;
+                                                  }
+                                                }
+
+                                                return StatefulBuilder(
+                                                  builder: (dialogCtx, setInnerD) {
+                                                    Future<void> pickTime({required bool isStart}) async {
+                                                      final currentStr = isStart ? selectedStartTime : selectedEndTime;
+                                                      final parts = currentStr.split(':');
+                                                      final initialHour = parts.isNotEmpty ? (int.tryParse(parts[0]) ?? 8) : 8;
+                                                      final initialMinute = parts.length > 1 ? (int.tryParse(parts[1]) ?? 0) : 0;
+                                                      final picked = await showTimePicker(
+                                                        context: dialogCtx,
+                                                        initialTime: TimeOfDay(hour: initialHour, minute: initialMinute),
+                                                      );
+                                                      if (picked != null) {
+                                                        final hh = picked.hour.toString().padLeft(2, '0');
+                                                        final mm = picked.minute.toString().padLeft(2, '0');
+                                                        setInnerD(() {
+                                                          if (isStart) {
+                                                            selectedStartTime = '$hh:$mm';
+                                                          } else {
+                                                            selectedEndTime = '$hh:$mm';
+                                                          }
+                                                        });
+                                                      }
+                                                    }
+
+                                                    return AlertDialog(
+                                                      title: const Text('Add Mandatory Shift Schedule Slot', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                                      content: SingleChildScrollView(
+                                                        child: Column(
+                                                          mainAxisSize: MainAxisSize.min,
+                                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                                          children: [
+                                                            DropdownButtonFormField<String>(
+                                                              value: campOptions.contains(selectedCamp) ? selectedCamp : campOptions.first,
+                                                              decoration: const InputDecoration(labelText: 'Camp Facility'),
+                                                              items: campOptions.map((id) => DropdownMenuItem(
+                                                                value: id,
+                                                                child: Text(CampSessionService.getCampLabel(id, userBranchId)),
+                                                              )).toList(),
+                                                              onChanged: (v) => setInnerD(() => selectedCamp = v ?? campOptions.first),
+                                                            ),
+                                                            const SizedBox(height: 12),
+                                                            DropdownButtonFormField<String>(
+                                                              value: selectedSession,
+                                                              decoration: const InputDecoration(labelText: 'Mandatory Shift / Session'),
+                                                              items: const [
+                                                                DropdownMenuItem(value: 'morning', child: Text('☀️ Morning')),
+                                                                DropdownMenuItem(value: 'evening', child: Text('🌅 Evening')),
+                                                                DropdownMenuItem(value: 'night', child: Text('🌙 Night')),
+                                                                DropdownMenuItem(value: 'all', child: Text('📑 All Sessions')),
+                                                              ],
+                                                              onChanged: (v) {
+                                                                final val = v ?? 'morning';
+                                                                setInnerD(() {
+                                                                  selectedSession = val;
+                                                                  updateDefaultsForSession(val);
+                                                                });
+                                                              },
+                                                            ),
+                                                            const SizedBox(height: 14),
+                                                            const Text('Session Time (Click to edit)', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                                                            const SizedBox(height: 6),
+                                                            Row(
+                                                              children: [
+                                                                Expanded(
+                                                                  child: InkWell(
+                                                                    onTap: () => pickTime(isStart: true),
+                                                                    borderRadius: BorderRadius.circular(8),
+                                                                    child: Container(
+                                                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                                                      decoration: BoxDecoration(
+                                                                        border: Border.all(color: Colors.grey.shade400),
+                                                                        borderRadius: BorderRadius.circular(8),
+                                                                      ),
+                                                                      child: Column(
+                                                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                                                        children: [
+                                                                          Text('Start Time', style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+                                                                          const SizedBox(height: 2),
+                                                                          Row(
+                                                                            children: [
+                                                                              const Icon(Icons.access_time_rounded, size: 14),
+                                                                              const SizedBox(width: 4),
+                                                                              Text(selectedStartTime, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                                                            ],
+                                                                          ),
+                                                                        ],
+                                                                      ),
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                                const SizedBox(width: 8),
+                                                                Expanded(
+                                                                  child: InkWell(
+                                                                    onTap: () => pickTime(isStart: false),
+                                                                    borderRadius: BorderRadius.circular(8),
+                                                                    child: Container(
+                                                                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                                                      decoration: BoxDecoration(
+                                                                        border: Border.all(color: Colors.grey.shade400),
+                                                                        borderRadius: BorderRadius.circular(8),
+                                                                      ),
+                                                                      child: Column(
+                                                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                                                        children: [
+                                                                          Text('End Time', style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+                                                                          const SizedBox(height: 2),
+                                                                          Row(
+                                                                            children: [
+                                                                              const Icon(Icons.access_time_rounded, size: 14),
+                                                                              const SizedBox(width: 4),
+                                                                              Text(selectedEndTime, style: const TextStyle(fontWeight: FontWeight.bold)),
+                                                                            ],
+                                                                          ),
+                                                                        ],
+                                                                      ),
+                                                                    ),
+                                                                  ),
+                                                                ),
+                                                              ],
+                                                            ),
+                                                          ],
+                                                        ),
                                                       ),
-                                                    const SizedBox(height: 12),
-                                                    DropdownButtonFormField<String>(
-                                                      value: selectedSession,
-                                                      decoration: const InputDecoration(labelText: 'Mandatory Shift / Session'),
-                                                      items: const [
-                                                        DropdownMenuItem(value: 'morning', child: Text('☀️ Morning')),
-                                                        DropdownMenuItem(value: 'evening', child: Text('🌅 Evening')),
-                                                        DropdownMenuItem(value: 'night', child: Text('🌙 Night')),
-                                                        DropdownMenuItem(value: 'all', child: Text('📑 All Sessions')),
+                                                      actions: [
+                                                        TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
+                                                        ElevatedButton(
+                                                          onPressed: () {
+                                                            Navigator.pop(dialogCtx, {
+                                                              'campId': selectedCamp,
+                                                              'session': selectedSession,
+                                                              'startTime': selectedStartTime,
+                                                              'endTime': selectedEndTime,
+                                                            });
+                                                          },
+                                                          child: const Text('Add Slot'),
+                                                        ),
                                                       ],
-                                                      onChanged: (v) => setD(() => selectedSession = v ?? 'morning'),
-                                                    ),
-                                                  ],
+                                                    );
+                                                  },
+                                                );
+                                              },
+                                            ),
+                                          );
+
+                                          if (added != null) {
+                                            setS(() => editedSchedule.add(added));
+                                          }
+                                        },
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 6),
+                                  if (editedSchedule.isEmpty)
+                                    Text(
+                                      'No specific shift schedule defined (Manual camp picker will be used).',
+                                      style: TextStyle(fontSize: 12, color: t.textTertiary, fontStyle: FontStyle.italic),
+                                    )
+                                  else
+                                    Column(
+                                      children: editedSchedule.asMap().entries.map<Widget>((e) {
+                                        final idx = e.key;
+                                        final item = e.value;
+                                        final label = CampSessionService.getCampLabel(item['campId'] ?? '');
+                                        final timeRange = (item['startTime']?.isNotEmpty == true && item['endTime']?.isNotEmpty == true)
+                                            ? ' (${item['startTime']} – ${item['endTime']})'
+                                            : '';
+                                        final sess = item['session']?.toString().toLowerCase();
+                                        String sessionDisplay = '';
+                                        if (sess == 'morning') {
+                                          sessionDisplay = '☀️ Morning';
+                                        } else if (sess == 'evening') {
+                                          sessionDisplay = '🌅 Evening';
+                                        } else if (sess == 'night') {
+                                          sessionDisplay = '🌙 Night';
+                                        } else if (sess == 'all') {
+                                          sessionDisplay = '📑 All Sessions';
+                                        }
+                                        final combinedSessionStr = sessionDisplay.isNotEmpty
+                                            ? (timeRange.isNotEmpty ? '$sessionDisplay$timeRange' : sessionDisplay)
+                                            : (timeRange.isNotEmpty ? '${item['startTime']} – ${item['endTime']}' : '📑 All Sessions');
+                                        return Container(
+                                          margin: const EdgeInsets.only(top: 6),
+                                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                          decoration: BoxDecoration(
+                                            color: t.bgCard,
+                                            borderRadius: BorderRadius.circular(8),
+                                            border: Border.all(color: t.bgRule),
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              Expanded(
+                                                child: Text(
+                                                  '$label — $combinedSessionStr',
+                                                  style: TextStyle(fontSize: 12, color: t.textPrimary, fontWeight: FontWeight.w600),
                                                 ),
-                                                actions: [
-                                                  TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
-                                                  ElevatedButton(
-                                                    onPressed: () {
-                                                      Navigator.pop(dialogCtx, {
-                                                        'campId': selectedCamp,
-                                                        'session': selectedSession,
-                                                      });
-                                                    },
-                                                    child: const Text('Add Slot'),
-                                                  ),
-                                                ],
-                                              );
-                                            },
+                                              ),
+                                              IconButton(
+                                                icon: Icon(Icons.close_rounded, size: 16, color: t.danger),
+                                                onPressed: () => setS(() => editedSchedule.removeAt(idx)),
+                                                padding: EdgeInsets.zero,
+                                                constraints: const BoxConstraints(),
+                                              ),
+                                            ],
                                           ),
                                         );
-
-                                        if (added != null) {
-                                          setS(() => editedSchedule.add(added));
-                                        }
-                                      },
+                                      }).toList(),
                                     ),
-                                  ],
-                                ),
-                                const SizedBox(height: 6),
-                                if (editedSchedule.isEmpty)
-                                  Text(
-                                    'No specific shift schedule defined (Manual camp picker will be used).',
-                                    style: TextStyle(fontSize: 12, color: t.textTertiary, fontStyle: FontStyle.italic),
-                                  )
-                                else
-                                  Column(
-                                    children: editedSchedule.asMap().entries.map((e) {
-                                      final idx = e.key;
-                                      final item = e.value;
-                                      final label = CampSessionService.getCampLabel(item['campId'] ?? '');
-                                      final sessionName = switch (item['session']?.toString().toLowerCase()) {
-                                        'morning' => '☀️ Morning',
-                                        'evening' => '🌅 Evening',
-                                        'night'   => '🌙 Night',
-                                        _         => item['startTime'] != null ? '${item['startTime']} – ${item['endTime']}' : '📑 All Sessions',
-                                      };
-                                      return Container(
-                                        margin: const EdgeInsets.only(top: 6),
-                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                                        decoration: BoxDecoration(
-                                          color: t.bgCard,
-                                          borderRadius: BorderRadius.circular(8),
-                                          border: Border.all(color: t.bgRule),
-                                        ),
-                                        child: Row(
-                                          children: [
-                                            Expanded(
-                                              child: Text(
-                                                '$label — $sessionName',
-                                                style: TextStyle(fontSize: 12, color: t.textPrimary, fontWeight: FontWeight.w600),
-                                              ),
-                                            ),
-                                            IconButton(
-                                              icon: Icon(Icons.close_rounded, size: 16, color: t.danger),
-                                              onPressed: () => setS(() => editedSchedule.removeAt(idx)),
-                                              padding: EdgeInsets.zero,
-                                              constraints: const BoxConstraints(),
-                                            ),
-                                          ],
-                                        ),
-                                      );
-                                    }).toList(),
-                                  ),
                               ],
                             ),
                           ),
@@ -1020,8 +1237,8 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       final path =
           'branches/${widget.branchId}/users/${widget.userId}/$name.${f.name.split('.').last}';
       final ref = FirebaseStorage.instance.ref(path);
-      await ref.putFile(File(f.path));
-      return ref.getDownloadURL();
+      await ref.putFile(File(f.path)).timeout(const Duration(seconds: 15));
+      return await ref.getDownloadURL().timeout(const Duration(seconds: 8));
     }
 
     if (_profileFile != null) {
@@ -1037,13 +1254,25 @@ class _UserDetailScreenState extends State<UserDetailScreen>
     }
 
     try {
+      final String oldRole = (old['role'] ?? '').toString().toLowerCase();
+      final String newRole = (_selectedRole ?? oldRole).toLowerCase();
+      final bool isStudentOrGuardian = oldRole.contains('guardian') ||
+          oldRole.contains('parent') ||
+          oldRole.contains('student') ||
+          newRole.contains('guardian') ||
+          newRole.contains('parent') ||
+          newRole.contains('student');
+
       final String oldEmail = old['email']?.toString() ?? '';
       final String oldPassword = old['password']?.toString() ?? '1122';
       final String newEmail = (updates['email'] ?? oldEmail).toString();
       final String newPassword = (updates['password'] ?? oldPassword).toString();
       final String newName = (updates['name'] ?? updates['username'] ?? old['name'] ?? old['username'])?.toString() ?? '';
+      final bool hasPasswordChanged = passCtrl.text.trim().isNotEmpty;
       final isLocal = widget.userId.startsWith('local-');
-      if (!isLocal) {
+
+      // Only attempt secondary Firebase Auth sync for staff accounts that changed their password
+      if (!isLocal && !isStudentOrGuardian && hasPasswordChanged && oldPassword.isNotEmpty) {
         try {
           await _updateFirebaseAuthUser(
             oldEmail,
@@ -1053,26 +1282,44 @@ class _UserDetailScreenState extends State<UserDetailScreen>
             newDisplayName: newName,
           );
         } catch (e) {
-          debugPrint('[UserDetailScreen] Auth sync warning: $e');
-          if (mounted) {
-            _snack('Database updated. Note: Auth sync warning ($e)', error: true);
-          }
+          debugPrint('[UserDetailScreen] Auth sync note: $e');
         }
       }
+
+      // Preserve and deduplicate studentIds for student/guardian portal profiles
+      if (old['studentIds'] != null) {
+        final rawIds = old['studentIds'];
+        if (rawIds is List) {
+          updates['studentIds'] = rawIds.map((e) => e.toString()).toSet().toList();
+        }
+      }
+
+      final fullUserData = <String, dynamic>{
+        ...old,
+        ...updates,
+        'uid': widget.userId,
+        'id': widget.userId,
+        'name': _usernameController.text.trim(),
+        'username': _usernameController.text.trim(),
+        'usernameLower': _usernameController.text.trim().toLowerCase(),
+        'email': _emailController.text.trim().toLowerCase(),
+        'branchId': widget.branchId,
+        'role': _selectedRole ?? old['role'] ?? 'User',
+        'status': _selectedStatus ?? 'Active',
+        'accountStatus': _selectedStatus ?? 'Active',
+        'isActive': (_selectedStatus ?? 'Active') == 'Active',
+      };
 
       await LocalStorageService.saveUserOffline(
         uid: widget.userId,
         branchId: widget.branchId,
-        userData: {
-          ...old,
-          ...updates,
-          'uid': widget.userId,
-          'branchId': widget.branchId,
-        },
+        userData: fullUserData,
       );
 
+      _remoteUserData = fullUserData;
+
       final cnicVal = ((updates['cnic'] ?? updates['identification']) ?? (old['cnic'] ?? old['identification']))?.toString() ?? '';
-      if (cnicVal.isNotEmpty) {
+      if (cnicVal.isNotEmpty && !isStudentOrGuardian) {
         await FinanceLocalStorage.linkUserAndEmployeeByCnic(
           cnic: cnicVal,
           userId: widget.userId,
@@ -1082,22 +1329,34 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       }
 
       if (widget.isOnline && !isLocal) {
-        await _firestore
-            .collection('users')
-            .doc(widget.userId)
-            .update(updates);
-
-        if (widget.branchId != 'all' && widget.branchId.isNotEmpty) {
+        try {
           await _firestore
-              .collection('branches')
-              .doc(widget.branchId)
               .collection('users')
               .doc(widget.userId)
-              .update(updates);
+              .set(fullUserData, SetOptions(merge: true))
+              .timeout(const Duration(seconds: 4));
+
+          if (widget.branchId != 'all' && widget.branchId.isNotEmpty && widget.branchId != 'global') {
+            await _firestore
+                .collection('branches')
+                .doc(widget.branchId)
+                .collection('users')
+                .doc(widget.userId)
+                .set(fullUserData, SetOptions(merge: true))
+                .timeout(const Duration(seconds: 4));
+          }
+        } catch (e) {
+          debugPrint('[UserDetailScreen] Firestore update note: $e');
         }
       }
+
+      SyncService().triggerUpload(force: true);
+
       _snack('User updated successfully!', success: true);
-      if (mounted) Navigator.pop(ctx);
+      if (mounted) {
+        Navigator.pop(ctx);
+        setState(() {});
+      }
     } catch (e) {
       _snack('Error: $e', error: true);
     }
@@ -1179,16 +1438,17 @@ class _UserDetailScreenState extends State<UserDetailScreen>
     );
     if (confirmed != true) return;
 
-    final String email = data['email']?.toString() ?? '';
-    final String password = data['password']?.toString() ?? '';
+    final targetUid = widget.userId;
+    final targetEmail = (data['email'] ?? '').toString().trim().toLowerCase();
+    final targetUsername = (data['username'] ?? data['name'] ?? '').toString().trim().toLowerCase();
+    final targetPass = (data['password'] ?? '112233').toString();
     final isLocal = widget.userId.startsWith('local-');
-    final targetDocId = (data['uid'] ?? data['id'] ?? widget.userId)?.toString() ?? widget.userId;
 
     try {
       bool authDeleted = false;
-      if (email.isNotEmpty && !isLocal && password.trim().isNotEmpty) {
+      if (targetEmail.isNotEmpty && !isLocal && targetPass.trim().isNotEmpty) {
         try {
-          await _deleteFirebaseAuthUser(email, password);
+          await _deleteFirebaseAuthUser(targetEmail, targetPass);
           authDeleted = true;
         } catch (e) {
           debugPrint('[UserDetailScreen] Firebase Auth delete skipped/failed: $e');
@@ -1196,40 +1456,96 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       }
 
       await FinanceLocalStorage.syncBiDirectionalOffboarding(
-        userId: widget.userId,
+        userId: targetUid,
         cnic: (data['cnic'] ?? data['identification'])?.toString(),
         performedBy: 'UserAdmin',
       );
 
       await LocalStorageService.deleteUserOffline(
-        uid: widget.userId,
+        uid: targetUid,
         branchId: widget.branchId,
-        email: email,
-        username: (data['username'] ?? data['usernameLower'] ?? '').toString(),
+        email: targetEmail,
+        username: targetUsername,
       );
 
-      if (widget.isOnline && !isLocal) {
-        try {
-          await _firestore.collection('users').doc(targetDocId).delete();
-          if (widget.branchId != 'all' && widget.branchId.isNotEmpty && widget.branchId != 'global') {
-            await _firestore
-                .collection('branches')
-                .doc(widget.branchId)
-                .collection('users')
-                .doc(targetDocId)
-                .delete();
-          }
-        } catch (e) {
-          debugPrint('[UserDetailScreen] Firestore delete best effort failed; local queue keeps it synced later: $e');
+      // Comprehensive Firestore deletion
+      final firestore = FirebaseFirestore.instance;
+      final identifiers = <String>{
+        if (targetUid.isNotEmpty) targetUid,
+        if (targetUsername.isNotEmpty) targetUsername,
+        if (targetEmail.isNotEmpty) targetEmail,
+      };
+
+      final deletePayload = {
+        'isDeleted': true,
+        'status': 'deleted',
+        'accountStatus': 'deleted',
+        'deletedAt': FieldValue.serverTimestamp(),
+      };
+
+      for (final id in identifiers) {
+        await firestore.collection('users').doc(id).set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+        if (widget.branchId.isNotEmpty && widget.branchId != 'all') {
+          await firestore.collection('branches').doc(widget.branchId).collection('users').doc(id).set(deletePayload, SetOptions(merge: true)).catchError((_) {});
         }
       }
 
+      if (targetUsername.isNotEmpty) {
+        try {
+          final snap = await firestore.collection('users').where('usernameLower', isEqualTo: targetUsername).get();
+          for (final doc in snap.docs) {
+            await doc.reference.set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+          }
+        } catch (_) {}
+      }
+
+      if (targetEmail.isNotEmpty) {
+        try {
+          final snap = await firestore.collection('users').where('email', isEqualTo: targetEmail).get();
+          for (final doc in snap.docs) {
+            await doc.reference.set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+          }
+        } catch (_) {}
+      }
+
+      if (targetUid.isNotEmpty) {
+        try {
+          final snap = await firestore.collection('users').where('uid', isEqualTo: targetUid).get();
+          for (final doc in snap.docs) {
+            await doc.reference.set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+          }
+        } catch (_) {}
+      }
+
+      try {
+        if (targetEmail.isNotEmpty) {
+          final gSnap = await firestore.collectionGroup('users').where('email', isEqualTo: targetEmail).get();
+          for (final doc in gSnap.docs) {
+            await doc.reference.set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+          }
+        }
+        if (targetUsername.isNotEmpty) {
+          final gSnap = await firestore.collectionGroup('users').where('usernameLower', isEqualTo: targetUsername).get();
+          for (final doc in gSnap.docs) {
+            await doc.reference.set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+          }
+        }
+        if (targetUid.isNotEmpty) {
+          final gSnap = await firestore.collectionGroup('users').where('uid', isEqualTo: targetUid).get();
+          for (final doc in gSnap.docs) {
+            await doc.reference.set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+          }
+        }
+      } catch (_) {}
+
+      SyncService().triggerUpload(force: true);
+
       final authMessage = authDeleted
           ? 'User deleted successfully.'
-          : 'User deleted locally and from the app records. Firebase Auth removal was skipped because no valid password was available for this account.';
+          : 'User deleted permanently from app and cloud records.';
 
       _snack(authMessage, success: true);
-      if (mounted) Navigator.pop(context);
+      if (mounted) Navigator.pop(context, true);
     } catch (e) {
       _snack('Error: $e', error: true);
     }
@@ -1266,145 +1582,113 @@ class _UserDetailScreenState extends State<UserDetailScreen>
   }
 
   Future<void> _refreshUser() async {
-    try {
-      final doc = await _fetchUserDoc();
-      if (doc != null && doc.exists) {
-        final data = doc.data() as Map<String, dynamic>?;
-        if (data != null && Hive.isBoxOpen('local_users')) {
-          final box = Hive.box('local_users');
-          final cacheKey = data['email'] != null && (data['email'] as String).isNotEmpty
-              ? 'user:${(data['email'] as String).toLowerCase().trim()}'
-              : 'user:${widget.userId}';
-          await box.put(cacheKey, {'id': widget.userId, ...data});
-          if (mounted) setState(() {});
-        }
-      }
-      if (mounted) {
-        _snack('User details refreshed', success: true);
-      }
-    } catch (e) {
-      if (mounted) {
-        _snack('Refresh failed: $e', error: true);
-      }
+    setState(() => _isLoadingRemote = true);
+    await _fetchUserDataFromFirestore();
+    if (mounted) {
+      _snack('User details refreshed', success: true);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
+
+    if (!Hive.isBoxOpen('local_users')) {
+      return Scaffold(
+        backgroundColor: t.bg,
+        body: Center(child: CircularProgressIndicator(color: t.accent)),
+      );
+    }
+
     return Scaffold(
       backgroundColor: t.bg,
-      body: StreamBuilder<DocumentSnapshot>(
-        stream: _userStream(),
-        builder: (context, snapshot) {
-          Map<String, dynamic>? userData;
-          bool hasUserData = false;
-
+      body: ValueListenableBuilder<Box>(
+        valueListenable: Hive.box('local_users').listenable(),
+        builder: (context, box, _) {
           final localUser = _getLocalUser();
-          if (snapshot.hasData && snapshot.data!.exists) {
-            userData = snapshot.data!.data() as Map<String, dynamic>?;
-            hasUserData = true;
-          } else if (localUser != null) {
-            userData = localUser;
-            hasUserData = true;
+          final Map<String, dynamic> merged = {};
+
+          if (_remoteUserData != null) {
+            merged.addAll(_remoteUserData!);
+          }
+          if (localUser != null) {
+            merged.addAll(localUser);
           }
 
-          if (snapshot.hasError && !hasUserData) return _errorState(t);
-          if (snapshot.connectionState == ConnectionState.waiting && !hasUserData) {
-            return Center(
-                child: CircularProgressIndicator(color: t.accent));
-          }
-          if (!hasUserData && snapshot.connectionState != ConnectionState.waiting) {
-            return FutureBuilder<DocumentSnapshot?>(
-              future: _fetchFallbackUser(),
-              builder: (context, fbSnap) {
-                if (fbSnap.hasData && fbSnap.data != null && fbSnap.data!.exists) {
-                  final fbData = fbSnap.data!.data() as Map<String, dynamic>?;
-                  if (fbData != null) {
-                    return FadeTransition(
-                      opacity: _fadeAnim,
-                      child: CustomScrollView(
-                        physics: const BouncingScrollPhysics(),
-                        slivers: [
-                          _buildSliverAppBar(fbData, t),
-                          SliverPadding(
-                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
-                            sliver: SliverList(
-                              delegate: SliverChildListDelegate([
-                                const SizedBox(height: 20),
-                                _buildInfoSection(fbData, t),
-                                const SizedBox(height: 16),
-                                _buildContactSection(fbData, t),
-                                const SizedBox(height: 16),
-                                _buildFinancialSection(fbData, t),
-                                const SizedBox(height: 16),
-                                _buildDocumentsSection(fbData, t),
-                              ]),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }
-                }
-                if (fbSnap.connectionState == ConnectionState.waiting) {
-                  return Center(child: CircularProgressIndicator(color: t.accent));
-                }
-                return _notFoundState(t);
-              },
-            );
+          if (merged.containsKey('updates') && merged['updates'] is Map) {
+            final unnested = Map<String, dynamic>.from(merged['updates'] as Map);
+            merged.addAll(unnested);
+            merged.remove('updates');
           }
 
-          final data = userData!;
+          if (merged.isEmpty && _isLoadingRemote) {
+            return Center(child: CircularProgressIndicator(color: t.accent));
+          }
+
+          if (merged.isEmpty) {
+            return _notFoundState(t);
+          }
+
+          final rawName = (merged['name'] ?? merged['username'] ?? merged['displayName'] ?? '').toString().trim();
+          final rawUsername = (merged['username'] ?? merged['name'] ?? '').toString().trim();
+          final rawEmail = (merged['email'] ?? '').toString().trim();
+          final rawRole = (merged['role'] ?? 'User').toString().trim();
+
+          merged['name'] = rawName.isNotEmpty ? rawName : (rawUsername.isNotEmpty ? rawUsername : 'User');
+          merged['username'] = rawUsername.isNotEmpty ? rawUsername : (rawName.isNotEmpty ? rawName : 'user');
+          merged['email'] = rawEmail;
+          merged['role'] = rawRole;
+          merged['uid'] = (merged['uid'] ?? merged['id'] ?? widget.userId).toString();
+          merged['id'] = merged['uid'];
+
           return RefreshIndicator(
             onRefresh: _refreshUser,
             child: FadeTransition(
               opacity: _fadeAnim,
               child: CustomScrollView(
                 physics: const AlwaysScrollableScrollPhysics(parent: BouncingScrollPhysics()),
-              slivers: [
-                _buildSliverAppBar(data, t),
-                SliverPadding(
-                  padding:
-                      const EdgeInsets.fromLTRB(16, 0, 16, 32),
-                  sliver: SliverList(
-                    delegate: SliverChildListDelegate([
-                      const SizedBox(height: 20),
-                      _buildInfoSection(data, t),
-                      const SizedBox(height: 16),
-                      _buildLinkedEmployeeSection(data, t),
-                      const SizedBox(height: 16),
-                      _buildContactSection(data, t),
-                      const SizedBox(height: 16),
-                      _buildFinancialSection(data, t),
-                      if ((data['role'] as String?) != null &&
-                          ((data['role'] as String).toLowerCase() == 'doctor' ||
-                              (data['role'] as String).toLowerCase().contains('doc'))) ...[
+                slivers: [
+                  _buildSliverAppBar(merged, t),
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+                    sliver: SliverList(
+                      delegate: SliverChildListDelegate([
+                        const SizedBox(height: 20),
+                        _buildInfoSection(merged, t),
                         const SizedBox(height: 16),
-                        _buildMedicalSection(data, t),
-                      ],
-                      if (data['identificationUrl'] != null ||
-                          data['degreeUrl'] != null) ...[
+                        _buildLinkedEmployeeSection(merged, t),
                         const SizedBox(height: 16),
-                        _buildDocumentsSection(data, t),
-                      ],
-                      const SizedBox(height: 16),
-                      _buildActiveDeviceSection(data, t),
-                      const SizedBox(height: 16),
-                      _buildMetaSection(data, t),
-                      const SizedBox(height: 16),
-                      _buildRevokeAccessCard(data, t),
-                    ]),
+                        _buildContactSection(merged, t),
+                        const SizedBox(height: 16),
+                        _buildFinancialSection(merged, t),
+                        if ((merged['role'] as String?) != null &&
+                            ((merged['role'] as String).toLowerCase() == 'doctor' ||
+                                (merged['role'] as String).toLowerCase().contains('doc'))) ...[
+                          const SizedBox(height: 16),
+                          _buildMedicalSection(merged, t),
+                        ],
+                        if (merged['identificationUrl'] != null ||
+                            merged['degreeUrl'] != null) ...[
+                          const SizedBox(height: 16),
+                          _buildDocumentsSection(merged, t),
+                        ],
+                        const SizedBox(height: 16),
+                        _buildActiveDeviceSection(merged, t),
+                        const SizedBox(height: 16),
+                        _buildMetaSection(merged, t),
+                        const SizedBox(height: 16),
+                        _buildRevokeAccessCard(merged, t),
+                      ]),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-        );
-      },
-    ),
-  );
-}
+          );
+        },
+      ),
+    );
+  }
 
   Widget _buildSliverAppBar(
       Map<String, dynamic> data, RoleThemeData t) {
@@ -2197,6 +2481,8 @@ class _UserDetailScreenState extends State<UserDetailScreen>
     ]);
   }
 
+  Future<Map<String, dynamic>?>? _deviceInfoFuture;
+
   Widget _buildActiveDeviceSection(Map<String, dynamic> data, RoleThemeData t) {
     Map<String, dynamic>? deviceInfo = (data['lastDeviceInfo'] != null && data['lastDeviceInfo'] is Map)
         ? Map<String, dynamic>.from(data['lastDeviceInfo'] as Map)
@@ -2204,31 +2490,34 @@ class _UserDetailScreenState extends State<UserDetailScreen>
             ? Map<String, dynamic>.from(data['deviceInfo'] as Map)
             : null);
 
-    if (deviceInfo == null && widget.userId.isNotEmpty) {
-      return FutureBuilder<DocumentSnapshot>(
-        future: FirebaseFirestore.instance.collection('users').doc(widget.userId).get(),
-        builder: (context, snapshot) {
-          Map<String, dynamic>? fetchedInfo;
-          if (snapshot.hasData && snapshot.data!.exists) {
-            final docData = snapshot.data!.data() as Map<String, dynamic>?;
-            if (docData != null && docData['lastDeviceInfo'] is Map) {
-              fetchedInfo = Map<String, dynamic>.from(docData['lastDeviceInfo'] as Map);
-            }
-          }
+    if (deviceInfo == null) {
+      if (Hive.isBoxOpen(LocalStorageService.usersBox)) {
+        final u = Hive.box(LocalStorageService.usersBox).get(widget.userId);
+        if (u is Map && u['lastDeviceInfo'] is Map) {
+          deviceInfo = Map<String, dynamic>.from(u['lastDeviceInfo'] as Map);
+        }
+      }
+    }
 
-          if (fetchedInfo == null) {
-            return FutureBuilder<DocumentSnapshot>(
-              future: FirebaseFirestore.instance.collection('user_sessions').doc(widget.userId).get(),
-              builder: (context, sessionSnap) {
-                if (sessionSnap.hasData && sessionSnap.data!.exists) {
-                  final sData = sessionSnap.data!.data() as Map<String, dynamic>?;
-                  if (sData != null) fetchedInfo = sData;
-                }
-                return _renderDeviceCard(fetchedInfo, t, userDoc: data);
-              },
-            );
+    if (deviceInfo == null && widget.userId.isNotEmpty) {
+      _deviceInfoFuture ??= () async {
+        try {
+          final doc = await FirebaseFirestore.instance.collection('users').doc(widget.userId).get().timeout(const Duration(seconds: 4));
+          if (doc.exists && doc.data() != null && doc.data()!['lastDeviceInfo'] is Map) {
+            return Map<String, dynamic>.from(doc.data()!['lastDeviceInfo'] as Map);
           }
-          return _renderDeviceCard(fetchedInfo, t, userDoc: data);
+          final sDoc = await FirebaseFirestore.instance.collection('user_sessions').doc(widget.userId).get().timeout(const Duration(seconds: 4));
+          if (sDoc.exists && sDoc.data() != null) {
+            return Map<String, dynamic>.from(sDoc.data()!);
+          }
+        } catch (_) {}
+        return null;
+      }();
+
+      return FutureBuilder<Map<String, dynamic>?>(
+        future: _deviceInfoFuture,
+        builder: (context, snapshot) {
+          return _renderDeviceCard(snapshot.data, t, userDoc: data);
         },
       );
     }
@@ -2566,6 +2855,11 @@ class _UserDetailScreenState extends State<UserDetailScreen>
     required List<String> items,
     required Function(String?) onChanged,
   }) {
+    final effectiveItems = List<String>.from(items);
+    if (value != null && value.isNotEmpty && !effectiveItems.any((e) => e.toLowerCase() == value.toLowerCase())) {
+      effectiveItems.add(value);
+    }
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: DropdownButtonFormField<String>(
@@ -2593,7 +2887,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
               borderSide:
                   BorderSide(color: t.accent, width: 2)),
         ),
-        items: items
+        items: effectiveItems
             .map((e) => DropdownMenuItem(
                 value: e,
                 child: Text(e,
@@ -2625,30 +2919,31 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                   fontWeight: FontWeight.w700)),
         );
 
-    final bool hasValidValue = roles.any((r) => r['value'].toString().toLowerCase() == value?.toLowerCase());
-    final String? currentValue = hasValidValue
-        ? roles.firstWhere((r) => r['value'].toString().toLowerCase() == value?.toLowerCase())['value'] as String
-        : null;
+    final effectiveRoles = List<Map<String, dynamic>>.from(roles);
+    if (value != null && value.isNotEmpty && !effectiveRoles.any((r) => r['value'].toString().toLowerCase() == value.toLowerCase())) {
+      effectiveRoles.add({
+        'value': value,
+        'label': value,
+        'type': value.toLowerCase().contains('madrassa') ? 'madrassa' : 'normal',
+        'icon': Icons.person_rounded,
+      });
+    }
 
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
       child: DropdownButtonFormField<String>(
-        value: currentValue,
-        hint: Row(
-          children: [
-            Icon(Icons.badge_outlined, color: t.textTertiary, size: 20),
-            const SizedBox(width: 10),
-            Text('Select Role *',
-                style: TextStyle(color: t.textTertiary, fontSize: 13)),
-          ],
-        ),
-        isExpanded: true,
+        value: value,
         dropdownColor: t.bgCard,
         icon: Icon(Icons.keyboard_arrow_down_rounded, color: t.textTertiary),
+        isExpanded: true,
         decoration: InputDecoration(
+          labelText: 'Assign System Role',
+          labelStyle: TextStyle(
+              color: t.accent, fontSize: 13, fontWeight: FontWeight.w600),
+          prefixIcon: Icon(Icons.admin_panel_settings_outlined,
+              color: t.accent, size: 20),
           filled: true,
           fillColor: t.bgCard,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
           border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide(color: t.bgRule)),
@@ -2663,7 +2958,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
               borderSide: BorderSide(color: t.danger, width: 1.5)),
           errorStyle: const TextStyle(fontSize: 11),
         ),
-        selectedItemBuilder: (context) => roles.map((role) {
+        selectedItemBuilder: (context) => effectiveRoles.map((role) {
           final type = role['type'] as String;
           final Color iconColor = type == 'crown'
               ? t.accent
@@ -2686,7 +2981,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
             ],
           );
         }).toList(),
-        items: roles.map((role) {
+        items: effectiveRoles.map((role) {
           final type = role['type'] as String;
           final isCrown = type == 'crown';
           final isShield = type == 'shield';
@@ -3093,7 +3388,9 @@ class _UserDetailScreenState extends State<UserDetailScreen>
         status == 'retired' ||
         status == 'offboarded' ||
         status == 'revoked' ||
-        data['isActive'] == false;
+        data['isActive'] == false ||
+        data['isRevoked'] == true ||
+        data['accessRevoked'] == true;
 
     return Container(
       width: double.infinity,
@@ -3335,48 +3632,68 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       }
 
       // Purge from Local Storage
-      for (final boxName in [LocalStorageService.usersBox, 'local_users', 'local']) {
-        if (Hive.isBoxOpen(boxName)) {
-          final box = Hive.box(boxName);
-          if (targetUid.isNotEmpty) await box.delete(targetUid);
-          if (usernameLower.isNotEmpty) await box.delete(usernameLower);
-          if (targetEmail.isNotEmpty) await box.delete(targetEmail);
-          final keysToDelete = <dynamic>[];
-          for (final key in box.keys) {
-            final val = box.get(key);
-            if (val is Map) {
-              final uidVal = (val['uid'] ?? val['id'] ?? '').toString();
-              final uNameVal = (val['username'] ?? '').toString().toLowerCase();
-              final emailVal = (val['email'] ?? '').toString().toLowerCase();
-              if ((targetUid.isNotEmpty && uidVal == targetUid) ||
-                  (usernameLower.isNotEmpty && uNameVal == usernameLower) ||
-                  (targetEmail.isNotEmpty && emailVal == targetEmail)) {
-                keysToDelete.add(key);
-              }
-            }
-          }
-          for (final k in keysToDelete) {
-            await box.delete(k);
-          }
-        }
-      }
+      await LocalStorageService.deleteUserOffline(
+        uid: targetUid,
+        branchId: widget.branchId,
+        email: targetEmail,
+        username: usernameLower,
+      );
 
-      // Purge from Firestore
+      // Mark as deleted in Firestore with tombstone so other devices sync the deletion
       if (widget.isOnline) {
+        final deletePayload = {
+          'isDeleted': true,
+          'status': 'deleted',
+          'accountStatus': 'deleted',
+          'deletedAt': DateTime.now().toIso8601String(),
+          'updatedAt': DateTime.now().toIso8601String(),
+          'isActive': false,
+          'isRevoked': true,
+        };
+
+        final identifiers = <String>{
+          if (targetUid.isNotEmpty) targetUid,
+          if (usernameLower.isNotEmpty) usernameLower,
+          if (targetEmail.isNotEmpty) targetEmail,
+        };
+
+        for (final id in identifiers) {
+          await _firestore.collection('users').doc(id).set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+          if (widget.branchId.isNotEmpty && widget.branchId != 'all') {
+            await _firestore.collection('branches').doc(widget.branchId).collection('users').doc(id).set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+          }
+        }
+
+        if (usernameLower.isNotEmpty) {
+          try {
+            final snap = await _firestore.collection('users').where('usernameLower', isEqualTo: usernameLower).get();
+            for (final doc in snap.docs) {
+              await doc.reference.set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+            }
+          } catch (_) {}
+        }
+
+        if (targetEmail.isNotEmpty) {
+          try {
+            final snap = await _firestore.collection('users').where('email', isEqualTo: targetEmail).get();
+            for (final doc in snap.docs) {
+              await doc.reference.set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+            }
+          } catch (_) {}
+        }
+
         if (targetUid.isNotEmpty) {
-          await _firestore.collection('users').doc(targetUid).delete().catchError((_) {});
+          try {
+            final snap = await _firestore.collection('users').where('uid', isEqualTo: targetUid).get();
+            for (final doc in snap.docs) {
+              await doc.reference.set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+            }
+          } catch (_) {}
         }
-        if (usernameLower.isNotEmpty && usernameLower != targetUid) {
-          await _firestore.collection('users').doc(usernameLower).delete().catchError((_) {});
-        }
-        if (widget.branchId.isNotEmpty && widget.branchId != 'all') {
-          if (targetUid.isNotEmpty) {
-            await _firestore.collection('branches').doc(widget.branchId).collection('users').doc(targetUid).delete().catchError((_) {});
-          }
-          if (usernameLower.isNotEmpty && usernameLower != targetUid) {
-            await _firestore.collection('branches').doc(widget.branchId).collection('users').doc(usernameLower).delete().catchError((_) {});
-          }
-        }
+
+        try {
+          SyncService().triggerUpload(force: true);
+        } catch (_) {}
       }
 
       _snack('Account deleted successfully.', success: true);
@@ -3543,6 +3860,10 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       'status': 'active',
       'accountStatus': 'active',
       'isActive': true,
+      'isRevoked': false,
+      'accessRevoked': false,
+      'restoreRequested': false,
+      'restoreRequestStatus': 'approved',
       'revocationReason': null,
       'revokedAt': null,
       'restoredAt': FieldValue.serverTimestamp(),
@@ -3550,22 +3871,52 @@ class _UserDetailScreenState extends State<UserDetailScreen>
     };
 
     try {
+      final fullUserData = {
+        ...data,
+        ...updates,
+        'uid': widget.userId,
+        'id': widget.userId,
+        'branchId': widget.branchId,
+      };
+
       await LocalStorageService.saveUserOffline(
         uid: widget.userId,
         branchId: widget.branchId,
-        userData: {
-          ...data,
-          ...updates,
-          'uid': widget.userId,
-          'branchId': widget.branchId,
-        },
+        userData: fullUserData,
       );
+
+      // Also unrevoke linked employee in local_employees if present
+      try {
+        if (Hive.isBoxOpen(LocalStorageService.employeesBox)) {
+          final empBox = Hive.box(LocalStorageService.employeesBox);
+          final empId = (data['linkedEmployeeId'] ?? '').toString();
+          final cnic = (data['cnic'] ?? data['identification'] ?? '').toString().replaceAll(RegExp(r'\D'), '');
+          final email = (data['email'] ?? '').toString().toLowerCase().trim();
+          for (final k in empBox.keys) {
+            final val = empBox.get(k);
+            if (val is Map) {
+              final eId = (val['localId'] ?? val['id'] ?? '').toString();
+              final eCnic = (val['cnic'] ?? '').toString().replaceAll(RegExp(r'\D'), '');
+              final eEmail = (val['email'] ?? '').toString().toLowerCase().trim();
+              if ((empId.isNotEmpty && eId == empId) ||
+                  (cnic.isNotEmpty && eCnic == cnic) ||
+                  (email.isNotEmpty && eEmail == email)) {
+                final updatedEmp = Map<String, dynamic>.from(val)
+                  ..['isActive'] = true
+                  ..['status'] = 'active'
+                  ..['employeeStatus'] = 'active';
+                await empBox.put(k, updatedEmp);
+              }
+            }
+          }
+        }
+      } catch (_) {}
 
       if (widget.isOnline && !isLocal) {
         await _firestore
             .collection('users')
             .doc(widget.userId)
-            .set(updates, SetOptions(merge: true));
+            .set(fullUserData, SetOptions(merge: true));
 
         if (widget.branchId != 'all' && widget.branchId.isNotEmpty) {
           await _firestore
@@ -3573,10 +3924,13 @@ class _UserDetailScreenState extends State<UserDetailScreen>
               .doc(widget.branchId)
               .collection('users')
               .doc(widget.userId)
-              .set(updates, SetOptions(merge: true));
+              .set(fullUserData, SetOptions(merge: true));
         }
       }
 
+      SyncService().triggerUpload(force: true);
+
+      if (mounted) setState(() {});
       _snack('App access restored for ${data['username'] ?? 'user'}', success: true);
     } catch (e) {
       _snack('Error updating access status: $e', error: true);

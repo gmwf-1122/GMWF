@@ -18,8 +18,10 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'dart:async';
 
 import '../config/constants.dart';
+import '../services/camp_session_service.dart';
 import '../services/python_runner_service.dart';
 import '../utils/network_utils.dart';
+import '../services/auto_update_service.dart';
 
 class LanServer {
   HttpServer? _server;
@@ -53,6 +55,9 @@ class LanServer {
   // ── [LIVENESS] Track last active timestamp for each socket to evict silent/dead sockets ──
   final Map<WebSocket, DateTime> _lastActiveTimes = {};
   Timer? _heartbeatTimer;
+
+  // Staged messages received before client completed 'identify' handshake
+  final Map<WebSocket, List<String>> _stagedPreHandshakeMessages = {};
 
   // ── Callbacks ──────────────────────────────────────────────────────────────
   Function(String socketId, Map<String, dynamic> info)? onClientConnected;
@@ -164,14 +169,19 @@ class LanServer {
         }
         final lastActive = _lastActiveTimes[client];
         if (lastActive != null) {
-          if (now.difference(lastActive) > const Duration(seconds: 40)) {
+          if (now.difference(lastActive) > const Duration(seconds: 30)) {
             try {
-              client.add('ping');
+              client.add(jsonEncode({
+                'type': 'ping',
+                'event_type': 'ping',
+                'serverEpoch': now.millisecondsSinceEpoch,
+              }));
             } catch (_) {
               deadSockets.add(client);
             }
           }
-          if (now.difference(lastActive) > const Duration(seconds: 60)) {
+          // Tolerant 120s liveness timeout before evicting
+          if (now.difference(lastActive) > const Duration(seconds: 120)) {
             deadSockets.add(client);
           }
         }
@@ -399,15 +409,30 @@ class LanServer {
 
           onClientConnected?.call(socketId, info);
           _broadcastClientCount();
+
+          // Safely drain any messages the client sent before identify was acknowledged
+          final pending = _stagedPreHandshakeMessages.remove(socket);
+          if (pending != null && pending.isNotEmpty) {
+            print('[LanServer] 🚀 Draining ${pending.length} staged pre-handshake message(s) for client $socketId');
+            for (final m in pending) {
+              _handleMessage(socket, socketId, m);
+            }
+          }
         } else {
           print('⚠️ Incomplete identification: role=$role branch=$branchId');
         }
         return;
       }
 
-      // ── Reject unidentified clients ───────────────────────────────────────
+      // ── Stage or reject unidentified clients ──────────────────────────────
       if (_clientInfo[socket]?['identified'] != true) {
-        print('❌ Message from UNIDENTIFIED client $socketId — rejecting');
+        final staged = _stagedPreHandshakeMessages.putIfAbsent(socket, () => []);
+        if (staged.length < 100) {
+          staged.add(message);
+          print('[LanServer] ⏳ Staged pre-handshake message for client $socketId (queue: ${staged.length})');
+        } else {
+          print('❌ Message from UNIDENTIFIED client $socketId dropped — staging buffer full');
+        }
         return;
       }
 
@@ -528,8 +553,9 @@ class LanServer {
 
       final clientBranch = (info['branchId'] as String?)?.toLowerCase().trim() ?? '';
       final isUniversal = targetBranch.isEmpty || targetBranch == 'all' || targetBranch == 'default' ||
-          clientBranch.isEmpty || clientBranch == 'all' || clientBranch == 'default';
-      if (!isUniversal && clientBranch != targetBranch && !clientBranch.contains(targetBranch) && !targetBranch.contains(clientBranch)) {
+          clientBranch.isEmpty || clientBranch == 'all' || clientBranch == 'default' ||
+          CampSessionService.areBranchesMatching(targetBranch, clientBranch);
+      if (!isUniversal) {
         continue;
       }
 
@@ -567,6 +593,7 @@ class LanServer {
     _clientInfo.remove(socket);
     _clientIps.remove(socket);
     _lastActiveTimes.remove(socket);
+    _stagedPreHandshakeMessages.remove(socket);
 
     print('╔════════════════════════════════════════════════════════════╗');
     print('║ CLIENT DISCONNECTED: $socketId  Remaining: ${_clients.length}');
@@ -627,7 +654,7 @@ class LanServer {
         'ipAddress': e.value['ipAddress'] ?? _clientIps[e.key] ?? '127.0.0.1',
         'deviceOs':  e.value['deviceOs'] ?? (kIsWeb ? 'Chrome Web' : 'Windows PC'),
 
-        'appVersion': e.value['appVersion'] ?? 'v2.4.0',
+        'appVersion': e.value['appVersion'] ?? 'v${AutoUpdateService.currentVersion}',
       };
     }).toList();
   }

@@ -56,6 +56,7 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
   @override
   Widget build(BuildContext context) {
     final service = LanHardwareScannerService();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return StreamBuilder<List<LanHardwareDevice>>(
       stream: service.devicesStream,
@@ -67,10 +68,10 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
 
         return Card(
           elevation: 0,
-          color: Colors.white,
+          color: isDark ? const Color(0xFF0F172A) : Colors.white,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
-            side: const BorderSide(color: Color(0xFFE2E8F0)),
+            side: BorderSide(color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0)),
           ),
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -82,8 +83,9 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFECFDF5),
+                        color: isDark ? const Color(0xFF0F766E).withOpacity(0.25) : const Color(0xFFECFDF5),
                         borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF10B981).withOpacity(0.4)),
                       ),
                       child: const Icon(Icons.hub_rounded, color: Color(0xFF10B981), size: 22),
                     ),
@@ -97,12 +99,12 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
                             style: GoogleFonts.outfit(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
-                              color: const Color(0xFF0F172A),
+                              color: isDark ? Colors.white : const Color(0xFF0F172A),
                             ),
                           ),
                           Text(
                             'Real-time network ping status for Biometrics, Thermal Printers & Gateway',
-                            style: GoogleFonts.inter(fontSize: 12, color: const Color(0xFF64748B)),
+                            style: GoogleFonts.inter(fontSize: 12, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
                           ),
                         ],
                       ),
@@ -110,10 +112,13 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
-                        color: onlineCount > 0 ? const Color(0xFFECFDF5) : const Color(0xFFFEF2F2),
+                        color: onlineCount > 0
+                            ? (isDark ? const Color(0xFF064E3B).withOpacity(0.4) : const Color(0xFFECFDF5))
+                            : (isDark ? const Color(0xFF7F1D1D).withOpacity(0.4) : const Color(0xFFFEF2F2)),
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(
-                          color: onlineCount > 0 ? const Color(0xFFA7F3D0) : const Color(0xFFFECACA),
+                          color: onlineCount > 0 ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                          width: 0.8,
                         ),
                       ),
                       child: Text(
@@ -121,7 +126,9 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
                         style: GoogleFonts.inter(
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
-                          color: onlineCount > 0 ? const Color(0xFF047857) : const Color(0xFFB91C1C),
+                          color: onlineCount > 0
+                              ? (isDark ? const Color(0xFF34D399) : const Color(0xFF047857))
+                              : (isDark ? const Color(0xFFF87171) : const Color(0xFFB91C1C)),
                         ),
                       ),
                     ),
@@ -133,14 +140,14 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
                               height: 18,
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
-                          : const Icon(Icons.refresh_rounded, size: 20),
+                          : Icon(Icons.refresh_rounded, size: 20, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
                       tooltip: 'Ping All LAN Hardware',
                       onPressed: _isRefreshing ? null : _manualRefresh,
                     ),
                   ],
                 ),
                 const SizedBox(height: 16),
-                const Divider(height: 1, color: Color(0xFFF1F5F9)),
+                Divider(height: 1, color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
                 const SizedBox(height: 12),
 
                 // Device Cards Grid / List
@@ -156,10 +163,14 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
                     return Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                       decoration: BoxDecoration(
-                        color: dev.isOnline ? const Color(0xFFF8FAFC) : const Color(0xFFFFF1F2),
+                        color: dev.isOnline
+                            ? (isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC))
+                            : (isDark ? const Color(0xFF3B1219) : const Color(0xFFFFF1F2)),
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
-                          color: dev.isOnline ? const Color(0xFFE2E8F0) : const Color(0xFFFECDD3),
+                          color: dev.isOnline
+                              ? (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0))
+                              : (isDark ? const Color(0xFF7F1D1D) : const Color(0xFFFECDD3)),
                         ),
                       ),
                       child: Row(
@@ -167,7 +178,7 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
                           Container(
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              color: catColor.withValues(alpha: 0.1),
+                              color: catColor.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Icon(_getCategoryIcon(dev.category), color: catColor, size: 20),
@@ -182,19 +193,19 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
                                   style: GoogleFonts.inter(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
-                                    color: const Color(0xFF0F172A),
+                                    color: isDark ? Colors.white : const Color(0xFF0F172A),
                                   ),
                                 ),
                                 Row(
                                   children: [
                                     Text(
                                       'IP: ${dev.ipAddress}:${dev.port}',
-                                      style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF64748B)),
+                                      style: GoogleFonts.inter(fontSize: 11, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
                                     ),
                                     const SizedBox(width: 8),
                                     Text(
                                       '• Checked: ${DateFormat('hh:mm:ss a').format(dev.lastChecked)}',
-                                      style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF94A3B8)),
+                                      style: GoogleFonts.inter(fontSize: 11, color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8)),
                                     ),
                                   ],
                                 ),
@@ -205,8 +216,14 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
-                              color: dev.isOnline ? const Color(0xFFDCFCE7) : const Color(0xFFFEE2E2),
+                              color: dev.isOnline
+                                  ? (isDark ? const Color(0xFF064E3B).withOpacity(0.5) : const Color(0xFFDCFCE7))
+                                  : (isDark ? const Color(0xFF7F1D1D).withOpacity(0.5) : const Color(0xFFFEE2E2)),
                               borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: dev.isOnline ? const Color(0xFF10B981).withOpacity(0.5) : const Color(0xFFEF4444).withOpacity(0.5),
+                                width: 0.8,
+                              ),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
@@ -215,7 +232,7 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
                                   width: 7,
                                   height: 7,
                                   decoration: BoxDecoration(
-                                    color: dev.isOnline ? const Color(0xFF16A34A) : const Color(0xFFDC2626),
+                                    color: dev.isOnline ? const Color(0xFF10B981) : const Color(0xFFEF4444),
                                     shape: BoxShape.circle,
                                   ),
                                 ),
@@ -225,7 +242,9 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
                                   style: GoogleFonts.inter(
                                     fontSize: 11,
                                     fontWeight: FontWeight.bold,
-                                    color: dev.isOnline ? const Color(0xFF15803D) : const Color(0xFFB91C1C),
+                                    color: dev.isOnline
+                                        ? (isDark ? const Color(0xFF34D399) : const Color(0xFF15803D))
+                                        : (isDark ? const Color(0xFFF87171) : const Color(0xFFB91C1C)),
                                   ),
                                 ),
                               ],

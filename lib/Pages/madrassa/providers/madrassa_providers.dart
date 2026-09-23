@@ -70,7 +70,9 @@ final madrassaFilteredStudentsProvider = Provider.family<AsyncValue<List<Map<Str
                 statusVal == 'archived' ||
                 statusVal == 'inactive' ||
                 statusVal == 'hifz_completed' ||
-                statusVal == 'hifz_complete';
+                statusVal == 'hifz_complete' ||
+                statusVal == 'nazra_completed' ||
+                statusVal == 'nazra_complete';
 
             if (statusVal == 'active') {
               final joinDateVal = d['joinDate'];
@@ -88,7 +90,7 @@ final madrassaFilteredStudentsProvider = Provider.family<AsyncValue<List<Map<Str
 
             if (isInactiveOrDropped) {
               DateTime? statusChangeDate;
-              final dynamic dateField = d['leftDate'] ?? d['droppedDate'] ?? d['archivedDate'] ?? d['hifzCompletedDate'];
+              final dynamic dateField = d['leftDate'] ?? d['droppedDate'] ?? d['archivedDate'] ?? d['hifzCompletedDate'] ?? d['nazraCompletionDate'];
               if (dateField is Timestamp) {
                 statusChangeDate = dateField.toDate();
               } else if (dateField is String) {

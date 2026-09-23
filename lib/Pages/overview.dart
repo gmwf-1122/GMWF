@@ -4,20 +4,16 @@
 import 'package:flutter/material.dart';
 import 'package:collection/collection.dart';
 import 'package:intl/intl.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:hive_flutter/hive_flutter.dart';
 import '../theme/role_theme_provider.dart';
 import '../theme/app_theme.dart';
 import '../widgets/dashboard_widgets.dart';
 import '../widgets/scroll_reveal.dart';
+import '../design/design_system.dart';
 import 'branches.dart';
 import 'donations/donations_shared.dart' as don;
 import 'donations/global_audit_trail.dart';
 import '../services/donations_local_storage.dart';
 import '../services/local_storage_service.dart';
-import '../services/auth_service.dart';
-import 'donations/donations_screen.dart' show DonDS;
-import '../widgets/firestore_quota_monitor_widget.dart';
 
 class OverviewScreen extends StatefulWidget {
   final String username;
@@ -222,8 +218,6 @@ class _OverviewScreenState extends State<OverviewScreen>
                       const SizedBox(height: DS.s3),
                     ],
                     _buildKPIOverview(filteredBranches, filter),
-                    const SizedBox(height: DS.s3),
-                    const FirestoreQuotaMonitorWidget(),
                   ] else if (_activeTab == 'dispensary') ...[
                     _buildKPIOverview(filteredBranches, filter),
                   ] else if (_activeTab == 'tokens') ...[
@@ -569,7 +563,7 @@ class _OverviewHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width < 600;
+    final isMobile = GBreakpoint.isMobile(context);
 
     return Container(
       width: double.infinity,
@@ -808,7 +802,7 @@ class _DonationIntelligenceSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isMobile = MediaQuery.of(context).size.width < 600;
+    final isMobile = GBreakpoint.isMobile(context);
     // We fetch ALL donations from local storage (synced from FS)
     final allDonations = DonationsLocalStorage.getAllDonations('all');
     
@@ -1232,7 +1226,7 @@ class _TopDonorsCard extends StatelessWidget {
               itemBuilder: (context, i) {
                 final entry = topDonors[i];
                 final name = names[entry.key] ?? 'Unknown Donor';
-                final isMobile = MediaQuery.of(context).size.width < 600;
+                final isMobile = GBreakpoint.isMobile(context);
                 return Row(
                   children: [
                     Container(

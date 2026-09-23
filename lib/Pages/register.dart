@@ -19,6 +19,7 @@ import '../services/zkteco_network_service.dart';
 import '../widgets/media_upload_tile.dart';
 import '../widgets/global_module_wrapper.dart';
 import '../widgets/app_back_button.dart';
+import '../services/sync_service.dart';
 import 'package:hive/hive.dart';
 
 class Register extends StatefulWidget {
@@ -39,6 +40,7 @@ class _RegisterState extends State<Register>
   String? _selectedDispensary; // Legacy single dispensary selection ('saddar', 'haji_camp')
   final Set<String> _selectedDispensaries = {}; // Multi-camp assignment
   final Map<String, String> _campSessions = {}; // Camp to mandatory session mapping
+  String _selectedMadrassaSession = 'morning'; // Madrassa teaching shift
   String? _selectedDegree;
 
   final TextEditingController _usernameController       = TextEditingController();
@@ -160,7 +162,6 @@ class _RegisterState extends State<Register>
 
   final List<String> _degrees = ['MBBS', 'MD', 'DO', 'BDS', 'DPT (Physiotherapist)', 'Other'];
   List<Map<String, dynamic>> _branches = [];
-  String? _usernameError;
 
   @override
   void initState() {
@@ -186,30 +187,152 @@ class _RegisterState extends State<Register>
   }
 
   Future<void> _loadBranches() async {
-    try {
-      final snap = await FirebaseFirestore.instance.collection('branches').get();
-      var list = snap.docs.map((d) {
-        final data = d.data();
-        return {'id': d.id, 'name': data['name'] as String? ?? d.id};
-      }).toList();
+    // 1. Gather all locally cached branches instantly (Hive local_branches, branchesBox, FinanceLocalStorage)
+    final List<Map<String, dynamic>> localList = [];
 
-      final role = _getCurrentUserRole();
-      final scopedBranchId = _getCurrentUserBranchId();
-      final isGlobalExec = ['chairman', 'ceo', 'admin', 'administrator', 'super admin', 'global admin', 'hq manager', 'president', 'founder'].contains(role);
-      
-      if (!isGlobalExec && scopedBranchId.isNotEmpty && scopedBranchId != 'all' && scopedBranchId != 'global') {
-        list = list.where((b) => b['id'].toString().toLowerCase().trim() == scopedBranchId).toList();
+    void addBranchIfNew(String rawId, String rawName) {
+      final id = rawId.replaceAll('branch:', '').trim();
+      final name = rawName.trim();
+      if (id.isEmpty || id.toLowerCase() == 'all' || id.toLowerCase() == 'global') return;
+      if (!localList.any((b) => b['id'].toString().toLowerCase().trim() == id.toLowerCase())) {
+        localList.add({'id': id, 'name': name.isNotEmpty ? name : id});
       }
+    }
 
+    try {
+      if (Hive.isBoxOpen('local_branches')) {
+        final box = Hive.box('local_branches');
+        for (final val in box.values) {
+          if (val is Map) {
+            final isOffboarded = val['isOffboarded'] == true || val['status'] == 'offboarded';
+            if (!isOffboarded) {
+              addBranchIfNew(val['id']?.toString() ?? '', val['name']?.toString() ?? '');
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
+    try {
+      if (Hive.isBoxOpen(LocalStorageService.branchesBox)) {
+        final box = Hive.box(LocalStorageService.branchesBox);
+        for (final val in box.values) {
+          if (val is Map) {
+            final isOffboarded = val['isOffboarded'] == true || val['status'] == 'offboarded';
+            if (!isOffboarded) {
+              addBranchIfNew(val['id']?.toString() ?? '', val['name']?.toString() ?? '');
+            }
+          }
+        }
+      }
+    } catch (_) {}
+
+    try {
+      final custom = FinanceLocalStorage.getAllBranches([]);
+      for (final b in custom) {
+        addBranchIfNew(b['id']?.toString() ?? '', b['name']?.toString() ?? '');
+      }
+    } catch (_) {}
+
+    // Fallback standard branches if local storage is completely empty
+    if (localList.isEmpty) {
+      for (final def in [
+        {'id': 'main', 'name': 'Main Branch'},
+        {'id': 'karachi', 'name': 'Karachi Branch'},
+        {'id': 'gujrat', 'name': 'Gujrat Branch'},
+        {'id': 'sialkot', 'name': 'Sialkot Branch'},
+        {'id': 'rawalpindi', 'name': 'Rawalpindi Branch'},
+      ]) {
+        addBranchIfNew(def['id']!, def['name']!);
+      }
+    }
+
+    final role = _getCurrentUserRole();
+    final scopedBranchId = _getCurrentUserBranchId();
+    final isGlobalExec = ['chairman', 'ceo', 'admin', 'administrator', 'super admin', 'global admin', 'hq manager', 'president', 'founder'].contains(role);
+
+    List<Map<String, dynamic>> applyFilter(List<Map<String, dynamic>> inputList) {
+      var filtered = List<Map<String, dynamic>>.from(inputList);
+      if (!isGlobalExec && scopedBranchId.isNotEmpty && scopedBranchId != 'all' && scopedBranchId != 'global') {
+        final cleanScoped = scopedBranchId.replaceAll('branch:', '').trim().toLowerCase();
+        final matched = filtered.where((b) {
+          final bId = b['id'].toString().replaceAll('branch:', '').trim().toLowerCase();
+          final bName = b['name'].toString().trim().toLowerCase();
+          return bId == cleanScoped || bName == cleanScoped || bId.contains(cleanScoped) || cleanScoped.contains(bId);
+        }).toList();
+
+        if (matched.isNotEmpty) {
+          filtered = matched;
+        } else {
+          final fallbackName = cleanScoped.length > 1
+              ? cleanScoped[0].toUpperCase() + cleanScoped.substring(1)
+              : cleanScoped.toUpperCase();
+          filtered = [{'id': cleanScoped, 'name': fallbackName}];
+        }
+      }
+      filtered.sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
+      return filtered;
+    }
+
+    final immediateBranches = applyFilter(localList);
+    if (mounted) {
       setState(() {
-        _branches = list..sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
-        if (_branches.isNotEmpty && !isGlobalExec) {
-          _selectedBranch = _branches.first['name'];
+        _branches = immediateBranches;
+        if (_branches.isNotEmpty && (_selectedBranch == null || !_branches.any((b) => b['name'] == _selectedBranch))) {
+          if (!isGlobalExec || _branches.length == 1) {
+            _selectedBranch = _branches.first['name'];
+          }
         }
       });
-    } catch (e) {
-      _snack('Failed to load branches: $e', error: true);
     }
+
+    // 2. Background fresh sync from Firestore with timeout
+    try {
+      final snap = await FirebaseFirestore.instance
+          .collection('branches')
+          .get()
+          .timeout(const Duration(seconds: 4));
+
+      if (snap.docs.isNotEmpty) {
+        final remoteList = <Map<String, dynamic>>[];
+        for (final d in snap.docs) {
+          final data = d.data();
+          final isOffboarded = data['isOffboarded'] == true || data['status'] == 'offboarded';
+          if (!isOffboarded) {
+            final id = d.id.replaceAll('branch:', '').trim();
+            final name = (data['name'] as String? ?? id).trim();
+            if (id.isNotEmpty && id.toLowerCase() != 'all' && id.toLowerCase() != 'global') {
+              if (!remoteList.any((b) => b['id'].toString().toLowerCase().trim() == id.toLowerCase())) {
+                remoteList.add({'id': id, 'name': name.isNotEmpty ? name : id});
+              }
+            }
+          }
+        }
+
+        if (remoteList.isNotEmpty) {
+          try {
+            if (Hive.isBoxOpen('local_branches')) {
+              final box = Hive.box('local_branches');
+              for (final b in remoteList) {
+                await box.put(b['id'], b);
+              }
+            }
+          } catch (_) {}
+
+          final updatedBranches = applyFilter(remoteList);
+          if (mounted) {
+            setState(() {
+              _branches = updatedBranches;
+              if (_branches.isNotEmpty && (_selectedBranch == null || !_branches.any((b) => b['name'] == _selectedBranch))) {
+                if (!isGlobalExec || _branches.length == 1) {
+                  _selectedBranch = _branches.first['name'];
+                }
+              }
+            });
+          }
+        }
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadStudentsForBranch(String bId) async {
@@ -232,12 +355,16 @@ class _RegisterState extends State<Register>
   Future<bool> _usernameExists(String username) async {
     final lower = username.trim().toLowerCase();
     try {
+      if (!Hive.isBoxOpen('local_users')) {
+        await LocalStorageService.openBoxSafe('local_users');
+      }
       final box = Hive.box('local_users');
       for (final val in box.values) {
         if (val is Map) {
-          final uName = (val['username']?.toString() ?? '').toLowerCase();
-          final uNameLower = (val['usernameLower']?.toString() ?? '').toLowerCase();
-          if (uName == lower || uNameLower == lower) {
+          final uName = (val['username']?.toString() ?? '').toLowerCase().trim();
+          final uNameLower = (val['usernameLower']?.toString() ?? '').toLowerCase().trim();
+          final isDeleted = val['isDeleted'] == true || val['status'] == 'deleted' || val['accountStatus'] == 'deleted';
+          if (!isDeleted && (uName == lower || uNameLower == lower)) {
             return true;
           }
         }
@@ -250,8 +377,14 @@ class _RegisterState extends State<Register>
           .where('usernameLower', isEqualTo: lower)
           .limit(1)
           .get()
-          .timeout(const Duration(seconds: 5));
-      if (res.docs.isNotEmpty) return true;
+          .timeout(const Duration(seconds: 4));
+      if (res.docs.isNotEmpty) {
+        final docData = res.docs.first.data();
+        final status = (docData['status'] ?? docData['accountStatus'] ?? '').toString().toLowerCase();
+        if (docData['isDeleted'] != true && status != 'deleted') {
+          return true;
+        }
+      }
     } catch (_) {}
 
     return false;
@@ -267,8 +400,8 @@ class _RegisterState extends State<Register>
     if (!_requiresBranch()) return 'all';
     if (_selectedBranch == null) throw Exception('Please select a branch for this role');
     final match = _branches.where((b) => b['name'] == _selectedBranch).toList();
-    if (match.isEmpty) throw Exception('Selected branch not found — please re-select');
-    return match.first['id'] as String;
+    if (match.isNotEmpty) return match.first['id'] as String;
+    return _selectedBranch!.toLowerCase().replaceAll(' ', '_');
   }
 
   String _getBranchName() =>
@@ -312,14 +445,13 @@ class _RegisterState extends State<Register>
       return;
     }
 
-    setState(() { _usernameError = null; _loading = true; });
+    setState(() { _loading = true; });
 
     final email    = _emailController.text.trim().toLowerCase();
     final username = _usernameController.text.trim(); // preserve original casing
 
     try {
       if (await _usernameExists(username)) {
-        setState(() => _usernameError = 'Username already taken');
         _snack('Username already exists', error: true);
         return;
       }
@@ -353,6 +485,8 @@ class _RegisterState extends State<Register>
         email:              email,
         password:           _passwordController.text.trim(),
         username:           username,
+        name:               username,
+        cnic:               _identificationController.text.trim(),
         role:               _selectedRole!,
         branchId:           branchId,
         branchName:         _getBranchName(),
@@ -368,16 +502,43 @@ class _RegisterState extends State<Register>
         studentId:          _selectedStudentId, // Pass the student ID
         dispensaryId:       _selectedDispensary, // Pass dispensary sub-location ('kapayya', 'haji_camp')
         dispensaryIds:      _selectedDispensaries.toList(), // Pass multi-camp assignments
-        campSchedule:       _selectedDispensaries.map((id) => {
-                              'campId': id,
-                              'session': _campSessions[id] ?? 'morning',
+        campSchedule:       _selectedDispensaries.map((id) {
+                              final sess = _campSessions[id] ?? 'morning';
+                              String startTime = '08:00';
+                              String endTime = '14:00';
+                              if (sess == 'evening') {
+                                startTime = '14:00';
+                                endTime = '20:00';
+                              } else if (sess == 'night') {
+                                startTime = '20:00';
+                                endTime = '08:00';
+                              } else if (sess == 'both') {
+                                startTime = '08:00';
+                                endTime = '20:00';
+                              }
+                              return {
+                                'campId': id,
+                                'session': sess,
+                                'startTime': startTime,
+                                'endTime': endTime,
+                              };
                             }).toList(),
         profileImageXFile:  _profileImageXFile,
         profileImageBytes:  _profileImageBytes,
         degreeFile:         _degreeFile,
         profilePictureBase64: _profilePictureBase64,
         degreeBase64:         _degreeBase64,
+        session:            _selectedRole == 'Madrassa Teacher' ? _selectedMadrassaSession : null,
+        sessions:           _selectedRole == 'Madrassa Teacher'
+                                ? (_selectedMadrassaSession == 'all'
+                                    ? ['morning', 'evening', 'night']
+                                    : [_selectedMadrassaSession])
+                                : const [],
       );
+
+      try {
+        SyncService().triggerUpload(force: true);
+      } catch (_) {}
 
       if (enteredPin.isNotEmpty && registeredUid.isNotEmpty) {
         await ZkTecoNetworkService.assignPinToEntity(
@@ -406,7 +567,6 @@ class _RegisterState extends State<Register>
         _selectedDispensaries.clear();
         _selectedDegree       = null;
         _selectedStudentId    = null;
-        _usernameError        = null;
       });
       for (final c in [
         _usernameController, _emailController, _passwordController,
@@ -516,6 +676,10 @@ class _RegisterState extends State<Register>
                                 const SizedBox(height: 14),
                                 _buildBranchDropdown(t),
                                 _buildDispensaryDropdown(t),
+                                if (_selectedRole == 'Madrassa Teacher') ...[
+                                  const SizedBox(height: 14),
+                                  _buildMadrassaTeacherSessionSelector(t),
+                                ],
                                 if (_selectedRole == 'Madrassa Parent') ...[
                                   const SizedBox(height: 14),
                                   _buildChildDropdown(t),
@@ -567,55 +731,6 @@ class _RegisterState extends State<Register>
                                         LengthLimitingTextInputFormatter(11),
                                       ]),
                                 ]),
-                              ]),
-                            ),
-                            const SizedBox(height: 16),
-
-                            _buildCard(t,
-                              title: 'Contact & Address',
-                              icon: Icons.contact_mail_outlined,
-                              accent: const Color(0xFFE65100),
-                              child: Column(children: [
-                                _buildField(t,
-                                    controller: _identificationController,
-                                    label: 'CNIC / ID Number',
-                                    icon: Icons.credit_card_outlined),
-                                const SizedBox(height: 14),
-                                _buildField(t,
-                                    controller: _addressController,
-                                    label: 'Address',
-                                    icon: Icons.home_outlined,
-                                    maxLines: 3),
-                              ]),
-                            ),
-                            const SizedBox(height: 16),
-
-                            _buildLinkedEmployeeCard(t),
-                            const SizedBox(height: 16),
-
-                            _buildCard(t,
-                              title: 'Financial Details',
-                              icon: Icons.account_balance_wallet_outlined,
-                              accent: t.accent,
-                              child: Column(children: [
-                                _buildRow([
-                                  _buildField(t,
-                                      controller: _bankNameController,
-                                      label: 'Bank Name',
-                                      icon: Icons.account_balance_outlined),
-                                  _buildField(t,
-                                      controller: _bankAccountController,
-                                      label: 'Account No.',
-                                      icon: Icons.numbers_outlined,
-                                      keyboardType: TextInputType.number),
-                                ]),
-                                const SizedBox(height: 14),
-                                _buildField(t,
-                                    controller: _salaryController,
-                                    label: 'Base Salary (PKR)',
-                                    icon: Icons.payments_outlined,
-                                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                                    inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'^\d+\.?\d{0,2}'))]),
                                 const SizedBox(height: 14),
                                 _buildField(t,
                                     controller: _biometricPinController,
@@ -625,6 +740,9 @@ class _RegisterState extends State<Register>
                                     inputFormatters: [FilteringTextInputFormatter.digitsOnly]),
                               ]),
                             ),
+                            const SizedBox(height: 16),
+
+                            _buildLinkedEmployeeCard(t),
 
                             if (isDoctor) ...[
                               const SizedBox(height: 16),
@@ -1019,14 +1137,29 @@ class _RegisterState extends State<Register>
         ? 'Global Access (No branch required)'
         : (isBranchLoading ? 'Loading branches...' : 'Select Branch *');
 
+    final bool branchExists = _selectedBranch != null && _branches.any((b) => b['name'] == _selectedBranch);
+    final String? effectiveValue = branchExists ? _selectedBranch : null;
+
     return DropdownButtonFormField<String>(
-      key: ValueKey('branch_${requiresBranch}_${_selectedBranch}'),
-      value: _selectedBranch,
+      key: ValueKey('branch_${requiresBranch}_${effectiveValue}_${_branches.length}'),
+      value: effectiveValue,
       isExpanded: true,
       icon: Icon(Icons.keyboard_arrow_down_rounded, color: t.textTertiary),
       dropdownColor: t.bgCard,
       decoration: InputDecoration(
         prefixIcon: Icon(Icons.location_city_rounded, color: t.textTertiary, size: 20),
+        suffixIcon: isBranchLoading && requiresBranch
+            ? SizedBox(
+                width: 24,
+                height: 24,
+                child: IconButton(
+                  padding: EdgeInsets.zero,
+                  icon: const Icon(Icons.refresh_rounded, size: 18),
+                  tooltip: 'Reload branches',
+                  onPressed: _loadBranches,
+                ),
+              )
+            : null,
         filled: true,
         fillColor: t.bgCardAlt,
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 0),
@@ -1171,10 +1304,10 @@ class _RegisterState extends State<Register>
               ),
               const SizedBox(height: 8),
               ..._selectedDispensaries.map((campId) {
-                final campLabel = rawDispensaries.firstWhere(
-                  (d) => d['id']?.toString().toLowerCase().trim() == campId,
-                  orElse: () => {'name': campId},
-                )['name'];
+                final match = rawDispensaries.where(
+                  (d) => (d['id'] ?? '').toString().toLowerCase().trim() == campId,
+                );
+                final campLabel = (match.isNotEmpty ? match.first['name'] : campId)?.toString() ?? campId;
                 final currentSession = _campSessions[campId] ?? 'morning';
 
                 return Container(
@@ -1223,6 +1356,75 @@ class _RegisterState extends State<Register>
     );
   }
 
+  Widget _buildMadrassaTeacherSessionSelector(RoleThemeData t) {
+    if (_selectedRole != 'Madrassa Teacher') return const SizedBox.shrink();
+
+    String bId = '';
+    try { bId = _getBranchId().toLowerCase().trim(); } catch (_) {}
+
+    final List<String> availableSessions = CampSessionService.getMadrassaSessions(bId);
+
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: t.bgCardAlt,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: t.bgRule),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.schedule_rounded, color: Color(0xFF5C6BC0), size: 20),
+              const SizedBox(width: 8),
+              Text(
+                'Madrassa Teaching Shift / Session *',
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: t.textPrimary,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            'Select which shift or session this teacher teaches (Morning, Evening, Night, or All)',
+            style: TextStyle(fontSize: 11, color: t.textTertiary),
+          ),
+          const SizedBox(height: 10),
+          DropdownButtonFormField<String>(
+            value: _selectedMadrassaSession,
+            isExpanded: true,
+            dropdownColor: t.bgCard,
+            decoration: InputDecoration(
+              filled: true,
+              fillColor: t.bgCard,
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+              enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFF5C6BC0), width: 2)),
+            ),
+            items: [
+              const DropdownMenuItem(value: 'morning', child: Text('☀️ Morning Shift (صبح کا سیشن)')),
+              if (availableSessions.contains('evening') || availableSessions.isEmpty)
+                const DropdownMenuItem(value: 'evening', child: Text('🌅 Evening Shift (شام کا سیشن)')),
+              if (availableSessions.contains('night') || availableSessions.isEmpty)
+                const DropdownMenuItem(value: 'night', child: Text('🌙 Night Shift (رات کا سیشن)')),
+              const DropdownMenuItem(value: 'all', child: Text('📑 All Sessions / Full Day (تمام سیشنز)')),
+            ],
+            onChanged: (val) {
+              if (val != null) {
+                setState(() => _selectedMadrassaSession = val);
+              }
+            },
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildChildDropdown(RoleThemeData t) {
     final hasBranch = _selectedBranch != null;
     final hintText = !hasBranch
@@ -1233,7 +1435,7 @@ class _RegisterState extends State<Register>
     final selectedId = studentExists ? _selectedStudentId : null;
 
     return DropdownButtonFormField<String>(
-      key: ValueKey('child_${_selectedBranch}_${selectedId}'),
+      key: ValueKey('child_${_selectedBranch}_$selectedId'),
       value: selectedId,
       isExpanded: true,
       icon: Icon(Icons.keyboard_arrow_down_rounded, color: t.textTertiary),

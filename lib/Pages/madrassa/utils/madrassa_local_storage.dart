@@ -9,6 +9,7 @@ import '../../../services/sync_service.dart';
 import '../../../realtime/realtime_manager.dart';
 import '../../../realtime/realtime_events.dart';
 import '../../../services/zkteco_network_service.dart';
+import '../../../services/network_health_service.dart';
 import '../models/madrassa_config.dart';
 
 class MadrassaLocalStorage {
@@ -101,6 +102,7 @@ class MadrassaLocalStorage {
     cleanData['id'] = effectiveStudentId;
     cleanData['branchId'] = effectiveBranchId;
     cleanData['lastUpdatedAt'] = DateTime.now().toIso8601String();
+    cleanData['syncStatus'] = 'pending';
 
     // 1. Immediately cache in Hive and flush to disk
     await cacheStudent(effectiveBranchId, effectiveStudentId, cleanData);
@@ -146,6 +148,20 @@ class MadrassaLocalStorage {
         'data': cleanData,
         'isNew': isNew,
       });
+
+      // Direct cloud push fallback if online
+      try {
+        if (NetworkHealthService().isStableOnline) {
+          unawaited(FirebaseFirestore.instance
+              .collection('branches')
+              .doc(effectiveBranchId)
+              .collection('madrassa_students')
+              .doc(effectiveStudentId)
+              .set(cleanData, SetOptions(merge: true))
+              .catchError((_) {}));
+        }
+      } catch (_) {}
+
       unawaited(SyncService().triggerUpload());
     } catch (e) {
       debugPrint('[MadrassaLocalStorage] enqueueSync error: $e');
@@ -276,6 +292,66 @@ class MadrassaLocalStorage {
         'reason': reason,
         'effectiveDate': (effectiveDate ?? now).toIso8601String(),
         'data': student,
+      });
+      unawaited(SyncService().triggerUpload());
+    } catch (e) {
+      debugPrint('[MadrassaLocalStorage] enqueueSync error: $e');
+    }
+  }
+
+  /// Permanently deletes a student from Hive cache, enqueues cloud deletion,
+  /// deletes biometric PIN and broadcasts to LAN WebSocket.
+  static Future<void> permanentlyDeleteStudent({
+    required String branchId,
+    required String studentId,
+  }) async {
+    final effectiveBranchId = branchId.toLowerCase().trim();
+    final box = await LocalStorageService.ensureBoxOpen(studentsBox);
+    final key = _studentKey(effectiveBranchId, studentId);
+    await box.delete(key);
+    await box.flush();
+
+    // 1. Direct Firestore delete if online
+    try {
+      if (NetworkHealthService().isStableOnline) {
+        unawaited(FirebaseFirestore.instance
+            .collection('branches')
+            .doc(effectiveBranchId)
+            .collection('madrassa_students')
+            .doc(studentId)
+            .delete()
+            .catchError((_) {}));
+      }
+    } catch (_) {}
+
+    // 2. Unenroll biometric PIN from device (background)
+    unawaited(
+      ZkTecoNetworkService.deleteBiometricCredential(studentId, branchId: effectiveBranchId).catchError((e) {
+        debugPrint('[MadrassaLocalStorage] Background deleteBiometricCredential error: $e');
+      }),
+    );
+
+    // 3. Broadcast to LAN WebSocket
+    try {
+      final payload = RealtimeEvents.payload(
+        type: 'delete_madrassa_student',
+        data: {
+          'branchId': effectiveBranchId,
+          'studentId': studentId,
+        },
+        branchId: effectiveBranchId,
+      );
+      RealtimeManager().sendMessage(payload);
+    } catch (e) {
+      debugPrint('[MadrassaLocalStorage] LAN broadcast error: $e');
+    }
+
+    // 4. Enqueue sync for cloud deletion
+    try {
+      await LocalStorageService.enqueueSync({
+        'type': 'permanent_delete_madrassa_student',
+        'branchId': effectiveBranchId,
+        'studentId': studentId,
       });
       unawaited(SyncService().triggerUpload());
     } catch (e) {
@@ -456,11 +532,56 @@ class MadrassaLocalStorage {
 
   static Map<String, dynamic>? getLogCached(String branchId, String dateKey) {
     if (!Hive.isBoxOpen(logsBox)) return null;
-    final key = _logKey(branchId, dateKey);
     final box = _getLogsBox();
+    final cleanBranch = branchId.toLowerCase().trim();
+    final isGlobal = cleanBranch.isEmpty || cleanBranch == 'all' || cleanBranch == 'global' || cleanBranch == 'main';
+
+    if (isGlobal) {
+      final merged = <String, dynamic>{};
+      bool foundAny = false;
+      for (final k in box.keys) {
+        final keyStr = k.toString();
+        if (keyStr.endsWith('__log__$dateKey') || keyStr.endsWith('_$dateKey') || keyStr == dateKey) {
+          final raw = box.get(k);
+          if (raw is Map) {
+            foundAny = true;
+            merged.addAll(Map<String, dynamic>.from(raw));
+          }
+        }
+      }
+      return foundAny ? merged : null;
+    }
+
+    final key = _logKey(branchId, dateKey);
     final raw = box.get(key);
-    if (raw == null) return null;
-    return Map<String, dynamic>.from(raw as Map);
+    if (raw != null && raw is Map) {
+      return Map<String, dynamic>.from(raw);
+    }
+
+    // Fallback: check other matching keys for this branch and date
+    for (final k in box.keys) {
+      final keyStr = k.toString();
+      if (keyStr.endsWith('__log__$dateKey') && keyStr.startsWith(cleanBranch)) {
+        final raw = box.get(k);
+        if (raw is Map) return Map<String, dynamic>.from(raw);
+      }
+    }
+    return null;
+  }
+
+  static int getPresentStudentsCount(String branchId, String dateKey) {
+    final log = getLogCached(branchId, dateKey);
+    if (log == null || log.isEmpty) return 0;
+    int present = 0;
+    for (final val in log.values) {
+      if (val is Map) {
+        final att = (val['attendance'] ?? val['status'])?.toString().toLowerCase().trim();
+        if (att == 'present' || att == 'p') {
+          present++;
+        }
+      }
+    }
+    return present;
   }
 
   static Map<String, dynamic>? getDailyLogCached(String branchId, String dateKey) =>
@@ -473,15 +594,22 @@ class MadrassaLocalStorage {
     await box.flush();
   }
 
-  // This one already watches a specific key, but still add distinct() so a
-  // put() that writes back identical data (e.g. a no-op merge) doesn't
-  // trigger a rebuild of every student card.
+  // This one watches Hive for changes. When viewing all branches, it watches the whole box.
   static Stream<Map<String, dynamic>> streamLogCached(String branchId, String dateKey) {
+    final cleanBranch = branchId.toLowerCase().trim();
+    final isGlobal = cleanBranch.isEmpty || cleanBranch == 'all' || cleanBranch == 'global' || cleanBranch == 'main';
+
     Stream<Map<String, dynamic>> source() async* {
       final box = await LocalStorageService.ensureBoxOpen(logsBox);
       yield getLogCached(branchId, dateKey) ?? {};
-      await for (final event in box.watch(key: _logKey(branchId, dateKey))) {
-        yield (event.value != null) ? Map<String, dynamic>.from(event.value as Map) : {};
+      if (isGlobal) {
+        await for (final _ in box.watch()) {
+          yield getLogCached(branchId, dateKey) ?? {};
+        }
+      } else {
+        await for (final event in box.watch(key: _logKey(branchId, dateKey))) {
+          yield (event.value != null) ? Map<String, dynamic>.from(event.value as Map) : (getLogCached(branchId, dateKey) ?? {});
+        }
       }
     }
     return source().distinct((a, b) => _deepEq.equals(a, b));
@@ -566,6 +694,19 @@ class MadrassaLocalStorage {
         }
       });
 
+      // Direct cloud push fallback if online
+      try {
+        if (NetworkHealthService().isStableOnline) {
+          unawaited(FirebaseFirestore.instance
+              .collection('branches')
+              .doc(branchId)
+              .collection('madrassa_daily_logs')
+              .doc(dateKey)
+              .set(sanitized, SetOptions(merge: true))
+              .catchError((_) {}));
+        }
+      } catch (_) {}
+
       unawaited(SyncService().triggerUpload());
     } catch (e) {
       debugPrint('[MadrassaLocalStorage] enqueueSync error: $e');
@@ -615,8 +756,29 @@ class MadrassaLocalStorage {
   static List<Map<String, dynamic>> getLogsForMonthCached(String branchId, int year, int month) {
     if (!Hive.isBoxOpen(logsBox)) return const [];
     final monthStr = '$year-${month.toString().padLeft(2, '0')}';
-    final prefix = '${branchId.toLowerCase().trim()}__log__$monthStr-';
+    final cleanBranch = branchId.toLowerCase().trim();
+    final isGlobal = cleanBranch.isEmpty || cleanBranch == 'all' || cleanBranch == 'global' || cleanBranch == 'main';
     final box = _getLogsBox();
+
+    if (isGlobal) {
+      final mapByDate = <String, Map<String, dynamic>>{};
+      for (final k in box.keys) {
+        final keyStr = k.toString();
+        if (keyStr.contains('__log__$monthStr-')) {
+          final dateKey = keyStr.split('__log__').last;
+          final raw = box.get(k);
+          if (raw is Map) {
+            final entry = mapByDate.putIfAbsent(dateKey, () => {'id': dateKey, 'dateKey': dateKey});
+            entry.addAll(Map<String, dynamic>.from(raw));
+          }
+        }
+      }
+      final list = mapByDate.values.toList();
+      list.sort((a, b) => a['dateKey'].toString().compareTo(b['dateKey'].toString()));
+      return list;
+    }
+
+    final prefix = '${cleanBranch}__log__$monthStr-';
     return box.keys
         .where((k) => k.toString().startsWith(prefix))
         .map((k) {
@@ -632,8 +794,29 @@ class MadrassaLocalStorage {
 
   static List<Map<String, dynamic>> getAllLogsCached(String branchId) {
     if (!Hive.isBoxOpen(logsBox)) return const [];
-    final prefix = '${branchId.toLowerCase().trim()}__log__';
+    final cleanBranch = branchId.toLowerCase().trim();
+    final isGlobal = cleanBranch.isEmpty || cleanBranch == 'all' || cleanBranch == 'global' || cleanBranch == 'main';
     final box = _getLogsBox();
+
+    if (isGlobal) {
+      final mapByDate = <String, Map<String, dynamic>>{};
+      for (final k in box.keys) {
+        final keyStr = k.toString();
+        if (keyStr.contains('__log__')) {
+          final dateKey = keyStr.split('__log__').last;
+          final raw = box.get(k);
+          if (raw is Map) {
+            final entry = mapByDate.putIfAbsent(dateKey, () => {'id': dateKey, 'dateKey': dateKey});
+            entry.addAll(Map<String, dynamic>.from(raw));
+          }
+        }
+      }
+      final list = mapByDate.values.toList();
+      list.sort((a, b) => a['dateKey'].toString().compareTo(b['dateKey'].toString()));
+      return list;
+    }
+
+    final prefix = '${cleanBranch}__log__';
     final list = box.keys
         .where((k) => k.toString().startsWith(prefix))
         .map((k) {
@@ -804,9 +987,14 @@ class MadrassaLocalStorage {
   static MadrassaConfig? getConfigCached(String branchId) {
     if (!Hive.isBoxOpen(studentsBox)) return null;
     final key = '${branchId.toLowerCase().trim()}__config__current';
-    final raw = _getStudentsBox().get(key);
-    if (raw == null || raw is! Map) return null;
-    return MadrassaConfig.fromMap(Map<String, dynamic>.from(raw));
+    try {
+      final raw = _getStudentsBox().get(key);
+      if (raw == null || raw is! Map) return null;
+      return MadrassaConfig.fromMap(raw);
+    } catch (e) {
+      debugPrint('[MadrassaLocalStorage] Error reading cached config: $e');
+      return null;
+    }
   }
 
   static Stream<MadrassaConfig> streamConfigCached(String branchId) {
@@ -817,7 +1005,11 @@ class MadrassaLocalStorage {
       yield cfg;
       await for (final event in box.watch(key: key)) {
         if (event.value != null && event.value is Map) {
-          yield MadrassaConfig.fromMap(Map<String, dynamic>.from(event.value as Map));
+          try {
+            yield MadrassaConfig.fromMap(event.value as Map);
+          } catch (e) {
+            debugPrint('[MadrassaLocalStorage] Error streaming cached config: $e');
+          }
         }
       }
     }
@@ -1019,6 +1211,328 @@ class MadrassaLocalStorage {
       debugPrint('[MadrassaLocalStorage] Downloaded ${snap.docs.length} fee payment records for $year-$month.');
     } catch (e) {
       debugPrint('[MadrassaLocalStorage] Error downloading fee payments: $e');
+    }
+  }
+
+  // ── Teachers Cache & Querying ──────────────────────────────────────────────
+
+  static String _teacherAttendanceKey(String branchId, String dateKey) =>
+      '${branchId.toLowerCase().trim()}__madrassa_tchlog__$dateKey';
+
+  static List<Map<String, dynamic>> getAllTeachersCached(String branchId) {
+    if (!Hive.isBoxOpen(LocalStorageService.usersBox)) return const [];
+    final cleanBranch = branchId.toLowerCase().trim();
+    final isGlobal = cleanBranch.isEmpty || cleanBranch == 'all' || cleanBranch == 'main' || cleanBranch == 'global';
+    final box = Hive.box(LocalStorageService.usersBox);
+
+    final List<Map<String, dynamic>> teachers = [];
+    for (final k in box.keys) {
+      final raw = box.get(k);
+      if (raw == null || raw is! Map) continue;
+      final m = Map<String, dynamic>.from(raw);
+      final role = (m['role'] ?? '').toString().toLowerCase();
+      final isTeacher = role.contains('teacher') || role == 'qari' || role == 'nazim';
+      if (!isTeacher) continue;
+
+      final uBranch = (m['branchId'] ?? '').toString().toLowerCase().trim();
+      final isMatchBranch = isGlobal || uBranch.isEmpty || uBranch == cleanBranch ||
+          ((uBranch.contains('karachi') || uBranch.contains('saddar') || uBranch.contains('haji')) &&
+              (cleanBranch.contains('karachi') || cleanBranch.contains('saddar') || cleanBranch.contains('haji')));
+
+      final isOffboarded = m['status']?.toString().toLowerCase() == 'offboarded' ||
+          m['status']?.toString().toLowerCase() == 'deleted' ||
+          m['isDeleted'] == true;
+
+      if (isMatchBranch && !isOffboarded) {
+        m['id'] = m['uid'] ?? m['id'] ?? k.toString().replaceAll('user:', '');
+        teachers.add(m);
+      }
+    }
+
+    teachers.sort((a, b) {
+      final nameA = (a['displayName'] ?? a['username'] ?? a['name'] ?? '').toString().toLowerCase();
+      final nameB = (b['displayName'] ?? b['username'] ?? b['name'] ?? '').toString().toLowerCase();
+      return nameA.compareTo(nameB);
+    });
+
+    return teachers;
+  }
+
+  static Stream<List<Map<String, dynamic>>> streamTeachersCached(String branchId) {
+    Stream<List<Map<String, dynamic>>> source() async* {
+      await LocalStorageService.ensureBoxOpen(LocalStorageService.usersBox);
+      yield getAllTeachersCached(branchId);
+      final box = Hive.box(LocalStorageService.usersBox);
+      await for (final _ in box.watch()) {
+        yield getAllTeachersCached(branchId);
+      }
+    }
+    return source().distinct((a, b) => _deepEq.equals(a, b));
+  }
+
+  static Future<void> downloadTeachers(String branchId, {bool force = false}) async {
+    try {
+      final cleanBranch = branchId.toLowerCase().trim();
+      final box = await LocalStorageService.ensureBoxOpen(LocalStorageService.usersBox);
+      final isGlobal = cleanBranch.isEmpty ||
+          cleanBranch == 'all' ||
+          cleanBranch == 'main' ||
+          cleanBranch == 'global' ||
+          cleanBranch == 'headquarters' ||
+          cleanBranch == 'hq';
+
+      final Map<String, dynamic> updates = {};
+
+      if (isGlobal) {
+        try {
+          final rootSnap = await FirebaseFirestore.instance.collection('users').get();
+          for (final doc in rootSnap.docs) {
+            final data = doc.data();
+            final role = (data['role'] ?? '').toString().toLowerCase();
+            if (role.contains('teacher') || role == 'qari' || role == 'nazim') {
+              final u = {'id': doc.id, 'uid': doc.id, ...data};
+              final email = (u['email'] ?? '').toString().toLowerCase().trim();
+              final cacheKey = email.isNotEmpty ? 'user:$email' : 'user:${doc.id}';
+              updates[cacheKey] = _sanitize(u);
+            }
+          }
+        } catch (e) {
+          debugPrint('[MadrassaLocalStorage] Error downloading global teachers: $e');
+        }
+      } else {
+        // 1. Fetch from branch users subcollection
+        try {
+          final branchSnap = await FirebaseFirestore.instance
+              .collection('branches')
+              .doc(cleanBranch)
+              .collection('users')
+              .get();
+
+          for (final doc in branchSnap.docs) {
+            final data = doc.data();
+            final role = (data['role'] ?? '').toString().toLowerCase();
+            if (role.contains('teacher') || role == 'qari' || role == 'nazim') {
+              final u = {'id': doc.id, 'uid': doc.id, ...data};
+              final email = (u['email'] ?? '').toString().toLowerCase().trim();
+              final cacheKey = email.isNotEmpty ? 'user:$email' : 'user:${doc.id}';
+              updates[cacheKey] = _sanitize(u);
+            }
+          }
+        } catch (_) {}
+
+        // 2. Fetch from root users collection matching branch
+        try {
+          final rootSnap = await FirebaseFirestore.instance
+              .collection('users')
+              .where('branchId', isEqualTo: cleanBranch)
+              .get();
+
+          for (final doc in rootSnap.docs) {
+            final data = doc.data();
+            final role = (data['role'] ?? '').toString().toLowerCase();
+            if (role.contains('teacher') || role == 'qari' || role == 'nazim') {
+              final u = {'id': doc.id, 'uid': doc.id, ...data};
+              final email = (u['email'] ?? '').toString().toLowerCase().trim();
+              final cacheKey = email.isNotEmpty ? 'user:$email' : 'user:${doc.id}';
+              updates[cacheKey] = _sanitize(u);
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (updates.isNotEmpty) {
+        await box.putAll(updates);
+        await box.flush();
+      }
+      debugPrint('[MadrassaLocalStorage] Downloaded ${updates.length} teachers for $cleanBranch');
+    } catch (e) {
+      debugPrint('[MadrassaLocalStorage] Error downloading teachers: $e');
+    }
+  }
+
+  static Future<void> saveTeacherProfileLocalAndSync({
+    required String branchId,
+    required String teacherId,
+    required Map<String, dynamic> teacherData,
+  }) async {
+    final cleanBranch = branchId.toLowerCase().trim();
+    final cleanData = Map<String, dynamic>.from(teacherData);
+    cleanData['uid'] = cleanData['uid'] ?? teacherId;
+    cleanData['id'] = cleanData['id'] ?? teacherId;
+    cleanData['branchId'] = cleanBranch;
+    cleanData['lastUpdatedAt'] = DateTime.now().toIso8601String();
+    cleanData['syncStatus'] = 'pending';
+
+    final email = (cleanData['email'] ?? '').toString().toLowerCase().trim();
+    final cacheKey = email.isNotEmpty ? 'user:$email' : 'user:$teacherId';
+
+    // 1. Immediately cache in Hive
+    final box = await LocalStorageService.ensureBoxOpen(LocalStorageService.usersBox);
+    final rawExisting = box.get(cacheKey);
+    final merged = <String, dynamic>{
+      if (rawExisting is Map) ...Map<String, dynamic>.from(rawExisting),
+      ...cleanData,
+    };
+    await box.put(cacheKey, _sanitize(merged));
+    await box.flush();
+
+    // 2. Broadcast LAN
+    try {
+      final payload = RealtimeEvents.payload(
+        type: 'save_user',
+        data: merged,
+        branchId: cleanBranch,
+      );
+      RealtimeManager().sendMessage(payload);
+    } catch (e) {
+      debugPrint('[MadrassaLocalStorage] LAN broadcast error: $e');
+    }
+
+    // 3. Enqueue sync
+    try {
+      await LocalStorageService.enqueueSync({
+        'type': 'save_user',
+        'branchId': cleanBranch,
+        'uid': teacherId,
+        'data': merged,
+      });
+
+      // Direct push if online
+      try {
+        if (NetworkHealthService().isStableOnline) {
+          unawaited(FirebaseFirestore.instance
+              .collection('users')
+              .doc(teacherId)
+              .set(merged, SetOptions(merge: true))
+              .catchError((_) {}));
+          unawaited(FirebaseFirestore.instance
+              .collection('branches')
+              .doc(cleanBranch)
+              .collection('users')
+              .doc(teacherId)
+              .set(merged, SetOptions(merge: true))
+              .catchError((_) {}));
+        }
+      } catch (_) {}
+
+      unawaited(SyncService().triggerUpload());
+    } catch (e) {
+      debugPrint('[MadrassaLocalStorage] enqueueSync error: $e');
+    }
+  }
+
+  // ── Teacher Attendance Methods ─────────────────────────────────────────────
+
+  static Map<String, dynamic>? getTeacherAttendanceCached(String branchId, String dateKey) {
+    if (!Hive.isBoxOpen(logsBox)) return null;
+    final key = _teacherAttendanceKey(branchId, dateKey);
+    final box = _getLogsBox();
+    final raw = box.get(key);
+    if (raw == null || raw is! Map) return null;
+    return Map<String, dynamic>.from(raw);
+  }
+
+  static Stream<Map<String, dynamic>?> streamTeacherAttendanceCached(String branchId, String dateKey) {
+    Stream<Map<String, dynamic>?> source() async* {
+      await LocalStorageService.ensureBoxOpen(logsBox);
+      yield getTeacherAttendanceCached(branchId, dateKey);
+      final box = _getLogsBox();
+      final targetKey = _teacherAttendanceKey(branchId, dateKey);
+      await for (final event in box.watch(key: targetKey)) {
+        if (event.value == null || event.value is! Map) {
+          yield null;
+        } else {
+          yield Map<String, dynamic>.from(event.value as Map);
+        }
+      }
+    }
+    return source().distinct((a, b) => _deepEq.equals(a, b));
+  }
+
+  static Future<void> saveTeacherAttendanceLocalAndSync({
+    required String branchId,
+    required String dateKey,
+    required Map<String, dynamic> entries,
+    required String editorName,
+  }) async {
+    final cleanBranch = branchId.toLowerCase().trim();
+    final nowIso = DateTime.now().toIso8601String();
+    final key = _teacherAttendanceKey(cleanBranch, dateKey);
+
+    final logData = {
+      'date': dateKey,
+      'dateKey': dateKey,
+      'branchId': cleanBranch,
+      'lastUpdated': nowIso,
+      'lastModified': nowIso,
+      'updatedBy': editorName,
+      'syncStatus': 'pending',
+      'entries': _sanitize(entries),
+    };
+
+    // 1. Immediately cache in Hive
+    final box = await LocalStorageService.ensureBoxOpen(logsBox);
+    await box.put(key, _sanitize(logData));
+    await box.flush();
+
+    // 2. Broadcast LAN
+    try {
+      final payload = RealtimeEvents.payload(
+        type: RealtimeEvents.saveMadrassaTeacherAttendance,
+        data: logData,
+        branchId: cleanBranch,
+      );
+      RealtimeManager().sendMessage(payload);
+    } catch (e) {
+      debugPrint('[MadrassaLocalStorage] LAN broadcast error: $e');
+    }
+
+    // 3. Enqueue sync
+    try {
+      await LocalStorageService.enqueueSync({
+        'type': 'save_madrassa_teacher_attendance',
+        'branchId': cleanBranch,
+        'dateKey': dateKey,
+        'data': logData,
+      });
+
+      // Direct push if online
+      try {
+        if (NetworkHealthService().isStableOnline) {
+          unawaited(FirebaseFirestore.instance
+              .collection('branches')
+              .doc(cleanBranch)
+              .collection('madrassa_teacher_attendance')
+              .doc(dateKey)
+              .set(logData, SetOptions(merge: true))
+              .catchError((_) {}));
+        }
+      } catch (_) {}
+
+      unawaited(SyncService().triggerUpload());
+    } catch (e) {
+      debugPrint('[MadrassaLocalStorage] enqueueSync error: $e');
+    }
+  }
+
+  static Future<void> downloadTeacherAttendance(String branchId, String dateKey) async {
+    try {
+      final cleanBranch = branchId.toLowerCase().trim();
+      final doc = await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(cleanBranch)
+          .collection('madrassa_teacher_attendance')
+          .doc(dateKey)
+          .get();
+
+      if (doc.exists && doc.data() != null) {
+        final box = await LocalStorageService.ensureBoxOpen(logsBox);
+        final key = _teacherAttendanceKey(cleanBranch, dateKey);
+        await box.put(key, _sanitize(doc.data()!));
+        await box.flush();
+      }
+    } catch (e) {
+      debugPrint('[MadrassaLocalStorage] Error downloading teacher attendance: $e');
     }
   }
 }

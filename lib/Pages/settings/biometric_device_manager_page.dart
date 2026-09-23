@@ -22,12 +22,14 @@ class BiometricDeviceManagerPage extends StatefulWidget {
   final String branchId;
   final VoidCallback? onBack;
   final String? currentUserRole;
+  final bool isEmbedded;
 
   const BiometricDeviceManagerPage({
     super.key,
     this.branchId = 'main',
     this.onBack,
     this.currentUserRole,
+    this.isEmbedded = false,
   });
 
   @override
@@ -721,9 +723,10 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
         final bgCanvas = isDark ? const Color(0xFF0B0F19) : const Color(0xFFF1F5F9);
 
         return PopScope(
-          canPop: widget.onBack == null && Navigator.canPop(context),
+          canPop: !widget.isEmbedded && widget.onBack == null && Navigator.canPop(context),
           onPopInvokedWithResult: (didPop, _) {
             if (didPop) return;
+            if (widget.isEmbedded) return;
             if (widget.onBack != null) {
               widget.onBack!();
             }
@@ -731,6 +734,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
           child: Scaffold(
             backgroundColor: bgCanvas,
             appBar: AppBar(
+              automaticallyImplyLeading: false,
               title: Text(
                 'Biometric Attendance Settings & Devices',
                 style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 19),
@@ -738,16 +742,18 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
               backgroundColor: const Color(0xFF0F172A), // Rich dark slate header
               elevation: 2,
               shadowColor: Colors.black26,
-              leading: IconButton(
-                icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
-                onPressed: () {
-                  if (widget.onBack != null) {
-                    widget.onBack!();
-                  } else if (Navigator.canPop(context)) {
-                    Navigator.pop(context);
-                  }
-                },
-              ),
+              leading: widget.isEmbedded
+                  ? null
+                  : IconButton(
+                      icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+                      onPressed: () {
+                        if (widget.onBack != null) {
+                          widget.onBack!();
+                        } else if (Navigator.canPop(context)) {
+                          Navigator.pop(context);
+                        }
+                      },
+                    ),
             actions: [
               IconButton(
                 icon: const Icon(Icons.delete_sweep_rounded, color: Color(0xFFF87171), size: 22),
