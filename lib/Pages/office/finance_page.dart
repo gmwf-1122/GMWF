@@ -147,26 +147,16 @@ class _FinancePageState extends State<FinancePage> {
     final userRole = LocalStorageService.getActiveUserRole();
     final isBranchScoped = userRole == 'branch manager' || userRole == 'supervisor';
 
-    // 1. Load 100% locally from Hive first
+    // 1. Load 100% locally from Hive first using FinanceLocalStorage.getAllKnownBranches
     if (Hive.isBoxOpen(LocalStorageService.branchesBox)) {
-      final box = Hive.box(LocalStorageService.branchesBox);
-      final localBranches = <Map<String, dynamic>>[];
-      for (final v in box.values) {
-        if (v is Map) {
-          final m = Map<String, dynamic>.from(v);
-          final id = (m['id'] ?? '').toString();
-          if (id.isNotEmpty && id != 'all' && id != 'global') {
-            localBranches.add({'id': id, 'name': (m['name'] as String?) ?? id});
-          }
-        }
-      }
-      if (localBranches.isNotEmpty) {
+      final known = FinanceLocalStorage.getAllKnownBranches();
+      if (known.isNotEmpty) {
         if (!mounted) return;
         setState(() {
-          _branches = localBranches;
+          _branches = known;
           if (isBranchScoped) {
             _activeBranchId = _getEffectiveUserBranch();
-            _branches = _branches.where((b) => b['id'].toString().toLowerCase() == _activeBranchId.toLowerCase()).toList();
+            _branches = _branches.where((b) => b['id'].toString().toLowerCase().trim() == _activeBranchId.toLowerCase().trim()).toList();
           }
           _isLoadingBranches = false;
         });
@@ -179,14 +169,24 @@ class _FinancePageState extends State<FinancePage> {
     try {
       final snap = await FirebaseFirestore.instance.collection('branches').get();
       if (!mounted) return;
+      final seen = <String>{};
+      final firestoreBranches = <Map<String, dynamic>>[];
+      for (final d in snap.docs) {
+        final data = d.data();
+        final rawId = (data['id'] ?? d.id).toString().trim();
+        final normId = rawId.toLowerCase();
+        if (normId.isEmpty || normId == 'all' || normId == 'global' || seen.contains(normId)) continue;
+        seen.add(normId);
+        firestoreBranches.add({
+          'id': normId,
+          'name': (data['name'] as String?)?.trim() ?? normId,
+        });
+      }
       setState(() {
-        _branches = snap.docs.map((d) {
-          final data = d.data();
-          return {'id': d.id, 'name': data['name'] as String? ?? d.id};
-        }).toList();
+        _branches = firestoreBranches;
         if (isBranchScoped) {
           _activeBranchId = _getEffectiveUserBranch();
-          _branches = _branches.where((b) => b['id'].toString().toLowerCase() == _activeBranchId.toLowerCase()).toList();
+          _branches = _branches.where((b) => b['id'].toString().toLowerCase().trim() == _activeBranchId.toLowerCase().trim()).toList();
         }
         _isLoadingBranches = false;
       });
@@ -436,7 +436,8 @@ class _FinancePageState extends State<FinancePage> {
             Builder(
               builder: (context) {
                 final branchItems = _getUniqueBranchDropdownItems();
-                final safeBranchValue = branchItems.any((it) => it.value == _activeBranchId) ? _activeBranchId : 'all';
+                final normActive = _activeBranchId.toLowerCase().trim();
+                final safeBranchValue = branchItems.any((it) => it.value == normActive) ? normActive : 'all';
                 return Container(
                   height: 30,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -454,7 +455,7 @@ class _FinancePageState extends State<FinancePage> {
                       onChanged: (val) {
                         if (val != null) {
                           setState(() {
-                            _activeBranchId = val;
+                            _activeBranchId = val.toLowerCase().trim();
                           });
                           _triggerDownloadForActiveBranch();
                         }
@@ -525,41 +526,47 @@ class _FinancePageState extends State<FinancePage> {
   }
 
   List<DropdownMenuItem<String>> _getUniqueDepartmentDropdownItems() {
-    final uniqueDepts = <String, String>{};
-    uniqueDepts['all'] = 'All Departments';
+    final dedupMap = <String, DropdownMenuItem<String>>{};
+    dedupMap['all'] = const DropdownMenuItem<String>(
+      value: 'all',
+      child: Text('All Departments', style: TextStyle(fontSize: 11)),
+    );
     final defaults = ['Administration', 'Office', 'Dasterkhawaan', 'Dispensary', 'Madrassa', 'School'];
     for (final d in [...defaults, ...FinanceLocalStorage.getCustomDepartments()]) {
       final key = d.trim().toLowerCase();
-      if (key.isNotEmpty && key != 'all') {
-        uniqueDepts[key] = d.trim();
+      if (key.isNotEmpty && key != 'all' && !dedupMap.containsKey(key)) {
+        dedupMap[key] = DropdownMenuItem<String>(
+          value: key,
+          child: Text(d.trim(), style: const TextStyle(fontSize: 11)),
+        );
       }
     }
-    return uniqueDepts.entries.map((e) => DropdownMenuItem<String>(
-      value: e.key,
-      child: Text(e.value, style: const TextStyle(fontSize: 11)),
-    )).toList();
+    return dedupMap.values.toList();
   }
 
   List<DropdownMenuItem<String>> _getUniqueBranchDropdownItems({bool includeDetails = false}) {
-    final uniqueBranches = <String, Map<String, dynamic>>{};
+    final dedupMap = <String, DropdownMenuItem<String>>{};
+    dedupMap['all'] = const DropdownMenuItem<String>(
+      value: 'all',
+      child: Text('All Branches', style: TextStyle(fontSize: 11)),
+    );
+
     for (final b in _branches) {
-      final id = b['id']?.toString().trim() ?? '';
-      if (id.isNotEmpty && id.toLowerCase() != 'all') {
-        uniqueBranches[id] = b;
-      }
-    }
-    return [
-      const DropdownMenuItem<String>(value: 'all', child: Text('All Branches', style: TextStyle(fontSize: 11))),
-      ...uniqueBranches.values.map((b) {
-        final bId = b['id']?.toString() ?? '';
-        final name = b['name']?.toString() ?? bId;
-        final label = includeDetails ? '$name ($bId)' : name;
-        return DropdownMenuItem<String>(
-          value: bId,
+      final rawId = (b['id'] ?? b['branchId'] ?? '').toString().trim();
+      final normId = rawId.toLowerCase();
+      if (normId.isEmpty || normId == 'all' || normId == 'global') continue;
+
+      if (!dedupMap.containsKey(normId)) {
+        final rawName = (b['name'] ?? b['branchName'] ?? rawId).toString().trim();
+        final name = rawName.isNotEmpty ? rawName : normId;
+        final label = includeDetails ? '$name ($rawId)' : name;
+        dedupMap[normId] = DropdownMenuItem<String>(
+          value: normId,
           child: Text(label, style: const TextStyle(fontSize: 11), overflow: TextOverflow.ellipsis),
         );
-      }),
-    ];
+      }
+    }
+    return dedupMap.values.toList();
   }
 
   Widget _buildBranchDropdown() {
@@ -567,7 +574,7 @@ class _FinancePageState extends State<FinancePage> {
     final isBranchManager = userRole == 'branch manager' || userRole == 'supervisor';
 
     if (isBranchManager) {
-      final bName = _branches.firstWhereOrNull((b) => b['id'] == _activeBranchId)?['name'] ?? _activeBranchId;
+      final bName = _branches.firstWhereOrNull((b) => b['id']?.toString().toLowerCase().trim() == _activeBranchId.toLowerCase().trim())?['name'] ?? _activeBranchId;
       return Container(
         height: 32,
         alignment: Alignment.center,
@@ -585,7 +592,8 @@ class _FinancePageState extends State<FinancePage> {
     }
 
     final branchItems = _getUniqueBranchDropdownItems(includeDetails: true);
-    final safeBranchValue = branchItems.any((it) => it.value == _activeBranchId) ? _activeBranchId : 'all';
+    final normActive = _activeBranchId.toLowerCase().trim();
+    final safeBranchValue = branchItems.any((it) => it.value == normActive) ? normActive : 'all';
 
     return Container(
       height: 32,
@@ -598,7 +606,12 @@ class _FinancePageState extends State<FinancePage> {
           style: const TextStyle(color: _kTextPrimary, fontSize: 12, fontWeight: FontWeight.w600),
           icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: _kTextSecondary),
           items: branchItems,
-          onChanged: (val) { if (val != null) { setState(() => _activeBranchId = val); _triggerDownloadForActiveBranch(); } },
+          onChanged: (val) {
+            if (val != null) {
+              setState(() => _activeBranchId = val.toLowerCase().trim());
+              _triggerDownloadForActiveBranch();
+            }
+          },
         ),
       ),
     );
@@ -949,7 +962,7 @@ class _FinanceSidebar extends StatelessWidget {
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(
-                            branches.firstWhereOrNull((b) => b['id'] == activeBranchId)?['name'] ?? activeBranchId,
+                            branches.firstWhereOrNull((b) => b['id']?.toString().toLowerCase().trim() == activeBranchId.toLowerCase().trim())?['name'] ?? activeBranchId,
                             overflow: TextOverflow.ellipsis,
                             style: const TextStyle(color: _kTextPrimary, fontSize: 11, fontWeight: FontWeight.bold),
                           ),
@@ -962,24 +975,26 @@ class _FinanceSidebar extends StatelessWidget {
                     decoration: BoxDecoration(color: _kBg, borderRadius: BorderRadius.circular(8), border: Border.all(color: _kBorder)),
                     child: Builder(
                       builder: (context) {
-                        final uniqueBranches = <String, Map<String, dynamic>>{};
+                        final dedupMap = <String, DropdownMenuItem<String>>{};
+                        dedupMap['all'] = const DropdownMenuItem<String>(
+                          value: 'all',
+                          child: Text('All Branches', style: TextStyle(fontSize: 11)),
+                        );
                         for (final b in branches) {
-                          final id = b['id']?.toString().trim() ?? '';
-                          if (id.isNotEmpty && id.toLowerCase() != 'all') {
-                            uniqueBranches[id] = b;
+                          final rawId = (b['id'] ?? b['branchId'] ?? '').toString().trim();
+                          final normId = rawId.toLowerCase();
+                          if (normId.isEmpty || normId == 'all' || normId == 'global') continue;
+                          if (!dedupMap.containsKey(normId)) {
+                            final name = (b['name'] ?? normId).toString().trim();
+                            dedupMap[normId] = DropdownMenuItem<String>(
+                              value: normId,
+                              child: Text('$name ($normId)', overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
+                            );
                           }
                         }
-                        final branchItems = [
-                          const DropdownMenuItem<String>(value: 'all', child: Text('All Branches', style: TextStyle(fontSize: 11))),
-                          ...uniqueBranches.values.map((b) {
-                            final bId = b['id']?.toString() ?? '';
-                            return DropdownMenuItem<String>(
-                              value: bId,
-                              child: Text('${b['name']} ($bId)', overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
-                            );
-                          }),
-                        ];
-                        final safeBranchValue = branchItems.any((it) => it.value == activeBranchId) ? activeBranchId : 'all';
+                        final branchItems = dedupMap.values.toList();
+                        final normActive = activeBranchId.toLowerCase().trim();
+                        final safeBranchValue = branchItems.any((it) => it.value == normActive) ? normActive : 'all';
 
                         return DropdownButtonHideUnderline(
                           child: DropdownButton<String>(
@@ -989,7 +1004,7 @@ class _FinanceSidebar extends StatelessWidget {
                             style: const TextStyle(color: _kTextPrimary, fontSize: 12, fontWeight: FontWeight.w600),
                             icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: _kTextSecondary),
                             items: branchItems,
-                            onChanged: (v) { if (v != null) onBranchChanged(v); },
+                            onChanged: (v) { if (v != null) onBranchChanged(v.toLowerCase().trim()); },
                           ),
                         );
                       },

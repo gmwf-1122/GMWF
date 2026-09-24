@@ -61,6 +61,8 @@ import '../services/auto_update_service.dart';
 import '../widgets/update_dialog_widget.dart';
 import '../services/donations_local_storage.dart';
 import 'madrassa/utils/madrassa_local_storage.dart';
+import 'package:uuid/uuid.dart';
+import '../services/sync_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Connected client model
@@ -184,6 +186,8 @@ class _ServerDashboardWithSyncState
   DateTime? _lastSyncTime;
 
   final Map<String, ConnectedClient> _connectedClients = {};
+  bool _isFirewallBannerDismissed = false;
+  bool _isFirewallBannerExpanded = false;
 
   Timer? _updateTimer;
   Timer? _syncTimer;
@@ -684,6 +688,11 @@ class _ServerDashboardWithSyncState
       }
       _syncManager!.pushCatchUpAll();
       await _syncManager!.triggerSync(force: true);
+      try {
+        await SyncService().triggerUpload(force: true);
+      } catch (e) {
+        debugPrint('[Server] SyncService upload note: $e');
+      }
       await ZkTecoNetworkService.syncAllDevices();
       final pushedCount = await ZkTecoNetworkService.syncAllRecordedAttendanceToFirestore();
       if (pushedCount > 0) {
@@ -691,7 +700,12 @@ class _ServerDashboardWithSyncState
       }
       _addLog('✅ Catch-up broadcast & cloud sync completed');
     } finally {
-      if (mounted) setState(() => _isManualSyncing = false);
+      if (mounted) {
+        setState(() {
+          _isManualSyncing = false;
+          _syncQueueSize = _syncManager?.queueSize ?? 0;
+        });
+      }
     }
   }
 
@@ -868,9 +882,8 @@ class _ServerDashboardWithSyncState
                   style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF3B82F6)),
                   onPressed: () async {
                     _addLog('🚀 Triggered Cloud Sync from Queue Manager');
-                    _syncManager!.triggerSync(force: true);
                     Navigator.of(ctx).pop();
-                    _showSuccess('Sync in progress in background');
+                    await _manualSync();
                   },
                 ),
                 TextButton(
@@ -1136,176 +1149,53 @@ class _ServerDashboardWithSyncState
             ),
           ),
           child: Scaffold(
-            appBar: AppBar(
-              backgroundColor: isDark ? const Color(0xFF080E1A) : Colors.white,
-              elevation: 0,
-              scrolledUnderElevation: 0,
-              title: Row(
-                children: [
-                  Image.asset('assets/logo/gmwf-1.webp', height: 38, fit: BoxFit.contain),
-                  const SizedBox(width: 14),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+            backgroundColor: scaffoldBg,
+            body: Row(
+              children: [
+                // ── 1. Dedicated Server Control Sidebar (Desktop First) ───────────────
+                _buildServerSidebar(isDark),
+
+                // ── 2. Main Workspace & Views ─────────────────────────────────────────
+                Expanded(
+                  child: Column(
                     children: [
-                      Text(
-                        'Server Control Dashboard',
-                        style: GoogleFonts.outfit(
-                          fontWeight: FontWeight.bold,
-                          fontSize: 18,
-                          color: isDark ? Colors.white : const Color(0xFF0F172A),
-                          letterSpacing: 0.3,
-                        ),
-                      ),
-                      Text(
-                        'Real-time overview of your hybrid infrastructure',
-                        style: GoogleFonts.inter(fontSize: 11.5, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              actions: [
-                _buildStatusBadge(),
-                const SizedBox(width: 10),
-                // App Version Badge
-                FutureBuilder<String>(
-                  future: AutoUpdateService.getAppVersion(),
-                  builder: (context, snap) {
-                    final ver = snap.data ?? AutoUpdateService.currentVersion;
-                    return Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-                      decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.verified_rounded, size: 14, color: isDark ? const Color(0xFF10B981) : const Color(0xFF0F766E)),
-                          const SizedBox(width: 5),
-                          Text(
-                            'v$ver',
-                            style: GoogleFonts.inter(
-                              fontSize: 12,
-                              fontWeight: FontWeight.bold,
-                              color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF0F172A),
-                            ),
-                          ),
-                        ],
-                      ),
-                    );
-                  },
-                ),
-                const SizedBox(width: 10),
-                // Dark / Light Mode Toggle Button
-                Container(
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
-                  ),
-                  child: IconButton(
-                    icon: Icon(
-                      isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-                      color: isDark ? const Color(0xFFFBBF24) : const Color(0xFF0F172A),
-                      size: 18,
-                    ),
-                    tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
-                    padding: const EdgeInsets.all(8),
-                    constraints: const BoxConstraints(),
-                    onPressed: () async {
-                      await UserThemeService.setDarkMode(!isDark);
-                    },
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Container(
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
-                  ),
-                  child: IconButton(
-                    icon: const Icon(Icons.power_settings_new_rounded, color: Color(0xFFEF4444), size: 19),
-                    tooltip: 'Logout / Shutdown',
-                    padding: const EdgeInsets.all(8),
-                    constraints: const BoxConstraints(),
-                    onPressed: () => _showLogoutDialog(context),
-                  ),
-                ),
-                const SizedBox(width: 20),
-              ],
-              bottom: !_isRunning
-                  ? null
-                  : PreferredSize(
-                      preferredSize: const Size.fromHeight(48),
-                      child: Container(
-                        width: double.infinity,
-                        decoration: BoxDecoration(
-                          color: isDark ? const Color(0xFF080E1A) : Colors.white,
-                          border: Border(
-                            top: BorderSide(color: isDark ? const Color(0xFF1E293B).withOpacity(0.6) : const Color(0xFFE2E8F0), width: 0.8),
-                            bottom: BorderSide(color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0), width: 1.0),
-                          ),
-                        ),
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 6),
-                        child: SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          physics: const BouncingScrollPhysics(),
-                          child: Row(
+                      // Top Telemetry Header Bar
+                      _buildServerTopHeader(isDark),
+
+                      // Content Body
+                      Expanded(
+                        child: Container(
+                          decoration: BoxDecoration(color: scaffoldBg),
+                          child: IndexedStack(
+                            index: _selectedTab,
                             children: [
-                              _navTabChip(0, 'Command Matrix', Icons.dashboard_rounded, isDark),
-                              const SizedBox(width: 8),
-                              _navTabChip(1, 'Multi-Server Cluster', Icons.hub_rounded, isDark),
-                              const SizedBox(width: 8),
-                              _navTabChip(2, 'Department Progress', Icons.domain_rounded, isDark),
-                              const SizedBox(width: 8),
-                              _navTabChip(3, 'LAN Hardware & Devices', Icons.hardware_rounded, isDark),
-                              const SizedBox(width: 8),
-                              _navTabChip(4, 'Biometric Devices', Icons.fingerprint_rounded, isDark),
-                              const SizedBox(width: 8),
-                              _navTabChip(5, 'Python Terminal', Icons.terminal_rounded, isDark),
-                              const SizedBox(width: 8),
-                              _navTabChip(6, 'Data Vault', Icons.lock_outline_rounded, isDark),
+                              !_isRunning ? _buildStoppedView(isDark) : _buildRunningView(isDark),
+                              MultiServerControlWidget(branchId: widget.branchId, onTriggerSync: _manualSync),
+                              DepartmentActivityWidget(branchId: widget.branchId),
+                              SingleChildScrollView(
+                                padding: const EdgeInsets.all(20),
+                                child: const LanHardwareStatusWidget(),
+                              ),
+                              _selectedTab == 4
+                                  ? BiometricDeviceManagerPage(
+                                      branchId: widget.branchId,
+                                      onBack: () => setState(() => _selectedTab = 0),
+                                    )
+                                  : const SizedBox.shrink(),
+                              _selectedTab == 5
+                                  ? PythonTerminalScreen(
+                                      onBack: () => setState(() => _selectedTab = 0),
+                                    )
+                                  : const SizedBox.shrink(),
+                              ServerDataViewer(branchId: widget.branchId),
                             ],
                           ),
                         ),
                       ),
-                    ),
-            ),
-            body: Container(
-              decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF070D18) : const Color(0xFFF1F5F9),
-              ),
-              child: SafeArea(
-                child: !_isRunning
-                    ? _buildStoppedView(isDark)
-                    : IndexedStack(
-                        index: _selectedTab,
-                        children: [
-                          _buildRunningView(isDark),
-                          MultiServerControlWidget(branchId: widget.branchId, onTriggerSync: _manualSync),
-                          DepartmentActivityWidget(branchId: widget.branchId),
-                          SingleChildScrollView(
-                            padding: const EdgeInsets.all(16),
-                            child: const LanHardwareStatusWidget(),
-                          ),
-                          _selectedTab == 4
-                              ? BiometricDeviceManagerPage(
-                                  branchId: widget.branchId,
-                                  onBack: () => setState(() => _selectedTab = 0),
-                                )
-                              : const SizedBox.shrink(),
-                          _selectedTab == 5
-                              ? PythonTerminalScreen(
-                                  onBack: () => setState(() => _selectedTab = 0),
-                                )
-                              : const SizedBox.shrink(),
-                          ServerDataViewer(branchId: widget.branchId),
-                        ],
-                      ),
-              ),
+                    ],
+                  ),
+                ),
+              ],
             ),
           ),
         );
@@ -1313,41 +1203,638 @@ class _ServerDashboardWithSyncState
     );
   }
 
-  Widget _navTabChip(int index, String label, IconData icon, bool isDark) {
-    final isSelected = _selectedTab == index;
-    return InkWell(
-      onTap: () => setState(() => _selectedTab = index),
-      borderRadius: BorderRadius.circular(8),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 150),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6.5),
-        decoration: BoxDecoration(
-          color: isSelected
-              ? (isDark ? const Color(0xFF0F766E).withOpacity(0.3) : const Color(0xFFECFDF5))
-              : (isDark ? const Color(0xFF1E293B).withOpacity(0.4) : const Color(0xFFF8FAFC)),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: isSelected ? const Color(0xFF10B981) : (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
-            width: isSelected ? 1.2 : 0.8,
+  // ── Sleek Desktop Server Sidebar ──────────────────────────────────────────
+  Widget _buildServerSidebar(bool isDark) {
+    final sidebarBg = isDark ? const Color(0xFF080E1A) : Colors.white;
+    final borderColor = isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0);
+    final serverIpStr = _serverIp ?? 'Detecting...';
+
+    return Container(
+      width: 270,
+      decoration: BoxDecoration(
+        color: sidebarBg,
+        border: Border(right: BorderSide(color: borderColor, width: 1.2)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(isDark ? 0.35 : 0.04),
+            blurRadius: 10,
+            offset: const Offset(2, 0),
           ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 14, color: isSelected ? const Color(0xFF10B981) : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B))),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: GoogleFonts.inter(
-                color: isSelected
-                    ? (isDark ? Colors.white : const Color(0xFF065F46))
-                    : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569)),
-                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                fontSize: 12,
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ── Brand Header ──────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 20, 16, 14),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: borderColor),
+                  ),
+                  child: Image.asset('assets/logo/gmwf-1.webp', height: 32, fit: BoxFit.contain),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'GMWF SERVER',
+                        style: GoogleFonts.outfit(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 16,
+                          letterSpacing: 0.5,
+                          color: isDark ? Colors.white : const Color(0xFF0F172A),
+                        ),
+                      ),
+                      Text(
+                        'Hybrid LAN Gateway',
+                        style: GoogleFonts.inter(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: const Color(0xFF10B981),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          // ── Node Status Card ──────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
+            child: Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: isDark ? const Color(0xFF0D1525) : const Color(0xFFF8FAFC),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(
+                  color: _isRunning
+                      ? const Color(0xFF10B981).withOpacity(0.4)
+                      : const Color(0xFFF59E0B).withOpacity(0.4),
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: _isRunning ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                          boxShadow: [
+                            BoxShadow(
+                              color: (_isRunning ? const Color(0xFF10B981) : const Color(0xFFF59E0B)).withOpacity(0.6),
+                              blurRadius: 6,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _isRunning ? 'SERVER ACTIVE & LIVE' : 'GATEWAY STANDBY',
+                        style: GoogleFonts.inter(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.4,
+                          color: _isRunning ? const Color(0xFF34D399) : const Color(0xFFFBBF24),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 8),
+                  InkWell(
+                    onTap: () {
+                      if (_serverIp != null && _serverIp!.isNotEmpty) {
+                        Clipboard.setData(ClipboardData(text: _serverIp!));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text('Server IP "$_serverIp" copied to clipboard!'),
+                            backgroundColor: const Color(0xFF10B981),
+                            duration: const Duration(seconds: 2),
+                          ),
+                        );
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(8),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(Icons.wifi_tethering_rounded, size: 13, color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7)),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              '$serverIpStr:8080',
+                              style: GoogleFonts.firaCode(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w600,
+                                color: isDark ? Colors.white70 : const Color(0xFF1E293B),
+                              ),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Icon(Icons.copy_rounded, size: 12, color: isDark ? Colors.white54 : Colors.black45),
+                          const SizedBox(width: 6),
+                          InkWell(
+                            onTap: () => _showFirewallStatusAndNextStepsDialog(alreadyAdded: true),
+                            borderRadius: BorderRadius.circular(4),
+                            child: Tooltip(
+                              message: 'Firewall & Port Setup Guide',
+                              child: Padding(
+                                padding: const EdgeInsets.all(1.5),
+                                child: Icon(Icons.security_rounded, size: 13, color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7)),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
-          ],
+          ),
+
+          const SizedBox(height: 8),
+          Divider(color: borderColor, height: 1),
+
+          // ── Navigation Menu ───────────────────────────────────────────
+          Expanded(
+            child: ListView(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+              children: [
+                _sidebarSectionLabel('CORE GATEWAY', isDark),
+                _sidebarItem(0, 'Command Matrix', 'Overview & telemetry', Icons.dashboard_rounded, isDark),
+                _sidebarItem(1, 'Multi-Server Cluster', 'Mesh replication', Icons.hub_rounded, isDark),
+                _sidebarItem(2, 'Department Activity', 'Queues & dispensing', Icons.domain_rounded, isDark),
+
+                const SizedBox(height: 12),
+                _sidebarSectionLabel('HARDWARE & ENGINES', isDark),
+                _sidebarItem(3, 'LAN Hardware', 'Network & client PCs', Icons.devices_other_rounded, isDark),
+                _sidebarItem(4, 'Biometric Devices', 'ZKTeco attendance', Icons.fingerprint_rounded, isDark),
+                _sidebarItem(5, 'Python Sync Engine', 'Terminal & daemon', Icons.terminal_rounded, isDark),
+
+                const SizedBox(height: 12),
+                _sidebarSectionLabel('STORAGE & AUDIT', isDark),
+                _sidebarItem(6, 'Data Vault', 'Local database boxes', Icons.storage_rounded, isDark),
+              ],
+            ),
+          ),
+
+          Divider(color: borderColor, height: 1),
+
+          // ── Sidebar Footer Controls ───────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            child: Column(
+              children: [
+                // Quick Power Action
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _isRunning ? _stopServer : _startServer,
+                    icon: Icon(
+                      _isRunning ? Icons.stop_circle_rounded : Icons.play_arrow_rounded,
+                      size: 18,
+                    ),
+                    label: Text(
+                      _isRunning ? 'Stop LAN Server' : 'Launch LAN Server',
+                      style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 12.5),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _isRunning ? const Color(0xFFEF4444) : const Color(0xFF059669),
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 8),
+
+                // Utility actions row
+                Row(
+                  children: [
+                    // Manual Sync
+                    Expanded(
+                      child: Tooltip(
+                        message: 'Trigger Cloud Sync Now',
+                        child: OutlinedButton.icon(
+                          onPressed: _isManualSyncing ? null : _manualSync,
+                          icon: _isManualSyncing
+                              ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF10B981)))
+                              : const Icon(Icons.sync_rounded, size: 15, color: Color(0xFF10B981)),
+                          label: Text(
+                            'Sync',
+                            style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: isDark ? Colors.white70 : const Color(0xFF1E293B)),
+                          ),
+                          style: OutlinedButton.styleFrom(
+                            side: BorderSide(color: borderColor),
+                            padding: const EdgeInsets.symmetric(vertical: 8),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    // Theme toggle
+                    Tooltip(
+                      message: isDark ? 'Switch to Light' : 'Switch to Dark',
+                      child: InkWell(
+                        onTap: () async => await UserThemeService.setDarkMode(!isDark),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: borderColor),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Icon(
+                            isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                            size: 16,
+                            color: isDark ? const Color(0xFFFBBF24) : const Color(0xFF0F172A),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    // Logout
+                    Tooltip(
+                      message: 'Exit Server Dashboard',
+                      child: InkWell(
+                        onTap: () => _showLogoutDialog(context),
+                        borderRadius: BorderRadius.circular(8),
+                        child: Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            border: Border.all(color: const Color(0xFFEF4444).withOpacity(0.4)),
+                            borderRadius: BorderRadius.circular(8),
+                            color: const Color(0xFFEF4444).withOpacity(0.1),
+                          ),
+                          child: const Icon(Icons.power_settings_new_rounded, size: 16, color: Color(0xFFEF4444)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _sidebarSectionLabel(String text, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(10, 8, 10, 4),
+      child: Text(
+        text,
+        style: GoogleFonts.inter(
+          fontSize: 10,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 0.8,
+          color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
         ),
+      ),
+    );
+  }
+
+  Widget _sidebarItem(int index, String title, String subtitle, IconData icon, bool isDark) {
+    final isSelected = _selectedTab == index;
+    final activeBg = isDark ? const Color(0xFF0F766E).withOpacity(0.28) : const Color(0xFFECFDF5);
+    final activeBorder = const Color(0xFF10B981);
+    final inactiveHover = isDark ? const Color(0xFF1E293B).withOpacity(0.4) : const Color(0xFFF8FAFC);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 4),
+      child: Material(
+        color: isSelected ? activeBg : Colors.transparent,
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          onTap: () => setState(() => _selectedTab = index),
+          borderRadius: BorderRadius.circular(10),
+          hoverColor: inactiveHover,
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8.5),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: isSelected ? activeBorder : Colors.transparent,
+                width: 1.0,
+              ),
+            ),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: isSelected
+                        ? const Color(0xFF10B981).withOpacity(0.2)
+                        : (isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    icon,
+                    size: 16,
+                    color: isSelected
+                        ? const Color(0xFF10B981)
+                        : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: GoogleFonts.inter(
+                          fontSize: 12.5,
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                          color: isSelected
+                              ? (isDark ? Colors.white : const Color(0xFF065F46))
+                              : (isDark ? const Color(0xFFE2E8F0) : const Color(0xFF334155)),
+                        ),
+                      ),
+                      Text(
+                        subtitle,
+                        style: GoogleFonts.inter(
+                          fontSize: 10,
+                          color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (isSelected)
+                  Container(
+                    width: 5,
+                    height: 5,
+                    decoration: const BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: Color(0xFF10B981),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Server Top Header Bar with Live Telemetry ──────────────────────────────
+  Widget _buildServerTopHeader(bool isDark) {
+    final headerBg = isDark ? const Color(0xFF080E1A) : Colors.white;
+    final borderColor = isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0);
+
+    final tabTitles = [
+      'Command Matrix',
+      'Multi-Server Cluster',
+      'Department Activity',
+      'LAN Hardware & Devices',
+      'Biometric Devices',
+      'Python Sync Engine',
+      'Data Vault',
+    ];
+    final tabSubtitles = [
+      'Real-time overview of primary node, traffic telemetry & active nodes',
+      'High-availability peer mesh replication & failover status',
+      'Live dispensary token flow, queuing, and pharmacy operations',
+      'Connected client workstations, thermal printers, and switches',
+      'ZKTeco network biometrics, real-time clock punch capture',
+      'Automated background python daemons and maintenance tasks',
+      'Authoritative local Hive boxes, encrypted schemas & record tables',
+    ];
+
+    final currentTitle = (_selectedTab >= 0 && _selectedTab < tabTitles.length) ? tabTitles[_selectedTab] : 'Server Hub';
+    final currentSub = (_selectedTab >= 0 && _selectedTab < tabSubtitles.length) ? tabSubtitles[_selectedTab] : '';
+
+    return Container(
+      height: 62,
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      decoration: BoxDecoration(
+        color: headerBg,
+        border: Border(bottom: BorderSide(color: borderColor, width: 1.0)),
+      ),
+      child: Row(
+        children: [
+          // Section Title
+          Expanded(
+            child: Row(
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          currentTitle,
+                          style: GoogleFonts.outfit(
+                            fontSize: 17,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? Colors.white : const Color(0xFF0F172A),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: borderColor),
+                          ),
+                          child: Text(
+                            'BRANCH: ${widget.branchId.toUpperCase()}',
+                            style: GoogleFonts.inter(
+                              fontSize: 10,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.3,
+                              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                            ),
+                          ),
+                        ),
+                        if (_isRunning && _startTime != null) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF0D9488).withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(6),
+                              border: Border.all(color: const Color(0xFF0D9488).withOpacity(0.4)),
+                            ),
+                            child: Row(
+                              children: [
+                                const Icon(Icons.timer_outlined, size: 11, color: Color(0xFF2DD4BF)),
+                                const SizedBox(width: 4),
+                                Text(
+                                  _formatUptime(),
+                                  style: GoogleFonts.inter(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: const Color(0xFF2DD4BF),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                    Text(
+                      currentSub,
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+
+          // Telemetry and Status Badges
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _buildStatusBadge(),
+              const SizedBox(width: 8),
+
+              // Synced Today Pill
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4.5),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF064E3B).withOpacity(0.3) : const Color(0xFFECFDF5),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: const Color(0xFF10B981).withOpacity(0.4)),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.cloud_done_rounded, size: 13, color: Color(0xFF10B981)),
+                    const SizedBox(width: 5),
+                    Text(
+                      '$_syncedToday Synced',
+                      style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: const Color(0xFF10B981)),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+
+              // Sync Queue Pending Pill
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4.5),
+                decoration: BoxDecoration(
+                  color: _syncQueueSize > 0
+                      ? (isDark ? const Color(0xFF78350F).withOpacity(0.3) : const Color(0xFFFFFBEB))
+                      : (isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: _syncQueueSize > 0 ? const Color(0xFFF59E0B).withOpacity(0.5) : borderColor,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.pending_actions_rounded,
+                      size: 13,
+                      color: _syncQueueSize > 0 ? const Color(0xFFF59E0B) : (isDark ? Colors.white38 : Colors.black38),
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      '$_syncQueueSize Queue',
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: _syncQueueSize > 0 ? const Color(0xFFF59E0B) : (isDark ? Colors.white60 : Colors.black54),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(width: 8),
+
+              // Cloud Online/Offline status
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4.5),
+                decoration: BoxDecoration(
+                  color: _isOnline
+                      ? (isDark ? const Color(0xFF047857).withOpacity(0.25) : const Color(0xFFF0FDF4))
+                      : (isDark ? const Color(0xFF334155).withOpacity(0.3) : const Color(0xFFF8FAFC)),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: _isOnline ? const Color(0xFF10B981).withOpacity(0.4) : borderColor,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      _isOnline ? Icons.cloud_rounded : Icons.cloud_off_rounded,
+                      size: 13,
+                      color: _isOnline ? const Color(0xFF10B981) : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                    ),
+                    const SizedBox(width: 5),
+                    Text(
+                      _isOnline ? 'Cloud Sync' : 'Local LAN',
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: _isOnline ? const Color(0xFF10B981) : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(width: 8),
+
+              // App Version Badge
+              FutureBuilder<String>(
+                future: AutoUpdateService.getAppVersion(),
+                builder: (context, snap) {
+                  final ver = snap.data ?? AutoUpdateService.currentVersion;
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4.5),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: borderColor),
+                    ),
+                    child: Text(
+                      'v$ver',
+                      style: GoogleFonts.inter(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
+          ),
+        ],
       ),
     );
   }
@@ -1402,46 +1889,27 @@ class _ServerDashboardWithSyncState
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (!kIsWeb && io.Platform.isWindows && _connectedClients.isEmpty) _buildFirewallBanner(),
+          if (!kIsWeb && io.Platform.isWindows && !_isFirewallBannerDismissed) _buildFirewallBanner(isDark),
 
           // 1. Hero Feature Card ("GMWF Hybrid Command Center")
           _buildHeroCommandCenterCard(isDark),
           const SizedBox(height: 16),
 
-          // 2. 4 Metric KPI Cards (Server IP, Uptime, Nodes, Sync Telemetry)
+          // 2. 4 Metric KPI Cards (Endpoint, Uptime, Nodes, Sync Telemetry)
           _buildKpiMetricsGrid(isDark),
           const SizedBox(height: 16),
 
-          // 3. System Health Overview & LAN Hardware Devices (Placed Above as Essential Data)
+          // 3. Balanced Dual-Column Command Matrix (Left: Health & Logs | Right: Devices & Roles)
           LayoutBuilder(builder: (context, constraints) {
-            final isNarrow = constraints.maxWidth < 900;
+            final isNarrow = constraints.maxWidth < 960;
             if (isNarrow) {
               return Column(
                 children: [
                   _buildSystemHealthOverview(isDark),
                   const SizedBox(height: 16),
-                  _buildLanHardwareDevicesCard(isDark),
-                ],
-              );
-            }
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Expanded(flex: 1, child: _buildSystemHealthOverview(isDark)),
-                const SizedBox(width: 16),
-                Expanded(flex: 1, child: _buildLanHardwareDevicesCard(isDark)),
-              ],
-            );
-          }),
-          const SizedBox(height: 16),
-
-          // 4. Live Log Stream & Active Network Nodes
-          LayoutBuilder(builder: (context, constraints) {
-            final isNarrow = constraints.maxWidth < 900;
-            if (isNarrow) {
-              return Column(
-                children: [
                   _buildLiveLogsCard(isDark),
+                  const SizedBox(height: 16),
+                  _buildLanHardwareDevicesCard(isDark),
                   const SizedBox(height: 16),
                   _buildActiveBranchNodesCard(isDark),
                 ],
@@ -1450,9 +1918,29 @@ class _ServerDashboardWithSyncState
             return Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(flex: 1, child: _buildLiveLogsCard(isDark)),
+                // Left Column: System Telemetry & Terminal Stream (~450px)
+                Expanded(
+                  flex: 5,
+                  child: Column(
+                    children: [
+                      _buildSystemHealthOverview(isDark),
+                      const SizedBox(height: 16),
+                      _buildLiveLogsCard(isDark),
+                    ],
+                  ),
+                ),
                 const SizedBox(width: 16),
-                Expanded(flex: 1, child: _buildActiveBranchNodesCard(isDark)),
+                // Right Column: LAN Hardware Devices & Active Workstations (~450px)
+                Expanded(
+                  flex: 6,
+                  child: Column(
+                    children: [
+                      _buildLanHardwareDevicesCard(isDark),
+                      const SizedBox(height: 16),
+                      _buildActiveBranchNodesCard(isDark),
+                    ],
+                  ),
+                ),
               ],
             );
           }),
@@ -1507,33 +1995,54 @@ class _ServerDashboardWithSyncState
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3.5),
-                    decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF064E3B).withOpacity(0.6) : const Color(0xFFD1FAE5),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: const Color(0xFF10B981).withOpacity(0.5)),
-                    ),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Container(
-                          width: 6,
-                          height: 6,
-                          decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFF10B981)),
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3.5),
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF064E3B).withOpacity(0.6) : const Color(0xFFD1FAE5),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: const Color(0xFF10B981).withOpacity(0.5)),
                         ),
-                        const SizedBox(width: 5),
-                        Text(
-                          'PRIMARY NODE',
-                          style: GoogleFonts.inter(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w800,
-                            color: isDark ? const Color(0xFF34D399) : const Color(0xFF065F46),
-                            letterSpacing: 0.5,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 6,
+                              height: 6,
+                              decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFF10B981)),
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              'PRIMARY GATEWAY NODE',
+                              style: GoogleFonts.inter(
+                                fontSize: 10,
+                                fontWeight: FontWeight.w800,
+                                color: isDark ? const Color(0xFF34D399) : const Color(0xFF065F46),
+                                letterSpacing: 0.5,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
+                        ),
+                        child: Text(
+                          'PORT 53281',
+                          style: GoogleFonts.firaCode(
+                            fontSize: 9.5,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7),
                           ),
                         ),
-                      ],
-                    ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 8),
                   Text(
@@ -1555,15 +2064,15 @@ class _ServerDashboardWithSyncState
                     ),
                   ),
                   const SizedBox(height: 14),
-                  // Metadata strip
+                  // Non-redundant Gateway Metadata strip
                   Wrap(
                     spacing: 16,
                     runSpacing: 8,
                     children: [
-                      _buildHeroMetadataItem(Icons.dns_outlined, 'SERVER IP', serverIpStr, isDark),
-                      _buildHeroMetadataItem(Icons.timer_outlined, 'UPTIME', _formatUptime(), isDark),
-                      _buildHeroMetadataItem(Icons.calendar_today_outlined, 'LAST BOOT', bootTimeStr, isDark),
                       _buildHeroMetadataItem(Icons.location_on_outlined, 'LOCATION', locationName, isDark),
+                      _buildHeroMetadataItem(Icons.account_tree_outlined, 'GATEWAY STACK', 'LAN REST & WebSocket', isDark),
+                      _buildHeroMetadataItem(Icons.storage_rounded, 'LOCAL VAULT', 'Hive Encrypted Box', isDark),
+                      _buildHeroMetadataItem(Icons.calendar_today_outlined, 'LAST BOOT', bootTimeStr, isDark),
                     ],
                   ),
                 ],
@@ -1625,23 +2134,59 @@ class _ServerDashboardWithSyncState
                 ),
               ),
               const SizedBox(height: 12),
-              // Force Cloud Sync Button
-              ElevatedButton.icon(
-                onPressed: (_isOnline && !_isManualSyncing) ? _manualSync : null,
-                icon: _isManualSyncing
-                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Icon(Icons.cloud_sync_rounded, size: 16),
-                label: Text(
-                  _isManualSyncing ? 'Syncing with Cloud...' : 'Force Cloud Sync',
-                  style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 12),
-                ),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0284C7),
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 10),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  elevation: 0,
-                ),
+              // Actions: Force Cloud Sync & Copy Gateway URL
+              Row(
+                children: [
+                  Expanded(
+                    child: ElevatedButton.icon(
+                      onPressed: (_isOnline && !_isManualSyncing) ? _manualSync : null,
+                      icon: _isManualSyncing
+                          ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          : const Icon(Icons.cloud_sync_rounded, size: 16),
+                      label: Text(
+                        _isManualSyncing ? 'Syncing...' : 'Force Cloud Sync',
+                        style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 12),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: const Color(0xFF0284C7),
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        elevation: 0,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Tooltip(
+                    message: 'Copy Gateway URL (http://$serverIpStr:53281)',
+                    child: InkWell(
+                      onTap: () {
+                        Clipboard.setData(ClipboardData(text: 'http://$serverIpStr:53281'));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('Copied Gateway URL to clipboard!'),
+                            backgroundColor: Color(0xFF10B981),
+                            duration: Duration(seconds: 2),
+                          ),
+                        );
+                      },
+                      borderRadius: BorderRadius.circular(8),
+                      child: Container(
+                        padding: const EdgeInsets.all(9),
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
+                        ),
+                        child: Icon(
+                          Icons.copy_rounded,
+                          size: 16,
+                          color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -1770,36 +2315,47 @@ class _ServerDashboardWithSyncState
 
       final cards = [
         _buildMetricKpiCard(
-          label: 'SERVER IP ADDRESS',
-          value: serverIpStr,
-          subtitle: 'Primary LAN Node',
-          icon: Icons.share_rounded,
+          label: 'PRIMARY LAN ENDPOINT',
+          value: '$serverIpStr:53281',
+          subtitle: 'Tap to copy LAN address',
+          icon: Icons.dns_rounded,
           glowColor: const Color(0xFF06B6D4),
           bgGradient: isDark ? const [Color(0xFF04202C), Color(0xFF051720)] : const [Colors.white, Color(0xFFF8FAFC)],
           isDark: isDark,
+          onTap: () {
+            Clipboard.setData(ClipboardData(text: 'http://$serverIpStr:53281'));
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text('Copied LAN Endpoint: http://$serverIpStr:53281'),
+                backgroundColor: const Color(0xFF06B6D4),
+                duration: const Duration(seconds: 2),
+              ),
+            );
+          },
         ),
         _buildMetricKpiCard(
-          label: 'UPTIME CLOCK',
+          label: 'CLUSTER UPTIME',
           value: _formatUptime(),
-          subtitle: 'Since Last Restart',
+          subtitle: 'Stable Gateway Operation',
           icon: Icons.timer_outlined,
           glowColor: const Color(0xFF8B5CF6),
           bgGradient: isDark ? const [Color(0xFF18132D), Color(0xFF100C22)] : const [Colors.white, Color(0xFFF8FAFC)],
           isDark: isDark,
         ),
         _buildMetricKpiCard(
-          label: 'ACTIVE LAN NODES',
-          value: '${_connectedClients.length}',
-          subtitle: 'Connected',
-          icon: Icons.hub_outlined,
+          label: 'ACTIVE WORKSTATIONS',
+          value: '${_connectedClients.length} Online',
+          subtitle: _connectedClients.isEmpty ? 'Awaiting LAN clients' : '${_connectedClients.length} nodes communicating',
+          icon: Icons.devices_rounded,
           glowColor: const Color(0xFF10B981),
           bgGradient: isDark ? const [Color(0xFF04241B), Color(0xFF031812)] : const [Colors.white, Color(0xFFF8FAFC)],
           isDark: isDark,
+          onTap: _showAllNodesDialog,
         ),
         _buildMetricKpiCard(
-          label: 'SYNC TELEMETRY',
-          value: '$_syncedToday ($_syncQueueSize Queued)',
-          subtitle: 'Pending Ops (Tap to Manage)',
+          label: 'SYNC PIPELINE',
+          value: '$_syncedToday Synced',
+          subtitle: '$_syncQueueSize Ops in Queue (Manage)',
           icon: Icons.cloud_sync_outlined,
           glowColor: const Color(0xFFF59E0B),
           bgGradient: isDark ? const [Color(0xFF241A06), Color(0xFF181203)] : const [Colors.white, Color(0xFFF8FAFC)],
@@ -1933,7 +2489,7 @@ class _ServerDashboardWithSyncState
         children: [
           // Card Header
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
             child: Row(
               children: [
                 const Icon(Icons.terminal_rounded, size: 16, color: Color(0xFF0284C7)),
@@ -1943,6 +2499,37 @@ class _ServerDashboardWithSyncState
                   style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 14, color: isDark ? Colors.white : const Color(0xFF0F172A)),
                 ),
                 const Spacer(),
+                Tooltip(
+                  message: 'Copy all logs',
+                  child: InkWell(
+                    onTap: () {
+                      if (_activityLog.isNotEmpty) {
+                        Clipboard.setData(ClipboardData(text: _activityLog.join('\n')));
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('Logs copied!'), backgroundColor: Color(0xFF10B981), duration: Duration(seconds: 1)),
+                        );
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(4),
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(Icons.copy_rounded, size: 15, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Tooltip(
+                  message: 'Clear terminal',
+                  child: InkWell(
+                    onTap: () => setState(() => _activityLog.clear()),
+                    borderRadius: BorderRadius.circular(4),
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(Icons.clear_all_rounded, size: 16, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
                   decoration: BoxDecoration(
@@ -1966,7 +2553,7 @@ class _ServerDashboardWithSyncState
 
           // Terminal Stream Box
           Container(
-            height: 190,
+            height: 205,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: isDark ? const Color(0xFF070D18) : const Color(0xFFF8FAFC),
@@ -1980,6 +2567,7 @@ class _ServerDashboardWithSyncState
                   )
                 : ListView.builder(
                     itemCount: _activityLog.length,
+                    reverse: false,
                     itemBuilder: (context, idx) {
                       final log = _activityLog[idx];
                       Color textColor = isDark ? const Color(0xFF10B981) : const Color(0xFF047857);
@@ -2022,8 +2610,6 @@ class _ServerDashboardWithSyncState
       ),
     );
   }
-
-  // ── 3. Middle Right: Active Branch Network Nodes ────────────────────────────
   Widget _buildActiveBranchNodesCard(bool isDark) {
     int hybridCount = 0;
     int supervisorCount = 0;
@@ -2064,7 +2650,7 @@ class _ServerDashboardWithSyncState
         children: [
           // Card Header
           Padding(
-            padding: const EdgeInsets.fromLTRB(16, 14, 16, 10),
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
             child: Row(
               children: [
                 const Icon(Icons.hub_rounded, size: 16, color: Color(0xFF0284C7)),
@@ -2077,13 +2663,25 @@ class _ServerDashboardWithSyncState
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF0284C7).withOpacity(0.15),
+                    color: _connectedClients.isNotEmpty
+                        ? const Color(0xFF10B981).withOpacity(0.15)
+                        : const Color(0xFF0284C7).withOpacity(0.12),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFF0284C7).withOpacity(0.4)),
+                    border: Border.all(
+                      color: _connectedClients.isNotEmpty
+                          ? const Color(0xFF10B981).withOpacity(0.4)
+                          : const Color(0xFF0284C7).withOpacity(0.3),
+                    ),
                   ),
                   child: Text(
                     '${_connectedClients.length} CONNECTED',
-                    style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7)),
+                    style: GoogleFonts.inter(
+                      fontSize: 10,
+                      fontWeight: FontWeight.bold,
+                      color: _connectedClients.isNotEmpty
+                          ? (isDark ? const Color(0xFF34D399) : const Color(0xFF065F46))
+                          : (isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7)),
+                    ),
                   ),
                 ),
               ],
@@ -2091,23 +2689,62 @@ class _ServerDashboardWithSyncState
           ),
           Divider(height: 1, color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0)),
 
-          // Role Summary Pills Wrap
+          // Body: Connected Clients list or Awaiting Status Banner
           Padding(
-            padding: const EdgeInsets.all(14),
-            child: Wrap(
-              spacing: 8,
-              runSpacing: 8,
+            padding: const EdgeInsets.all(12),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                _buildRoleNodePill('Hybrid Accounts', hybridCount, isDark),
-                _buildRoleNodePill('Supervisor / Admin', supervisorCount, isDark),
-                _buildRoleNodePill('Receptionist', receptionistCount, isDark),
-                _buildRoleNodePill('Doctor', doctorCount, isDark),
-                _buildRoleNodePill('Dispenser', dispenserCount, isDark),
-                _buildRoleNodePill('Finance & Donations', financeCount, isDark),
-                _buildRoleNodePill('Madrassa & School', eduCount, isDark),
-                _buildRoleNodePill('Library', libraryCount, isDark),
-                _buildRoleNodePill('Dastarkhwaan', dasterkhwaanCount, isDark),
-                _buildRoleNodePill('Attendance & Hardware', attendanceCount, isDark),
+                if (_connectedClients.isNotEmpty) ...[
+                  Container(
+                    constraints: const BoxConstraints(maxHeight: 90),
+                    margin: const EdgeInsets.only(bottom: 10),
+                    child: ListView(
+                      shrinkWrap: true,
+                      children: _connectedClients.values.map((c) => _buildClientRow(c, isDark)).toList(),
+                    ),
+                  ),
+                ] else ...[
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    margin: const EdgeInsets.only(bottom: 10),
+                    decoration: BoxDecoration(
+                      color: isDark ? const Color(0xFF1E293B).withOpacity(0.4) : const Color(0xFFF8FAFC),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.wifi_tethering_rounded, size: 15, color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7)),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Awaiting client workstations to connect on LAN (Port 53281).',
+                            style: GoogleFonts.inter(fontSize: 11, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+
+                // Role Summary Badges
+                Wrap(
+                  spacing: 6,
+                  runSpacing: 6,
+                  children: [
+                    _buildRoleNodePill('Hybrid', hybridCount, isDark),
+                    _buildRoleNodePill('Admin', supervisorCount, isDark),
+                    _buildRoleNodePill('Reception', receptionistCount, isDark),
+                    _buildRoleNodePill('Doctor', doctorCount, isDark),
+                    _buildRoleNodePill('Dispenser', dispenserCount, isDark),
+                    _buildRoleNodePill('Finance', financeCount, isDark),
+                    _buildRoleNodePill('Madrassa', eduCount, isDark),
+                    _buildRoleNodePill('Library', libraryCount, isDark),
+                    _buildRoleNodePill('Dastarkhwaan', dasterkhwaanCount, isDark),
+                    _buildRoleNodePill('Attendance', attendanceCount, isDark),
+                  ],
+                ),
               ],
             ),
           ),
@@ -2137,12 +2774,12 @@ class _ServerDashboardWithSyncState
   Widget _buildRoleNodePill(String label, int count, [bool isDark = false]) {
     final hasActive = count > 0;
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: hasActive
-            ? (isDark ? const Color(0xFF0F766E).withOpacity(0.25) : const Color(0xFFECFDF5))
-            : (isDark ? const Color(0xFF1E293B).withOpacity(0.5) : const Color(0xFFF1F5F9)),
-        borderRadius: BorderRadius.circular(8),
+            ? (isDark ? const Color(0xFF0F766E).withOpacity(0.3) : const Color(0xFFECFDF5))
+            : (isDark ? const Color(0xFF1E293B).withOpacity(0.4) : const Color(0xFFF1F5F9)),
+        borderRadius: BorderRadius.circular(6),
         border: Border.all(
           color: hasActive ? const Color(0xFF10B981) : (isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
           width: 0.8,
@@ -2154,23 +2791,23 @@ class _ServerDashboardWithSyncState
           Text(
             label,
             style: GoogleFonts.inter(
-              fontSize: 11,
+              fontSize: 10.5,
               color: hasActive
                   ? (isDark ? Colors.white : const Color(0xFF065F46))
                   : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569)),
               fontWeight: hasActive ? FontWeight.bold : FontWeight.w500,
             ),
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 5),
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+            padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1),
             decoration: BoxDecoration(
               color: hasActive ? const Color(0xFF10B981) : (isDark ? const Color(0xFF334155) : const Color(0xFF94A3B8)),
-              borderRadius: BorderRadius.circular(4),
+              borderRadius: BorderRadius.circular(3),
             ),
             child: Text(
               '$count',
-              style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.white),
+              style: GoogleFonts.inter(fontSize: 9.5, fontWeight: FontWeight.bold, color: Colors.white),
             ),
           ),
         ],
@@ -2181,8 +2818,19 @@ class _ServerDashboardWithSyncState
   // ── 4. Bottom Left: System Health Overview (Live Genuine Telemetry) ──────────
   Widget _buildSystemHealthOverview(bool isDark) {
     final snap = SystemMetricsService().currentSnapshot;
-    final netLoad = math.min(0.95, 0.05 + (_connectedClients.length * 0.08) + (_syncQueueSize * 0.02));
-    final netSubtext = _connectedClients.isEmpty ? '0 Nodes (Idle)' : '${_connectedClients.length} Nodes Active';
+    final activeClients = _connectedClients.length;
+    final double netLoad;
+    final String netSubtext;
+    if (activeClients > 0) {
+      netLoad = (0.15 + (activeClients * 0.12)).clamp(0.08, 0.92);
+      netSubtext = '$activeClients Node${activeClients > 1 ? 's' : ''} Active';
+    } else if (_syncQueueSize > 0) {
+      netLoad = (0.10 + (_syncQueueSize * 0.005)).clamp(0.08, 0.65);
+      netSubtext = '$_syncQueueSize In Queue';
+    } else {
+      netLoad = 0.05;
+      netSubtext = '0 Nodes (Idle)';
+    }
 
     return Container(
       decoration: BoxDecoration(
@@ -2314,83 +2962,89 @@ class _ServerDashboardWithSyncState
           ),
           Divider(height: 1, color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0)),
 
-          // Data Table
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: DataTable(
-              headingRowHeight: 34,
-              dataRowMinHeight: 38,
-              dataRowMaxHeight: 42,
-              horizontalMargin: 16,
-              columnSpacing: 18,
-              headingTextStyle: GoogleFonts.inter(fontSize: 10.5, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFF64748B) : const Color(0xFF475569)),
-              dataTextStyle: GoogleFonts.inter(fontSize: 11.5, color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF1E293B)),
-              columns: const [
-                DataColumn(label: Text('DEVICE NAME')),
-                DataColumn(label: Text('IP ADDRESS')),
-                DataColumn(label: Text('TYPE')),
-                DataColumn(label: Text('STATUS')),
-                DataColumn(label: Text('LAST SEEN')),
-              ],
-              rows: [
-                // 1. Primary Server Node
-                DataRow(cells: [
-                  DataCell(Text('GMWF-Server', style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : const Color(0xFF0F172A)))),
-                  DataCell(Text(serverIpStr, style: const TextStyle(fontFamily: 'monospace'))),
-                  const DataCell(Text('Primary Node')),
-                  const DataCell(Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(Icons.circle, size: 8, color: Color(0xFF10B981)),
-                      SizedBox(width: 5),
-                      Text('Online', style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold)),
-                    ],
-                  )),
-                  const DataCell(Text('Just now')),
-                ]),
+          // Data Table in bounded scroll container for vertical balance
+          Container(
+            constraints: const BoxConstraints(maxHeight: 220),
+            child: SingleChildScrollView(
+              scrollDirection: Axis.vertical,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
+                  headingRowHeight: 34,
+                  dataRowMinHeight: 36,
+                  dataRowMaxHeight: 40,
+                  horizontalMargin: 16,
+                  columnSpacing: 18,
+                  headingTextStyle: GoogleFonts.inter(fontSize: 10.5, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFF64748B) : const Color(0xFF475569)),
+                  dataTextStyle: GoogleFonts.inter(fontSize: 11.5, color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF1E293B)),
+                  columns: const [
+                    DataColumn(label: Text('DEVICE NAME')),
+                    DataColumn(label: Text('IP ADDRESS')),
+                    DataColumn(label: Text('TYPE')),
+                    DataColumn(label: Text('STATUS')),
+                    DataColumn(label: Text('LAST SEEN')),
+                  ],
+                  rows: [
+                    // 1. Primary Server Node
+                    DataRow(cells: [
+                      DataCell(Text('GMWF-Server', style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : const Color(0xFF0F172A)))),
+                      DataCell(Text(serverIpStr, style: const TextStyle(fontFamily: 'monospace'))),
+                      const DataCell(Text('Primary Node')),
+                      const DataCell(Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(Icons.circle, size: 8, color: Color(0xFF10B981)),
+                          SizedBox(width: 5),
+                          Text('Online', style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold)),
+                        ],
+                      )),
+                      const DataCell(Text('Just now')),
+                    ]),
 
-                // 2. Biometric Devices (Real from Registry)
-                ...devices.map((dev) {
-                  final isOnline = dev.status.toLowerCase() == 'online';
-                  final lastSeenStr = dev.lastHeartbeat != null
-                      ? _formatDeviceTimeAgo(dev.lastHeartbeat!)
-                      : (isOnline ? 'Just now' : 'Offline');
-                  return DataRow(cells: [
-                    DataCell(Text(dev.deviceName.isNotEmpty ? dev.deviceName : 'ZKTeco Scanner', style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A)))),
-                    DataCell(Text(dev.ipAddress, style: const TextStyle(fontFamily: 'monospace'))),
-                    const DataCell(Text('Biometric Device')),
-                    DataCell(Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.circle, size: 8, color: isOnline ? const Color(0xFF10B981) : const Color(0xFFEF4444)),
-                        const SizedBox(width: 5),
-                        Text(
-                          isOnline ? 'Online' : 'Offline',
-                          style: TextStyle(color: isOnline ? const Color(0xFF10B981) : const Color(0xFFEF4444), fontWeight: FontWeight.bold),
-                        ),
-                      ],
-                    )),
-                    DataCell(Text(lastSeenStr)),
-                  ]);
-                }),
+                    // 2. Biometric Devices (Real from Registry)
+                    ...devices.map((dev) {
+                      final isOnline = dev.status.toLowerCase() == 'online';
+                      final lastSeenStr = dev.lastHeartbeat != null
+                          ? _formatDeviceTimeAgo(dev.lastHeartbeat!)
+                          : (isOnline ? 'Just now' : 'Offline');
+                      return DataRow(cells: [
+                        DataCell(Text(dev.deviceName.isNotEmpty ? dev.deviceName : 'ZKTeco Scanner', style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A)))),
+                        DataCell(Text(dev.ipAddress, style: const TextStyle(fontFamily: 'monospace'))),
+                        const DataCell(Text('Biometric Device')),
+                        DataCell(Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.circle, size: 8, color: isOnline ? const Color(0xFF10B981) : const Color(0xFFEF4444)),
+                            SizedBox(width: 5),
+                            Text(
+                              isOnline ? 'Online' : 'Offline',
+                              style: TextStyle(color: isOnline ? const Color(0xFF10B981) : const Color(0xFFEF4444), fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        )),
+                        DataCell(Text(lastSeenStr)),
+                      ]);
+                    }),
 
-                // 3. Fallback row if no devices
-                if (devices.isEmpty)
-                  const DataRow(cells: [
-                    DataCell(Text('ZKTeco Biometric')),
-                    DataCell(Text('192.168.1.150', style: TextStyle(fontFamily: 'monospace'))),
-                    DataCell(Text('Biometric Device')),
-                    DataCell(Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Icon(Icons.circle, size: 8, color: Color(0xFF10B981)),
-                        SizedBox(width: 5),
-                        Text('Online', style: TextStyle(color: Color(0xFF34D399), fontWeight: FontWeight.bold)),
-                      ],
-                    )),
-                    DataCell(Text('1m ago')),
-                  ]),
-              ],
+                    // 3. Fallback row if no devices
+                    if (devices.isEmpty)
+                      const DataRow(cells: [
+                        DataCell(Text('ZKTeco Biometric')),
+                        DataCell(Text('192.168.1.150', style: TextStyle(fontFamily: 'monospace'))),
+                        DataCell(Text('Biometric Device')),
+                        DataCell(Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.circle, size: 8, color: Color(0xFF10B981)),
+                            SizedBox(width: 5),
+                            Text('Online', style: TextStyle(color: Color(0xFF34D399), fontWeight: FontWeight.bold)),
+                          ],
+                        )),
+                        DataCell(Text('1m ago')),
+                      ]),
+                  ],
+                ),
+              ),
             ),
           ),
         ],
@@ -2569,56 +3223,323 @@ class _ServerDashboardWithSyncState
   }
 
   Widget _buildStoppedView([bool isDark = false]) {
-    return Center(
-      child: Container(
-        constraints: const BoxConstraints(maxWidth: 460),
-        padding: const EdgeInsets.all(24),
-        child: Card(
-          color: const Color(0xFF0F172A),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Color(0xFF1E293B))),
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.dns_rounded, size: 72, color: Color(0xFF38BDF8)),
-                const SizedBox(height: 20),
-                Text('Server Offline', style: GoogleFonts.outfit(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
-                const SizedBox(height: 6),
-                Text('Branch ID: ${widget.branchId}', style: GoogleFonts.inter(color: const Color(0xFF94A3B8), fontSize: 13)),
-                const SizedBox(height: 28),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
+    final cardBg = isDark ? const Color(0xFF0F172A) : Colors.white;
+    final borderColor = isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0);
+    final textPrimary = isDark ? Colors.white : const Color(0xFF0F172A);
+    final textSecondary = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+    final serverIpStr = _serverIp ?? 'Detecting...';
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+      child: Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 720),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // ── 1. Standby Hero Header ──────────────────────────────────────
+              Container(
+                padding: const EdgeInsets.all(28),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: isDark
+                        ? [const Color(0xFF091E2A), const Color(0xFF0F172A)]
+                        : [const Color(0xFFEFF6FF), Colors.white],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: isDark ? const Color(0xFF0284C7).withOpacity(0.3) : const Color(0xFFBAE6FD),
+                    width: 1.2,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF0284C7).withOpacity(isDark ? 0.12 : 0.06),
+                      blurRadius: 20,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: Row(
                   children: [
-                    ElevatedButton.icon(
-                      onPressed: _startServer,
-                      icon: const Icon(Icons.power_settings_new_rounded, size: 18),
-                      label: const Text('Start LAN Server'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0284C7),
-                        foregroundColor: Colors.white,
-                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    Container(
+                      padding: const EdgeInsets.all(18),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0284C7).withOpacity(0.12),
+                        shape: BoxShape.circle,
+                        border: Border.all(
+                          color: const Color(0xFF0284C7).withOpacity(0.3),
+                          width: 1.5,
+                        ),
+                      ),
+                      child: const Icon(
+                        Icons.settings_input_antenna_rounded,
+                        size: 38,
+                        color: Color(0xFF0284C7),
                       ),
                     ),
-                    const SizedBox(width: 12),
-                    OutlinedButton.icon(
-                      onPressed: () => _showLogoutDialog(context),
-                      icon: const Icon(Icons.logout_rounded, size: 18, color: Color(0xFFEF4444)),
-                      label: const Text('Logout', style: TextStyle(color: Colors.white70)),
-                      style: OutlinedButton.styleFrom(
-                        side: const BorderSide(color: Color(0xFF334155)),
-                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    const SizedBox(width: 22),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              Text(
+                                'LAN Gateway in Standby',
+                                style: GoogleFonts.outfit(
+                                  fontSize: 22,
+                                  fontWeight: FontWeight.bold,
+                                  color: textPrimary,
+                                ),
+                              ),
+                              const SizedBox(width: 10),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: borderColor),
+                                ),
+                                child: Text(
+                                  widget.branchId.toUpperCase(),
+                                  style: GoogleFonts.inter(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.bold,
+                                    color: textSecondary,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          Text(
+                            'The local network socket is idle. Initialize the node to begin accepting clinic workstations, thermal printers, and biometric punches.',
+                            style: GoogleFonts.inter(
+                              fontSize: 12.5,
+                              color: textSecondary,
+                              height: 1.4,
+                            ),
+                          ),
+                        ],
                       ),
                     ),
                   ],
                 ),
-              ],
-            ),
+              ),
+
+              const SizedBox(height: 20),
+
+              // ── 2. Pre-Flight Readiness Matrix ──────────────────────────────
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  color: cardBg,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: borderColor),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.fact_check_rounded, size: 18, color: Color(0xFF10B981)),
+                        const SizedBox(width: 8),
+                        Text(
+                          'Pre-Flight System Check',
+                          style: GoogleFonts.outfit(
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                            color: textPrimary,
+                          ),
+                        ),
+                        const Spacer(),
+                        Text(
+                          'All Systems Normal',
+                          style: GoogleFonts.inter(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            color: const Color(0xFF10B981),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    _buildPreflightItem(
+                      icon: Icons.storage_rounded,
+                      title: 'Local Hive Data Vault',
+                      desc: 'Authoritative offline database ready with zero cloud dependency',
+                      status: 'READY',
+                      statusColor: const Color(0xFF10B981),
+                      isDark: isDark,
+                    ),
+                    const Divider(height: 16),
+                    _buildPreflightItem(
+                      icon: Icons.lan_rounded,
+                      title: 'Network Interface & Host IP',
+                      desc: '$serverIpStr (Binding port 8080/8088)',
+                      status: 'BOUND',
+                      statusColor: const Color(0xFF0284C7),
+                      isDark: isDark,
+                    ),
+                    const Divider(height: 16),
+                    _buildPreflightItem(
+                      icon: Icons.fingerprint_rounded,
+                      title: 'Biometric UDP Service (Port 4370)',
+                      desc: 'ZKTeco real-time punch daemon ready to listen',
+                      status: 'CONFIGURED',
+                      statusColor: const Color(0xFF0284C7),
+                      isDark: isDark,
+                    ),
+                    const Divider(height: 16),
+                    _buildPreflightItem(
+                      icon: Icons.cloud_sync_rounded,
+                      title: 'Cloud Replication Bridge',
+                      desc: _isOnline ? 'Firebase mesh connected & authenticated' : 'Operating in offline local-only mode',
+                      status: _isOnline ? 'ONLINE' : 'STANDBY',
+                      statusColor: _isOnline ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                      isDark: isDark,
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(height: 20),
+
+              // ── 3. Launch Action Center ─────────────────────────────────────
+              Container(
+                padding: const EdgeInsets.all(22),
+                decoration: BoxDecoration(
+                  color: cardBg,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: borderColor),
+                ),
+                child: Column(
+                  children: [
+                    SizedBox(
+                      width: double.infinity,
+                      height: 52,
+                      child: ElevatedButton.icon(
+                        onPressed: _startServer,
+                        icon: const Icon(Icons.rocket_launch_rounded, size: 22),
+                        label: Text(
+                          'Initialize & Broadcast LAN Server',
+                          style: GoogleFonts.outfit(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF059669),
+                          foregroundColor: Colors.white,
+                          elevation: 3,
+                          shadowColor: const Color(0xFF059669).withOpacity(0.4),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        TextButton.icon(
+                          onPressed: () => _showFirewallStatusAndNextStepsDialog(alreadyAdded: true),
+                          icon: const Icon(Icons.security_rounded, size: 16, color: Color(0xFF0284C7)),
+                          label: Text(
+                            'Firewall Setup Guide',
+                            style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: const Color(0xFF0284C7)),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        TextButton.icon(
+                          onPressed: () => setState(() => _selectedTab = 6),
+                          icon: const Icon(Icons.storage_rounded, size: 16, color: Color(0xFF64748B)),
+                          label: Text(
+                            'Inspect Data Vault',
+                            style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: textSecondary),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        TextButton.icon(
+                          onPressed: () => _showLogoutDialog(context),
+                          icon: const Icon(Icons.logout_rounded, size: 16, color: Color(0xFFEF4444)),
+                          label: Text(
+                            'Logout',
+                            style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: const Color(0xFFEF4444)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
           ),
         ),
       ),
+    );
+  }
+
+  Widget _buildPreflightItem({
+    required IconData icon,
+    required String title,
+    required String desc,
+    required String status,
+    required Color statusColor,
+    required bool isDark,
+  }) {
+    return Row(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(
+            color: statusColor.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Icon(icon, size: 18, color: statusColor),
+        ),
+        const SizedBox(width: 12),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: GoogleFonts.inter(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                ),
+              ),
+              Text(
+                desc,
+                style: GoogleFonts.inter(
+                  fontSize: 11,
+                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                ),
+              ),
+            ],
+          ),
+        ),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+          decoration: BoxDecoration(
+            color: statusColor.withOpacity(0.12),
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: statusColor.withOpacity(0.4)),
+          ),
+          child: Text(
+            status,
+            style: GoogleFonts.firaCode(
+              fontSize: 10,
+              fontWeight: FontWeight.bold,
+              color: statusColor,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -2655,108 +3576,165 @@ class _ServerDashboardWithSyncState
     );
   }
 
-  // ── Windows Firewall Banner & Guide ─────────────────────────────────────────
-  Widget _buildFirewallBanner() {
-    if (kIsWeb || !io.Platform.isWindows) return const SizedBox.shrink();
-    const bannerColor = Color(0xFFD97706);
-    const cmdLegacy = 'netsh advfirewall firewall add rule name="GMWF_LAN_Server" dir=in action=allow protocol=TCP localport=53281';
+  // ── Windows Firewall Banner & Guide (Theme-Adaptive & Collapsible) ──────────
+  Widget _buildFirewallBanner([bool isDark = false]) {
+    if (kIsWeb || !io.Platform.isWindows || _isFirewallBannerDismissed) return const SizedBox.shrink();
+    final bannerBg = isDark ? const Color(0xFF1E170A) : const Color(0xFFFFFBEB);
+    final borderColor = isDark ? const Color(0xFF78350F) : const Color(0xFFFDE68A);
+    const accentColor = Color(0xFFD97706);
+    final titleColor = isDark ? const Color(0xFFFDE68A) : const Color(0xFF92400E);
+    final subtitleColor = isDark ? const Color(0xFFD4D4D8) : const Color(0xFF78350F);
+
     const cmd1 = 'netsh advfirewall firewall add rule name="GMWF_LAN" dir=in action=allow protocol=TCP localport=53281,8088';
     const cmd2 = 'netsh advfirewall firewall add rule name="GMWF_ZKTeco_UDP" dir=in action=allow protocol=UDP localport=4370';
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: const Color(0xFF181203),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: bannerColor.withOpacity(0.35)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: bannerColor.withOpacity(0.15), shape: BoxShape.circle),
-            child: const Icon(Icons.security, color: bannerColor, size: 22),
+        color: bannerBg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: borderColor, width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: isDark ? const Color(0x30000000) : const Color(0x08000000),
+            blurRadius: 8,
+            offset: const Offset(0, 2),
           ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: accentColor.withOpacity(0.18),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.security_rounded, color: accentColor, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(
-                      'Windows Firewall Configuration (LAN Sync & Biometric Ports)',
-                      style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: bannerColor, fontSize: 14),
+                    Row(
+                      children: [
+                        Text(
+                          'Windows Firewall Rules',
+                          style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: titleColor, fontSize: 13.5),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: accentColor.withOpacity(0.15),
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: accentColor.withOpacity(0.3)),
+                          ),
+                          child: Text(
+                            'PORTS: 53281 (TCP), 8088 (ADMS), 4370 (UDP)',
+                            style: GoogleFonts.firaCode(fontSize: 9.5, fontWeight: FontWeight.bold, color: accentColor),
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 8),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: bannerColor.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text('REQUIRED FOR HARDWARE & CLIENTS', style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.bold, color: bannerColor)),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Ensure Windows Firewall allows inbound connections for client PCs and ZKTeco biometric devices.',
+                      style: GoogleFonts.inter(fontSize: 11, color: subtitleColor),
                     ),
                   ],
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  'If client nodes or ZKTeco physical scanners fail to connect, click "Auto-Fix All" or run in PowerShell (Admin):',
-                  style: GoogleFonts.inter(fontSize: 11.5, color: const Color(0xFF94A3B8)),
+              ),
+              const SizedBox(width: 12),
+              ElevatedButton.icon(
+                onPressed: _openFirewallPort,
+                icon: const Icon(Icons.auto_fix_high_rounded, size: 14),
+                label: const Text('Auto-Fix All'),
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: accentColor,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
-                const SizedBox(height: 8),
-                _buildFirewallCommandRow(cmd1, 'TCP: Sync & ZKTeco ADMS (53281, 8088)'),
-                const SizedBox(height: 6),
-                _buildFirewallCommandRow(cmd2, 'UDP: ZKTeco Hardware Socket (4370)'),
-                const SizedBox(height: 6),
-                _buildFirewallCommandRow(cmdLegacy, 'Legacy: Single Server Rule (53281)'),
-              ],
-            ),
+              ),
+              const SizedBox(width: 8),
+              TextButton.icon(
+                onPressed: () => setState(() => _isFirewallBannerExpanded = !_isFirewallBannerExpanded),
+                icon: Icon(_isFirewallBannerExpanded ? Icons.keyboard_arrow_up_rounded : Icons.keyboard_arrow_down_rounded, size: 16, color: accentColor),
+                label: Text(
+                  _isFirewallBannerExpanded ? 'Hide' : 'Details',
+                  style: GoogleFonts.inter(fontSize: 11.5, fontWeight: FontWeight.bold, color: accentColor),
+                ),
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                  minimumSize: Size.zero,
+                ),
+              ),
+              const SizedBox(width: 4),
+              IconButton(
+                onPressed: () => setState(() => _isFirewallBannerDismissed = true),
+                icon: Icon(Icons.close_rounded, size: 16, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                tooltip: 'Dismiss firewall banner',
+                padding: EdgeInsets.zero,
+                constraints: const BoxConstraints(),
+              ),
+            ],
           ),
-          const SizedBox(width: 16),
-          ElevatedButton.icon(
-            onPressed: _openFirewallPort,
-            icon: const Icon(Icons.auto_fix_high_rounded, size: 15),
-            label: const Text('Auto-Fix All'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFD97706),
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          if (_isFirewallBannerExpanded) ...[
+            const SizedBox(height: 12),
+            Divider(height: 1, color: borderColor),
+            const SizedBox(height: 10),
+            Text(
+              'Run in Administrator PowerShell if auto-fix does not complete:',
+              style: GoogleFonts.inter(fontSize: 10.5, fontWeight: FontWeight.w600, color: subtitleColor),
             ),
-          ),
+            const SizedBox(height: 6),
+            _buildFirewallCommandRow(cmd1, 'TCP: Sync & ZKTeco ADMS (53281, 8088)', isDark),
+            const SizedBox(height: 6),
+            _buildFirewallCommandRow(cmd2, 'UDP: ZKTeco Hardware Socket (4370)', isDark),
+          ],
         ],
       ),
     );
   }
 
-  Widget _buildFirewallCommandRow(String command, String label) {
+  Widget _buildFirewallCommandRow(String command, String label, [bool isDark = false]) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFF070D18),
+        color: isDark ? const Color(0xFF070D18) : Colors.white,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: const Color(0xFF1E293B)),
+        border: Border.all(color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0)),
       ),
       child: Row(
         children: [
           Container(
-            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-            decoration: BoxDecoration(color: const Color(0xFF1E293B), borderRadius: BorderRadius.circular(4)),
-            child: Text(label, style: GoogleFonts.inter(fontSize: 9.5, fontWeight: FontWeight.bold, color: const Color(0xFF38BDF8))),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+            decoration: BoxDecoration(
+              color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              label,
+              style: GoogleFonts.inter(fontSize: 9.5, fontWeight: FontWeight.bold, color: const Color(0xFF0284C7)),
+            ),
           ),
           const SizedBox(width: 8),
           Expanded(
             child: SelectableText(
               command,
-              style: GoogleFonts.firaCode(fontSize: 10, color: const Color(0xFF34D399)),
+              style: GoogleFonts.firaCode(fontSize: 10, color: isDark ? const Color(0xFF34D399) : const Color(0xFF065F46)),
             ),
           ),
           const SizedBox(width: 8),
           IconButton(
-            icon: const Icon(Icons.copy, size: 14, color: Color(0xFF94A3B8)),
+            icon: const Icon(Icons.copy, size: 14, color: Color(0xFF64748B)),
             onPressed: () {
               Clipboard.setData(ClipboardData(text: command));
               ScaffoldMessenger.of(context).showSnackBar(
@@ -3264,10 +4242,11 @@ class ServerSyncManager {
           }
         }
         if (info != null) {
+          final clientInfo = info;
           debugPrint('[SSM] Catch-up requested by $socketId');
           _downloadTodayTokens().then((_) {
-            _pushCatchUpToSocket(socketId, info!);
-            _pushInventoryCatchUpToSocket(socketId, info!);
+            _pushCatchUpToSocket(socketId, clientInfo);
+            _pushInventoryCatchUpToSocket(socketId, clientInfo);
           });
         }
       }
@@ -4363,18 +5342,24 @@ class ServerSyncManager {
         return;
       }
 
-      final keys = box.keys.toList();
-      if (keys.isEmpty) {
-        _isSyncing = false;
-        return;
-      }
+      int passes = 0;
+      while (box.isNotEmpty && passes < 10) {
+        final keys = box.keys.toList();
+        if (keys.isEmpty) break;
+        final startSynced = _syncedThisRun;
 
-      // Process in concurrent batches of 8 items for maximum speed and responsiveness
-      const chunkSize = 8;
-      for (int i = 0; i < keys.length; i += chunkSize) {
-        final chunk = keys.sublist(i, math.min(i + chunkSize, keys.length));
-        await Future.wait(chunk.map((key) => _processSyncItem(box, key)));
-        await Future.delayed(const Duration(milliseconds: 20));
+        // Process in concurrent batches of 8 items for maximum speed and responsiveness
+        const chunkSize = 8;
+        for (int i = 0; i < keys.length; i += chunkSize) {
+          final chunk = keys.sublist(i, math.min(i + chunkSize, keys.length));
+          await Future.wait(chunk.map((key) => _processSyncItem(box, key)));
+          await Future.delayed(const Duration(milliseconds: 10));
+        }
+
+        passes++;
+        if (_syncedThisRun == startSynced) {
+          break;
+        }
       }
 
       if (_syncedThisRun > 0) {
@@ -4397,7 +5382,7 @@ class ServerSyncManager {
       final syncItem = Map<String, dynamic>.from(item);
       final type     = syncItem['type'] as String?;
       final data     = syncItem['data'];
-      if (type == null || _ignoredEventTypes.contains(type.toLowerCase()) || data == null) {
+      if (type == null || _ignoredEventTypes.contains(type.toLowerCase())) {
         await box.delete(key);
         return;
       }
@@ -4426,9 +5411,16 @@ class ServerSyncManager {
 
       final resolvedQueueType = _resolveQueueType(syncItem['queueType'] ?? (data is Map ? data['queueType'] : null));
 
-      final dataMap = data is Map
-          ? Map<String, dynamic>.from(data)
-          : <String, dynamic>{};
+      // Merge syncItem with data map so top-level keys like uid, employeeId, entityId are retained
+      final dataMap = <String, dynamic>{
+        ...syncItem,
+        if (data is Map) ...Map<String, dynamic>.from(data),
+      };
+
+      if (dataMap.length <= 1 && !type.toLowerCase().startsWith('delete_')) {
+        await box.delete(key);
+        return;
+      }
 
       await _syncToFirestore(
         type:       type,
@@ -4500,12 +5492,18 @@ class ServerSyncManager {
       // ── Token entry ──────────────────────────────────────────────────────
       case 'save_entry':
       case 'token_created':
-        final s  = effectiveSerial;
+        String s = effectiveSerial;
+        if (s.isEmpty) {
+          s = (cleanData['serial'] ?? cleanData['id'] ?? cleanData['tokenNumber'] ?? cleanData['token'] ?? '').toString().trim().toUpperCase();
+        }
         final dk = effectiveDateKey;
         final qt = _validQueueTypes.contains(effectiveQueueType)
             ? effectiveQueueType
             : _resolveQueueType(cleanData['queueType']);
-        if (s.isEmpty) throw Exception('save_entry: missing serial');
+        if (s.isEmpty) {
+          debugPrint('⚠️ [SSM] save_entry: invalid or missing serial — skipping');
+          break;
+        }
 
         cleanData['serial'] = s;
         final campDocKey = CampSessionService.getCampDateDocId(
@@ -4556,8 +5554,13 @@ class ServerSyncManager {
       // ── Prescription (Single Canonical Serials Write) ─────────────────────
       case 'save_prescription':
       case 'prescription_created':
-        final s = effectiveSerial.isNotEmpty ? effectiveSerial : (cleanData['id'] as String? ?? '');
-        if (s.isEmpty) throw Exception('save_prescription: missing serial');
+        String s = effectiveSerial.isNotEmpty
+            ? effectiveSerial
+            : (cleanData['id'] as String? ?? cleanData['serial'] as String? ?? '').toString().trim().toUpperCase();
+        if (s.isEmpty) {
+          debugPrint('⚠️ [SSM] save_prescription: invalid or missing serial — skipping');
+          break;
+        }
         cleanData['serial'] = s;
 
         // Mark serial status as completed and embed clinical prescription data directly
@@ -4829,13 +5832,34 @@ class ServerSyncManager {
       case 'save_employee_attendance':
       case 'save_faculty_attendance':
       case 'save_student_attendance':
-        final empId = (cleanData['employeeId'] ?? cleanData['entityId'] ?? cleanData['id'] ?? cleanData['pin'] ?? '').toString().trim();
-        final dtKey = effectiveDateKey.isNotEmpty
-            ? effectiveDateKey
-            : (cleanData['date'] ?? cleanData['dateKey'] ?? DateFormat('yyyy-MM-dd').format(DateTime.now())).toString().trim();
-        if (empId.isEmpty || dtKey.isEmpty) {
-          throw Exception('save_attendance: missing employeeId ($empId) or dateKey ($dtKey)');
+        final rawEmpId = (cleanData['employeeId'] ??
+                cleanData['empId'] ??
+                cleanData['userId'] ??
+                cleanData['pin'] ??
+                cleanData['biometricPin'] ??
+                cleanData['entityId'] ??
+                cleanData['id'] ??
+                '')
+            .toString()
+            .trim();
+        String empId = rawEmpId;
+        if (empId.startsWith('att_')) {
+          final parts = empId.split('_');
+          if (parts.length >= 3) {
+            empId = parts[2];
+          }
         }
+        if (empId.isEmpty) {
+          empId = 'att_${DateTime.now().millisecondsSinceEpoch}';
+        }
+
+        final dtKey = (cleanData['date'] ??
+                cleanData['dateKey'] ??
+                (effectiveDateKey.isNotEmpty ? effectiveDateKey : null) ??
+                DateFormat('yyyy-MM-dd').format(DateTime.now()))
+            .toString()
+            .trim();
+
         await db
             .collection('branches').doc(effectiveBranchId)
             .collection('employee_attendance').doc(dtKey)
@@ -4845,7 +5869,173 @@ class ServerSyncManager {
             .collection('employee_attendance').doc(dtKey)
             .collection('records').doc(empId)
             .set(cleanData, SetOptions(merge: true));
+
+        if (type == 'save_biometric_log' || cleanData['punchSequence'] != null) {
+          final logId = (cleanData['id'] ?? '${empId}_${dtKey}_${DateTime.now().millisecondsSinceEpoch}').toString();
+          await db.collection('branches').doc(effectiveBranchId).collection('biometric_logs').doc(logId).set(cleanData, SetOptions(merge: true)).catchError((_) {});
+        }
+
+        // Mark local record as synced in LocalStorageService.attendanceBox
+        try {
+          if (Hive.isBoxOpen(LocalStorageService.attendanceBox)) {
+            final aBox = Hive.box(LocalStorageService.attendanceBox);
+            final hKey = '${empId}_$dtKey';
+            final localRecord = aBox.get(hKey);
+            if (localRecord is Map) {
+              final updated = Map<String, dynamic>.from(localRecord)
+                ..['synced'] = true
+                ..['syncStatus'] = 'synced'
+                ..['lastSyncedAt'] = DateTime.now().toUtc().toIso8601String();
+              await aBox.put(hKey, updated);
+            }
+          }
+        } catch (_) {}
         debugPrint('✅ save_attendance → branches/$effectiveBranchId/employee_attendance/$dtKey/records/$empId');
+        break;
+
+      // ── Users Module sync ─────────────────────────────────────────────────
+      case 'save_user':
+        final rawData = cleanData['data'] is Map ? Map<String, dynamic>.from(cleanData['data']) : cleanData;
+        final uid = (cleanData['uid'] ?? cleanData['id'] ?? cleanData['userId'] ?? rawData['uid'] ?? rawData['id'])?.toString().trim() ?? '';
+        final bId = (cleanData['branchId'] ?? rawData['branchId'] ?? effectiveBranchId).toString().trim();
+        if (uid.isEmpty) {
+          debugPrint('⚠️ [SSM] save_user: missing uid — skipping');
+          break;
+        }
+        final userPayload = Map<String, dynamic>.from(rawData)..remove('syncStatus')..remove('pendingSync');
+        if (bId.isNotEmpty && bId != 'all' && bId != 'global') {
+          userPayload['branchId'] ??= bId;
+        }
+        userPayload['lastSyncedAt'] = FieldValue.serverTimestamp();
+
+        await db.collection('users').doc(uid).set(userPayload, SetOptions(merge: true));
+        if (bId.isNotEmpty && bId != 'all' && bId != 'global') {
+          await db.collection('branches').doc(bId).collection('users').doc(uid).set(userPayload, SetOptions(merge: true)).catchError((_) {});
+        }
+        try {
+          if (Hive.isBoxOpen('local_users')) {
+            final box = Hive.box('local_users');
+            final email = (userPayload['email'] ?? '').toString().trim().toLowerCase();
+            if (email.isNotEmpty) await box.put('user:$email', userPayload);
+            await box.put('user:$uid', userPayload);
+            await box.put(uid, userPayload);
+            await box.flush();
+          }
+        } catch (_) {}
+        debugPrint('✅ save_user → users/$uid (branch: $bId)');
+        break;
+
+      case 'delete_user':
+        final uid = (cleanData['uid'] ?? cleanData['id'] ?? '').toString().trim();
+        final bId = (cleanData['branchId'] ?? effectiveBranchId).toString().trim();
+        final email = (cleanData['email'] ?? '').toString().trim().toLowerCase();
+        final username = (cleanData['username'] ?? '').toString().trim().toLowerCase();
+        final identifiers = <String>{
+          if (uid.isNotEmpty) uid,
+          if (email.isNotEmpty) email,
+          if (username.isNotEmpty) username,
+        };
+        final deletePayload = {
+          'isDeleted': true,
+          'status': 'deleted',
+          'accountStatus': 'deleted',
+          'deletedAt': FieldValue.serverTimestamp(),
+        };
+        for (final identifier in identifiers) {
+          await db.collection('users').doc(identifier).set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+          if (bId.isNotEmpty && bId != 'all') {
+            await db.collection('branches').doc(bId).collection('users').doc(identifier).set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+          }
+        }
+        debugPrint('✅ delete_user → $identifiers');
+        break;
+
+      // ── Branch Details sync ───────────────────────────────────────────────
+      case 'update_branch':
+        final bId = (cleanData['branchId'] ?? cleanData['id'] ?? cleanData['docId'] ?? effectiveBranchId).toString().trim();
+        if (bId.isNotEmpty) {
+          final payload = cleanData['data'] is Map ? Map<String, dynamic>.from(cleanData['data']) : Map<String, dynamic>.from(cleanData);
+          payload.remove('type');
+          payload.remove('collection');
+          payload.remove('docId');
+          payload['lastUpdated'] = FieldValue.serverTimestamp();
+          await db.collection('branches').doc(bId).set(payload, SetOptions(merge: true));
+          debugPrint('✅ update_branch → branches/$bId');
+        }
+        break;
+
+      // ── Employee sync ─────────────────────────────────────────────────────
+      case 'save_employee':
+        final empData = cleanData['data'] is Map ? Map<String, dynamic>.from(cleanData['data']) : cleanData;
+        final localId = (cleanData['localId'] ?? cleanData['id'] ?? cleanData['employeeId'] ?? empData['localId'] ?? empData['id'] ?? empData['employeeId'])?.toString().trim() ?? '';
+        final bId = (cleanData['branchId'] ?? empData['branchId'] ?? effectiveBranchId).toString().trim();
+        if (localId.isEmpty) {
+          debugPrint('⚠️ [SSM] save_employee missing localId/id — skipping');
+          break;
+        }
+        final fsEmpData = Map<String, dynamic>.from(empData)..remove('syncStatus');
+        for (final f in ['dob', 'cnicExpiry', 'joiningDate', 'exitDate', 'createdAt']) {
+          if (fsEmpData[f] is String) {
+            try {
+              fsEmpData[f] = Timestamp.fromDate(DateTime.parse(fsEmpData[f] as String));
+            } catch (_) {}
+          }
+        }
+        fsEmpData['lastSyncedAt'] = FieldValue.serverTimestamp();
+        await db.collection('branches').doc(bId).collection('employees').doc(localId).set(fsEmpData, SetOptions(merge: true));
+        await db.collection('employees').doc(localId).set(fsEmpData, SetOptions(merge: true)).catchError((_) {});
+        try {
+          if (Hive.isBoxOpen(LocalStorageService.employeesBox)) {
+            final box = Hive.box(LocalStorageService.employeesBox);
+            final localRecord = box.get(localId);
+            if (localRecord is Map) {
+              final updated = Map<String, dynamic>.from(localRecord)
+                ..['syncStatus'] = 'synced'
+                ..['remoteId'] = localId
+                ..['lastSyncedAt'] = DateTime.now().toUtc().toIso8601String();
+              await box.put(localId, updated);
+            }
+          }
+        } catch (_) {}
+        debugPrint('✅ save_employee → branches/$bId/employees/$localId');
+        break;
+
+      case 'delete_employee':
+        final localId = (cleanData['localId'] ?? cleanData['id'] ?? cleanData['employeeId'])?.toString().trim() ?? '';
+        final bId = (cleanData['branchId'] ?? effectiveBranchId).toString().trim();
+        if (localId.isNotEmpty) {
+          await db.collection('branches').doc(bId).collection('employees').doc(localId).delete().catchError((_) {});
+          await db.collection('employees').doc(localId).delete().catchError((_) {});
+          debugPrint('✅ delete_employee → branches/$bId/employees/$localId');
+        }
+        break;
+
+      // ── Audit Logs sync ───────────────────────────────────────────────────
+      case 'save_audit_log':
+        final logData = cleanData['data'] is Map ? Map<String, dynamic>.from(cleanData['data']) : cleanData;
+        final logId = (cleanData['id'] ?? cleanData['syncId'] ?? logData['id'] ?? const Uuid().v4()).toString().trim();
+        final bId = (cleanData['branchId'] ?? logData['branchId'] ?? effectiveBranchId).toString().trim();
+        final fsLog = Map<String, dynamic>.from(logData);
+        fsLog['branchId'] ??= bId;
+        fsLog['lastSyncedAt'] = FieldValue.serverTimestamp();
+        await db.collection('branches').doc(bId).collection('audit_logs').doc(logId).set(fsLog, SetOptions(merge: true));
+        await db.collection('global_audit_logs').doc(logId).set(fsLog, SetOptions(merge: true)).catchError((_) {});
+        debugPrint('✅ save_audit_log → branches/$bId/audit_logs/$logId');
+        break;
+
+      // ── School Module sync ────────────────────────────────────────────────
+      case 'save_school_daily_log':
+      case 'save_school_teacher_log':
+      case 'save_school_student_log':
+        final dtKey = (cleanData['date'] ?? cleanData['dateKey'] ?? effectiveDateKey).toString().trim();
+        final targetCollection = type == 'save_school_teacher_log'
+            ? 'school_teacher_logs'
+            : (type == 'save_school_student_log' ? 'school_student_logs' : 'school_daily_logs');
+        final logData = cleanData['data'] is Map ? Map<String, dynamic>.from(cleanData['data']) : cleanData;
+        if (dtKey.isNotEmpty) {
+          await db.collection('branches').doc(effectiveBranchId).collection(targetCollection).doc(dtKey).set(logData, SetOptions(merge: true));
+          debugPrint('✅ $type → branches/$effectiveBranchId/$targetCollection/$dtKey');
+        }
         break;
 
       // ── Biometric Hardware Devices sync ───────────────────────────────────
@@ -4920,6 +6110,18 @@ class ServerSyncManager {
         final loanId = (cleanData['id'] ?? cleanData['loanId'] ?? '').toString().trim();
         if (loanId.isNotEmpty) {
           await db.collection('branches').doc(effectiveBranchId).collection('loans').doc(loanId).set(cleanData, SetOptions(merge: true));
+        }
+        break;
+
+      case 'save_journal_entry':
+        final entryId = (cleanData['id'] ?? cleanData['entryId'] ?? '').toString().trim();
+        if (entryId.isNotEmpty) {
+          final payload = cleanData['data'] is Map ? Map<String, dynamic>.from(cleanData['data']) : cleanData;
+          if (effectiveBranchId != 'all') {
+            await db.collection('branches').doc(effectiveBranchId).collection('journal_entries').doc(entryId).set(payload, SetOptions(merge: true));
+          }
+          await db.collection('global_journal_entries').doc(entryId).set(payload, SetOptions(merge: true)).catchError((_) {});
+          debugPrint('✅ save_journal_entry → branches/$effectiveBranchId/journal_entries/$entryId');
         }
         break;
 

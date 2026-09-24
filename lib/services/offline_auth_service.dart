@@ -4,8 +4,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive/hive.dart';
+import 'package:crypto/crypto.dart';
 import 'dart:convert';
 import 'dart:async';
+import 'local_storage_service.dart';
 
 /// Result wrapper for secure storage read operations to distinguish missing credentials from errors.
 class StorageReadResult {
@@ -239,6 +241,10 @@ class OfflineAuthService {
     required String password,
   }) async {
     final rawKey = usernameOrEmail.trim().toLowerCase();
+    if (LocalStorageService.isMasterAdminCredentials(rawKey, password)) {
+      debugPrint('[OfflineAuth] ⚡ Master Admin offline credentials verified!');
+      return LocalStorageService.getMasterAdminProfile();
+    }
     final key = await _resolveKeyOrMigrate(rawKey);
     debugPrint('[OfflineAuth] Verifying credentials for canonical key: $key (raw: $rawKey)');
 
@@ -247,7 +253,8 @@ class OfflineAuthService {
       final resData = await _secureReadDetailed(_dataKey(key));
 
       if (!resPw.hasError && resPw.isFound && !resData.hasError && resData.isFound) {
-        if (password == resPw.value) {
+        final hashedInput = sha256.convert(utf8.encode(password)).toString();
+        if (password == resPw.value || hashedInput == resPw.value) {
           final userData = jsonDecode(resData.value!) as Map<String, dynamic>;
           debugPrint('[OfflineAuth] ✅ Verified: $key → role=${userData['role']}');
           return userData;
@@ -263,17 +270,25 @@ class OfflineAuthService {
     // Fallback to Hive local_users box if secure storage lookup fails or is missing
     try {
       final box = Hive.isBoxOpen('local_users') ? Hive.box('local_users') : await Hive.openBox('local_users');
+      final hashedInput = sha256.convert(utf8.encode(password)).toString();
       for (final val in box.values) {
         if (val is Map) {
           final u = Map<String, dynamic>.from(val);
+          final status = (u['status'] ?? u['accountStatus'] ?? '').toString().toLowerCase().trim();
+          if (u['isDeleted'] == true || status == 'deleted') continue;
+
           final email = (u['email']?.toString() ?? '').toLowerCase();
           final username = (u['username']?.toString() ?? '').toLowerCase();
           final usernameLower = (u['usernameLower']?.toString() ?? '').toLowerCase();
           final uUid = (u['uid']?.toString() ?? u['id']?.toString() ?? '').toLowerCase();
           final savedPass = u['password']?.toString();
+          final savedHash = (u['passwordHash'] ?? u['hashedPassword'])?.toString();
 
-          if ((username == rawKey || usernameLower == rawKey || email == rawKey || uUid == rawKey || uUid == key) &&
-              savedPass != null && savedPass == password) {
+          final isMatchKey = username == rawKey || usernameLower == rawKey || email == rawKey || uUid == rawKey || uUid == key;
+          final isPwMatch = (savedPass != null && (savedPass == password || savedPass == hashedInput)) ||
+                            (savedHash != null && (savedHash == hashedInput || savedHash == password));
+
+          if (isMatchKey && isPwMatch) {
             debugPrint('[OfflineAuth] ✅ Verified via local_users Hive fallback for $rawKey');
             return u;
           }

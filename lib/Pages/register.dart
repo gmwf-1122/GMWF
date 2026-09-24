@@ -375,14 +375,14 @@ class _RegisterState extends State<Register>
 
   String _getBranchId() {
     if (!_requiresBranch()) return 'all';
-    if (_selectedBranch == null) throw Exception('Please select a branch for this role');
+    if (_selectedBranch == null || _selectedBranch!.trim().isEmpty) return 'all';
     final match = _branches.where((b) => b['name'] == _selectedBranch).toList();
     if (match.isNotEmpty) return match.first['id'] as String;
-    return _selectedBranch!.toLowerCase().replaceAll(' ', '_');
+    return (_selectedBranch ?? 'all').toLowerCase().replaceAll(' ', '_');
   }
 
   String _getBranchName() =>
-      _requiresBranch() ? (_selectedBranch ?? 'Unknown') : 'All Branches';
+      _requiresBranch() ? (_selectedBranch ?? 'All Branches') : 'All Branches';
 
   Future<void> _pickProfileImage() async {
     try {
@@ -440,8 +440,7 @@ class _RegisterState extends State<Register>
         _snack('Please select the associated student for this parent', error: true);
         return false;
       }
-      final isDoctor = _selectedRole != null &&
-          (_selectedRole!.toLowerCase() == 'doctor' || _selectedRole!.toLowerCase().contains('doc'));
+      final isDoctor = (_selectedRole ?? '').toLowerCase().contains('doc');
       if (isDoctor && _selectedDegree == null) {
         _snack('Please select medical degree for Doctor role', error: true);
         return false;
@@ -458,11 +457,13 @@ class _RegisterState extends State<Register>
       }
     }
     setState(() => _currentStep = targetStep);
-    _pageController.animateToPage(
-      targetStep,
-      duration: const Duration(milliseconds: 320),
-      curve: Curves.easeInOutCubic,
-    );
+    if (_pageController.hasClients) {
+      _pageController.animateToPage(
+        targetStep,
+        duration: const Duration(milliseconds: 320),
+        curve: Curves.easeInOutCubic,
+      );
+    }
   }
 
   Future<void> _registerUser() async {
@@ -473,7 +474,7 @@ class _RegisterState extends State<Register>
       }
     }
 
-    if (!_formKey.currentState!.validate()) {
+    if (_formKey.currentState != null && !_formKey.currentState!.validate()) {
       _snack('Please correct the highlighted errors in the form', error: true);
       return;
     }
@@ -482,6 +483,13 @@ class _RegisterState extends State<Register>
 
     final email    = _emailController.text.trim().toLowerCase();
     final username = _usernameController.text.trim();
+    if (_selectedRole == null || _selectedRole!.trim().isEmpty) {
+      _snack('Please select a valid role before proceeding', error: true);
+      _goToStep(0);
+      return;
+    }
+
+    final roleToAssign = _selectedRole!.trim();
 
     try {
       if (await _usernameExists(username)) {
@@ -511,7 +519,7 @@ class _RegisterState extends State<Register>
         password:           _passwordController.text.trim(),
         username:           username,
         name:               username,
-        role:               _selectedRole!,
+        role:               roleToAssign,
         branchId:           branchId,
         branchName:         _getBranchName(),
         phone:              _phoneController.text.trim().isNotEmpty ? _phoneController.text.trim() : null,
@@ -546,11 +554,11 @@ class _RegisterState extends State<Register>
         degreeFile:         _degreeFile,
         profilePictureBase64: _profilePictureBase64,
         degreeBase64:         _degreeBase64,
-        session:            _selectedRole == 'Madrassa Teacher' ? _selectedMadrassaSession : null,
-        sessions:           _selectedRole == 'Madrassa Teacher'
+        session:            roleToAssign == 'Madrassa Teacher' ? (_selectedMadrassaSession.isNotEmpty ? _selectedMadrassaSession : 'morning') : null,
+        sessions:           roleToAssign == 'Madrassa Teacher'
                                 ? (_selectedMadrassaSession == 'all'
                                     ? ['morning', 'evening', 'night']
-                                    : [_selectedMadrassaSession])
+                                    : [if (_selectedMadrassaSession.isNotEmpty) _selectedMadrassaSession else 'morning'])
                                 : const [],
       );
 
@@ -569,7 +577,7 @@ class _RegisterState extends State<Register>
       }
 
       final registeredName = _usernameController.text.trim();
-      _formKey.currentState!.reset();
+      _formKey.currentState?.reset();
       _biometricPinController.clear();
       setState(() {
         _selectedDepartment       = null;
@@ -586,13 +594,15 @@ class _RegisterState extends State<Register>
         _selectedStudentId        = null;
         _currentStep              = 0;
       });
-      _pageController.jumpToPage(0);
+      if (_pageController.hasClients) {
+        _pageController.jumpToPage(0);
+      }
       for (final c in [
         _usernameController, _emailController, _passwordController,
         _phoneController, _customDegreeController, _biometricPinController,
       ]) { c.clear(); }
 
-      _snack('🎉 $registeredName registered successfully as $_selectedRole!', success: true);
+      _snack('🎉 $registeredName registered successfully as $roleToAssign!', success: true);
     } on Exception catch (e) {
       _snack(e.toString().replaceAll('Exception: ', ''), error: true);
     } catch (e) {

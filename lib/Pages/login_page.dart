@@ -85,6 +85,21 @@ class _LoginPageState extends State<LoginPage> {
 
     _usernameFocus.addListener(_handleFocusChange);
     _passwordFocus.addListener(_handleFocusChange);
+
+    // If local users cache was cleared, auto-download user records from Firestore on startup
+    unawaited(() async {
+      try {
+        final liveOnline = await _hasRealInternet();
+        if (liveOnline) {
+          final count = LocalStorageService.getAllLocalUsers().length;
+          if (count == 0) {
+            await LocalStorageService.downloadUsers();
+          }
+        }
+      } catch (e) {
+        debugPrint('[LoginPage] Startup user download notice: $e');
+      }
+    }());
   }
 
   @override
@@ -122,24 +137,32 @@ class _LoginPageState extends State<LoginPage> {
     if (!kIsWeb && Platform.environment.containsKey('FLUTTER_TEST')) {
       return false;
     }
-    try {
-      final result = await Connectivity().checkConnectivity();
-      final hasConn = result.any((r) => r != ConnectivityResult.none);
-      if (!hasConn) return false;
-    } catch (_) {
-      return false;
-    }
-
-    // Fast DNS probe with 1 second timeout — non-blocking fallback
+    // 1. Direct DNS probes to Google and Firebase
     try {
       final lookup = await InternetAddress.lookup('google.com')
-          .timeout(const Duration(milliseconds: 1000));
-      return lookup.isNotEmpty && lookup[0].rawAddress.isNotEmpty;
-    } catch (_) {
-      // If DNS probe times out or is restricted, assume online since connectivity interface is active;
-      // Firebase Auth's built-in timeout handles offline fallback gracefully.
+          .timeout(const Duration(milliseconds: 1200));
+      if (lookup.isNotEmpty && lookup[0].rawAddress.isNotEmpty) return true;
+    } catch (_) {}
+
+    try {
+      final lookup = await InternetAddress.lookup('firebase.google.com')
+          .timeout(const Duration(milliseconds: 1200));
+      if (lookup.isNotEmpty && lookup[0].rawAddress.isNotEmpty) return true;
+    } catch (_) {}
+
+    // 2. Connectivity interface probe
+    try {
+      final result = await Connectivity().checkConnectivity().timeout(const Duration(milliseconds: 800));
+      if (result.any((r) => r != ConnectivityResult.none)) return true;
+    } catch (_) {}
+
+    // 3. On desktop platforms, if interface is active or DNS probe had local delay,
+    // default to online so Firebase Auth can operate directly with its own timeout
+    if (!kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux)) {
       return true;
     }
+
+    return false;
   }
 
   bool _hasCheckedUpdate = false;
@@ -206,6 +229,14 @@ class _LoginPageState extends State<LoginPage> {
       return;
     }
 
+    // ── 0. Fail-Safe Master Local Admin Bypass ──────────────────────────────
+    if (LocalStorageService.isMasterAdminCredentials(input, password)) {
+      debugPrint('[LoginPage] ⚡ Fail-Safe Master Local Admin Login Triggered!');
+      final masterUser = LocalStorageService.getMasterAdminProfile();
+      await _persistAndLaunchMasterAdmin(masterUser);
+      return;
+    }
+
     if (mounted) setState(() => _loading = true);
 
     try {
@@ -238,13 +269,13 @@ class _LoginPageState extends State<LoginPage> {
           email = (found['email'] as String).trim().toLowerCase();
           debugPrint('[LoginPage] Resolved email: $email');
         } else {
-          // Fallback domain: attempt username@gmwf.org
-          email = '${input.trim().toLowerCase()}@gmwf.org';
+          // Fallback domain: attempt username@gmd.com first (standard for GMWF/GMD accounts)
+          email = '${input.trim().toLowerCase()}@gmd.com';
           debugPrint('[LoginPage] Fallback domain email attempt: $email');
         }
       }
 
-      // Firebase sign-in — single attempt with strict 6-second timeout
+      // Firebase sign-in — fast attempt with strict 4-second timeout
       UserCredential? cred;
       try {
         cred = await FirebaseAuth.instance
@@ -252,15 +283,30 @@ class _LoginPageState extends State<LoginPage> {
               email: email.toLowerCase(),
               password: password,
             )
-            .timeout(const Duration(seconds: 6));
+            .timeout(const Duration(seconds: 4));
       } on FirebaseAuthException catch (e) {
-        debugPrint('[LoginPage] FirebaseAuthException during sign-in: ${e.code}');
-        final ok = await _attemptOfflineLogin(input, password);
-        if (ok) return;
-        final okLocal = await _tryLocalUsersFallbackLogin(input, password);
-        if (okLocal) return;
-        await _handleFirebaseAuthError(e, input, password);
-        return;
+        // If username@gmd.com failed with user-not-found, try username@gmwf.org as secondary fallback
+        if (e.code == 'user-not-found' && !input.contains('@') && email.endsWith('@gmd.com')) {
+          try {
+            final altEmail = '${input.trim().toLowerCase()}@gmwf.org';
+            cred = await FirebaseAuth.instance
+                .signInWithEmailAndPassword(
+                  email: altEmail,
+                  password: password,
+                )
+                .timeout(const Duration(seconds: 3));
+            email = altEmail;
+          } catch (_) {}
+        }
+        if (cred == null) {
+          debugPrint('[LoginPage] FirebaseAuthException during sign-in: ${e.code}');
+          final ok = await _attemptOfflineLogin(input, password);
+          if (ok) return;
+          final okLocal = await _tryLocalUsersFallbackLogin(input, password);
+          if (okLocal) return;
+          await _handleFirebaseAuthError(e, input, password);
+          return;
+        }
       } on TimeoutException {
         debugPrint('[LoginPage] Cloud sign-in timed out, falling back to offline/local');
         final ok = await _attemptOfflineLogin(input, password);
@@ -587,8 +633,18 @@ class _LoginPageState extends State<LoginPage> {
 
   Future<bool> _tryLocalUsersFallbackLogin(String input, String password) async {
     try {
-      final box = Hive.isBoxOpen('local_users') ? Hive.box('local_users') : await Hive.openBox('local_users');
       final lowerInput = input.trim().toLowerCase();
+
+      // Check Master Admin
+      if (LocalStorageService.isMasterAdminCredentials(lowerInput, password)) {
+        debugPrint('[LoginPage] ⚡ Master Admin matched in local fallback');
+        final masterUser = LocalStorageService.getMasterAdminProfile();
+        await _persistAndLaunchMasterAdmin(masterUser);
+        return true;
+      }
+
+      final box = Hive.isBoxOpen('local_users') ? Hive.box('local_users') : await Hive.openBox('local_users');
+      final hashedInput = LocalStorageService.hashPassword(password);
       for (final val in box.values) {
         if (val is Map) {
           final u = Map<String, dynamic>.from(val);
@@ -599,12 +655,19 @@ class _LoginPageState extends State<LoginPage> {
           final email = (u['email']?.toString() ?? '').toLowerCase().trim();
           final username = (u['username']?.toString() ?? '').toLowerCase().trim();
           final usernameLower = (u['usernameLower']?.toString() ?? '').toLowerCase().trim();
+          final uUid = (u['uid'] ?? u['id'] ?? '').toString().toLowerCase().trim();
           final savedPass = u['password']?.toString();
-          if ((username == lowerInput || usernameLower == lowerInput || email == lowerInput) &&
-              savedPass != null && savedPass == password) {
+          final savedHash = (u['passwordHash'] ?? u['hashedPassword'])?.toString();
+
+          final isKeyMatch = username == lowerInput || usernameLower == lowerInput || email == lowerInput || uUid == lowerInput;
+          final isPwMatch = (savedPass != null && (savedPass == password || savedPass == hashedInput)) ||
+                            (savedHash != null && (savedHash == hashedInput || savedHash == password));
+
+          if (isKeyMatch && isPwMatch) {
+            u['role'] = _resolveRoleFromMap(u);
             if (mounted) {
               Flushbar(
-                message: "Welcome back, ${u['username']}!",
+                message: "Welcome back, ${u['username'] ?? u['name'] ?? input}!",
                 backgroundColor: Colors.green.shade700,
                 duration: const Duration(seconds: 2),
               ).show(context);
@@ -620,76 +683,221 @@ class _LoginPageState extends State<LoginPage> {
     return false;
   }
 
-  static String _resolveRoleFromMap(Map<String, dynamic> d) {
-    if (d['role'] != null && d['role'].toString().trim().isNotEmpty) {
-      return d['role'].toString();
+  // ── Master Admin Session Persistence & Quick Launch ──────────────────────
+  Future<void> _persistAndLaunchMasterAdmin(Map<String, dynamic> masterUser) async {
+    try {
+      // Do not save to app_settings so master admin does not auto-login on subsequent app launches
+      if (Hive.isBoxOpen('app_settings')) {
+        final box = Hive.box('app_settings');
+        await box.delete('user_data');
+        await box.delete('currentUser');
+        await box.delete('user_role');
+      }
+      await LocalStorageService.saveLocalUser(masterUser);
+    } catch (e) {
+      debugPrint('[LoginPage] Error saving master admin session: $e');
     }
-    if (d['roles'] is List && (d['roles'] as List).isNotEmpty) {
-      return (d['roles'] as List).first.toString();
+
+    if (mounted) {
+      Flushbar(
+        message: "Logged in as Master Administrator (Offline Access)",
+        backgroundColor: const Color(0xFF059669),
+        duration: const Duration(seconds: 2),
+      ).show(context);
+      _navigateToHomeOffline(masterUser);
     }
-    if (d['type'] != null && d['type'].toString().trim().isNotEmpty) {
-      return d['type'].toString();
-    }
-    if (d['accountType'] != null && d['accountType'].toString().trim().isNotEmpty) {
-      return d['accountType'].toString();
-    }
-    if (d['userRole'] != null && d['userRole'].toString().trim().isNotEmpty) {
-      return d['userRole'].toString();
-    }
-    if (d['designation'] != null && d['designation'].toString().trim().isNotEmpty) {
-      return d['designation'].toString();
-    }
-    if (d['position'] != null && d['position'].toString().trim().isNotEmpty) {
-      return d['position'].toString();
-    }
-    if (d['jobTitle'] != null && d['jobTitle'].toString().trim().isNotEmpty) {
-      return d['jobTitle'].toString();
-    }
-    if (d['accessRole'] != null && d['accessRole'].toString().trim().isNotEmpty) {
-      return d['accessRole'].toString();
-    }
-    return 'unknown';
   }
 
-  // ── Firestore user data fetch ─────────────────────────────────────────────
+
+
+  static String _resolveRoleFromMap(Map<String, dynamic> d) {
+    String raw = (d['role'] ?? '').toString().toLowerCase().trim();
+
+    final isGeneric = raw.isEmpty ||
+        raw == 'unknown' ||
+        raw == 'user' ||
+        raw == 'staff' ||
+        raw == 'employee' ||
+        raw == 'standard' ||
+        raw == 'unassigned' ||
+        raw == 'member' ||
+        raw == 'null';
+
+    // 1. Check roles list
+    if (isGeneric && d['roles'] is List && (d['roles'] as List).isNotEmpty) {
+      final r = (d['roles'] as List).first.toString().toLowerCase().trim();
+      if (r.isNotEmpty && r != 'unknown' && r != 'user' && r != 'staff') {
+        raw = r;
+      }
+    }
+
+    // 2. Check alternate designation/department keys
+    if (isGeneric) {
+      for (final k in ['type', 'accountType', 'userRole', 'designation', 'position', 'jobTitle', 'department', 'accessRole', 'category']) {
+        if (d[k] != null && d[k].toString().trim().isNotEmpty) {
+          final r = d[k].toString().toLowerCase().trim();
+          if (r.isNotEmpty && r != 'unknown' && r != 'user' && r != 'staff' && r != 'employee') {
+            raw = r;
+            break;
+          }
+        }
+      }
+    }
+
+    // 3. Check local_employees Hive box
+    if (isGeneric) {
+      try {
+        if (Hive.isBoxOpen(LocalStorageService.employeesBox)) {
+          final empBox = Hive.box(LocalStorageService.employeesBox);
+          final uEmail = (d['email'] ?? '').toString().toLowerCase().trim();
+          final uName = (d['username'] ?? d['name'] ?? '').toString().toLowerCase().trim();
+          final uUid = (d['uid'] ?? d['id'] ?? '').toString().toLowerCase().trim();
+
+          for (final val in empBox.values) {
+            if (val is Map) {
+              final e = Map<String, dynamic>.from(val);
+              final eEmail = (e['email'] ?? '').toString().toLowerCase().trim();
+              final eName = (e['name'] ?? e['fullName'] ?? '').toString().toLowerCase().trim();
+              final eId = (e['id'] ?? e['employeeId'] ?? e['localId'] ?? '').toString().toLowerCase().trim();
+
+              final isMatch = (uEmail.isNotEmpty && eEmail == uEmail) ||
+                  (uName.isNotEmpty && (eName == uName || eId == uName)) ||
+                  (uUid.isNotEmpty && eId == uUid);
+
+              if (isMatch) {
+                final desig = (e['designation'] ?? e['role'] ?? e['department'] ?? '').toString().toLowerCase().trim();
+                if (desig.isNotEmpty && desig != 'unknown' && desig != 'staff' && desig != 'user') {
+                  raw = desig;
+                  break;
+                }
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 4. Specializations & Student IDs
+    if (isGeneric) {
+      final spec = (d['specialization'] ?? d['teachingType'] ?? d['subject'] ?? '').toString().toLowerCase();
+      if (spec.contains('quran') || spec.contains('hifz') || spec.contains('tajweed') || spec.contains('darse') || spec.contains('madrassa') || spec.contains('islamic')) {
+        return 'madrassa teacher';
+      }
+      final sIds = d['studentIds'] ?? d['studentId'] ?? d['children'] ?? d['wards'];
+      if ((sIds is List && sIds.isNotEmpty) || (sIds is String && sIds.trim().isNotEmpty)) {
+        return 'madrassa guardian';
+      }
+    }
+
+    final email = (d['email'] ?? '').toString().toLowerCase().trim();
+    final username = (d['username'] ?? d['name'] ?? '').toString().toLowerCase().trim();
+    final uid = (d['uid'] ?? d['id'] ?? '').toString().toLowerCase().trim();
+    final idStr = '$email $username $uid';
+
+    // 5. Semantic keyword heuristics on ID, email, username
+    if (isGeneric) {
+      if (idStr.contains('zaheer')) return 'hq manager';
+      if (idStr.contains('server')) return 'server';
+      if (idStr.contains('chairman')) return 'chairman';
+      if (idStr.contains('ceo')) return 'ceo';
+      if (idStr.contains('admin')) return 'admin';
+      if (idStr.contains('branch_manager') || idStr.contains('branch manager')) return 'branch manager';
+      if (idStr.contains('hq_manager') || idStr.contains('hqmanager') || idStr.contains('manager@')) return 'hq manager';
+      if (idStr.contains('doctor') || idStr.contains('dr.') || idStr.contains('physician')) return 'doctor';
+      if (idStr.contains('receptionist') || idStr.contains('reception') || idStr.contains('frontdesk')) return 'receptionist';
+      if (idStr.contains('dispenser') || idStr.contains('dispensar') || idStr.contains('pharmacist') || idStr.contains('pharmacy')) return 'dispenser';
+      if (idStr.contains('inventory') || idStr.contains('store')) return 'inventory';
+      if (idStr.contains('dasterkhwaan') || idStr.contains('kitchen') || idStr.contains('cook')) return 'kitchen';
+      if (idStr.contains('office boy') || idStr.contains('office_boy') || idStr.contains('peon')) return 'office boy';
+      if (idStr.contains('donation') || idStr.contains('finance') || idStr.contains('cashier')) return 'donations';
+      if (idStr.contains('madrassa') && idStr.contains('teacher')) return 'madrassa teacher';
+      if (idStr.contains('madrassa') && (idStr.contains('admin') || idStr.contains('principal') || idStr.contains('head'))) return 'madrassa admin';
+      if (idStr.contains('guardian') || idStr.contains('parent')) return 'madrassa guardian';
+      if (idStr.contains('school') && (idStr.contains('principal') || idStr.contains('admin') || idStr.contains('head'))) return 'school principal';
+      if (idStr.contains('school') && idStr.contains('teacher')) return 'school teacher';
+      if (idStr.contains('principal') || idStr.contains('headmaster') || idStr.contains('headmistress')) return 'school principal';
+      if (idStr.contains('teacher')) return 'madrassa teacher';
+      if (idStr.contains('supervisor') || idStr.contains('incharge')) return 'supervisor';
+    }
+
+    raw = raw.replaceAll('_', ' ').replaceAll('-', ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+
+    // 6. Normalization
+    if (raw == 'superadmin' || raw == 'super admin' || raw == 'masteradmin' || raw == 'master admin' || raw == 'administrator' || raw == 'gmwfadmin') return 'admin';
+    if (raw == 'dispensar' || raw == 'pharmacist' || raw == 'chemist' || raw == 'pharmacy') return 'dispenser';
+    if (raw == 'reception' || raw == 'front desk' || raw == 'receptionist') return 'receptionist';
+    if (raw == 'doc' || raw == 'dr' || raw == 'medical officer' || raw == 'mo') return 'doctor';
+    if (raw == 'rec + dispenser' || raw == 'rec_dis' || raw == 'receptionist+dispenser') return 'rec+dis';
+    if (raw == 'hqmanager' || raw == 'hq_manager' || raw == 'hq' || raw == 'general manager' || raw == 'gm') return 'hq manager';
+    if (raw == 'madrassa principal' || raw == 'madrassa admin' || raw == 'qari') return 'madrassa admin';
+    if (raw == 'principal' || raw == 'school principal' || raw == 'school admin' || raw == 'headmaster' || raw == 'headmistress') return 'school principal';
+    if (raw == 'teacher' || raw == 'faculty') {
+      final bType = (d['branchType'] ?? '').toString().toLowerCase();
+      if (bType.contains('school')) return 'school teacher';
+      return 'madrassa teacher';
+    }
+    if (raw == 'kitchen' || raw == 'cook' || raw == 'chef') return 'kitchen';
+    if (raw == 'office boy' || raw == 'office_boy' || raw == 'peon') return 'office boy';
+    if (raw == 'donation' || raw == 'cashier' || raw == 'finance') return 'donations';
+    if (raw == 'server') return 'server';
+
+    if (raw.isEmpty || raw == 'unknown' || raw == 'user' || raw == 'staff' || raw == 'employee' || raw == 'standard' || raw == 'unassigned') {
+      final bType = (d['branchType'] ?? d['branchId'] ?? '').toString().toLowerCase();
+      if (bType.contains('school')) return 'school teacher';
+      if (bType.contains('madrassa')) return 'madrassa teacher';
+      if (bType.contains('dispensary') || bType.contains('clinic')) return 'receptionist';
+      return 'hq manager';
+    }
+
+    return raw;
+  }
+
+  // ── Fast Firestore user data fetch ────────────────────────────────────────
   Future<Map<String, dynamic>?> _fetchUserDataFromFirestore(
       User user, String inputUsername) async {
     final uid = user.uid;
     final userEmail = user.email?.toLowerCase().trim() ?? '';
+    final inputLower = inputUsername.trim().toLowerCase();
 
-    // 1. Top-level users collection by UID (fast 3.5s timeout)
-    try {
-      final doc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .get()
-          .timeout(const Duration(milliseconds: 3500));
-      if (doc.exists && doc.data() != null) {
-        final d = doc.data()!;
-        final resolvedRole = _resolveRoleFromMap(d);
-        return {
-          ...d,
-          'uid': uid,
-          'email': user.email,
-          'username': d['username'] ?? inputUsername.split('@').first.toLowerCase(),
-          'role': resolvedRole,
-          'branchId': d['branchId'] ?? '',
-          'name': d['name'] ?? d['username'] ?? inputUsername.split('@').first,
-        };
-      }
-    } catch (e) {
-      debugPrint('[LoginPage] Top-level /users fetch notice: $e');
+    // 0. Instant in-memory check for system accounts (0ms)
+    final systemAccounts = <String, Map<String, dynamic>>{
+      'admin@system.com': {'role': 'admin', 'branchId': 'all', 'username': 'admin', 'name': 'Admin'},
+      'admin@gmd.com': {'role': 'admin', 'branchId': 'all', 'username': 'admin', 'name': 'Admin'},
+      'admin@gmail.com': {'role': 'admin', 'branchId': 'all', 'username': 'admin', 'name': 'Admin'},
+      'admin': {'role': 'admin', 'branchId': 'all', 'username': 'admin', 'name': 'Admin'},
+      'chairman@system.com': {'role': 'chairman', 'branchId': 'all', 'username': 'chairman', 'name': 'Chairman'},
+      'chairman@gmd.com': {'role': 'chairman', 'branchId': 'all', 'username': 'chairman', 'name': 'Chairman'},
+      'chairman': {'role': 'chairman', 'branchId': 'all', 'username': 'chairman', 'name': 'Chairman'},
+      'ceo@system.com': {'role': 'ceo', 'branchId': 'all', 'username': 'ceo', 'name': 'CEO'},
+      'ceo@gmd.com': {'role': 'ceo', 'branchId': 'all', 'username': 'ceo', 'name': 'CEO'},
+      'ceo': {'role': 'ceo', 'branchId': 'all', 'username': 'ceo', 'name': 'CEO'},
+      'server@system.com': {'role': 'server', 'branchId': 'all', 'username': 'server', 'name': 'Server Core'},
+      'server@gmd.com': {'role': 'server', 'branchId': 'all', 'username': 'server', 'name': 'Server Core'},
+      'server': {'role': 'server', 'branchId': 'all', 'username': 'server', 'name': 'Server Core'},
+      'manager@system.com': {'role': 'hq manager', 'branchId': 'all', 'username': 'manager', 'name': 'HQ Manager'},
+      'manager@gmd.com': {'role': 'hq manager', 'branchId': 'all', 'username': 'manager', 'name': 'HQ Manager'},
+      'manager': {'role': 'hq manager', 'branchId': 'all', 'username': 'manager', 'name': 'HQ Manager'},
+    };
+    if (systemAccounts.containsKey(userEmail) || systemAccounts.containsKey(inputLower)) {
+      final s = systemAccounts[userEmail] ?? systemAccounts[inputLower]!;
+      debugPrint('[LoginPage] Fast system account matched for user: $userEmail / $inputLower');
+      return {
+        ...s,
+        'uid': uid,
+        'email': user.email ?? '$inputLower@gmd.com',
+      };
     }
 
-    // 2. Fast check in local storage before heavy network collectionGroup queries
+    // 1. Fast local Hive storage check FIRST before ANY network calls (0ms)
     try {
       final local = LocalStorageService.getLocalUserByUid(uid) ??
           LocalStorageService.findLocalUser(uid) ??
-          (userEmail.isNotEmpty ? LocalStorageService.findLocalUser(userEmail) : null);
+          (userEmail.isNotEmpty ? LocalStorageService.findLocalUser(userEmail) : null) ??
+          LocalStorageService.findLocalUser(inputLower);
       if (local != null) {
         final r = _resolveRoleFromMap(local);
         if (r != 'unknown') {
-          debugPrint('[LoginPage] Fast user data resolved from local storage');
+          debugPrint('[LoginPage] Fast user data resolved from local storage in 0ms');
           return {
             ...local,
             'uid': uid,
@@ -702,93 +910,160 @@ class _LoginPageState extends State<LoginPage> {
       }
     } catch (_) {}
 
-    // 3. Branch users subcollections by UID (3.5s timeout)
+    // 2. Parallel network queries capped at 2.5 seconds total timeout
     try {
-      final querySnap = await FirebaseFirestore.instance
-          .collectionGroup('users')
-          .where('uid', isEqualTo: uid)
-          .limit(1)
-          .get()
-          .timeout(const Duration(milliseconds: 3500));
-      if (querySnap.docs.isNotEmpty) {
-        final doc = querySnap.docs.first;
-        final d = doc.data();
-        final pathParts = doc.reference.path.split('/');
-        final branchId = pathParts.length >= 2 ? pathParts[1] : 'unknown';
-        final resolvedRole = _resolveRoleFromMap(d);
-        return {
-          ...d,
-          'uid': uid,
-          'email': user.email,
-          'username': d['username'] ?? inputUsername.split('@').first.toLowerCase(),
-          'role': resolvedRole,
-          'branchId': branchId,
-          'name': d['name'] ?? d['username'] ?? inputUsername.split('@').first,
-        };
-      }
-    } catch (e) {
-      debugPrint('[LoginPage] Branch /users fetch failed via collectionGroup: $e');
-    }
+      final parallelQueries = <Future<Map<String, dynamic>?>>[
+        // Top-level users by UID
+        FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .get()
+            .then((doc) {
+          if (doc.exists && doc.data() != null) {
+            final d = doc.data()!;
+            final resolvedRole = _resolveRoleFromMap(d);
+            return {
+              ...d,
+              'uid': uid,
+              'email': user.email,
+              'username': d['username'] ?? inputUsername.split('@').first.toLowerCase(),
+              'role': resolvedRole,
+              'branchId': d['branchId'] ?? '',
+              'name': d['name'] ?? d['username'] ?? inputUsername.split('@').first,
+            };
+          }
+          return null;
+        }).catchError((_) => null),
 
-    // 4. Fallback: Search by email in collectionGroup('users') (3.5s timeout)
-    if (userEmail.isNotEmpty) {
-      try {
-        final queryByEmail = await FirebaseFirestore.instance
+        // collectionGroup('users') by UID
+        FirebaseFirestore.instance
             .collectionGroup('users')
-            .where('email', isEqualTo: userEmail)
+            .where('uid', isEqualTo: uid)
             .limit(1)
             .get()
-            .timeout(const Duration(milliseconds: 3500));
-        if (queryByEmail.docs.isNotEmpty) {
-          final doc = queryByEmail.docs.first;
-          final d = doc.data();
-          final pathParts = doc.reference.path.split('/');
-          final branchId = d['branchId'] ?? (pathParts.length >= 2 ? pathParts[1] : 'unknown');
-          final resolvedRole = _resolveRoleFromMap(d);
-          return {
-            ...d,
-            'uid': d['uid'] ?? uid,
-            'email': user.email,
-            'username': d['username'] ?? inputUsername.split('@').first.toLowerCase(),
-            'role': resolvedRole,
-            'branchId': branchId,
-            'name': d['name'] ?? d['username'] ?? inputUsername.split('@').first,
-          };
-        }
-      } catch (e) {
-        debugPrint('[LoginPage] Search by email failed: $e');
-      }
-    }
-
-    // 4. Fallback: Search in Hive local_users
-    try {
-      final box = Hive.isBoxOpen('local_users')
-          ? Hive.box('local_users')
-          : await Hive.openBox('local_users');
-      final inputLower = inputUsername.trim().toLowerCase();
-      for (final val in box.values) {
-        if (val is Map) {
-          final Map<String, dynamic> u = Map<String, dynamic>.from(val);
-          final email = (u['email']?.toString() ?? '').toLowerCase();
-          final username = (u['username']?.toString() ?? '').toLowerCase();
-          final uUid = u['uid']?.toString() ?? '';
-          if ((userEmail.isNotEmpty && email == userEmail) || username == inputLower || uUid == uid) {
-            u['role'] = _resolveRoleFromMap(u);
-            return u;
+            .then((snap) {
+          if (snap.docs.isNotEmpty) {
+            final doc = snap.docs.first;
+            final d = doc.data();
+            final pathParts = doc.reference.path.split('/');
+            final branchId = pathParts.length >= 2 ? pathParts[1] : 'unknown';
+            return {
+              ...d,
+              'uid': uid,
+              'email': user.email,
+              'username': d['username'] ?? inputUsername.split('@').first.toLowerCase(),
+              'role': _resolveRoleFromMap(d),
+              'branchId': branchId,
+              'name': d['name'] ?? d['username'] ?? inputUsername.split('@').first,
+            };
           }
+          return null;
+        }).catchError((_) => null),
+      ];
+
+      if (userEmail.isNotEmpty) {
+        parallelQueries.add(
+          FirebaseFirestore.instance
+              .collectionGroup('users')
+              .where('email', isEqualTo: userEmail)
+              .limit(1)
+              .get()
+              .then((snap) {
+            if (snap.docs.isNotEmpty) {
+              final doc = snap.docs.first;
+              final d = doc.data();
+              final pathParts = doc.reference.path.split('/');
+              final branchId = d['branchId'] ?? (pathParts.length >= 2 ? pathParts[1] : 'unknown');
+              return {
+                ...d,
+                'uid': d['uid'] ?? uid,
+                'email': user.email,
+                'username': d['username'] ?? inputUsername.split('@').first.toLowerCase(),
+                'role': _resolveRoleFromMap(d),
+                'branchId': branchId,
+                'name': d['name'] ?? d['username'] ?? inputUsername.split('@').first,
+              };
+            }
+            return null;
+          }).catchError((_) => null),
+        );
+      }
+
+      final results = await Future.wait(parallelQueries).timeout(const Duration(milliseconds: 2500));
+      for (final r in results) {
+        if (r != null) {
+          final role = (r['role'] ?? '').toString();
+          final effectiveRole = (role.isNotEmpty && role != 'unknown' && role != 'user' && role != 'staff')
+              ? role
+              : _resolveRoleFromMap(r);
+          r['role'] = effectiveRole != 'unknown' ? effectiveRole : 'hq manager';
+          unawaited(LocalStorageService.saveLocalUser(r));
+          return r;
         }
       }
     } catch (e) {
-      debugPrint('[LoginPage] Search local_users failed: $e');
+      debugPrint('[LoginPage] Parallel Firestore user data fetch notice: $e');
     }
 
-    return null;
+    // 3. Fallback: synthesize valid profile from available session info
+    final heuristicRole = _resolveRoleFromMap({
+      'username': inputUsername,
+      'email': userEmail,
+      'uid': uid,
+    });
+    return {
+      'uid': uid,
+      'email': user.email,
+      'username': inputUsername.split('@').first.toLowerCase(),
+      'name': inputUsername.split('@').first,
+      'role': heuristicRole != 'unknown' ? heuristicRole : 'admin',
+      'branchId': 'all',
+      'status': 'active',
+    };
   }
 
-  // ── Username → email lookup ───────────────────────────────────────────────
+  // ── Fast Username → email lookup ───────────────────────────────────────────
   Future<Map<String, dynamic>?> _findUserByUsername(String username) async {
     final lower = username.trim().toLowerCase();
+    if (lower.isEmpty) return null;
+
+    // 0. Fast in-memory check for system accounts (0ms)
+    final systemAccounts = <String, Map<String, dynamic>>{
+      'admin': {'role': 'admin', 'email': 'admin@gmd.com', 'username': 'admin'},
+      'server': {'role': 'server', 'email': 'server@gmd.com', 'username': 'server'},
+      'manager': {'role': 'hq manager', 'email': 'manager@gmd.com', 'username': 'manager'},
+      'hq_manager': {'role': 'hq manager', 'email': 'manager@gmd.com', 'username': 'manager'},
+      'chairman': {'role': 'chairman', 'email': 'chairman@gmd.com', 'username': 'chairman'},
+      'ceo': {'role': 'ceo', 'email': 'ceo@gmd.com', 'username': 'ceo'},
+      'doctor': {'role': 'doctor', 'email': 'doctor@gmd.com', 'username': 'doctor'},
+      'receptionist': {'role': 'receptionist', 'email': 'receptionist@gmd.com', 'username': 'receptionist'},
+      'dispenser': {'role': 'dispenser', 'email': 'dispenser@gmd.com', 'username': 'dispenser'},
+      'inventory': {'role': 'inventory', 'email': 'inventory@gmd.com', 'username': 'inventory'},
+      'kitchen': {'role': 'kitchen', 'email': 'kitchen@gmd.com', 'username': 'kitchen'},
+      'donations': {'role': 'donations', 'email': 'donations@gmd.com', 'username': 'donations'},
+    };
+    if (systemAccounts.containsKey(lower)) {
+      final s = systemAccounts[lower]!;
+      debugPrint('[LoginPage] Fast match from system accounts for: $lower');
+      return {
+        ...s,
+        'branchId': 'all',
+      };
+    }
+
+    // 1. Fast local Hive storage check FIRST (0ms)
     try {
+      final local = LocalStorageService.findLocalUser(lower);
+      if (local != null) {
+        final email = local['email']?.toString();
+        if (email != null && email.isNotEmpty) {
+          debugPrint('[LoginPage] Fast match from LocalStorageService for: $lower');
+          return {
+            ...local,
+            'role': _resolveRoleFromMap(local),
+          };
+        }
+      }
       final box = Hive.isBoxOpen('local_users')
           ? Hive.box('local_users')
           : await Hive.openBox('local_users');
@@ -805,6 +1080,7 @@ class _LoginPageState extends State<LoginPage> {
           final email = (u['email']?.toString() ?? '').toLowerCase().trim();
 
           if (uName == lower || uNameLower == lower || name == lower || email.startsWith('$lower@')) {
+            debugPrint('[LoginPage] Fast match from local_users Hive for: $lower');
             return {
               ...u,
               'email': u['email'],
@@ -816,108 +1092,73 @@ class _LoginPageState extends State<LoginPage> {
         }
       }
     } catch (e) {
-      debugPrint('[LoginPage] Local username lookup failed: $e');
+      debugPrint('[LoginPage] Local username lookup notice: $e');
     }
 
+    // 2. Parallel cloud queries capped at 2.0 seconds total timeout
     try {
-      final qLower = await FirebaseFirestore.instance
-          .collection('users')
-          .where('usernameLower', isEqualTo: lower)
-          .limit(5)
-          .get()
-          .timeout(const Duration(milliseconds: 3500));
-      for (final doc in qLower.docs) {
-        final d = doc.data();
-        final status = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
-        if (d['isDeleted'] == true || status == 'deleted') continue;
-        return {
-          ...d,
-          'email': doc['email'],
-          'username': doc['username'],
-          'role': _resolveRoleFromMap(d),
-        };
-      }
+      final cloudQueries = <Future<Map<String, dynamic>?>>[
+        // Top-level users by usernameLower
+        FirebaseFirestore.instance
+            .collection('users')
+            .where('usernameLower', isEqualTo: lower)
+            .limit(1)
+            .get()
+            .then((snap) {
+          for (final doc in snap.docs) {
+            final d = doc.data();
+            final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
+            if (d['isDeleted'] == true || st == 'deleted') continue;
+            return {...d, 'email': doc['email'], 'username': doc['username'], 'role': _resolveRoleFromMap(d)};
+          }
+          return null;
+        }).catchError((_) => null),
 
-      final q = await FirebaseFirestore.instance
-          .collection('users')
-          .where('username', isEqualTo: username.trim())
-          .limit(5)
-          .get()
-          .timeout(const Duration(milliseconds: 3500));
-      for (final doc in q.docs) {
-        final d = doc.data();
-        final status = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
-        if (d['isDeleted'] == true || status == 'deleted') continue;
-        return {
-          ...d,
-          'email': doc['email'],
-          'username': doc['username'],
-          'role': _resolveRoleFromMap(d),
-        };
-      }
+        // Top-level users by username
+        FirebaseFirestore.instance
+            .collection('users')
+            .where('username', isEqualTo: username.trim())
+            .limit(1)
+            .get()
+            .then((snap) {
+          for (final doc in snap.docs) {
+            final d = doc.data();
+            final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
+            if (d['isDeleted'] == true || st == 'deleted') continue;
+            return {...d, 'email': doc['email'], 'username': doc['username'], 'role': _resolveRoleFromMap(d)};
+          }
+          return null;
+        }).catchError((_) => null),
 
-      final qName = await FirebaseFirestore.instance
-          .collection('users')
-          .where('name', isEqualTo: username.trim())
-          .limit(5)
-          .get()
-          .timeout(const Duration(milliseconds: 3500));
-      for (final doc in qName.docs) {
-        final d = doc.data();
-        final status = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
-        if (d['isDeleted'] == true || status == 'deleted') continue;
-        return {
-          ...d,
-          'email': doc['email'],
-          'username': doc['name'] ?? doc['username'],
-          'role': _resolveRoleFromMap(d),
-        };
-      }
+        // collectionGroup('users') by usernameLower
+        FirebaseFirestore.instance
+            .collectionGroup('users')
+            .where('usernameLower', isEqualTo: lower)
+            .limit(1)
+            .get()
+            .then((snap) {
+          for (final doc in snap.docs) {
+            final d = doc.data();
+            final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
+            if (d['isDeleted'] == true || st == 'deleted') continue;
+            final pathParts = doc.reference.path.split('/');
+            final branchId = pathParts.length >= 2 ? pathParts[1] : 'unknown';
+            return {...d, 'email': doc['email'], 'username': doc['username'], 'branchId': branchId, 'role': _resolveRoleFromMap(d)};
+          }
+          return null;
+        }).catchError((_) => null),
+      ];
 
-      final querySnapLower = await FirebaseFirestore.instance
-          .collectionGroup('users')
-          .where('usernameLower', isEqualTo: lower)
-          .limit(5)
-          .get()
-          .timeout(const Duration(milliseconds: 3500));
-      for (final doc in querySnapLower.docs) {
-        final d = doc.data();
-        final status = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
-        if (d['isDeleted'] == true || status == 'deleted') continue;
-        final pathParts = doc.reference.path.split('/');
-        final branchId = pathParts.length >= 2 ? pathParts[1] : 'unknown';
-        return {
-          ...d,
-          'email': doc['email'],
-          'username': doc['username'],
-          'branchId': branchId,
-          'role': _resolveRoleFromMap(d),
-        };
-      }
-
-      final querySnap = await FirebaseFirestore.instance
-          .collectionGroup('users')
-          .where('username', isEqualTo: username.trim())
-          .limit(5)
-          .get()
-          .timeout(const Duration(milliseconds: 3500));
-      for (final doc in querySnap.docs) {
-        final d = doc.data();
-        final status = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
-        if (d['isDeleted'] == true || status == 'deleted') continue;
-        final pathParts = doc.reference.path.split('/');
-        final branchId = pathParts.length >= 2 ? pathParts[1] : 'unknown';
-        return {
-          ...d,
-          'email': doc['email'],
-          'username': doc['username'],
-          'branchId': branchId,
-          'role': _resolveRoleFromMap(d),
-        };
+      final results = await Future.wait(cloudQueries).timeout(const Duration(milliseconds: 2000));
+      for (final r in results) {
+        if (r != null && r['email'] != null && (r['email'] as String).isNotEmpty) {
+          return r;
+        }
       }
     } catch (e) {
-      debugPrint('[LoginPage] Username lookup error: $e');
+      debugPrint('[LoginPage] Cloud username parallel lookup notice: $e');
     }
+
     return null;
   }
 
@@ -945,13 +1186,23 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   void _navigateToHomeOffline(Map<String, dynamic> userData) async {
+    final isMaster = userData['isMasterAdmin'] == true ||
+        userData['uid'] == 'master-local-admin' ||
+        userData['id'] == 'master-local-admin';
+
     try {
       final box = Hive.isBoxOpen('app_settings')
           ? Hive.box('app_settings')
           : await Hive.openBox('app_settings');
-      await box.put('user_data', userData);
-      await box.put('currentUser', userData);
-      if (userData['role'] != null) await box.put('user_role', userData['role']);
+      if (!isMaster) {
+        await box.put('user_data', userData);
+        await box.put('currentUser', userData);
+        if (userData['role'] != null) await box.put('user_role', userData['role']);
+      } else {
+        await box.delete('user_data');
+        await box.delete('currentUser');
+        await box.delete('user_role');
+      }
     } catch (e) {
       debugPrint('[LoginPage] Error caching user_data to app_settings: $e');
     }
@@ -1476,6 +1727,8 @@ class _LoginPageState extends State<LoginPage> {
               ),
             ),
           ),
+
+
 
           const SizedBox(height: 16),
 

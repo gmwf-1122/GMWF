@@ -92,6 +92,7 @@ class SyncService {
     unawaited(_enqueueMissingDonations(branchId));
     unawaited(_enqueueMissingFoodTokens(branchId));
     unawaited(sweepAllPendingLocalData());
+    unawaited(LocalStorageService.downloadUsers(branchId));
 
     // Run full structure sanitization (clean bogus/duplicate branches & consolidate bloat)
     try {
@@ -471,6 +472,7 @@ class SyncService {
 
   Future<void> _refreshDataForBranch(String branchId) async {
     try {
+      await LocalStorageService.downloadUsers(branchId);
       await LocalStorageService.downloadTodayTokens(branchId);
       await LocalStorageService.downloadInventory(branchId);
       await LocalStorageService.refreshPrescriptions(branchId);
@@ -1315,8 +1317,11 @@ class SyncService {
             if (bId.isNotEmpty && bId != 'all' && bId != 'global') {
               fsData['branchId'] ??= bId;
             }
-            // Canonical single user write to root collection /users (no double documents)
+            // Write user to root collection /users and branch subcollection
             await _db.collection('users').doc(uid).set(fsData, SetOptions(merge: true));
+            if (bId.isNotEmpty && bId != 'all' && bId != 'global') {
+              await _db.collection('branches').doc(bId).collection('users').doc(uid).set(fsData, SetOptions(merge: true)).catchError((_) {});
+            }
 
             try {
               if (Hive.isBoxOpen('local_users')) {

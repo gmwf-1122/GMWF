@@ -268,8 +268,8 @@ class FirestoreStructureSanitizer {
                 await _db.collection('users').doc(uid).set(uData, SetOptions(merge: true));
               }
 
-              // Delete redundant duplicate subcollection document
-              await uDoc.reference.delete();
+              // Sync to root users collection while preserving branch users subcollection
+              // Branch user documents must remain intact for branch-scoped auth & authorization
               report['userDoublesCleaned'] = (report['userDoublesCleaned'] as int) + 1;
             }
           }

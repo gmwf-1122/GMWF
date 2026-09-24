@@ -25,6 +25,7 @@ import '../services/camp_session_service.dart';
 import 'office/offboard_dialog.dart';
 import '../services/staff_patient_link_service.dart';
 import '../services/sync_service.dart';
+import '../services/device_info_service.dart';
 
 class UserDetailScreen extends StatefulWidget {
   final String userId;
@@ -1209,18 +1210,20 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       'bankAccount': _bankAccountController.text.trim().isNotEmpty
           ? _bankAccountController.text.trim()
           : null,
-      'role': _selectedRole,
+      'role': _selectedRole ?? old['role'],
       'status': _selectedStatus ?? 'Active',
       'accountStatus': _selectedStatus ?? 'Active',
       'isActive': (_selectedStatus ?? 'Active') == 'Active',
       'password': passCtrl.text.trim().isEmpty
-          ? '1122'
+          ? (old['password']?.toString().isNotEmpty == true ? old['password'].toString() : '1122')
           : passCtrl.text.trim(),
       'dispensaryIds': dispensaryIds,
       'dispensaryId': dispensaryIds.isNotEmpty ? dispensaryIds.first : null,
       'campSchedule': campSchedule,
       'allowedSessions': allowedSessionsList,
     };
+    final effectivePw = updates['password'].toString();
+    updates['passwordHash'] = LocalStorageService.hashPassword(effectivePw);
     if (isDoctor) updates['degree'] = _degreeController.text.trim();
 
     if (enteredPin.isNotEmpty) {
@@ -1294,6 +1297,19 @@ class _UserDetailScreenState extends State<UserDetailScreen>
         }
       }
 
+      String resolvedEditRole = (_selectedRole ?? old['role'] ?? '').toString().trim();
+      if (resolvedEditRole.isEmpty ||
+          resolvedEditRole.toLowerCase() == 'user' ||
+          resolvedEditRole.toLowerCase() == 'staff' ||
+          resolvedEditRole.toLowerCase() == 'unknown') {
+        resolvedEditRole = (old['role'] != null &&
+                old['role'].toString().trim().isNotEmpty &&
+                old['role'].toString().toLowerCase() != 'user' &&
+                old['role'].toString().toLowerCase() != 'staff')
+            ? old['role'].toString().trim()
+            : 'Admin';
+      }
+
       final fullUserData = <String, dynamic>{
         ...old,
         ...updates,
@@ -1303,11 +1319,15 @@ class _UserDetailScreenState extends State<UserDetailScreen>
         'username': _usernameController.text.trim(),
         'usernameLower': _usernameController.text.trim().toLowerCase(),
         'email': _emailController.text.trim().toLowerCase(),
-        'branchId': widget.branchId,
-        'role': _selectedRole ?? old['role'] ?? 'User',
+        'branchId': widget.branchId.isNotEmpty && widget.branchId != 'global' ? widget.branchId : (old['branchId'] ?? 'all'),
+        'role': resolvedEditRole,
+        'userRole': resolvedEditRole,
+        'roles': [resolvedEditRole],
         'status': _selectedStatus ?? 'Active',
         'accountStatus': _selectedStatus ?? 'Active',
         'isActive': (_selectedStatus ?? 'Active') == 'Active',
+        'password': effectivePw,
+        'passwordHash': LocalStorageService.hashPassword(effectivePw),
       };
 
       await LocalStorageService.saveUserOffline(
@@ -1315,6 +1335,29 @@ class _UserDetailScreenState extends State<UserDetailScreen>
         branchId: widget.branchId,
         userData: fullUserData,
       );
+
+      // Save credentials into OfflineAuthService so offline login works immediately
+      await OfflineAuthService.saveCredentials(
+        usernameOrEmail: fullUserData['usernameLower'],
+        password: effectivePw,
+        userData: fullUserData,
+        setAsLastLoggedIn: false,
+      );
+      if (fullUserData['email'] != null && fullUserData['email'].toString().isNotEmpty) {
+        await OfflineAuthService.saveCredentials(
+          usernameOrEmail: fullUserData['email'].toString().toLowerCase(),
+          password: effectivePw,
+          userData: fullUserData,
+          setAsLastLoggedIn: false,
+        );
+      }
+
+      await LocalStorageService.enqueueSync({
+        'type': 'save_user',
+        'branchId': widget.branchId,
+        'uid': widget.userId,
+        'data': fullUserData,
+      });
 
       _remoteUserData = fullUserData;
 
@@ -1706,9 +1749,22 @@ class _UserDetailScreenState extends State<UserDetailScreen>
             .take(2)
             .join()
             .toUpperCase();
+    final isOnline = DeviceInfoService.isUserOnline(data, thresholdMinutes: 5);
+    final status = (data['status'] ?? data['accountStatus'] ?? 'active').toString().toLowerCase().trim();
+    final isRevoked = status == 'inactive' ||
+        status == 'suspended' ||
+        status == 'terminated' ||
+        status == 'resigned' ||
+        status == 'retired' ||
+        status == 'offboarded' ||
+        status == 'revoked' ||
+        data['isActive'] == false ||
+        data['isRevoked'] == true ||
+        data['accessRevoked'] == true;
+    final handle = (data['username'] ?? '').toString().trim();
 
     return SliverAppBar(
-      expandedHeight: 220,
+      expandedHeight: 235,
       pinned: true,
       backgroundColor: t.accent,
       foregroundColor: Colors.white,
@@ -1718,12 +1774,13 @@ class _UserDetailScreenState extends State<UserDetailScreen>
           icon: Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(10)),
+                color: Colors.white.withValues(alpha: 0.16),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.25), width: 0.8)),
             child: const Icon(Icons.refresh_rounded,
                 size: 18, color: Colors.white),
           ),
-          tooltip: 'Refresh',
+          tooltip: 'Refresh User Data',
           onPressed: _refreshUser,
         ),
         if (_canManageUserAccess(data)) ...[
@@ -1731,12 +1788,13 @@ class _UserDetailScreenState extends State<UserDetailScreen>
             icon: Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(10)),
+                  color: Colors.white.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.25), width: 0.8)),
               child: const Icon(Icons.edit_rounded,
                   size: 18, color: Colors.white),
             ),
-            tooltip: 'Edit User',
+            tooltip: 'Edit Profile & Credentials',
             onPressed: () => _showEditDialog(data, t),
           ),
           if (!isGuardian)
@@ -1744,20 +1802,28 @@ class _UserDetailScreenState extends State<UserDetailScreen>
               icon: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                    color: Colors.red.withValues(alpha: 0.3),
-                    borderRadius: BorderRadius.circular(10)),
-                child: const Icon(Icons.no_accounts_rounded,
-                    size: 18, color: Colors.white),
+                    color: isRevoked ? Colors.green.withValues(alpha: 0.3) : Colors.red.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: isRevoked ? Colors.green.withValues(alpha: 0.5) : Colors.red.withValues(alpha: 0.5),
+                      width: 0.8,
+                    )),
+                child: Icon(
+                  isRevoked ? Icons.lock_open_rounded : Icons.lock_person_rounded,
+                  size: 18,
+                  color: Colors.white,
+                ),
               ),
-              tooltip: 'Revoke Access',
+              tooltip: isRevoked ? 'Restore Access' : 'Revoke Access',
               onPressed: () => _showRevokeAccessDialog(data, t),
             ),
           IconButton(
             icon: Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(10)),
+                  color: Colors.white.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.25), width: 0.8)),
               child: const Icon(Icons.medical_services_outlined,
                   size: 18, color: Colors.white),
             ),
@@ -1774,12 +1840,13 @@ class _UserDetailScreenState extends State<UserDetailScreen>
             icon: Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(10)),
+                  color: Colors.red.withValues(alpha: 0.25),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.red.withValues(alpha: 0.5), width: 0.8)),
               child: const Icon(Icons.delete_outline_rounded,
                   size: 18, color: Colors.white),
             ),
-            tooltip: 'Delete User',
+            tooltip: 'Delete User Permanently',
             onPressed: () => _deleteUser(data, t),
           ),
           const SizedBox(width: 8),
@@ -1793,8 +1860,8 @@ class _UserDetailScreenState extends State<UserDetailScreen>
               end: Alignment.bottomRight,
               colors: [
                 t.bg == const Color(0xFF080C14)
-                    ? const Color(0xFF080C14)
-                    : t.accent.withValues(alpha: 0.9),
+                    ? const Color(0xFF0F172A)
+                    : t.accent.withValues(alpha: 0.95),
                 t.accent,
                 t.accentLight,
               ],
@@ -1802,9 +1869,9 @@ class _UserDetailScreenState extends State<UserDetailScreen>
           ),
           child: SafeArea(
             child: Padding(
-              padding:
-                  const EdgeInsets.fromLTRB(20, 56, 20, 20),
+              padding: const EdgeInsets.fromLTRB(20, 52, 20, 16),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   GestureDetector(
                     onTap: () => _showEnlargedPhotoDialog(context, username, photoUrl, role, t),
@@ -1812,31 +1879,61 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                       cursor: SystemMouseCursors.click,
                       child: Tooltip(
                         message: 'Tap to enlarge profile photo',
-                        child: Container(
-                          width: 80,
-                          height: 80,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: Colors.white.withValues(alpha: 0.2),
-                            image: (photoUrl != null && photoUrl.isNotEmpty)
-                                ? DecorationImage(
-                                    image: (photoUrl.startsWith('http://') || photoUrl.startsWith('https://'))
-                                        ? NetworkImage(photoUrl) as ImageProvider
-                                        : MemoryImage(ImageUploadService.decodeBase64ToBytes(photoUrl) ?? Uint8List(0)),
-                                    fit: BoxFit.cover)
-                                : null,
-                            border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.4),
-                                width: 2.5),
-                          ),
-                          alignment: Alignment.center,
-                          child: (photoUrl == null || photoUrl.isEmpty)
-                              ? Text(initials,
-                                  style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 26,
-                                      fontWeight: FontWeight.w800))
-                              : null,
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Container(
+                              width: 84,
+                              height: 84,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.white.withValues(alpha: 0.2),
+                                image: (photoUrl != null && photoUrl.isNotEmpty)
+                                    ? DecorationImage(
+                                        image: (photoUrl.startsWith('http://') || photoUrl.startsWith('https://'))
+                                            ? NetworkImage(photoUrl) as ImageProvider
+                                            : MemoryImage(ImageUploadService.decodeBase64ToBytes(photoUrl) ?? Uint8List(0)),
+                                        fit: BoxFit.cover)
+                                    : null,
+                                border: Border.all(
+                                  color: Colors.white,
+                                  width: 3.0,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.25),
+                                    blurRadius: 12,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              alignment: Alignment.center,
+                              child: (photoUrl == null || photoUrl.isEmpty)
+                                  ? Text(initials,
+                                      style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 28,
+                                          fontWeight: FontWeight.w900))
+                                  : null,
+                            ),
+                            if (isOnline)
+                              Positioned(
+                                right: 2,
+                                bottom: 2,
+                                child: Container(
+                                  width: 18,
+                                  height: 18,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF22C55E),
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: Colors.white, width: 2.5),
+                                    boxShadow: const [
+                                      BoxShadow(color: Color(0x6622C55E), blurRadius: 6, spreadRadius: 1),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                          ],
                         ),
                       ),
                     ),
@@ -1844,60 +1941,115 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                   const SizedBox(width: 18),
                   Expanded(
                     child: Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment.start,
-                      mainAxisAlignment:
-                          MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Text(username,
-                            style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 22,
-                                fontWeight: FontWeight.w800)),
-                        const SizedBox(height: 6),
+                        Text(
+                          username,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 22,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.4,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        if (handle.isNotEmpty) ...[
+                          const SizedBox(height: 2),
+                          Text(
+                            '@$handle',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.8),
+                              fontSize: 13,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ],
+                        const SizedBox(height: 8),
                         Wrap(
-                          spacing: 8,
-                          runSpacing: 4,
+                          spacing: 6,
+                          runSpacing: 5,
                           children: [
                             Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 4),
+                              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3.5),
                               decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.2),
-                                borderRadius: BorderRadius.circular(20),
+                                color: Colors.white.withValues(alpha: 0.22),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: Colors.white.withValues(alpha: 0.35), width: 0.7),
                               ),
-                              child: Text(role,
-                                  style: const TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 12,
-                                      fontWeight: FontWeight.w700)),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.badge_outlined, size: 12, color: Colors.white),
+                                  const SizedBox(width: 4),
+                                  Text(
+                                    role,
+                                    style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800),
+                                  ),
+                                ],
+                              ),
                             ),
                             Container(
-                              padding: const EdgeInsets.symmetric(
-                                  horizontal: 10, vertical: 4),
+                              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3.5),
                               decoration: BoxDecoration(
-                                color: ((data['status'] ?? data['accountStatus'] ?? 'Active').toString().toLowerCase() == 'active')
-                                    ? const Color(0xFF10B981)
-                                    : const Color(0xFFEF4444),
-                                borderRadius: BorderRadius.circular(20),
+                                color: isRevoked
+                                    ? const Color(0xFFEF4444)
+                                    : const Color(0xFF10B981),
+                                borderRadius: BorderRadius.circular(10),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: (isRevoked ? const Color(0xFFEF4444) : const Color(0xFF10B981)).withValues(alpha: 0.35),
+                                    blurRadius: 6,
+                                  ),
+                                ],
                               ),
                               child: Text(
-                                (data['status'] ?? data['accountStatus'] ?? 'ACTIVE').toString().toUpperCase(),
+                                isRevoked ? 'REVOKED' : 'ACTIVE',
                                 style: const TextStyle(
                                   color: Colors.white,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.bold,
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.w900,
                                 ),
+                              ),
+                            ),
+                            if (isOnline)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF22C55E).withValues(alpha: 0.3),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: const Color(0xFF22C55E), width: 0.8),
+                                ),
+                                child: const Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.circle, size: 6, color: Color(0xFF4ADE80)),
+                                    SizedBox(width: 4),
+                                    Text('ONLINE', style: TextStyle(color: Color(0xFF4ADE80), fontSize: 10, fontWeight: FontWeight.w800)),
+                                  ],
+                                ),
+                              ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.location_on_outlined, size: 11, color: Colors.white.withValues(alpha: 0.8)),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    (branchName ?? widget.branchId).toUpperCase(),
+                                    style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 10.5, fontWeight: FontWeight.w600),
+                                  ),
+                                ],
                               ),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 6),
-                        Text(branchName ?? widget.branchId,
-                            style: TextStyle(
-                                color:
-                                    Colors.white.withValues(alpha: 0.7),
-                                fontSize: 12)),
                       ],
                     ),
                   ),
@@ -2645,40 +2797,50 @@ class _UserDetailScreenState extends State<UserDetailScreen>
     return Container(
       decoration: BoxDecoration(
         color: t.bgCard,
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: t.bgRule, width: 0.8),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: t.bgRule, width: 0.9),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
-              blurRadius: 16,
-              offset: const Offset(0, 4))
+            color: Colors.black.withValues(alpha: 0.04),
+            blurRadius: 14,
+            offset: const Offset(0, 3),
+          ),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding:
-                const EdgeInsets.fromLTRB(16, 16, 16, 12),
-            child: Row(children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.10),
-                    borderRadius: BorderRadius.circular(10)),
-                child: Icon(icon, color: accent, size: 18),
-              ),
-              const SizedBox(width: 10),
-              Text(title,
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
+            child: Row(
+              children: [
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: accent.withValues(alpha: 0.25), width: 0.8),
+                  ),
+                  alignment: Alignment.center,
+                  child: Icon(icon, color: accent, size: 18),
+                ),
+                const SizedBox(width: 12),
+                Text(
+                  title,
                   style: TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                      color: t.textPrimary)),
-            ]),
+                    fontSize: 15,
+                    fontWeight: FontWeight.w800,
+                    color: t.textPrimary,
+                    letterSpacing: -0.2,
+                  ),
+                ),
+              ],
+            ),
           ),
           Divider(height: 1, color: t.bgRule),
           Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(14),
             child: Column(children: children),
           ),
         ],
@@ -2687,28 +2849,90 @@ class _UserDetailScreenState extends State<UserDetailScreen>
   }
 
   Widget _infoRow(RoleThemeData t, String label, String value,
-      IconData icon) {
+      IconData icon, {bool copyable = true}) {
+    final canCopy = copyable && value.isNotEmpty && value != 'N/A' && value != '?';
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, size: 17, color: t.textTertiary),
-          const SizedBox(width: 10),
-          SizedBox(
-              width: 110,
-              child: Text(label,
-                  style: TextStyle(
-                      fontSize: 13,
+      padding: const EdgeInsets.only(bottom: 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
+        decoration: BoxDecoration(
+          color: t.bgCardAlt.withValues(alpha: 0.45),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: t.bgRule.withValues(alpha: 0.5), width: 0.7),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: t.accent.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              alignment: Alignment.center,
+              child: Icon(icon, size: 16, color: t.accent),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 11,
                       color: t.textSecondary,
-                      fontWeight: FontWeight.w500))),
-          Expanded(
-              child: Text(value,
-                  style: TextStyle(
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+                  const SizedBox(height: 1),
+                  Text(
+                    value,
+                    style: TextStyle(
                       fontSize: 13,
                       color: t.textPrimary,
-                      fontWeight: FontWeight.w600))),
-        ],
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (canCopy)
+              Tooltip(
+                message: 'Copy $label',
+                child: InkWell(
+                  borderRadius: BorderRadius.circular(8),
+                  onTap: () {
+                    Clipboard.setData(ClipboardData(text: value));
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.check_circle_rounded, color: Colors.white, size: 16),
+                            const SizedBox(width: 8),
+                            Text('Copied $label to clipboard', style: const TextStyle(fontSize: 12.5)),
+                          ],
+                        ),
+                        duration: const Duration(seconds: 1),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.all(5),
+                    decoration: BoxDecoration(
+                      color: t.bg.withValues(alpha: 0.7),
+                      borderRadius: BorderRadius.circular(6),
+                      border: Border.all(color: t.bgRule, width: 0.6),
+                    ),
+                    child: Icon(Icons.copy_rounded, size: 13, color: t.textSecondary),
+                  ),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -3399,10 +3623,18 @@ class _UserDetailScreenState extends State<UserDetailScreen>
         color: isRevoked
             ? Colors.red.withValues(alpha: 0.08)
             : t.bgCard,
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: isRevoked ? Colors.red.withValues(alpha: 0.3) : t.bgRule,
+          color: isRevoked ? Colors.red.withValues(alpha: 0.35) : t.bgRule,
+          width: 0.9,
         ),
+        boxShadow: [
+          BoxShadow(
+            color: (isRevoked ? Colors.red : Colors.black).withValues(alpha: 0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 3),
+          ),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3410,18 +3642,20 @@ class _UserDetailScreenState extends State<UserDetailScreen>
           Row(
             children: [
               Container(
-                padding: const EdgeInsets.all(10),
+                width: 44,
+                height: 44,
                 decoration: BoxDecoration(
                   color: isRevoked ? Colors.red.withValues(alpha: 0.15) : t.accentMuted,
                   borderRadius: BorderRadius.circular(12),
                 ),
+                alignment: Alignment.center,
                 child: Icon(
                   isRevoked ? Icons.no_accounts_rounded : Icons.shield_outlined,
                   color: isRevoked ? Colors.red : t.accent,
-                  size: 22,
+                  size: 24,
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -3430,10 +3664,12 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                       'Access Control & Offboarding',
                       style: TextStyle(
                         fontSize: 16,
-                        fontWeight: FontWeight.bold,
+                        fontWeight: FontWeight.w800,
                         color: t.textPrimary,
+                        letterSpacing: -0.2,
                       ),
                     ),
+                    const SizedBox(height: 2),
                     Text(
                       isRevoked
                           ? 'Account access is currently revoked (${data['status'] ?? 'Revoked'}).'
@@ -3451,13 +3687,13 @@ class _UserDetailScreenState extends State<UserDetailScreen>
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.red.withValues(alpha: 0.05),
+                color: Colors.red.withValues(alpha: 0.06),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.red.withValues(alpha: 0.2)),
+                border: Border.all(color: Colors.red.withValues(alpha: 0.25)),
               ),
               child: Text(
                 'Reason: ${data['revocationReason']}',
-                style: const TextStyle(fontSize: 12, color: Colors.red, fontWeight: FontWeight.w500),
+                style: const TextStyle(fontSize: 12, color: Colors.red, fontWeight: FontWeight.w600),
               ),
             ),
           ],

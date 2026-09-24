@@ -154,6 +154,10 @@ class AuthService {
         'usernameLower': lowerUsername,      // for case-insensitive lookup
         'email': lowerEmail,
         'role': role.trim(),
+        'userRole': role.trim(),
+        'roles': [role.trim()],
+        'password': password,
+        'passwordHash': LocalStorageService.hashPassword(password),
         'branchId': branchId.trim(),
         'branchName': branchName.trim(),
         'name': effectiveName,
@@ -178,15 +182,15 @@ class AuthService {
         'updatedAt': FieldValue.serverTimestamp(),
       };
 
-      if (phone?.isNotEmpty ?? false)          userData['phone']          = phone!.trim();
-      if (identification?.isNotEmpty ?? false) userData['identification']  = identification!.trim();
-      if (address?.isNotEmpty ?? false)        userData['address']         = address!.trim();
-      if (bankName?.isNotEmpty ?? false)       userData['bankName']        = bankName!.trim();
-      if (bankAccount?.isNotEmpty ?? false)    userData['bankAccount']     = bankAccount!.trim();
-      if (degree?.isNotEmpty ?? false)         userData['degree']          = degree!.trim();
-      if (salary != null)                      userData['baseSalary']      = salary;
-      if (studentId?.isNotEmpty ?? false)      userData['studentId']       = studentId!.trim();
-      if (dispensaryId?.isNotEmpty ?? false)   userData['dispensaryId']    = dispensaryId!.trim().toLowerCase();
+      if (phone != null && phone.trim().isNotEmpty)                   userData['phone']          = phone.trim();
+      if (identification != null && identification.trim().isNotEmpty) userData['identification'] = identification.trim();
+      if (address != null && address.trim().isNotEmpty)               userData['address']        = address.trim();
+      if (bankName != null && bankName.trim().isNotEmpty)              userData['bankName']       = bankName.trim();
+      if (bankAccount != null && bankAccount.trim().isNotEmpty)       userData['bankAccount']    = bankAccount.trim();
+      if (degree != null && degree.trim().isNotEmpty)                userData['degree']         = degree.trim();
+      if (salary != null)                                             userData['baseSalary']     = salary;
+      if (studentId != null && studentId.trim().isNotEmpty)           userData['studentId']      = studentId.trim();
+      if (dispensaryId != null && dispensaryId.trim().isNotEmpty)     userData['dispensaryId']   = dispensaryId.trim().toLowerCase();
 
       // Base64 strings (offline & storage-free) with storage upload fallback
       if (profilePictureBase64 != null && profilePictureBase64.isNotEmpty) {
@@ -216,6 +220,9 @@ class AuthService {
 
       try {
         await _firestore.collection('users').doc(uid).set(userData).timeout(const Duration(seconds: 15));
+        if (branchId.isNotEmpty && branchId != 'all' && branchId != 'global') {
+          await _firestore.collection('branches').doc(branchId).collection('users').doc(uid).set(userData, SetOptions(merge: true)).timeout(const Duration(seconds: 5)).catchError((_) {});
+        }
       } catch (cloudErr) {
         debugPrint('[AuthService] Cloud user document write notice (enqueued for sync): $cloudErr');
       }
@@ -240,8 +247,8 @@ class AuthService {
         userData: hiveUserData,
       );
 
-      // Also enqueue for cloud sync (without plain password in cloud payload)
-      final syncData = Map<String, dynamic>.from(hiveUserData)..remove('password');
+      // Also enqueue for cloud sync
+      final syncData = Map<String, dynamic>.from(hiveUserData);
       await LocalStorageService.enqueueSync({
         'type': 'save_user',
         'branchId': branchId,

@@ -84,9 +84,9 @@ class SystemMetricsService {
       final diskPercent = (totalDiskGb > 0 ? (usedDiskGb / totalDiskGb) : 0.40).clamp(0.01, 1.0);
 
       String cpuStatus = 'Optimal';
-      if (appRamMb > 600.0) {
-        cpuStatus = 'High Memory';
-      } else if (appRamMb > 350.0) {
+      if (cpu > 0.8) {
+        cpuStatus = 'High Load';
+      } else if (cpu > 0.4) {
         cpuStatus = 'Moderate';
       } else {
         cpuStatus = 'Optimal';

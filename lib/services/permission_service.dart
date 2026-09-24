@@ -236,18 +236,58 @@ class PermissionService {
     'school teacher': {
       AppPermission.manageSchool,
     },
+
+    // Standard Staff / Employee (default fallback)
+    'staff': {
+      AppPermission.viewPatients,
+      AppPermission.registerPatients,
+      AppPermission.viewTodayTokens,
+      AppPermission.viewInventory,
+      AppPermission.viewDonations,
+      AppPermission.generateFoodTokens,
+      AppPermission.viewReports,
+      AppPermission.downloadData,
+      AppPermission.viewKitchenOrders,
+      AppPermission.viewBranchSpecificStats,
+      AppPermission.manageMadrassa,
+      AppPermission.manageSchool,
+    },
+    'user': {
+      AppPermission.viewPatients,
+      AppPermission.registerPatients,
+      AppPermission.viewTodayTokens,
+      AppPermission.viewInventory,
+      AppPermission.viewDonations,
+      AppPermission.generateFoodTokens,
+      AppPermission.viewReports,
+      AppPermission.downloadData,
+      AppPermission.viewKitchenOrders,
+      AppPermission.viewBranchSpecificStats,
+    },
+    'employee': {
+      AppPermission.viewPatients,
+      AppPermission.registerPatients,
+      AppPermission.viewTodayTokens,
+      AppPermission.viewInventory,
+      AppPermission.viewDonations,
+      AppPermission.generateFoodTokens,
+      AppPermission.viewReports,
+      AppPermission.downloadData,
+      AppPermission.viewKitchenOrders,
+      AppPermission.viewBranchSpecificStats,
+    },
   };
 
   bool hasPermission(String role, AppPermission permission) {
     final normalizedRole = role.toLowerCase().trim();
-    final permissions = _rolePermissions[normalizedRole];
+    final permissions = _rolePermissions[normalizedRole] ?? _rolePermissions['staff'];
     if (permissions == null) return false;
     return permissions.contains(permission);
   }
 
   Set<AppPermission> getPermissionsForRole(String role) {
     final normalizedRole = role.toLowerCase().trim();
-    return _rolePermissions[normalizedRole] ?? {};
+    return _rolePermissions[normalizedRole] ?? _rolePermissions['staff'] ?? {};
   }
 
   // ── GMWF Finance v2 RBAC matrix checks ──────────────────────────────────────

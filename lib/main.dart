@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -279,6 +280,22 @@ Future<void> _runBackgroundCleanups() async {
 
 // ── Main App ──────────────────────────────────────────────────────────────────
 
+/// Global controller for hard-refreshing the application instance (Ctrl+Shift+R / Ctrl+R / F5 on desktop).
+class AppRestartController {
+  static final ValueNotifier<int> restartNotifier = ValueNotifier<int>(0);
+
+  static void refreshApp() {
+    debugPrint('[Main] 🔄 Hard Refresh (Ctrl+Shift+R / Ctrl+R / F5) triggered!');
+    AuthHomeWrapper.clearSession();
+    // Non-blocking background sync of authoritative users from cloud/server
+    unawaited(LocalStorageService.downloadUsers().catchError((e) {
+      debugPrint('[Main] Refresh user sync notice: $e');
+    }));
+    restartNotifier.value++;
+    navigatorKey.currentState?.pushNamedAndRemoveUntil('/home', (r) => false);
+  }
+}
+
 class MyApp extends StatefulWidget {
   const MyApp({super.key});
 
@@ -292,6 +309,7 @@ class _MyAppState extends State<MyApp> {
   @override
   void initState() {
     super.initState();
+    HardwareKeyboard.instance.addHandler(_handleGlobalKey);
     if (!kIsWeb) {
       _lifecycleListener = AppLifecycleListener(
         onDetach: () {
@@ -307,11 +325,34 @@ class _MyAppState extends State<MyApp> {
 
   @override
   void dispose() {
+    HardwareKeyboard.instance.removeHandler(_handleGlobalKey);
     if (!kIsWeb) {
       _lifecycleListener?.dispose();
       PythonRunnerService.instance.stopProcess();
     }
     super.dispose();
+  }
+
+  bool _handleGlobalKey(KeyEvent event) {
+    if (event is KeyDownEvent) {
+      final isCtrl = HardwareKeyboard.instance.isControlPressed;
+      final isShift = HardwareKeyboard.instance.isShiftPressed;
+      final isR = event.logicalKey == LogicalKeyboardKey.keyR;
+      final isF5 = event.logicalKey == LogicalKeyboardKey.f5;
+
+      // Intercept Ctrl+Shift+R, Ctrl+R, or F5 on desktop
+      if ((isCtrl && isR) || isF5) {
+        final shortcutName = isCtrl && isShift && isR
+            ? 'Ctrl+Shift+R'
+            : isCtrl && isR
+                ? 'Ctrl+R'
+                : 'F5';
+        debugPrint('[MyApp] 🔄 Keyboard shortcut $shortcutName detected. Triggering hard app refresh.');
+        AppRestartController.refreshApp();
+        return true;
+      }
+    }
+    return false;
   }
 
   ThemeData _buildThemeData({
@@ -408,113 +449,119 @@ class _MyAppState extends State<MyApp> {
 
   @override
   Widget build(BuildContext context) {
-    if (!Hive.isBoxOpen('app_settings')) {
-      return MaterialApp(
-        navigatorKey: navigatorKey,
-        title: 'GMWF',
-        debugShowCheckedModeBanner: false,
-        routes: {
-          '/home': (context) => const AuthHomeWrapper(),
-          '/login': (context) => const LoginPage(),
-        },
-        home: const AuthHomeWrapper(),
-      );
-    }
+    return ValueListenableBuilder<int>(
+      valueListenable: AppRestartController.restartNotifier,
+      builder: (context, restartIndex, _) {
+        return KeyedSubtree(
+          key: ValueKey('gmwf_root_instance_$restartIndex'),
+          child: !Hive.isBoxOpen('app_settings')
+              ? MaterialApp(
+                  navigatorKey: navigatorKey,
+                  title: 'GMWF',
+                  debugShowCheckedModeBanner: false,
+                  routes: {
+                    '/home': (context) => const AuthHomeWrapper(),
+                    '/login': (context) => const LoginPage(),
+                  },
+                  home: const AuthHomeWrapper(),
+                )
+              : ValueListenableBuilder(
+                  valueListenable: Hive.box('app_settings').listenable(keys: [
+                    'custom_accent_color',
+                    'card_radius',
+                    'is_dark_mode',
+                    'language',
+                    'font_scale',
+                  ]),
+                  builder: (context, Box box, _) {
+                    final colorHex = box.get('custom_accent_color') as String?;
 
-    return ValueListenableBuilder(
-      valueListenable: Hive.box('app_settings').listenable(keys: [
-        'custom_accent_color',
-        'card_radius',
-        'is_dark_mode',
-        'language',
-        'font_scale',
-      ]),
-      builder: (context, Box box, _) {
-        final colorHex = box.get('custom_accent_color') as String?;
+                    Color seedColor = AppColors.primary;
+                    if (colorHex != null && colorHex.isNotEmpty) {
+                      try {
+                        final hex = colorHex.replaceAll('#', '');
+                        seedColor = Color(int.parse('FF$hex', radix: 16));
+                      } catch (_) {}
+                    }
 
-        Color seedColor = AppColors.primary;
-        if (colorHex != null && colorHex.isNotEmpty) {
-          try {
-            final hex = colorHex.replaceAll('#', '');
-            seedColor = Color(int.parse('FF$hex', radix: 16));
-          } catch (_) {}
-        }
+                    final cardRadius = (box.get('card_radius', defaultValue: 16.0) as num).toDouble();
+                    final isDarkMode = box.get('is_dark_mode', defaultValue: false) as bool;
+                    final language = box.get('language', defaultValue: 'en') as String;
+                    final fontFamily = GoogleFonts.dmSans().fontFamily;
+                    final isUrdu = language == 'ur';
 
-        final cardRadius = (box.get('card_radius', defaultValue: 16.0) as num).toDouble();
-        final isDarkMode = box.get('is_dark_mode', defaultValue: false) as bool;
-        final language = box.get('language', defaultValue: 'en') as String;
-        final fontFamily = GoogleFonts.dmSans().fontFamily;
-        final isUrdu = language == 'ur';
+                    return MaterialApp(
+                      navigatorKey: navigatorKey,
+                      title: 'GMWF',
+                      debugShowCheckedModeBanner: false,
+                      themeMode: isDarkMode ? ThemeMode.dark : ThemeMode.light,
+                      locale: Locale(language),
+                      theme: _buildThemeData(
+                        seedColor: seedColor,
+                        cardRadius: cardRadius,
+                        fontFamily: fontFamily,
+                        brightness: Brightness.light,
+                      ),
+                      darkTheme: _buildThemeData(
+                        seedColor: seedColor,
+                        cardRadius: cardRadius,
+                        fontFamily: fontFamily,
+                        brightness: Brightness.dark,
+                      ),
+                      builder: (context, child) {
+                        final mediaQuery = MediaQuery.of(context);
+                        final scale = (box.get('font_scale', defaultValue: 1.0) as num).toDouble();
 
-        return MaterialApp(
-          navigatorKey: navigatorKey,
-          title: 'GMWF',
-          debugShowCheckedModeBanner: false,
-          themeMode: isDarkMode ? ThemeMode.dark : ThemeMode.light,
-          locale: Locale(language),
-          theme: _buildThemeData(
-            seedColor: seedColor,
-            cardRadius: cardRadius,
-            fontFamily: fontFamily,
-            brightness: Brightness.light,
-          ),
-          darkTheme: _buildThemeData(
-            seedColor: seedColor,
-            cardRadius: cardRadius,
-            fontFamily: fontFamily,
-            brightness: Brightness.dark,
-          ),
-          builder: (context, child) {
-            final mediaQuery = MediaQuery.of(context);
-            final scale = (box.get('font_scale', defaultValue: 1.0) as num).toDouble();
+                        final appDirection = isUrdu ? TextDirection.rtl : TextDirection.ltr;
+                        final appMediaQuery = mediaQuery.copyWith(
+                          textScaler: TextScaler.linear(scale),
+                        );
 
-            final appDirection = isUrdu ? TextDirection.rtl : TextDirection.ltr;
-            final appMediaQuery = mediaQuery.copyWith(
-              textScaler: TextScaler.linear(scale),
-            );
+                        final adjustedChild = MediaQuery(
+                          data: appMediaQuery,
+                          child: Directionality(
+                            textDirection: appDirection,
+                            child: child ?? const SizedBox.shrink(),
+                          ),
+                        );
 
-            final adjustedChild = MediaQuery(
-              data: appMediaQuery,
-              child: Directionality(
-                textDirection: appDirection,
-                child: child ?? const SizedBox.shrink(),
-              ),
-            );
-
-            if (!kIsWeb && Platform.isWindows && !Platform.environment.containsKey('FLUTTER_TEST')) {
-              return Material(
-                color: isDarkMode ? const Color(0xFF090C10) : const Color(0xFFEAEFF5),
-                child: Column(
-                  children: [
-                    const CustomTitleBar(),
-                    Expanded(child: ClipRect(child: adjustedChild)),
-                  ],
+                        if (!kIsWeb && Platform.isWindows && !Platform.environment.containsKey('FLUTTER_TEST')) {
+                          return Material(
+                            color: isDarkMode ? const Color(0xFF090C10) : const Color(0xFFEAEFF5),
+                            child: Column(
+                              children: [
+                                const CustomTitleBar(),
+                                Expanded(child: ClipRect(child: adjustedChild)),
+                              ],
+                            ),
+                          );
+                        }
+                        return adjustedChild;
+                      },
+                      home: const AuthHomeWrapper(),
+                      onUnknownRoute: (settings) {
+                        return MaterialPageRoute(
+                          builder: (context) => const AuthHomeWrapper(),
+                        );
+                      },
+                      routes: {
+                        '/home': (context) => const AuthHomeWrapper(),
+                        '/login': (context) => const LoginPage(),
+                        '/admin': (context) => const OverviewScreen(),
+                        '/chairman': (context) => const OverviewScreen(),
+                        '/donations': (context) => const DonationsScreen.embedded(),
+                        '/dispensar': (context) {
+                          final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>?;
+                          return DispensarScreen(branchId: args?['branchId'] ?? 'unknown');
+                        },
+                        '/inventory': (context) {
+                          final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>?;
+                          return InventoryPage(branchId: args?['branchId'] ?? 'unknown');
+                        },
+                      },
+                    );
+                  },
                 ),
-              );
-            }
-            return adjustedChild;
-          },
-          home: const AuthHomeWrapper(),
-          onUnknownRoute: (settings) {
-            return MaterialPageRoute(
-              builder: (context) => const AuthHomeWrapper(),
-            );
-          },
-          routes: {
-            '/home': (context) => const AuthHomeWrapper(),
-            '/login': (context) => const LoginPage(),
-            '/admin': (context) => const OverviewScreen(),
-            '/chairman': (context) => const OverviewScreen(),
-            '/donations': (context) => const DonationsScreen.embedded(),
-            '/dispensar': (context) {
-              final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>?;
-              return DispensarScreen(branchId: args?['branchId'] ?? 'unknown');
-            },
-            '/inventory': (context) {
-              final args = ModalRoute.of(context)!.settings.arguments as Map<String, dynamic>?;
-              return InventoryPage(branchId: args?['branchId'] ?? 'unknown');
-            },
-          },
         );
       },
     );
@@ -590,8 +637,24 @@ class _AuthHomeWrapperState extends State<AuthHomeWrapper> {
 
       // If we have valid local user data, restore session immediately (prevents logout on hot restart)
       if (localUserData != null) {
-        _cachedSession = _SessionData(user: null, localUser: localUserData);
-        return _cachedSession!;
+        final isMaster = localUserData['isMasterAdmin'] == true ||
+            localUserData['uid'] == 'master-local-admin' ||
+            localUserData['id'] == 'master-local-admin';
+        if (isMaster) {
+          debugPrint('[AuthHomeWrapper] Master admin will not be logged in automatically; requiring manual login');
+          try {
+            if (Hive.isBoxOpen('app_settings')) {
+              final box = Hive.box('app_settings');
+              await box.delete('user_data');
+              await box.delete('currentUser');
+              await box.delete('user_role');
+            }
+          } catch (_) {}
+          localUserData = null;
+        } else {
+          _cachedSession = _SessionData(user: null, localUser: localUserData);
+          return _cachedSession!;
+        }
       }
 
       // 2. Wait at most 1.5 seconds for authStateChanges event
@@ -614,8 +677,13 @@ class _AuthHomeWrapperState extends State<AuthHomeWrapper> {
           (offlineUser['uid'] != null ||
            offlineUser['username'] != null ||
            offlineUser['email'] != null)) {
-        _cachedSession = _SessionData(user: null, localUser: offlineUser);
-        return _cachedSession!;
+        final isMaster = offlineUser['isMasterAdmin'] == true ||
+            offlineUser['uid'] == 'master-local-admin' ||
+            offlineUser['id'] == 'master-local-admin';
+        if (!isMaster) {
+          _cachedSession = _SessionData(user: null, localUser: offlineUser);
+          return _cachedSession!;
+        }
       }
     } catch (e) {
       debugPrint('[AuthHomeWrapper] Session resolution warning: $e');

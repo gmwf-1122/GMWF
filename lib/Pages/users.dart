@@ -50,6 +50,7 @@ class _UsersScreenState extends State<UsersScreen>
 
   String? _filterStatus;
   String _searchQuery = '';
+  final TextEditingController _searchCtrl = TextEditingController();
   String? _roleFilter;
   String? _genderFilter;
   String? _ageFilter;
@@ -145,6 +146,7 @@ class _UsersScreenState extends State<UsersScreen>
   @override
   void dispose() {
     _tabController?.dispose();
+    _searchCtrl.dispose();
     super.dispose();
   }
 
@@ -214,22 +216,41 @@ class _UsersScreenState extends State<UsersScreen>
         if (_branches.length > 1)
           Container(
             color: t.bgCard,
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             child: TabBar(
               controller: _tabController!,
               isScrollable: true,
-              labelColor: t.accent,
-              unselectedLabelColor: t.textTertiary,
-              labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13),
-              unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13),
-              indicator: UnderlineTabIndicator(
-                borderSide: BorderSide(color: t.accent, width: 3),
-                insets: const EdgeInsets.symmetric(horizontal: 12),
-              ),
               tabAlignment: TabAlignment.start,
-              padding: const EdgeInsets.symmetric(horizontal: 8),
+              indicatorSize: TabBarIndicatorSize.tab,
+              indicator: BoxDecoration(
+                color: t.accent,
+                borderRadius: BorderRadius.circular(12),
+                boxShadow: [
+                  BoxShadow(
+                    color: t.accent.withValues(alpha: 0.28),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+              ),
+              labelColor: Colors.white,
+              unselectedLabelColor: t.textSecondary,
+              labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5),
+              unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12.5),
+              padding: EdgeInsets.zero,
               tabs: _branches.map((b) => Tab(
-                child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4),
-                    child: Text(b['name'] as String)),
+                height: 36,
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const Icon(Icons.apartment_rounded, size: 14),
+                      const SizedBox(width: 6),
+                      Text(b['name'] as String),
+                    ],
+                  ),
+                ),
               )).toList(),
             ),
           ),
@@ -272,25 +293,7 @@ class _UsersScreenState extends State<UsersScreen>
 
   Future<void> _syncUsersForBranch(String branchId) async {
     try {
-      final List<DocumentSnapshot> allDocs = [];
-      try {
-        final rootSnap = await FirebaseFirestore.instance.collection('users').limit(300).get().timeout(const Duration(seconds: 6));
-        allDocs.addAll(rootSnap.docs);
-      } catch (_) {}
-
-      final normalizedBranch = branchId.trim().toLowerCase();
-      if (normalizedBranch.isNotEmpty && normalizedBranch != 'all' && normalizedBranch != 'global') {
-        try {
-          final branchSnap = await FirebaseFirestore.instance
-              .collection('branches')
-              .doc(normalizedBranch)
-              .collection('users')
-              .limit(300)
-              .get()
-              .timeout(const Duration(seconds: 6));
-          allDocs.addAll(branchSnap.docs);
-        } catch (_) {}
-      }
+      await LocalStorageService.downloadUsers(branchId);
 
       // Explicitly pull any pending access restore requests across the board
       try {
@@ -299,35 +302,15 @@ class _UsersScreenState extends State<UsersScreen>
             .where('restoreRequested', isEqualTo: true)
             .get()
             .timeout(const Duration(seconds: 5));
-        for (final pDoc in pendingSnap.docs) {
-          if (!allDocs.any((d) => d.id == pDoc.id)) {
-            allDocs.add(pDoc);
-          }
-        }
-      } catch (_) {}
-
-      if (Hive.isBoxOpen('local_users')) {
-        final box = Hive.box('local_users');
-        for (final doc in allDocs) {
-          final data = doc.data() as Map<String, dynamic>?;
-          if (data == null) continue;
-          final status = (data['status'] ?? data['accountStatus'] ?? '').toString().toLowerCase().trim();
-          final isDeleted = data['isDeleted'] == true || status == 'deleted';
-          final email = (data['email'] ?? '').toString().toLowerCase().trim();
-          final usernameLower = (data['usernameLower'] ?? data['username'] ?? '').toString().toLowerCase().trim();
-          final uid = doc.id.trim();
-
-          if (isDeleted) {
-            // Actively purge deleted record from local cache
-            if (email.isNotEmpty) await box.delete('user:$email');
-            if (usernameLower.isNotEmpty) await box.delete('user:$usernameLower');
-            if (uid.isNotEmpty) {
-              await box.delete('user:$uid');
-              await box.delete(uid);
-            }
-          } else {
-            final Map<String, dynamic> u = {'id': doc.id, 'uid': doc.id, ...data};
+        if (Hive.isBoxOpen('local_users')) {
+          final box = Hive.box('local_users');
+          for (final pDoc in pendingSnap.docs) {
+            final data = pDoc.data();
+            final Map<String, dynamic> u = {'id': pDoc.id, 'uid': pDoc.id, ...data};
             final sanitized = LocalStorageService.sanitize(u);
+            final email = (data['email'] ?? '').toString().toLowerCase().trim();
+            final usernameLower = (data['usernameLower'] ?? data['username'] ?? '').toString().toLowerCase().trim();
+            final uid = pDoc.id.trim();
             if (email.isNotEmpty) await box.put('user:$email', sanitized);
             if (usernameLower.isNotEmpty) await box.put('user:$usernameLower', sanitized);
             if (uid.isNotEmpty) {
@@ -335,9 +318,9 @@ class _UsersScreenState extends State<UsersScreen>
               await box.put(uid, sanitized);
             }
           }
+          await box.flush();
         }
-        await box.flush();
-      }
+      } catch (_) {}
     } catch (e) {
       debugPrint('[UsersScreen] _syncUsersForBranch error: $e');
     }
@@ -351,32 +334,62 @@ class _UsersScreenState extends State<UsersScreen>
         Row(children: [
           Expanded(
             child: Container(
-              height: 42,
+              height: 44,
               decoration: BoxDecoration(
                 color: t.bg,
-                borderRadius: BorderRadius.circular(12),
+                borderRadius: BorderRadius.circular(14),
                 border: Border.all(color: t.bgRule),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.03),
+                    blurRadius: 6,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
               ),
               child: TextField(
+                controller: _searchCtrl,
                 onChanged: (v) => setState(() => _searchQuery = v.trim().toLowerCase()),
-                style: TextStyle(fontSize: 14, color: t.textPrimary),
+                style: TextStyle(fontSize: 13.5, color: t.textPrimary),
                 decoration: InputDecoration(
                   hintText: widget.isPatientMode
-                      ? 'Search records…'
-                      : (widget.isGuardianMode ? 'Search by username/email…' : 'Search by username…'),
-                  hintStyle: TextStyle(color: t.textTertiary, fontSize: 13),
-                  prefixIcon: Icon(Icons.search_rounded, color: t.accent, size: 18),
+                      ? 'Search patient name, phone, CNIC…'
+                      : (widget.isGuardianMode ? 'Search guardian name, email, student…' : 'Search by name, username, email…'),
+                  hintStyle: TextStyle(color: t.textTertiary, fontSize: 12.5),
+                  prefixIcon: Icon(Icons.search_rounded, color: t.accent, size: 20),
+                  suffixIcon: _searchQuery.isNotEmpty
+                      ? IconButton(
+                          icon: Icon(Icons.clear_rounded, size: 16, color: t.textTertiary),
+                          onPressed: () {
+                            _searchCtrl.clear();
+                            setState(() => _searchQuery = '');
+                          },
+                        )
+                      : null,
                   border: InputBorder.none,
-                  contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                  contentPadding: const EdgeInsets.symmetric(vertical: 11),
                 ),
               ),
             ),
           ),
           const SizedBox(width: 8),
-          IconButton(
-            icon: Icon(Icons.refresh_rounded, color: t.accent),
-            tooltip: 'Refresh Records',
-            onPressed: () => _refreshData(),
+          Tooltip(
+            message: 'Refresh Records',
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => _refreshData(),
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  color: t.bg,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: t.bgRule),
+                ),
+                alignment: Alignment.center,
+                child: Icon(Icons.refresh_rounded, color: t.accent, size: 20),
+              ),
+            ),
           ),
           if (!widget.isGuardianMode) ...[
             const SizedBox(width: 8),
@@ -384,19 +397,28 @@ class _UsersScreenState extends State<UsersScreen>
               onTap: () => setState(() => _filtersExpanded = !_filtersExpanded),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
-                height: 42,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
+                height: 44,
+                padding: const EdgeInsets.symmetric(horizontal: 14),
                 decoration: BoxDecoration(
                   color: _filtersExpanded ? t.accent : t.bg,
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(14),
                   border: Border.all(color: _filtersExpanded ? t.accent : t.bgRule),
+                  boxShadow: _filtersExpanded
+                      ? [
+                          BoxShadow(
+                            color: t.accent.withValues(alpha: 0.25),
+                            blurRadius: 8,
+                            offset: const Offset(0, 2),
+                          ),
+                        ]
+                      : null,
                 ),
                 child: Row(children: [
                   Icon(Icons.tune_rounded, color: _filtersExpanded ? Colors.white : t.textSecondary, size: 18),
-                  const SizedBox(width: 5),
+                  const SizedBox(width: 6),
                   Text('Filters', style: TextStyle(
                       color: _filtersExpanded ? Colors.white : t.textSecondary,
-                      fontSize: 13, fontWeight: FontWeight.w600)),
+                      fontSize: 12.5, fontWeight: FontWeight.w700)),
                 ]),
               ),
             ),
@@ -407,12 +429,12 @@ class _UsersScreenState extends State<UsersScreen>
               style: ElevatedButton.styleFrom(
                 backgroundColor: const Color(0xFF0F5132),
                 foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 elevation: 0,
               ),
               icon: const Icon(Icons.admin_panel_settings_rounded, size: 18),
-              label: const Text('Access Control Matrix', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+              label: const Text('Access Matrix', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
               onPressed: () => _openAccessControlMatrixSheet(context, t),
             ),
           ],
@@ -1016,23 +1038,35 @@ class _UsersScreenState extends State<UsersScreen>
       onTap: () => setState(() => _selectedCategoryFilter = catKey),
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 180),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
         decoration: BoxDecoration(
-          color: active ? color : color.withValues(alpha: 0.10),
+          color: active ? color : color.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: active ? color : color.withValues(alpha: 0.3)),
+          border: Border.all(
+            color: active ? color : color.withValues(alpha: 0.25),
+            width: active ? 1.2 : 0.8,
+          ),
+          boxShadow: active
+              ? [
+                  BoxShadow(
+                    color: color.withValues(alpha: 0.3),
+                    blurRadius: 8,
+                    offset: const Offset(0, 2),
+                  ),
+                ]
+              : null,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
             Icon(icon, color: active ? Colors.white : color, size: 13),
-            const SizedBox(width: 5),
+            const SizedBox(width: 6),
             Text(
               label,
               style: TextStyle(
                 color: active ? Colors.white : color,
                 fontSize: 11.5,
-                fontWeight: FontWeight.bold,
+                fontWeight: active ? FontWeight.w800 : FontWeight.w600,
               ),
             ),
           ],
@@ -1131,9 +1165,13 @@ class _UsersScreenState extends State<UsersScreen>
     } : null);
 
     final isChairmanCard = rawRole == 'chairman';
+    final username = (data['username'] ?? '').toString().trim();
+    final phone = (data['phone'] ?? '').toString().trim();
+    final branchDisplay = (data['branchName'] ?? data['branchId'] ?? data['branch'] ?? branchId).toString().trim();
+    final zkPin = (data['zkPin'] ?? data['biometricId'] ?? data['pin'] ?? '').toString().trim();
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
         gradient: isChairmanCard
             ? const LinearGradient(
@@ -1152,18 +1190,18 @@ class _UsersScreenState extends State<UsersScreen>
           color: isChairmanCard
               ? const Color(0xFFFBBF24)
               : (isPendingRestore
-                  ? const Color(0xFFF59E0B).withValues(alpha: 0.5)
-                  : (isRevoked ? Colors.red.withValues(alpha: 0.3) : t.bgRule)),
-          width: isChairmanCard ? 2.0 : (isPendingRestore ? 1.2 : 0.8),
+                  ? const Color(0xFFF59E0B).withValues(alpha: 0.6)
+                  : (isRevoked ? Colors.red.withValues(alpha: 0.35) : t.bgRule)),
+          width: isChairmanCard ? 2.0 : (isPendingRestore ? 1.4 : 0.9),
         ),
         boxShadow: [
           BoxShadow(
             color: isChairmanCard
-                ? const Color(0xFFF59E0B).withValues(alpha: 0.45)
-                : t.accent.withValues(alpha: 0.04),
-            blurRadius: isChairmanCard ? 20 : 10,
+                ? const Color(0xFFF59E0B).withValues(alpha: 0.35)
+                : Colors.black.withValues(alpha: 0.04),
+            blurRadius: isChairmanCard ? 18 : 10,
             spreadRadius: isChairmanCard ? 1.5 : 0,
-            offset: const Offset(0, 4),
+            offset: const Offset(0, 3),
           ),
         ],
       ),
@@ -1174,365 +1212,521 @@ class _UsersScreenState extends State<UsersScreen>
           borderRadius: BorderRadius.circular(16),
           onTap: () => _openDetail(itemId, branchId),
           child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Row(children: [
-              // Avatar with online badge and tap to enlarge photo
-              GestureDetector(
-                onTap: () => _showEnlargedPhotoDialog(context, name, profilePicUrl, (data['role'] ?? 'USER').toString(), t),
-                child: MouseRegion(
-                  cursor: SystemMouseCursors.click,
-                  child: Tooltip(
-                    message: 'Tap to enlarge profile photo',
-                    child: Stack(
-                      clipBehavior: Clip.none,
-                      children: [
-                        Container(
-                          width: 46, height: 46,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            color: isChairmanCard
-                                ? const Color(0xFF382207)
-                                : (isFemale ? const Color(0xFFFCE7F3) : (isMale ? const Color(0xFFE0F2FE) : t.accentMuted)),
-                            border: isChairmanCard ? Border.all(color: const Color(0xFFFBBF24), width: 2) : null,
-                            image: profilePicUrl != null && profilePicUrl.trim().isNotEmpty
-                                ? DecorationImage(
-                                    image: (ImageUploadService.decodeBase64ToBytes(profilePicUrl) != null
-                                        ? MemoryImage(ImageUploadService.decodeBase64ToBytes(profilePicUrl)!)
-                                        : NetworkImage(profilePicUrl) as ImageProvider),
-                                    fit: BoxFit.cover,
-                                  )
-                                : null,
-                            boxShadow: [
-                              BoxShadow(
-                                color: isChairmanCard ? const Color(0xFFF59E0B).withValues(alpha: 0.35) : t.accent.withValues(alpha: 0.1),
-                                blurRadius: isChairmanCard ? 8 : 4,
-                                offset: const Offset(0, 2),
+            padding: const EdgeInsets.all(13),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // Avatar with online badge and tap to enlarge photo
+                GestureDetector(
+                  onTap: () => _showEnlargedPhotoDialog(context, name, profilePicUrl, (data['role'] ?? 'USER').toString(), t),
+                  child: MouseRegion(
+                    cursor: SystemMouseCursors.click,
+                    child: Tooltip(
+                      message: 'Tap to enlarge profile photo',
+                      child: Stack(
+                        clipBehavior: Clip.none,
+                        children: [
+                          Container(
+                            width: 50,
+                            height: 50,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: isChairmanCard
+                                  ? const Color(0xFF382207)
+                                  : (isFemale ? const Color(0xFFFCE7F3) : (isMale ? const Color(0xFFE0F2FE) : t.accentMuted)),
+                              border: Border.all(
+                                color: isChairmanCard
+                                    ? const Color(0xFFFBBF24)
+                                    : (isOnline ? const Color(0xFF22C55E) : t.bgRule),
+                                width: isChairmanCard ? 2.2 : (isOnline ? 1.8 : 1.0),
                               ),
-                            ],
+                              image: profilePicUrl != null && profilePicUrl.trim().isNotEmpty
+                                  ? DecorationImage(
+                                      image: (ImageUploadService.decodeBase64ToBytes(profilePicUrl) != null
+                                          ? MemoryImage(ImageUploadService.decodeBase64ToBytes(profilePicUrl)!)
+                                          : NetworkImage(profilePicUrl) as ImageProvider),
+                                      fit: BoxFit.cover,
+                                    )
+                                  : null,
+                              boxShadow: [
+                                BoxShadow(
+                                  color: isChairmanCard
+                                      ? const Color(0xFFF59E0B).withValues(alpha: 0.35)
+                                      : (isOnline ? const Color(0xFF22C55E).withValues(alpha: 0.2) : t.accent.withValues(alpha: 0.08)),
+                                  blurRadius: 8,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            alignment: Alignment.center,
+                            child: (profilePicUrl == null || profilePicUrl.trim().isEmpty)
+                                ? (isChairmanCard
+                                    ? const Text('👑', style: TextStyle(fontSize: 22))
+                                    : (isFemale
+                                        ? const Icon(Icons.face_3_rounded, size: 26, color: Color(0xFFDB2777))
+                                        : (isMale
+                                            ? const Icon(Icons.face_6_rounded, size: 26, color: Color(0xFF0284C7))
+                                            : Text(initials, style: TextStyle(color: t.accent, fontWeight: FontWeight.w900, fontSize: 16)))))
+                                : null,
                           ),
-                          alignment: Alignment.center,
-                          child: (profilePicUrl == null || profilePicUrl.trim().isEmpty)
-                              ? (isChairmanCard
-                                  ? Text(initials, style: const TextStyle(color: Color(0xFFFBBF24), fontWeight: FontWeight.w900, fontSize: 15))
-                                  : (isFemale
-                                      ? const Icon(Icons.face_3_rounded, size: 24, color: Color(0xFFDB2777))
-                                      : (isMale
-                                          ? const Icon(Icons.face_6_rounded, size: 24, color: Color(0xFF0284C7))
-                                          : Text(initials, style: TextStyle(color: t.accent, fontWeight: FontWeight.w900, fontSize: 15)))))
-                              : null,
-                        ),
-                        if (isOnline)
-                          Positioned(
-                            right: -1,
-                            bottom: -1,
-                            child: Container(
-                              width: 12,
-                              height: 12,
-                              decoration: BoxDecoration(
-                                color: Colors.green,
-                                shape: BoxShape.circle,
-                                border: Border.all(color: isChairmanCard ? const Color(0xFF1E112A) : t.bgCard, width: 2),
+                          if (isOnline)
+                            Positioned(
+                              right: 0,
+                              bottom: 0,
+                              child: Container(
+                                width: 14,
+                                height: 14,
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF22C55E),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(
+                                    color: isChairmanCard ? const Color(0xFF1E112A) : t.bgCard,
+                                    width: 2.2,
+                                  ),
+                                  boxShadow: const [
+                                    BoxShadow(
+                                      color: Color(0x6622C55E),
+                                      blurRadius: 4,
+                                      spreadRadius: 1,
+                                    ),
+                                  ],
+                                ),
                               ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 14),
-              // Info
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
+                const SizedBox(width: 14),
+                // Center Info
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // Name row + status badges
+                      Wrap(
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        spacing: 6,
+                        runSpacing: 4,
+                        children: [
+                          Text(
                             name,
                             style: TextStyle(
                               fontSize: 15,
-                              fontWeight: FontWeight.w900,
+                              fontWeight: FontWeight.w800,
                               color: isChairmanCard ? const Color(0xFFFFFBEB) : (isRevoked ? Colors.red.shade900 : t.textPrimary),
                               decoration: isRevoked ? TextDecoration.lineThrough : null,
                               height: 1.2,
                               letterSpacing: isChairmanCard ? 0.3 : 0,
                             ),
-                            maxLines: 2,
-                            softWrap: true,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                        if (isOnline) ...[
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.green.withValues(alpha: 0.18),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.green.withValues(alpha: 0.4), width: 0.6),
+                          if (isChairmanCard)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                              decoration: BoxDecoration(
+                                gradient: const LinearGradient(
+                                  colors: [Color(0xFF92400E), Color(0xFF451A03)],
+                                ),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: const Color(0xFFFCD34D), width: 0.8),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text('👑 ', style: TextStyle(fontSize: 9)),
+                                  Text('CHAIRMAN', style: TextStyle(color: Color(0xFFFDE68A), fontSize: 9.5, fontWeight: FontWeight.w900)),
+                                ],
+                              ),
                             ),
-                            child: const Text(
-                              'ONLINE',
-                              style: TextStyle(color: Color(0xFF4ADE80), fontSize: 9, fontWeight: FontWeight.bold),
+                          if (isOnline)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF22C55E).withValues(alpha: 0.16),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: const Color(0xFF22C55E).withValues(alpha: 0.4), width: 0.6),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.circle, size: 6, color: Color(0xFF22C55E)),
+                                  SizedBox(width: 4),
+                                  Text('ONLINE', style: TextStyle(color: Color(0xFF16A34A), fontSize: 9, fontWeight: FontWeight.w800)),
+                                ],
+                              ),
                             ),
-                          ),
-                        ],
-                        if (widget.isPatientMode) ...[
-                          Builder(builder: (_) {
-                            final staffInfo = StaffPatientLinkService.getStaffInfoForPatient(
-                              cnic: data['cnic']?.toString() ?? data['guardianCnic']?.toString(),
-                              name: name,
-                            );
-                            if (staffInfo != null) {
-                              return Padding(
-                                padding: const EdgeInsets.only(left: 6),
-                                child: StaffPatientLinkService.buildStaffBadge(
+                          if (widget.isPatientMode) ...[
+                            Builder(builder: (_) {
+                              final staffInfo = StaffPatientLinkService.getStaffInfoForPatient(
+                                cnic: data['cnic']?.toString() ?? data['guardianCnic']?.toString(),
+                                name: name,
+                              );
+                              if (staffInfo != null) {
+                                return StaffPatientLinkService.buildStaffBadge(
                                   staffInfo,
                                   isDark: Theme.of(context).brightness == Brightness.dark,
-                                ),
-                              );
-                            }
-                            return const SizedBox.shrink();
-                          }),
-                        ],
-                        if (isPendingRestore) ...[
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFFF59E0B).withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: const Color(0xFFF59E0B), width: 0.8),
+                                );
+                              }
+                              return const SizedBox.shrink();
+                            }),
+                          ],
+                          if (isPendingRestore)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFF59E0B).withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: const Color(0xFFF59E0B), width: 0.8),
+                              ),
+                              child: const Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.mark_email_unread_rounded, size: 10, color: Color(0xFFFBBF24)),
+                                  SizedBox(width: 4),
+                                  Text(
+                                    'RESTORE REQUESTED',
+                                    style: TextStyle(color: Color(0xFFFBBF24), fontSize: 9, fontWeight: FontWeight.w900),
+                                  ),
+                                ],
+                              ),
+                            )
+                          else if (data['isEmployeeRecord'] == true)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.purple.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.purple.withValues(alpha: 0.4), width: 0.6),
+                              ),
+                              child: const Text(
+                                'OFFBOARDED EMPLOYEE',
+                                style: TextStyle(color: Colors.purpleAccent, fontSize: 9, fontWeight: FontWeight.bold),
+                              ),
+                            )
+                          else if (isRevoked)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: Colors.red.withValues(alpha: 0.15),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: Colors.red.withValues(alpha: 0.4), width: 0.6),
+                              ),
+                              child: const Text(
+                                'REVOKED USER',
+                                style: TextStyle(color: Colors.redAccent, fontSize: 9, fontWeight: FontWeight.bold),
+                              ),
+                            )
+                          else if (status != 'active' && status.isNotEmpty)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: _getStatusColor(status).withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Text(
+                                status.replaceAll('_', ' ').toUpperCase(),
+                                style: TextStyle(color: _getStatusColor(status), fontSize: 9, fontWeight: FontWeight.bold),
+                              ),
                             ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.mark_email_unread_rounded, size: 10, color: Color(0xFFFBBF24)),
-                                SizedBox(width: 4),
-                                Text(
-                                  'RESTORE REQUESTED',
-                                  style: TextStyle(color: Color(0xFFFBBF24), fontSize: 9, fontWeight: FontWeight.w900),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      // Subtitle row: Role + Username
+                      Row(
+                        children: [
+                          if (!widget.isPatientMode && username.isNotEmpty) ...[
+                            Text(
+                              '@$username',
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: isChairmanCard ? const Color(0xFFFDE68A).withValues(alpha: 0.8) : t.textSecondary,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text('•', style: TextStyle(color: t.textTertiary, fontSize: 12)),
+                            const SizedBox(width: 8),
+                          ],
+                          Flexible(
+                            child: Text(
+                              subtitle,
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: isChairmanCard ? const Color(0xFFFBBF24) : t.accent,
+                                fontWeight: FontWeight.w600,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                      // Metadata chips row (Branch, Phone, PIN, Device)
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 6,
+                        runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          if (branchDisplay.isNotEmpty && branchDisplay != 'all' && branchDisplay != 'global')
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: t.bgCardAlt,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: t.bgRule, width: 0.5),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.location_on_outlined, size: 10, color: t.textSecondary),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    branchDisplay.toUpperCase(),
+                                    style: TextStyle(color: t.textSecondary, fontSize: 9.5, fontWeight: FontWeight.w600),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          if (phone.isNotEmpty && phone != 'N/A')
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: t.bgCardAlt,
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: t.bgRule, width: 0.5),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.phone_outlined, size: 10, color: t.textSecondary),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    phone,
+                                    style: TextStyle(color: t.textSecondary, fontSize: 9.5, fontWeight: FontWeight.w600),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          if (zkPin.isNotEmpty)
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF0284C7).withValues(alpha: 0.1),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: const Color(0xFF0284C7).withValues(alpha: 0.3), width: 0.5),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(Icons.pin_outlined, size: 10, color: Color(0xFF0284C7)),
+                                  const SizedBox(width: 3),
+                                  Text(
+                                    'PIN: $zkPin',
+                                    style: const TextStyle(color: Color(0xFF0284C7), fontSize: 9.5, fontWeight: FontWeight.w700),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          if (effectiveDevInfo != null)
+                            DeviceBadgeWidget(
+                              deviceInfo: effectiveDevInfo,
+                              compact: true,
+                            ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                // Action Hub
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (!widget.isPatientMode && _canManageUserAccess(data)) ...[
+                      // Quick Lock/Unlock toggle
+                      if (!isGuardianRole)
+                        Tooltip(
+                          message: isPendingRestore
+                              ? 'Allow Access (Restore Requested)'
+                              : (isRevoked ? 'Allow / Restore App Access' : 'Revoke App Access'),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(10),
+                            onTap: () => _showQuickRevokeDialog(data, branchId, t),
+                            child: Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: isPendingRestore
+                                    ? const Color(0xFF10B981).withValues(alpha: 0.18)
+                                    : (isRevoked ? Colors.green.withValues(alpha: 0.12) : Colors.red.withValues(alpha: 0.12)),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: isPendingRestore
+                                      ? const Color(0xFF10B981)
+                                      : (isRevoked ? Colors.green.shade600 : Colors.red.shade400),
+                                  width: 0.8,
                                 ),
+                              ),
+                              alignment: Alignment.center,
+                              child: Icon(
+                                isPendingRestore
+                                    ? Icons.check_circle_rounded
+                                    : (isRevoked ? Icons.lock_open_rounded : Icons.lock_person_rounded),
+                                size: 18,
+                                color: isPendingRestore
+                                    ? const Color(0xFF10B981)
+                                    : (isRevoked ? Colors.green.shade600 : Colors.red.shade400),
+                              ),
+                            ),
+                          ),
+                        )
+                      else
+                        Tooltip(
+                          message: 'Update Student / Guardian Status',
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(10),
+                            onTap: () => _showGuardianStatusDialog(data, branchId, t),
+                            child: Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                color: Colors.teal.withValues(alpha: 0.14),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: Colors.teal.withValues(alpha: 0.5), width: 0.8),
+                              ),
+                              alignment: Alignment.center,
+                              child: const Icon(Icons.school_rounded, size: 18, color: Colors.teal),
+                            ),
+                          ),
+                        ),
+                      const SizedBox(width: 6),
+                      // Primary Edit Button
+                      Tooltip(
+                        message: 'Edit Profile & Credentials',
+                        child: InkWell(
+                          borderRadius: BorderRadius.circular(10),
+                          onTap: () => _openDetail(itemId, branchId),
+                          child: Container(
+                            width: 36,
+                            height: 36,
+                            decoration: BoxDecoration(
+                              color: t.accent.withValues(alpha: 0.14),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: t.accent.withValues(alpha: 0.5), width: 0.8),
+                            ),
+                            alignment: Alignment.center,
+                            child: Icon(Icons.edit_rounded, size: 18, color: t.accent),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      // Overflow Popup Menu for Medical History & Delete
+                      PopupMenuButton<String>(
+                        icon: Container(
+                          width: 32,
+                          height: 36,
+                          alignment: Alignment.center,
+                          child: Icon(Icons.more_vert_rounded, size: 20, color: t.textSecondary),
+                        ),
+                        tooltip: 'More actions',
+                        color: t.bgCard,
+                        surfaceTintColor: Colors.transparent,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          side: BorderSide(color: t.bgRule),
+                        ),
+                        onSelected: (val) {
+                          if (val == 'detail') {
+                            _openDetail(itemId, branchId);
+                          } else if (val == 'medical') {
+                            StaffPatientLinkService.openStaffMedicalHistory(
+                              context,
+                              name: name,
+                              cnic: data['cnic']?.toString(),
+                              branchId: branchId,
+                              role: data['role']?.toString(),
+                            );
+                          } else if (val == 'delete') {
+                            _showQuickDeleteUserDialog(data, branchId, t);
+                          } else if (val == 'guardian_status') {
+                            _showGuardianStatusDialog(data, branchId, t);
+                          }
+                        },
+                        itemBuilder: (ctx) => [
+                          PopupMenuItem(
+                            value: 'detail',
+                            child: Row(
+                              children: [
+                                Icon(Icons.person_pin_rounded, size: 17, color: t.accent),
+                                const SizedBox(width: 10),
+                                Text('View Profile', style: TextStyle(color: t.textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
                               ],
                             ),
                           ),
-                        ] else if (data['isEmployeeRecord'] == true) ...[
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.purple.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.purple.withValues(alpha: 0.4), width: 0.6),
+                          if (isGuardianRole)
+                            PopupMenuItem(
+                              value: 'guardian_status',
+                              child: const Row(
+                                children: [
+                                  Icon(Icons.school_rounded, size: 17, color: Colors.teal),
+                                  SizedBox(width: 10),
+                                  Text('Update Status', style: TextStyle(color: Colors.teal, fontSize: 13, fontWeight: FontWeight.w600)),
+                                ],
+                              ),
+                            )
+                          else
+                            PopupMenuItem(
+                              value: 'medical',
+                              child: const Row(
+                                children: [
+                                  Icon(Icons.medical_services_outlined, size: 17, color: Colors.teal),
+                                  SizedBox(width: 10),
+                                  Text('Medical History', style: TextStyle(color: Colors.teal, fontSize: 13, fontWeight: FontWeight.w600)),
+                                ],
+                              ),
                             ),
-                            child: const Text(
-                              'OFFBOARDED EMPLOYEE',
-                              style: TextStyle(color: Colors.purpleAccent, fontSize: 9, fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        ] else if (isRevoked) ...[
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: Colors.red.withValues(alpha: 0.15),
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.red.withValues(alpha: 0.4), width: 0.6),
-                            ),
-                            child: const Text(
-                              'REVOKED USER',
-                              style: TextStyle(color: Colors.redAccent, fontSize: 9, fontWeight: FontWeight.bold),
-                            ),
-                          ),
-                        ] else if (status != 'active' && status.isNotEmpty) ...[
-                          const SizedBox(width: 6),
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: _getStatusColor(status).withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Text(
-                              status.replaceAll('_', ' ').toUpperCase(),
-                              style: TextStyle(color: _getStatusColor(status), fontSize: 9, fontWeight: FontWeight.bold),
+                          const PopupMenuDivider(),
+                          const PopupMenuItem(
+                            value: 'delete',
+                            child: Row(
+                              children: [
+                                Icon(Icons.delete_forever_rounded, size: 17, color: Colors.redAccent),
+                                SizedBox(width: 10),
+                                Text('Delete Account', style: TextStyle(color: Colors.redAccent, fontSize: 13, fontWeight: FontWeight.w700)),
+                              ],
                             ),
                           ),
                         ],
-                      ],
-                    ),
-                    const SizedBox(height: 3),
-                    if (isChairmanCard)
-                      Container(
-                        margin: const EdgeInsets.only(top: 3),
-                        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
-                        decoration: BoxDecoration(
-                          gradient: const LinearGradient(
-                            colors: [Color(0xFF92400E), Color(0xFF451A03)],
-                          ),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: const Color(0xFFFCD34D), width: 0.8),
-                          boxShadow: [
-                            BoxShadow(color: const Color(0xFFF59E0B).withValues(alpha: 0.35), blurRadius: 6),
-                          ],
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Text('👑 ', style: TextStyle(fontSize: 10)),
-                            Text(
-                              'CHAIRMAN · SUPREME SYSTEM AUTHORITY',
-                              style: TextStyle(
-                                color: const Color(0xFFFDE68A),
-                                fontSize: 9.5,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: 0.6,
-                              ),
-                            ),
-                          ],
-                        ),
-                      )
-                    else
-                      Text(subtitle, style: TextStyle(fontSize: 11.5, color: t.textSecondary, fontWeight: FontWeight.w500),
-                          maxLines: 1, overflow: TextOverflow.ellipsis),
-                    if (effectiveDevInfo != null) ...[
-                      const SizedBox(height: 4),
-                      DeviceBadgeWidget(
-                        deviceInfo: effectiveDevInfo,
-                        compact: true,
                       ),
-                    ],
+                    ] else
+                      InkWell(
+                        borderRadius: BorderRadius.circular(10),
+                        onTap: () => _openDetail(itemId, branchId),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: t.accent.withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: t.accent.withValues(alpha: 0.3), width: 0.8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text('View', style: TextStyle(color: t.accent, fontSize: 12, fontWeight: FontWeight.bold)),
+                              const SizedBox(width: 2),
+                              Icon(Icons.chevron_right_rounded, color: t.accent, size: 16),
+                            ],
+                          ),
+                        ),
+                      ),
                   ],
                 ),
-              ),
-              // Action buttons: Revoke/Allow Access, Edit, and Delete
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (!widget.isPatientMode && _canManageUserAccess(data)) ...[
-                    if (!isGuardianRole)
-                      IconButton(
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                        icon: Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: isPendingRestore
-                                ? const Color(0xFF10B981).withValues(alpha: 0.2)
-                                : (isRevoked ? Colors.green.withValues(alpha: 0.12) : Colors.red.withValues(alpha: 0.12)),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: isPendingRestore
-                                  ? const Color(0xFF10B981)
-                                  : (isRevoked ? Colors.green.shade700 : Colors.red.shade700),
-                              width: 0.8,
-                            ),
-                          ),
-                          child: Icon(
-                            isPendingRestore
-                                ? Icons.check_circle_rounded
-                                : (isRevoked ? Icons.lock_open_rounded : Icons.lock_person_rounded),
-                            size: 16,
-                            color: isPendingRestore
-                                ? const Color(0xFF10B981)
-                                : (isRevoked ? Colors.green.shade400 : Colors.red.shade400),
-                          ),
-                        ),
-                        tooltip: isPendingRestore
-                            ? 'Allow Access (Restore Requested)'
-                            : (isRevoked ? 'Allow / Restore App Access' : 'Revoke App Access'),
-                        onPressed: () => _showQuickRevokeDialog(data, branchId, t),
-                      )
-                    else
-                      IconButton(
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                        icon: Container(
-                          padding: const EdgeInsets.all(6),
-                          decoration: BoxDecoration(
-                            color: Colors.teal.withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Icon(
-                            Icons.school_rounded,
-                            size: 16,
-                            color: Colors.teal,
-                          ),
-                        ),
-                        tooltip: 'Update Student / Guardian Status',
-                        onPressed: () => _showGuardianStatusDialog(data, branchId, t),
-                      ),
-                    const SizedBox(width: 4),
-
-                    // Medical History Button
-                    IconButton(
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                      icon: Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: Colors.teal.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.teal, width: 0.8),
-                        ),
-                        child: const Icon(Icons.medical_services_outlined, size: 16, color: Colors.teal),
-                      ),
-                      tooltip: 'View Medical History',
-                      onPressed: () => StaffPatientLinkService.openStaffMedicalHistory(
-                        context,
-                        name: name,
-                        cnic: data['cnic']?.toString(),
-                        branchId: branchId,
-                        role: data['role']?.toString(),
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-
-                    // Edit Profile Button
-                    IconButton(
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                      icon: Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: t.accent.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: t.accent, width: 0.8),
-                        ),
-                        child: Icon(Icons.edit_rounded, size: 16, color: t.accent),
-                      ),
-                      tooltip: 'Edit Profile & Credentials',
-                      onPressed: () => _openDetail(itemId, branchId),
-                    ),
-                    const SizedBox(width: 4),
-
-                    // Delete Account Button
-                    IconButton(
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                      icon: Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: Colors.red.withValues(alpha: 0.15),
-                          borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.red, width: 0.8),
-                        ),
-                        child: const Icon(Icons.delete_forever_rounded, size: 16, color: Colors.redAccent),
-                      ),
-                      tooltip: 'Delete Account Permanently',
-                      onPressed: () => _showQuickDeleteUserDialog(data, branchId, t),
-                    ),
-                  ] else
-                    IconButton(
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                      icon: Icon(Icons.chevron_right_rounded, color: t.textSecondary, size: 20),
-                      tooltip: 'View Profile',
-                      onPressed: () => _openDetail(itemId, branchId),
-                    ),
-                ],
-              ),
-            ]),
+              ],
+            ),
           ),
         ),
       ),

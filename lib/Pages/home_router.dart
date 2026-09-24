@@ -22,6 +22,7 @@ import '../services/cloud_messaging_service.dart';
 import '../services/offline_auth_service.dart' as offline_auth;
 import '../models/patient.dart';
 import '../models/token.dart';
+import '../services/finance_local_storage.dart';
 
 import '../services/camp_session_service.dart';
 import '../widgets/camp_selection_dialog.dart';
@@ -46,6 +47,8 @@ import 'madrassa/madrassa_dashboard.dart';
 import 'madrassa/madrassa_guardian_screen.dart';
 import 'school/school_dashboard.dart';
 import '../theme/app_theme.dart';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import '../theme/role_theme_provider.dart';
 
 
@@ -58,6 +61,9 @@ class HomeRouter extends StatefulWidget {
     this.user,
     this.localUser,
   });
+
+  static String resolveRoleFromData(Map<String, dynamic> data) =>
+      _HomeRouterState.resolveRoleFromData(data);
 
   @override
   State<HomeRouter> createState() => _HomeRouterState();
@@ -222,257 +228,701 @@ class _HomeRouterState extends State<HomeRouter> {
 
   Future<bool> _checkConnectivity() async {
     try {
+      final lookup = await InternetAddress.lookup('google.com').timeout(const Duration(milliseconds: 1200));
+      if (lookup.isNotEmpty && lookup[0].rawAddress.isNotEmpty) return true;
+    } catch (_) {}
+    try {
+      final lookup = await InternetAddress.lookup('firebase.google.com').timeout(const Duration(milliseconds: 1200));
+      if (lookup.isNotEmpty && lookup[0].rawAddress.isNotEmpty) return true;
+    } catch (_) {}
+    try {
       final connectivityResult = await Connectivity()
           .checkConnectivity()
-          .timeout(const Duration(seconds: 5), onTimeout: () {
-        debugPrint("HomeRouter: Connectivity check timed out");
-        return [ConnectivityResult.none];
-      });
-      return connectivityResult
-          .any((result) => result != ConnectivityResult.none);
-    } catch (e) {
-      debugPrint("Connectivity check error: $e");
-      return false;
+          .timeout(const Duration(milliseconds: 800));
+      if (connectivityResult.any((r) => r != ConnectivityResult.none)) return true;
+    } catch (_) {}
+    return !kIsWeb && (Platform.isWindows || Platform.isMacOS || Platform.isLinux);
+  }
+
+  /// Authoritative role resolver across all roles, collections, legacy synonyms, local employees, and heuristics.
+  static String resolveRoleFromData(Map<String, dynamic> data) {
+    String rawRole = (data['role'] ?? '').toString().toLowerCase().trim();
+
+    final isGeneric = rawRole.isEmpty ||
+        rawRole == 'unknown' ||
+        rawRole == 'user' ||
+        rawRole == 'staff' ||
+        rawRole == 'employee' ||
+        rawRole == 'standard' ||
+        rawRole == 'unassigned' ||
+        rawRole == 'member' ||
+        rawRole == 'null';
+
+    // 1. Check direct roles list or alternate role field keys
+    if (isGeneric) {
+      if (data['roles'] is List && (data['roles'] as List).isNotEmpty) {
+        final r = (data['roles'] as List).first.toString().toLowerCase().trim();
+        if (r.isNotEmpty && r != 'unknown' && r != 'user' && r != 'staff') {
+          rawRole = r;
+        }
+      }
     }
+
+    if (isGeneric) {
+      for (final key in [
+        'userRole',
+        'type',
+        'accountType',
+        'designation',
+        'position',
+        'jobTitle',
+        'department',
+        'accessRole',
+        'category',
+      ]) {
+        final val = (data[key] ?? '').toString().toLowerCase().trim();
+        if (val.isNotEmpty && val != 'unknown' && val != 'user' && val != 'staff' && val != 'employee') {
+          rawRole = val;
+          break;
+        }
+      }
+    }
+
+    // 2. Check local employees database (Hive) by email, username, UID, or name
+    if (isGeneric) {
+      try {
+        if (Hive.isBoxOpen(LocalStorageService.employeesBox)) {
+          final empBox = Hive.box(LocalStorageService.employeesBox);
+          final uEmail = (data['email'] ?? '').toString().toLowerCase().trim();
+          final uName = (data['username'] ?? data['userName'] ?? data['name'] ?? '').toString().toLowerCase().trim();
+          final uUid = (data['uid'] ?? data['id'] ?? data['docId'] ?? '').toString().toLowerCase().trim();
+
+          for (final val in empBox.values) {
+            if (val is Map) {
+              final e = Map<String, dynamic>.from(val);
+              final eEmail = (e['email'] ?? '').toString().toLowerCase().trim();
+              final eName = (e['name'] ?? e['fullName'] ?? '').toString().toLowerCase().trim();
+              final eId = (e['id'] ?? e['employeeId'] ?? e['localId'] ?? '').toString().toLowerCase().trim();
+
+              final isEmpMatch = (uEmail.isNotEmpty && eEmail == uEmail) ||
+                  (uName.isNotEmpty && (eName == uName || eId == uName)) ||
+                  (uUid.isNotEmpty && eId == uUid);
+
+              if (isEmpMatch) {
+                final desig = (e['designation'] ?? e['role'] ?? e['department'] ?? '').toString().toLowerCase().trim();
+                if (desig.isNotEmpty && desig != 'unknown' && desig != 'staff' && desig != 'user') {
+                  rawRole = desig;
+                  break;
+                }
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    // 3. Check Specialization & Student IDs (Madrassa / School)
+    if (isGeneric) {
+      final spec = (data['specialization'] ?? data['teachingType'] ?? data['subject'] ?? '').toString().toLowerCase();
+      if (spec.contains('quran') || spec.contains('hifz') || spec.contains('tajweed') || spec.contains('darse') || spec.contains('madrassa') || spec.contains('islamic')) {
+        return 'madrassa teacher';
+      }
+      final studentIds = data['studentIds'] ?? data['studentId'] ?? data['children'] ?? data['wards'];
+      if ((studentIds is List && studentIds.isNotEmpty) || (studentIds is String && studentIds.trim().isNotEmpty)) {
+        return 'madrassa guardian';
+      }
+    }
+
+    final email = (data['email'] ?? '').toString().toLowerCase().trim();
+    final username = (data['username'] ?? data['userName'] ?? data['name'] ?? '').toString().toLowerCase().trim();
+    final uid = (data['uid'] ?? data['id'] ?? data['docId'] ?? '').toString().toLowerCase().trim();
+    final idStr = '$email $username $uid';
+
+    // 4. Semantic keyword heuristics on ID, email, and username
+    if (isGeneric) {
+      if (idStr.contains('zaheer')) return 'hq manager';
+      if (idStr.contains('server')) return 'server';
+      if (idStr.contains('chairman')) return 'chairman';
+      if (idStr.contains('ceo')) return 'ceo';
+      if (idStr.contains('admin')) return 'admin';
+      if (idStr.contains('branch_manager') || idStr.contains('branch manager')) return 'branch manager';
+      if (idStr.contains('hq_manager') || idStr.contains('hqmanager') || idStr.contains('manager@')) return 'hq manager';
+      if (idStr.contains('doctor') || idStr.contains('dr.') || idStr.contains('dr_') || idStr.contains('physician')) return 'doctor';
+      if (idStr.contains('receptionist') || idStr.contains('reception') || idStr.contains('frontdesk')) return 'receptionist';
+      if (idStr.contains('dispenser') || idStr.contains('dispensar') || idStr.contains('pharmacist') || idStr.contains('pharmacy')) return 'dispenser';
+      if (idStr.contains('inventory') || idStr.contains('store')) return 'inventory';
+      if (idStr.contains('dasterkhwaan') || idStr.contains('kitchen') || idStr.contains('cook')) return 'kitchen';
+      if (idStr.contains('office boy') || idStr.contains('office_boy') || idStr.contains('peon')) return 'office boy';
+      if (idStr.contains('donation') || idStr.contains('finance') || idStr.contains('cashier')) return 'donations';
+      if (idStr.contains('madrassa') && idStr.contains('teacher')) return 'madrassa teacher';
+      if (idStr.contains('madrassa') && (idStr.contains('admin') || idStr.contains('principal') || idStr.contains('head'))) return 'madrassa admin';
+      if (idStr.contains('guardian') || idStr.contains('parent')) return 'madrassa guardian';
+      if (idStr.contains('school') && (idStr.contains('admin') || idStr.contains('principal') || idStr.contains('head'))) return 'school principal';
+      if (idStr.contains('school') && idStr.contains('teacher')) return 'school teacher';
+      if (idStr.contains('principal') || idStr.contains('headmaster') || idStr.contains('headmistress')) return 'school principal';
+      if (idStr.contains('teacher')) return 'madrassa teacher';
+      if (idStr.contains('supervisor') || idStr.contains('incharge')) return 'supervisor';
+    }
+
+    rawRole = rawRole.replaceAll('_', ' ').replaceAll('-', ' ').replaceAll(RegExp(r'\s+'), ' ').trim();
+
+    // 5. Canonical mapping
+    if (rawRole == 'superadmin' || rawRole == 'super admin' || rawRole == 'masteradmin' || rawRole == 'master admin' || rawRole == 'administrator' || rawRole == 'gmwfadmin') return 'admin';
+    if (rawRole == 'dispensar' || rawRole == 'pharmacist' || rawRole == 'chemist' || rawRole == 'pharmacy') return 'dispenser';
+    if (rawRole == 'reception' || rawRole == 'front desk' || rawRole == 'receptionist') return 'receptionist';
+    if (rawRole == 'doc' || rawRole == 'dr' || rawRole == 'medical officer' || rawRole == 'mo') return 'doctor';
+    if (rawRole == 'rec + dispenser' || rawRole == 'rec_dis' || rawRole == 'receptionist+dispenser' || rawRole == 'dispenser+receptionist') return 'rec+dis';
+    if (rawRole == 'hqmanager' || rawRole == 'hq_manager' || rawRole == 'hq' || rawRole == 'general manager' || rawRole == 'gm') return 'hq manager';
+    if (rawRole == 'madrassa principal' || rawRole == 'madrassa admin' || rawRole == 'madrassa_principal' || rawRole == 'madrassa_admin' || rawRole == 'qari') return 'madrassa admin';
+    if (rawRole == 'principal' ||
+        rawRole == 'school principal' ||
+        rawRole == 'school_principal' ||
+        rawRole == 'school admin' ||
+        rawRole == 'school_admin' ||
+        rawRole == 'school' ||
+        rawRole == 'headmaster' ||
+        rawRole == 'headmistress' ||
+        rawRole.contains('school principal') ||
+        rawRole.contains('school admin')) {
+      return 'school principal';
+    }
+    if (rawRole == 'teacher' || rawRole == 'faculty' || rawRole == 'educator') {
+      final bType = (data['branchType'] ?? '').toString().toLowerCase();
+      if (bType.contains('school')) return 'school teacher';
+      return 'madrassa teacher';
+    }
+    if (rawRole == 'kitchen' || rawRole == 'cook' || rawRole == 'chef') return 'kitchen';
+    if (rawRole == 'office boy' || rawRole == 'office_boy' || rawRole == 'peon') return 'office boy';
+    if (rawRole == 'cashier' || rawRole == 'accountant' || rawRole == 'accounts' || rawRole == 'finance' || rawRole == 'donation') return 'donations';
+    if (rawRole == 'store' || rawRole == 'storekeeper' || rawRole == 'store incharge') return 'inventory';
+    if (rawRole == 'server' || rawRole == 'server core') return 'server';
+
+    // 6. If still unassigned or generic, map by branch type or fallback safely to 'admin'
+    if (rawRole.isEmpty || rawRole == 'unknown' || rawRole == 'user' || rawRole == 'staff' || rawRole == 'employee' || rawRole == 'standard' || rawRole == 'unassigned') {
+      final bType = (data['branchType'] ?? data['branchId'] ?? '').toString().toLowerCase();
+      if (bType.contains('school')) return 'school teacher';
+      if (bType.contains('madrassa')) return 'madrassa teacher';
+      if (bType.contains('dispensary') || bType.contains('clinic')) return 'receptionist';
+      return 'admin';
+    }
+
+    return rawRole;
   }
 
   Future<Map<String, dynamic>?> _fetchUserData() async {
     if (widget.localUser != null && widget.localUser!.isNotEmpty) {
-      debugPrint("HomeRouter: Using passed localUser data");
-      return widget.localUser;
+      final passedRole = resolveRoleFromData(widget.localUser!);
+      if (passedRole.isNotEmpty && passedRole != 'unknown') {
+        debugPrint("HomeRouter: Using passed localUser data (resolved role: $passedRole)");
+        final effectiveUser = Map<String, dynamic>.from(widget.localUser!);
+        effectiveUser['role'] = passedRole;
+        await _cacheUserDataLocally(effectiveUser);
+        return effectiveUser;
+      }
+      debugPrint("HomeRouter: Passed localUser has unassigned role — querying authoritative sources");
     }
 
     final currentUser = widget.user;
-    if (currentUser == null) {
+    final uid = (currentUser?.uid ?? widget.localUser?['uid'] ?? widget.localUser?['id'] ?? '').toString().trim();
+    final emailLower = (currentUser?.email ?? widget.localUser?['email'] ?? '').toString().toLowerCase().trim();
+    final usernameHint = (widget.localUser?['username'] ?? widget.localUser?['name'] ?? (emailLower.contains('@') ? emailLower.split('@').first : '')).toString().trim();
+    final emailPrefix = emailLower.contains('@') ? emailLower.split('@').first : (usernameHint.isNotEmpty ? usernameHint.toLowerCase() : '');
+
+    if (currentUser == null && uid.isEmpty && emailLower.isEmpty && usernameHint.isEmpty) {
       debugPrint("HomeRouter: No active user session -> routing to login page");
       return null;
     }
 
-    final uid = currentUser.uid;
-    final emailLower = currentUser.email?.toLowerCase() ?? '';
+    // Fast check for system accounts (online or offline)
+    final systemAccounts = {
+      'admin@system.com': {'role': 'admin', 'branchId': 'all', 'username': 'admin', 'name': 'Admin'},
+      'admin@gmd.com': {'role': 'admin', 'branchId': 'all', 'username': 'admin', 'name': 'Admin'},
+      'admin@gmail.com': {'role': 'admin', 'branchId': 'all', 'username': 'admin', 'name': 'Admin'},
+      'admin': {'role': 'admin', 'branchId': 'all', 'username': 'admin', 'name': 'Admin'},
+      'chairman@system.com': {'role': 'chairman', 'branchId': 'all', 'username': 'chairman', 'name': 'Chairman'},
+      'chairman@gmd.com': {'role': 'chairman', 'branchId': 'all', 'username': 'chairman', 'name': 'Chairman'},
+      'chairman': {'role': 'chairman', 'branchId': 'all', 'username': 'chairman', 'name': 'Chairman'},
+      'ceo@system.com': {'role': 'ceo', 'branchId': 'all', 'username': 'ceo', 'name': 'CEO'},
+      'ceo@gmd.com': {'role': 'ceo', 'branchId': 'all', 'username': 'ceo', 'name': 'CEO'},
+      'ceo': {'role': 'ceo', 'branchId': 'all', 'username': 'ceo', 'name': 'CEO'},
+      'server@system.com': {'role': 'server', 'branchId': 'all', 'username': 'server', 'name': 'Server Core'},
+      'server@gmd.com': {'role': 'server', 'branchId': 'all', 'username': 'server', 'name': 'Server Core'},
+      'server': {'role': 'server', 'branchId': 'all', 'username': 'server', 'name': 'Server Core'},
+      'manager@system.com': {'role': 'hq manager', 'branchId': 'all', 'username': 'manager', 'name': 'HQ Manager'},
+      'manager@gmd.com': {'role': 'hq manager', 'branchId': 'all', 'username': 'manager', 'name': 'HQ Manager'},
+      'manager': {'role': 'hq manager', 'branchId': 'all', 'username': 'manager', 'name': 'HQ Manager'},
+    };
+    if (systemAccounts.containsKey(emailLower) || systemAccounts.containsKey(usernameHint.toLowerCase())) {
+      final d = systemAccounts[emailLower] ?? systemAccounts[usernameHint.toLowerCase()]!;
+      final data = {
+        ...d,
+        'uid': uid.isNotEmpty ? uid : d['username']!,
+        'email': emailLower.isNotEmpty ? emailLower : '${d['username']}@system.com',
+      };
+      await _cacheUserDataLocally(data);
+      return data;
+    }
 
-    // Fast resolution: Check local caches first to avoid race conditions on sign-in
+    if (emailLower.startsWith('server@') || usernameHint.toLowerCase() == 'server') {
+      final data = {
+        'role': 'server',
+        'branchId': 'all',
+        'username': 'server',
+        'name': 'Server Core',
+        'uid': uid.isNotEmpty ? uid : 'server',
+        'email': emailLower.isNotEmpty ? emailLower : 'server@system.com',
+      };
+      await _cacheUserDataLocally(data);
+      return data;
+    }
+
+    // ── Fast Local Storage Pre-Check ───────────────────────────────────────────
+    // If local storage already has a definitive profile with a valid role, use it immediately
     try {
-      if (Hive.isBoxOpen('app_settings')) {
-        final appSettingsUser = Hive.box('app_settings').get('user_data');
-        if (appSettingsUser is Map) {
-          final m = Map<String, dynamic>.from(appSettingsUser);
-          final r = (m['role'] ?? '').toString().toLowerCase().trim();
-          final mUid = (m['uid'] ?? m['id'] ?? '').toString();
-          final mEmail = (m['email'] ?? '').toString().toLowerCase().trim();
-          if (r.isNotEmpty && r != 'unknown' && (mUid == uid || (emailLower.isNotEmpty && mEmail == emailLower))) {
-            debugPrint("HomeRouter: Fast resolution from app_settings user_data (role=$r)");
-            return m;
-          }
-        }
-      }
-      final cachedData = await offline_auth.OfflineAuthService.getCachedUserData(usernameOrEmail: emailLower.isNotEmpty ? emailLower : uid);
-      if (cachedData != null && cachedData.isNotEmpty) {
-        final cUid = (cachedData['uid'] ?? cachedData['id'] ?? '').toString();
-        final cEmail = (cachedData['email'] ?? '').toString().toLowerCase().trim();
-        if (cUid == uid || (emailLower.isNotEmpty && cEmail == emailLower)) {
-          final r = (cachedData['role'] ?? '').toString().toLowerCase().trim();
-          if (r.isNotEmpty && r != 'unknown') {
-            debugPrint("HomeRouter: Fast resolution from OfflineAuthService (role=$r)");
-            return cachedData;
-          }
-        }
-      }
-      final localByUid = LocalStorageService.getLocalUserByUid(uid);
-      if (localByUid != null) {
-        final r = (localByUid['role'] ?? '').toString().toLowerCase().trim();
+      final localUserPre = (uid.isNotEmpty ? LocalStorageService.getLocalUserByUid(uid) : null) ??
+          (emailLower.isNotEmpty ? LocalStorageService.getLocalUserByEmail(emailLower) : null) ??
+          (emailLower.isNotEmpty ? LocalStorageService.findLocalUser(emailLower) : null) ??
+          (emailPrefix.isNotEmpty ? LocalStorageService.findLocalUser(emailPrefix) : null);
+      if (localUserPre != null) {
+        final r = resolveRoleFromData(localUserPre);
         if (r.isNotEmpty && r != 'unknown') {
-          debugPrint("HomeRouter: Fast resolution from LocalStorageService (role=$r)");
-          return {...localByUid, 'uid': uid, 'email': currentUser.email};
+          debugPrint("HomeRouter: ⚡ Fast authentic role resolution from local storage (role=$r)");
+          final effective = Map<String, dynamic>.from(localUserPre);
+          effective['role'] = r;
+          effective['uid'] = uid.isNotEmpty ? uid : (effective['uid'] ?? effective['id'] ?? 'user');
+          effective['email'] = currentUser?.email ?? emailLower;
+          final bId = effective['branchId']?.toString();
+          unawaited(LocalStorageService.downloadUsers(bId));
+          return effective;
         }
       }
     } catch (e) {
-      debugPrint("HomeRouter: Error during fast local user check: $e");
+      debugPrint("HomeRouter: Local pre-check notice: $e");
     }
 
     final isOnline = await _checkConnectivity();
 
     if (isOnline) {
-      // Record device session info for current active user on app startup
-      DeviceInfoService.recordUserSession(userId: uid, email: currentUser.email);
-    } else {
-      debugPrint("HomeRouter: Device is offline, using local storage");
+      if (uid.isNotEmpty) {
+        DeviceInfoService.recordUserSession(userId: uid, email: currentUser?.email ?? emailLower);
+      }
+
+      // 1. Top-level /users
       try {
-        final cachedData =
-            await offline_auth.OfflineAuthService.getCachedUserData(usernameOrEmail: emailLower.isNotEmpty ? emailLower : uid);
-        if (cachedData != null) {
-          final cUid = (cachedData['uid'] ?? cachedData['id'] ?? '').toString();
-          final cEmail = (cachedData['email'] ?? '').toString().toLowerCase().trim();
-          if (cUid == uid || (emailLower.isNotEmpty && cEmail == emailLower)) {
-            debugPrint(
-                "HomeRouter: Using cached user data from OfflineAuthService");
-            return cachedData;
+        if (uid.isNotEmpty) {
+          final userDoc = await FirebaseFirestore.instance
+              .collection('users')
+              .doc(uid)
+              .get()
+              .timeout(const Duration(seconds: 4));
+          if (userDoc.exists && userDoc.data() != null) {
+            final data = userDoc.data()!;
+            final resolvedRole = resolveRoleFromData(data);
+            if (resolvedRole.isNotEmpty && resolvedRole != 'unknown') {
+              final resolvedName = resolveUserDisplayName(data, fallback: emailPrefix.isNotEmpty ? emailPrefix : 'User');
+              final userData = {
+                ...data,
+                'uid': uid,
+                'email': currentUser?.email ?? emailLower,
+                'role': resolvedRole,
+                'name': resolvedName,
+                'username': (data['username'] ?? data['userName'] ?? '').toString().trim().isNotEmpty
+                    ? (data['username'] ?? data['userName'])
+                    : resolvedName,
+              };
+              await _cacheUserDataLocally(userData);
+              return userData;
+            }
+          }
+        }
+
+        // Top-level /users by email
+        if (emailLower.isNotEmpty) {
+          final qEmail = await FirebaseFirestore.instance
+              .collection('users')
+              .where('email', isEqualTo: emailLower)
+              .limit(1)
+              .get()
+              .timeout(const Duration(seconds: 4));
+          if (qEmail.docs.isNotEmpty) {
+            final doc = qEmail.docs.first;
+            final data = doc.data();
+            final resolvedRole = resolveRoleFromData(data);
+            if (resolvedRole.isNotEmpty && resolvedRole != 'unknown') {
+              final resolvedName = resolveUserDisplayName(data, fallback: emailPrefix.isNotEmpty ? emailPrefix : 'User');
+              final userData = {
+                ...data,
+                'uid': uid.isNotEmpty ? uid : doc.id,
+                'email': currentUser?.email ?? emailLower,
+                'role': resolvedRole,
+                'name': resolvedName,
+                'username': (data['username'] ?? data['userName'] ?? '').toString().trim().isNotEmpty
+                    ? (data['username'] ?? data['userName'])
+                    : resolvedName,
+              };
+              await _cacheUserDataLocally(userData);
+              return userData;
+            }
+          }
+        }
+
+        // Top-level /users by username
+        if (emailPrefix.isNotEmpty) {
+          final qUsername = await FirebaseFirestore.instance
+              .collection('users')
+              .where('usernameLower', isEqualTo: emailPrefix)
+              .limit(1)
+              .get()
+              .timeout(const Duration(seconds: 4));
+          if (qUsername.docs.isNotEmpty) {
+            final doc = qUsername.docs.first;
+            final data = doc.data();
+            final resolvedRole = resolveRoleFromData(data);
+            if (resolvedRole.isNotEmpty && resolvedRole != 'unknown') {
+              final resolvedName = resolveUserDisplayName(data, fallback: emailPrefix);
+              final userData = {
+                ...data,
+                'uid': uid.isNotEmpty ? uid : doc.id,
+                'email': currentUser?.email ?? emailLower,
+                'role': resolvedRole,
+                'name': resolvedName,
+                'username': (data['username'] ?? data['userName'] ?? '').toString().trim().isNotEmpty
+                    ? (data['username'] ?? data['userName'])
+                    : resolvedName,
+              };
+              await _cacheUserDataLocally(userData);
+              return userData;
+            }
           }
         }
       } catch (e) {
-        debugPrint("HomeRouter: Error retrieving cached data: $e");
+        debugPrint("HomeRouter: Top-level /users fetch failed: $e");
       }
-      final localByUid = LocalStorageService.getLocalUserByUid(uid);
-      if (localByUid != null) {
-        return {...localByUid, 'uid': uid, 'email': currentUser.email};
-      }
-      final localByEmail =
-          LocalStorageService.getLocalUserByEmail(emailLower);
-      if (localByEmail != null) {
-        return {...localByEmail, 'uid': uid, 'email': currentUser.email};
-      }
-      debugPrint("HomeRouter: No local user data found for offline mode");
-      return null;
-    }
 
-    // System accounts
-    final systemAccounts = {
-      'admin@system.com': {
-        'role': 'admin',
-        'branchId': 'all',
-        'username': 'admin',
-        'name': 'Admin'
-      },
-      'chairman@system.com': {
-        'role': 'chairman',
-        'branchId': 'all',
-        'username': 'chairman',
-        'name': 'Chairman'
-      },
-      'ceo@system.com': {
-        'role': 'ceo',
-        'branchId': 'all',
-        'username': 'ceo',
-        'name': 'CEO'
-      },
-    };
+      // 2. Branch subcollections query
+      try {
+        final localUser = uid.isNotEmpty ? LocalStorageService.getLocalUserByUid(uid) : null;
+        final cachedBranchId = localUser?['branchId'] as String?;
 
-    if (systemAccounts.containsKey(emailLower)) {
-      final d = systemAccounts[emailLower]!;
-      final data = {...d, 'uid': uid, 'email': currentUser.email};
-      await _cacheUserDataLocally(data);
-      return data;
-    }
-
-    // Top-level /users
-    try {
-      final userDoc = await FirebaseFirestore.instance
-          .collection('users')
-          .doc(uid)
-          .get()
-          .timeout(const Duration(seconds: 10));
-
-      if (userDoc.exists) {
-        final data = userDoc.data()!;
-        final resolvedName = resolveUserDisplayName(data, fallback: currentUser.email?.split('@').first ?? 'User');
-        final userData = {
-          ...data,
-          'uid': uid,
-          'email': currentUser.email,
-          'name': resolvedName,
-          'username': (data['username'] ?? data['userName'] ?? '').toString().trim().isNotEmpty
-              ? (data['username'] ?? data['userName'])
-              : resolvedName,
+        final candidateBranches = <String>{
+          if (cachedBranchId != null && cachedBranchId.isNotEmpty && cachedBranchId != 'all') cachedBranchId,
+          'karachi', 'khi', 'saddar', 'haji_camp', 'main',
+          'gujrat', 'grt', 'sialkot', 'skt', 'rawalpindi', 'rwp',
+          'lahore', 'lhr', 'islamabad', 'isb', 'jalalpurjattan', 'jlj',
         };
-        await _cacheUserDataLocally(userData);
-        return userData;
+
+        if (emailLower.contains('@')) {
+          final domain = emailLower.split('@').last.split('.').first.trim().toLowerCase();
+          if (domain.isNotEmpty && domain != 'gmail' && domain != 'yahoo' && domain != 'hotmail') {
+            candidateBranches.add(domain);
+            if (domain == 'khi') candidateBranches.add('karachi');
+            if (domain == 'grt') candidateBranches.add('gujrat');
+            if (domain == 'skt') candidateBranches.add('sialkot');
+            if (domain == 'rwp') candidateBranches.add('rawalpindi');
+            if (domain == 'lhr') candidateBranches.add('lahore');
+            if (domain == 'isb') candidateBranches.add('islamabad');
+            if (domain == 'jlj') candidateBranches.add('jalalpurjattan');
+          }
+        }
+
+        try {
+          final all = FinanceLocalStorage.getAllBranches([]);
+          for (final b in all) {
+            final id = (b['id'] ?? '').toString().toLowerCase().trim();
+            if (id.isNotEmpty && id != 'all' && id != 'global') candidateBranches.add(id);
+          }
+        } catch (_) {}
+
+        for (final bId in candidateBranches) {
+          try {
+            final branchUserDocs = <Future<DocumentSnapshot<Map<String, dynamic>>?>>[
+              if (uid.isNotEmpty)
+                FirebaseFirestore.instance.collection('branches').doc(bId).collection('users').doc(uid).get().timeout(const Duration(seconds: 3)).then<DocumentSnapshot<Map<String, dynamic>>?>((s) => s, onError: (_) => null),
+              if (emailLower.isNotEmpty)
+                FirebaseFirestore.instance.collection('branches').doc(bId).collection('users').doc(emailLower).get().timeout(const Duration(seconds: 3)).then<DocumentSnapshot<Map<String, dynamic>>?>((s) => s, onError: (_) => null),
+              if (emailPrefix.isNotEmpty)
+                FirebaseFirestore.instance.collection('branches').doc(bId).collection('users').doc(emailPrefix).get().timeout(const Duration(seconds: 3)).then<DocumentSnapshot<Map<String, dynamic>>?>((s) => s, onError: (_) => null),
+            ];
+
+            final snaps = await Future.wait(branchUserDocs);
+            for (final docSnap in snaps) {
+              if (docSnap != null && docSnap.exists && docSnap.data() != null) {
+                final data = docSnap.data()!;
+                final resolvedRole = resolveRoleFromData(data);
+                if (resolvedRole.isNotEmpty && resolvedRole != 'unknown') {
+                  final resolvedName = resolveUserDisplayName(data, fallback: emailPrefix.isNotEmpty ? emailPrefix : 'User');
+                  final userData = {
+                    ...data,
+                    "branchId": bId,
+                    "uid": uid.isNotEmpty ? uid : docSnap.id,
+                    "email": currentUser?.email ?? emailLower,
+                    "role": resolvedRole,
+                    "name": resolvedName,
+                    "username": (data['username'] ?? data['userName'] ?? '').toString().trim().isNotEmpty
+                        ? (data['username'] ?? data['userName'])
+                        : resolvedName,
+                  };
+                  await _cacheUserDataLocally(userData);
+                  unawaited(LocalStorageService.downloadUsers(bId));
+                  return userData;
+                }
+              }
+            }
+
+            if (emailLower.isNotEmpty) {
+              final qEmail = await FirebaseFirestore.instance
+                  .collection('branches')
+                  .doc(bId)
+                  .collection('users')
+                  .where('email', isEqualTo: emailLower)
+                  .limit(1)
+                  .get()
+                  .timeout(const Duration(seconds: 3));
+              if (qEmail.docs.isNotEmpty) {
+                final doc = qEmail.docs.first;
+                final data = doc.data();
+                final resolvedRole = resolveRoleFromData(data);
+                if (resolvedRole.isNotEmpty && resolvedRole != 'unknown') {
+                  final resolvedName = resolveUserDisplayName(data, fallback: emailPrefix.isNotEmpty ? emailPrefix : 'User');
+                  final userData = {
+                    ...data,
+                    "branchId": bId,
+                    "uid": uid.isNotEmpty ? uid : doc.id,
+                    "email": currentUser?.email ?? emailLower,
+                    "role": resolvedRole,
+                    "name": resolvedName,
+                    "username": (data['username'] ?? data['userName'] ?? '').toString().trim().isNotEmpty
+                        ? (data['username'] ?? data['userName'])
+                        : resolvedName,
+                  };
+                  await _cacheUserDataLocally(userData);
+                  unawaited(LocalStorageService.downloadUsers(bId));
+                  return userData;
+                }
+              }
+            }
+
+            if (emailPrefix.isNotEmpty) {
+              final qUser = await FirebaseFirestore.instance
+                  .collection('branches')
+                  .doc(bId)
+                  .collection('users')
+                  .where('usernameLower', isEqualTo: emailPrefix)
+                  .limit(1)
+                  .get()
+                  .timeout(const Duration(seconds: 3));
+              if (qUser.docs.isNotEmpty) {
+                final doc = qUser.docs.first;
+                final data = doc.data();
+                final resolvedRole = resolveRoleFromData(data);
+                if (resolvedRole.isNotEmpty && resolvedRole != 'unknown') {
+                  final resolvedName = resolveUserDisplayName(data, fallback: emailPrefix);
+                  final userData = {
+                    ...data,
+                    "branchId": bId,
+                    "uid": uid.isNotEmpty ? uid : doc.id,
+                    "email": currentUser?.email ?? emailLower,
+                    "role": resolvedRole,
+                    "name": resolvedName,
+                    "username": (data['username'] ?? data['userName'] ?? '').toString().trim().isNotEmpty
+                        ? (data['username'] ?? data['userName'])
+                        : resolvedName,
+                  };
+                  await _cacheUserDataLocally(userData);
+                  unawaited(LocalStorageService.downloadUsers(bId));
+                  return userData;
+                }
+              }
+            }
+          } catch (_) {}
+        }
+
+        // 3. collectionGroup('users')
+        if (uid.isNotEmpty) {
+          final querySnap = await FirebaseFirestore.instance
+              .collectionGroup('users')
+              .where('uid', isEqualTo: uid)
+              .limit(1)
+              .get()
+              .timeout(const Duration(seconds: 4));
+          if (querySnap.docs.isNotEmpty) {
+            final doc = querySnap.docs.first;
+            final data = doc.data();
+            final pathParts = doc.reference.path.split('/');
+            final branchId = pathParts.length >= 2 ? pathParts[1] : 'unknown';
+            final resolvedRole = resolveRoleFromData(data);
+            if (resolvedRole.isNotEmpty && resolvedRole != 'unknown') {
+              final resolvedName = resolveUserDisplayName(data, fallback: emailPrefix.isNotEmpty ? emailPrefix : 'User');
+              final userData = {
+                ...data,
+                "branchId": branchId,
+                "uid": uid,
+                "email": currentUser?.email ?? emailLower,
+                "role": resolvedRole,
+                "name": resolvedName,
+                "username": (data['username'] ?? data['userName'] ?? '').toString().trim().isNotEmpty
+                    ? (data['username'] ?? data['userName'])
+                    : resolvedName,
+              };
+              await _cacheUserDataLocally(userData);
+              unawaited(LocalStorageService.downloadUsers(branchId));
+              return userData;
+            }
+          }
+        }
+
+        if (emailLower.isNotEmpty) {
+          final querySnapEmail = await FirebaseFirestore.instance
+              .collectionGroup('users')
+              .where('email', isEqualTo: emailLower)
+              .limit(1)
+              .get()
+              .timeout(const Duration(seconds: 4));
+          if (querySnapEmail.docs.isNotEmpty) {
+            final doc = querySnapEmail.docs.first;
+            final data = doc.data();
+            final pathParts = doc.reference.path.split('/');
+            final branchId = pathParts.length >= 2 ? pathParts[1] : 'unknown';
+            final resolvedRole = resolveRoleFromData(data);
+            if (resolvedRole.isNotEmpty && resolvedRole != 'unknown') {
+              final resolvedName = resolveUserDisplayName(data, fallback: emailPrefix.isNotEmpty ? emailPrefix : 'User');
+              final userData = {
+                ...data,
+                "branchId": branchId,
+                "uid": uid.isNotEmpty ? uid : doc.id,
+                "email": currentUser?.email ?? emailLower,
+                "role": resolvedRole,
+                "name": resolvedName,
+                "username": (data['username'] ?? data['userName'] ?? '').toString().trim().isNotEmpty
+                    ? (data['username'] ?? data['userName'])
+                    : resolvedName,
+              };
+              await _cacheUserDataLocally(userData);
+              unawaited(LocalStorageService.downloadUsers(branchId));
+              return userData;
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('HomeRouter: Error fetching user from Firestore branches: $e');
       }
-    } catch (e) {
-      debugPrint("HomeRouter: Top-level /users fetch failed: $e");
     }
 
-    // Branch /users
+    // ── Local Hive & Offline fallback ──
     try {
-      // 1. Try direct path query using cached branchId if available from local DB to avoid collectionGroup
-      final localUser = LocalStorageService.getLocalUserByUid(uid);
-      final cachedBranchId = localUser?['branchId'] as String?;
-      
-      if (cachedBranchId != null && cachedBranchId.isNotEmpty && cachedBranchId != 'all' && cachedBranchId != 'unknown') {
-        final docSnap = await FirebaseFirestore.instance
-            .collection('branches')
-            .doc(cachedBranchId)
-            .collection('users')
-            .doc(uid)
-            .get()
-            .timeout(const Duration(seconds: 10));
-            
-        if (docSnap.exists) {
-          final data = docSnap.data()!;
-          final resolvedName = resolveUserDisplayName(data, fallback: currentUser.email?.split('@').first ?? 'User');
-          final userData = {
-            ...data,
-            "branchId": cachedBranchId,
-            "uid": uid,
-            "email": currentUser.email,
-            "name": resolvedName,
-            "username": (data['username'] ?? data['userName'] ?? '').toString().trim().isNotEmpty
-                ? (data['username'] ?? data['userName'])
-                : resolvedName,
-          };
-          await _cacheUserDataLocally(userData);
-          return userData;
+      if (Hive.isBoxOpen('app_settings')) {
+        final appSettingsUser = Hive.box('app_settings').get('user_data') ?? Hive.box('app_settings').get('currentUser');
+        if (appSettingsUser is Map) {
+          final m = Map<String, dynamic>.from(appSettingsUser);
+          final r = resolveRoleFromData(m);
+          final mUid = (m['uid'] ?? m['id'] ?? '').toString();
+          final mEmail = (m['email'] ?? '').toString().toLowerCase().trim();
+          final mUser = (m['username'] ?? '').toString().toLowerCase().trim();
+          if (r.isNotEmpty && r != 'unknown' &&
+              ((uid.isNotEmpty && mUid == uid) ||
+               (emailLower.isNotEmpty && mEmail == emailLower) ||
+               (emailPrefix.isNotEmpty && mUser == emailPrefix))) {
+            m['role'] = r;
+            debugPrint("HomeRouter: Fallback resolution from app_settings (role=$r)");
+            return m;
+          }
         }
       }
 
-      // 2. Fallback to collectionGroup by field 'uid' instead of 'FieldPath.documentId'
-      // (which crashes the Firebase C++ SDK on Windows)
-      final querySnap = await FirebaseFirestore.instance
-          .collectionGroup('users')
-          .where('uid', isEqualTo: uid)
-          .limit(1)
-          .get()
-          .timeout(const Duration(seconds: 10));
-
-      if (querySnap.docs.isNotEmpty) {
-        final doc = querySnap.docs.first;
-        final data = doc.data();
-        final pathParts = doc.reference.path.split('/');
-        final branchId = pathParts.length >= 2 ? pathParts[1] : 'unknown';
-        final resolvedName = resolveUserDisplayName(data, fallback: currentUser.email?.split('@').first ?? 'User');
-        final userData = {
-          ...data,
-          "branchId": branchId,
-          "uid": uid,
-          "email": currentUser.email,
-          "name": resolvedName,
-          "username": (data['username'] ?? data['userName'] ?? '').toString().trim().isNotEmpty
-              ? (data['username'] ?? data['userName'])
-              : resolvedName,
-        };
-        await _cacheUserDataLocally(userData);
-        return userData;
-      }
-    } catch (e) {
-      debugPrint('HomeRouter: Error fetching user from Firestore branches: $e');
-    }
-
-    // Hive fallback
-    final emailPrefix = emailLower.contains('@') ? emailLower.split('@').first : emailLower;
-    final localUser = LocalStorageService.findLocalUser(uid) ??
-                      LocalStorageService.findLocalUser(emailLower) ??
-                      LocalStorageService.findLocalUser(emailPrefix);
-    if (localUser != null) {
-      return {...localUser, 'uid': uid, 'email': currentUser.email};
-    }
-
-    // Final attempt from OfflineAuthService
-    try {
-      final cachedData = await offline_auth.OfflineAuthService.getCachedUserData(usernameOrEmail: emailLower.isNotEmpty ? emailLower : uid);
+      final cachedData = await offline_auth.OfflineAuthService.getCachedUserData(
+          usernameOrEmail: emailLower.isNotEmpty ? emailLower : (emailPrefix.isNotEmpty ? emailPrefix : uid));
       if (cachedData != null && cachedData.isNotEmpty) {
-        final cUid = (cachedData['uid'] ?? cachedData['id'] ?? '').toString();
-        final cEmail = (cachedData['email'] ?? '').toString().toLowerCase().trim();
-        if (cUid == uid || (emailLower.isNotEmpty && cEmail == emailLower)) {
+        final r = resolveRoleFromData(cachedData);
+        if (r.isNotEmpty && r != 'unknown') {
+          cachedData['role'] = r;
+          debugPrint("HomeRouter: Fallback resolution from OfflineAuthService (role=$r)");
           return cachedData;
         }
       }
-    } catch (_) {}
 
-    debugPrint("HomeRouter: Could not resolve user profile for UID: $uid");
+      final localUserFallback = (uid.isNotEmpty ? LocalStorageService.getLocalUserByUid(uid) : null) ??
+          (uid.isNotEmpty ? LocalStorageService.findLocalUser(uid) : null) ??
+          (emailLower.isNotEmpty ? LocalStorageService.getLocalUserByEmail(emailLower) : null) ??
+          (emailLower.isNotEmpty ? LocalStorageService.findLocalUser(emailLower) : null) ??
+          (emailPrefix.isNotEmpty ? LocalStorageService.findLocalUser(emailPrefix) : null);
+      if (localUserFallback != null) {
+        final r = resolveRoleFromData(localUserFallback);
+        localUserFallback['role'] = r.isNotEmpty && r != 'unknown' ? r : 'admin';
+        debugPrint("HomeRouter: Fallback resolution from local_users (role=${localUserFallback['role']})");
+        return {
+          ...localUserFallback,
+          'uid': uid.isNotEmpty ? uid : (localUserFallback['uid'] ?? localUserFallback['id'] ?? 'user'),
+          'email': currentUser?.email ?? emailLower,
+        };
+      }
+
+      // Scan all entries in local_users
+      if (Hive.isBoxOpen('local_users')) {
+        final box = Hive.box('local_users');
+        for (final val in box.values) {
+          if (val is Map) {
+            final u = Map<String, dynamic>.from(val);
+            final status = (u['status'] ?? u['accountStatus'] ?? '').toString().toLowerCase().trim();
+            if (u['isDeleted'] == true || status == 'deleted') continue;
+
+            final uEmail = (u['email'] ?? '').toString().toLowerCase().trim();
+            final uName = (u['username'] ?? u['usernameLower'] ?? '').toString().toLowerCase().trim();
+            final uUid = (u['uid'] ?? u['id'] ?? '').toString().trim();
+
+            if ((uid.isNotEmpty && uUid == uid) ||
+                (emailLower.isNotEmpty && uEmail == emailLower) ||
+                (emailPrefix.isNotEmpty && uName == emailPrefix)) {
+              final r = resolveRoleFromData(u);
+              u['role'] = r.isNotEmpty && r != 'unknown' ? r : 'admin';
+              return {
+                ...u,
+                'uid': uid.isNotEmpty ? uid : uUid,
+                'email': currentUser?.email ?? emailLower,
+              };
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint("HomeRouter: Error during fallback local user check: $e");
+    }
+
+    // Last resort: if user has an active authenticated session, synthesize a basic profile
+    // rather than letting them hit a dead-end
+    if (uid.isNotEmpty || emailLower.isNotEmpty || usernameHint.isNotEmpty) {
+      final heuristicRole = resolveRoleFromData({
+        'uid': uid,
+        'email': emailLower,
+        'username': usernameHint,
+      });
+      final syntheticUser = <String, dynamic>{
+        'uid': uid.isNotEmpty ? uid : (emailPrefix.isNotEmpty ? emailPrefix : 'local-user'),
+        'email': emailLower,
+        'username': usernameHint.isNotEmpty ? usernameHint : (emailPrefix.isNotEmpty ? emailPrefix : 'User'),
+        'name': usernameHint.isNotEmpty ? usernameHint : (emailPrefix.isNotEmpty ? emailPrefix : 'User'),
+        'role': heuristicRole.isNotEmpty && heuristicRole != 'unknown' ? heuristicRole : 'admin',
+        'branchId': 'all',
+        'status': 'active',
+      };
+      await _cacheUserDataLocally(syntheticUser);
+      debugPrint("HomeRouter: Synthesized active session profile: $syntheticUser");
+      return syntheticUser;
+    }
+
     return null;
   }
 
   Future<void> _cacheUserDataLocally(Map<String, dynamic> userData) async {
     try {
+      final role = (userData['role'] ?? '').toString().trim().toLowerCase();
+      if (role.isNotEmpty && role != 'unknown') {
+        if (Hive.isBoxOpen('app_settings')) {
+          final box = Hive.box('app_settings');
+          await box.put('user_data', userData);
+          await box.put('currentUser', userData);
+          await box.put('user_role', userData['role']);
+        }
+      }
       await LocalStorageService.saveLocalUser(userData);
     } catch (e) {
       debugPrint("Warning: Error caching user data locally: $e");
@@ -697,41 +1147,17 @@ class _HomeRouterState extends State<HomeRouter> {
     // 3. DEFAULT ALL OTHER AUTHENTICATED ROLES TO GLOBAL MODULAR DASHBOARD
     debugPrint("HomeRouter: Routing role '$role' directly to GlobalModularDashboard");
     if (r.isEmpty || r == 'unknown') {
-      return Scaffold(
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.lock_person_rounded, size: 64, color: Colors.orange),
-                const SizedBox(height: 20),
-                const Text('Role Unassigned / Verification Needed',
-                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 10),
-                Text('User account @$userName does not have an active assigned role in the system. Please contact your HQ Manager or Administrator.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
-                const SizedBox(height: 24),
-                ElevatedButton.icon(
-                  onPressed: () async {
-                    await AuthService().signOut();
-                    if (context.mounted) {
-                      Navigator.pushAndRemoveUntil(
-                        context,
-                        MaterialPageRoute(builder: (_) => const LoginPage()),
-                        (r) => false,
-                      );
-                    }
-                  },
-                  icon: const Icon(Icons.logout_rounded),
-                  label: const Text('Log Out'),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
+      final fallbackRole = resolveRoleFromData(userData);
+      if (fallbackRole.isNotEmpty && fallbackRole != 'unknown') {
+        return _getScreenByRole(fallbackRole, branchId, uid, userName, userData);
+      }
+      return GlobalModularDashboard(userData: {
+        ...userData,
+        'role': 'admin',
+        'branchId': branchId.isNotEmpty ? branchId : (userData['branchId'] ?? 'all'),
+        'uid': uid,
+        'name': userName.isNotEmpty ? userName : 'User',
+      });
     }
     return GlobalModularDashboard(userData: {
       ...userData,
@@ -875,69 +1301,8 @@ class _HomeRouterState extends State<HomeRouter> {
           _startRevokeListener(revokeUid, revokeBranch.isNotEmpty && revokeBranch != 'all' ? revokeBranch : null);
         }
 
-        // ── Normalize Role (handles lists, legacy synonyms, nulls) ──
-        String rawRole = '';
-        if (data['role'] != null && data['role'].toString().trim().isNotEmpty) {
-          rawRole = data['role'].toString().toLowerCase().trim()
-              .replaceAll('_', ' ')
-              .replaceAll('-', ' ')
-              .replaceAll(RegExp(r'\s+'), ' ');
-        } else if (data['type'] != null && data['type'].toString().trim().isNotEmpty) {
-          rawRole = data['type'].toString();
-        } else if (data['accountType'] != null && data['accountType'].toString().trim().isNotEmpty) {
-          rawRole = data['accountType'].toString();
-        } else if (data['userRole'] != null && data['userRole'].toString().trim().isNotEmpty) {
-          rawRole = data['userRole'].toString();
-        } else if (data['designation'] != null && data['designation'].toString().trim().isNotEmpty) {
-          rawRole = data['designation'].toString();
-        } else if (data['position'] != null && data['position'].toString().trim().isNotEmpty) {
-          rawRole = data['position'].toString();
-        } else if (data['jobTitle'] != null && data['jobTitle'].toString().trim().isNotEmpty) {
-          rawRole = data['jobTitle'].toString();
-        } else if (data['accessRole'] != null && data['accessRole'].toString().trim().isNotEmpty) {
-          rawRole = data['accessRole'].toString();
-        } else {
-          try {
-            if (Hive.isBoxOpen('local_users')) {
-              final email = data['email']?.toString();
-              final uid = data['uid']?.toString();
-              final uObj = (email != null ? Hive.box('local_users').get('user:${email.toLowerCase()}') : null) ??
-                          (uid != null ? Hive.box('local_users').get('user:$uid') : null);
-              if (uObj is Map) {
-                final cachedRole = uObj['role'] ?? uObj['type'] ?? uObj['accountType'] ?? uObj['designation'];
-                if (cachedRole != null) rawRole = cachedRole.toString();
-              }
-            }
-          } catch (_) {}
-        }
-
-        rawRole = rawRole.toLowerCase().trim();
-        if (rawRole == 'dispensar' || rawRole == 'pharmacist' || rawRole == 'chemist') {
-          rawRole = 'dispenser';
-        } else if (rawRole == 'reception' || rawRole == 'front desk') {
-          rawRole = 'receptionist';
-        } else if (rawRole == 'doc') {
-          rawRole = 'doctor';
-        } else if (rawRole == 'rec + dispenser' || rawRole == 'rec_dis') {
-          rawRole = 'rec+dis';
-        } else if (rawRole == 'hqmanager' || rawRole == 'hq_manager' || rawRole == 'hq') {
-          rawRole = 'hq manager';
-        } else if (rawRole == 'madrassa principal' || rawRole == 'madrassa admin' || rawRole == 'madrassa_principal' || rawRole == 'madrassa_admin') {
-          rawRole = 'madrassa admin';
-        } else if (rawRole == 'principal' ||
-            rawRole == 'school principal' ||
-            rawRole == 'school_principal' ||
-            rawRole == 'school admin' ||
-            rawRole == 'school_admin' ||
-            rawRole == 'school' ||
-            rawRole == 'headmaster' ||
-            rawRole == 'headmistress' ||
-            rawRole.contains('school principal') ||
-            rawRole.contains('school admin')) {
-          rawRole = 'school principal';
-        }
-
-        final role = rawRole.isEmpty ? 'unknown' : rawRole;
+        // ── Normalize Role (handles lists, legacy synonyms, nulls, heuristics) ──
+        final role = resolveRoleFromData(data);
 
         // ── Normalize Branch ID (handles null, 'null', empty strings) ──
         String rawBranch = (data['branchId']?.toString() ?? '').trim();
@@ -983,6 +1348,12 @@ class _HomeRouterState extends State<HomeRouter> {
             const globalRoles = [
               'chairman',
               'admin',
+              'superadmin',
+              'super admin',
+              'masteradmin',
+              'master admin',
+              'administrator',
+              'gmwfadmin',
               'ceo',
               'manager',
               'hq manager',
@@ -1173,3 +1544,283 @@ class _ReceptionistBootstrapWrapperState extends State<ReceptionistBootstrapWrap
     );
   }
 }
+
+class _UnassignedRoleRecoveryScreen extends StatefulWidget {
+  final String userName;
+  final String uid;
+  final Map<String, dynamic> userData;
+  final VoidCallback onRetry;
+
+  const _UnassignedRoleRecoveryScreen({
+    super.key,
+    required this.userName,
+    required this.uid,
+    required this.userData,
+    required this.onRetry,
+  });
+
+  @override
+  State<_UnassignedRoleRecoveryScreen> createState() => _UnassignedRoleRecoveryScreenState();
+}
+
+class _UnassignedRoleRecoveryScreenState extends State<_UnassignedRoleRecoveryScreen> {
+  bool _isSaving = false;
+  String _selectedRole = 'hq manager';
+
+  final List<Map<String, dynamic>> _roleOptions = const [
+    {'role': 'hq manager', 'label': 'HQ Manager / Executive', 'icon': Icons.business_center_rounded, 'desc': 'Full operations, inventory, and branch oversight'},
+    {'role': 'branch manager', 'label': 'Branch Manager', 'icon': Icons.store_mall_directory_rounded, 'desc': 'Manage local branch operations & personnel'},
+    {'role': 'doctor', 'label': 'Doctor (Medical Officer)', 'icon': Icons.medical_services_rounded, 'desc': 'Patient consultations & prescriptions'},
+    {'role': 'receptionist', 'label': 'Receptionist', 'icon': Icons.badge_rounded, 'desc': 'Patient registration & token generator'},
+    {'role': 'dispenser', 'label': 'Dispenser / Pharmacist', 'icon': Icons.medication_rounded, 'desc': 'Medicine inventory & dispensing'},
+    {'role': 'server', 'label': 'Server Gateway Mode', 'icon': Icons.dns_rounded, 'desc': 'Host local sync & attendance server'},
+    {'role': 'donations', 'label': 'Donations Officer', 'icon': Icons.volunteer_activism_rounded, 'desc': 'Collection boxes & donation entries'},
+    {'role': 'kitchen', 'label': 'Kitchen / Dasterkhwaan', 'icon': Icons.soup_kitchen_rounded, 'desc': 'Meal distribution & food orders'},
+    {'role': 'madrassa admin', 'label': 'Madrassa Principal / Admin', 'icon': Icons.menu_book_rounded, 'desc': 'Students, Nazra/Hifz, and teachers'},
+    {'role': 'school principal', 'label': 'School Principal / Admin', 'icon': Icons.school_rounded, 'desc': 'Classes, grades, and academic staff'},
+  ];
+
+  Future<void> _applyRoleAndLaunch(String chosenRole) async {
+    if (_isSaving) return;
+    setState(() => _isSaving = true);
+
+    try {
+      final updatedUser = Map<String, dynamic>.from(widget.userData);
+      updatedUser['role'] = chosenRole;
+      updatedUser['status'] = 'active';
+      updatedUser['isActive'] = true;
+
+      // Save locally
+      await LocalStorageService.saveLocalUser(updatedUser);
+      if (Hive.isBoxOpen('app_settings')) {
+        final box = Hive.box('app_settings');
+        await box.put('user_data', updatedUser);
+        await box.put('currentUser', updatedUser);
+        await box.put('user_role', chosenRole);
+      }
+
+      // Persist to Firestore in background
+      final uid = (widget.uid.isNotEmpty ? widget.uid : updatedUser['uid'] ?? '').toString();
+      if (uid.isNotEmpty && !uid.startsWith('local-')) {
+        FirebaseFirestore.instance
+            .collection('users')
+            .doc(uid)
+            .set({'role': chosenRole, 'lastLoginAt': FieldValue.serverTimestamp()}, SetOptions(merge: true))
+            .timeout(const Duration(seconds: 2))
+            .catchError((_) {});
+      }
+
+      if (mounted) {
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => HomeRouter(
+              user: FirebaseAuth.instance.currentUser,
+              localUser: updatedUser,
+            ),
+          ),
+        );
+      }
+    } catch (e) {
+      debugPrint('[RoleRecovery] Error setting role: $e');
+      if (mounted) {
+        setState(() => _isSaving = false);
+        widget.onRetry();
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0F172A),
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 620),
+            child: Card(
+              color: const Color(0xFF1E293B),
+              elevation: 8,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: const BorderSide(color: Color(0xFF334155), width: 1.2),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF0F766E).withOpacity(0.25),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: const Color(0xFF10B981).withOpacity(0.5)),
+                          ),
+                          child: const Icon(Icons.shield_outlined, size: 30, color: Color(0xFF34D399)),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                'Role Assignment & Verification',
+                                style: TextStyle(
+                                  fontSize: 20,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                'Logged in as @${widget.userName} — Select your designated role:',
+                                style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    const Divider(color: Color(0xFF334155), height: 1),
+                    const SizedBox(height: 16),
+
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 330),
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: _roleOptions.length,
+                        separatorBuilder: (_, __) => const SizedBox(height: 8),
+                        itemBuilder: (context, idx) {
+                          final item = _roleOptions[idx];
+                          final isSelected = _selectedRole == item['role'];
+                          return InkWell(
+                            onTap: () => setState(() => _selectedRole = item['role'] as String),
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                              decoration: BoxDecoration(
+                                color: isSelected
+                                    ? const Color(0xFF0F766E).withOpacity(0.35)
+                                    : const Color(0xFF0F172A).withOpacity(0.6),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(
+                                  color: isSelected ? const Color(0xFF10B981) : const Color(0xFF334155),
+                                  width: isSelected ? 1.5 : 1.0,
+                                ),
+                              ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    item['icon'] as IconData,
+                                    size: 22,
+                                    color: isSelected ? const Color(0xFF34D399) : const Color(0xFF94A3B8),
+                                  ),
+                                  const SizedBox(width: 12),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(
+                                          item['label'] as String,
+                                          style: TextStyle(
+                                            color: isSelected ? Colors.white : const Color(0xFFE2E8F0),
+                                            fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                        Text(
+                                          item['desc'] as String,
+                                          style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11.5),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (isSelected)
+                                    const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 20),
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+
+                    const SizedBox(height: 24),
+
+                    if (_isSaving)
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(12),
+                          child: CircularProgressIndicator(color: Color(0xFF10B981)),
+                        ),
+                      )
+                    else ...[
+                      ElevatedButton.icon(
+                        onPressed: () => _applyRoleAndLaunch(_selectedRole),
+                        icon: const Icon(Icons.check_rounded, size: 20),
+                        label: Text('Confirm Role & Open App (${_selectedRole.toUpperCase()})',
+                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF059669),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () => _applyRoleAndLaunch('hq manager'),
+                              icon: const Icon(Icons.bolt_rounded, color: Color(0xFFFBBF24), size: 18),
+                              label: const Text('Quick HQ Launch', style: TextStyle(color: Color(0xFFFBBF24), fontSize: 12.5)),
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: Color(0xFFFBBF24), width: 0.8),
+                                padding: const EdgeInsets.symmetric(vertical: 11),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: OutlinedButton.icon(
+                              onPressed: () async {
+                                await AuthService().signOut();
+                                if (context.mounted) {
+                                  Navigator.pushAndRemoveUntil(
+                                    context,
+                                    MaterialPageRoute(builder: (_) => const LoginPage()),
+                                    (r) => false,
+                                  );
+                                }
+                              },
+                              icon: const Icon(Icons.logout_rounded, color: Color(0xFFEF4444), size: 18),
+                              label: const Text('Log Out', style: TextStyle(color: Color(0xFFEF4444), fontSize: 12.5)),
+                              style: OutlinedButton.styleFrom(
+                                side: const BorderSide(color: Color(0xFFEF4444), width: 0.8),
+                                padding: const EdgeInsets.symmetric(vertical: 11),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
