@@ -978,6 +978,13 @@ class SyncService {
         type == 'save_donation' ||
         type == 'save_donation_box' ||
         type == 'save_box_opening' ||
+        type == 'save_dasterkhwan_tokens' ||
+        type == 'save_dasterkhwan_food_log' ||
+        type == 'save_dasterkhwan_stock' ||
+        type == 'save_inventory_request' ||
+        type == 'update_inventory_stock' ||
+        type == 'save_inventory_item' ||
+        type == 'save_proforma' ||
         type == 'save_madrassa_student' ||
         type == 'save_madrassa_admission' ||
         type == 'save_madrassa_daily_log' ||
@@ -1040,8 +1047,9 @@ class SyncService {
       final updatedAttendanceHeaders = <String>{};
 
       // Quota gate: bypassed if forced or when priority records need flushing
-      if (!force && (QuotaService.isQuotaExhausted || !QuotaService.canWrite())) {
-        debugPrint('[SyncService] ⛔ Quota check failed — upload batch skipped');
+      final hasPriority = queueBox.values.any((v) => v is Map && _isPriorityType(v['type']?.toString() ?? ''));
+      if (!force && !hasPriority && (QuotaService.isQuotaExhausted || !QuotaService.canWrite())) {
+        debugPrint('[SyncService] ⛔ Quota check failed and no priority records — upload batch skipped');
         return;
       }
 
