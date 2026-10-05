@@ -26,6 +26,7 @@ import 'package:gmwf/services/sync_service.dart';
 import 'package:gmwf/services/auto_update_service.dart';
 import 'inventory_pdf_helper.dart';
 import 'package:gmwf/design/design_system.dart';
+import 'package:gmwf/widgets/blurred_dialog_observer.dart';
 
 class InventoryPage extends StatefulWidget {
   final String branchId;
@@ -178,6 +179,7 @@ class _InventoryPageState extends State<InventoryPage>
   final _searchCtrl = TextEditingController();
   String _filterType = 'All';
   String _filterBatch = 'All Batches';
+  bool _mergeByFormula = false;
   String _sortField = 'name';
   bool _isAscending = true;
   int _page = 0;
@@ -328,7 +330,7 @@ class _InventoryPageState extends State<InventoryPage>
   void _onActiveCampChanged() {
     if (!mounted) return;
     final active = CampSessionService.getActiveCamp(widget.branchId);
-    if (active != null && active.isNotEmpty && active != 'all' && active != _selectedCampFilter) {
+    if (active != null && active.isNotEmpty && active != _selectedCampFilter) {
       setState(() {
         _selectedCampFilter = active;
       });
@@ -353,14 +355,22 @@ class _InventoryPageState extends State<InventoryPage>
 
   String get _effectiveBranchId {
     final b = widget.branchId.trim().toLowerCase();
-    if (b.isNotEmpty && b != 'all' && b != 'unknown') return b;
+    if (b.isNotEmpty && b != 'all' && b != 'unknown') {
+      if (CampSessionService.isKarachiFamily(b)) return 'karachi';
+      return b;
+    }
     final active = LocalStorageService.getActiveBranchId();
-    if (active != null && active.isNotEmpty && active != 'all') return active.toLowerCase().trim();
+    if (active != null && active.isNotEmpty && active != 'all') {
+      if (CampSessionService.isKarachiFamily(active)) return 'karachi';
+      return active.toLowerCase().trim();
+    }
     try {
       if (Hive.isBoxOpen('app_settings')) {
         final saved = Hive.box('app_settings').get('selected_branch');
         if (saved != null && saved.toString().isNotEmpty && saved != 'all') {
-          return saved.toString().toLowerCase().trim();
+          final s = saved.toString().toLowerCase().trim();
+          if (CampSessionService.isKarachiFamily(s)) return 'karachi';
+          return s;
         }
       }
     } catch (_) {}
@@ -414,7 +424,11 @@ class _InventoryPageState extends State<InventoryPage>
     }
 
     try {
-      await LocalStorageService.downloadInventory(effBranch, forceFull: true, campId: activeCamp);
+      if (CampSessionService.isKarachiFamily(effBranch)) {
+        await LocalStorageService.restoreAndSyncKarachiInventory('karachi');
+      } else {
+        await LocalStorageService.downloadInventory(effBranch, forceFull: true, campId: activeCamp);
+      }
       if (mounted) {
         _loadDataFromHive();
         if (showToast) {
@@ -500,14 +514,24 @@ class _InventoryPageState extends State<InventoryPage>
     final box = Hive.box(LocalStorageService.stockBox);
     final normBranch = widget.branchId.toLowerCase().trim();
     final allMapDocs = <Map<String, dynamic>>[];
+    final seenIds = <String>{};
+
     for (final key in box.keys) {
       final val = box.get(key);
       if (val is Map) {
         final m = Map<String, dynamic>.from(val);
-        if (m['id'] == null || m['id'].toString().isEmpty || m['id'] == 'unknown') {
-          final kStr = key.toString();
-          m['id'] = kStr.startsWith('stock:') ? kStr.substring(6) : kStr;
-        }
+        final kStr = key.toString();
+        final rawId = (m['id'] ?? m['medicineId'] ?? m['docId'])?.toString().trim();
+        final cleanId = (rawId != null && rawId.isNotEmpty && rawId != 'unknown' && rawId != 'null')
+            ? rawId
+            : (kStr.startsWith('stock:') ? kStr.substring(6) : kStr);
+        m['id'] = cleanId;
+
+        // Skip duplicate records in stockBox (which stores both 'stock:$id' and '$id')
+        final itemCamp = (m['campId'] ?? m['dispensaryId'] ?? '').toString().toLowerCase().trim();
+        final dedupKey = '${itemCamp}_${cleanId.toLowerCase().trim()}';
+        if (seenIds.contains(dedupKey)) continue;
+        seenIds.add(dedupKey);
 
         // Auto-normalize medicine name & formula to latest master catalog for unedited items
         final isCustom = m['isCustomized'] == true || m['userEdited'] == true;
@@ -522,8 +546,8 @@ class _InventoryPageState extends State<InventoryPage>
 
         // Auto-normalize Kapayya/Kapaya camp to Saddar
         final rawCamp = (m['campId'] ?? m['dispensaryId'] ?? '').toString().toLowerCase();
-        final rawId = m['id'].toString().toLowerCase();
-        if (rawCamp.contains('kapay') || rawCamp == 'kapayya' || rawCamp == 'kapaya' || rawId.startsWith('kapay')) {
+        final rawIdLower = cleanId.toLowerCase();
+        if (rawCamp.contains('kapay') || rawCamp == 'kapayya' || rawCamp == 'kapaya' || rawIdLower.startsWith('kapay')) {
           m['campId'] = 'saddar';
           m['dispensaryId'] = 'saddar';
         }
@@ -536,6 +560,8 @@ class _InventoryPageState extends State<InventoryPage>
       if (normBranch == 'all' || normBranch.isEmpty) return true;
       final b = v['branchId']?.toString().toLowerCase().trim();
       if (b == null || b.isEmpty) return true; // Branch stock fallback
+      if (CampSessionService.areBranchesMatching(normBranch, b)) return true;
+      if (CampSessionService.isKarachiFamily(normBranch) && CampSessionService.isKarachiFamily(b)) return true;
       return b == normBranch ||
           b == 'branch_$normBranch' ||
           'branch_$b' == normBranch ||
@@ -543,7 +569,7 @@ class _InventoryPageState extends State<InventoryPage>
           (b.isNotEmpty && normBranch.contains(b));
     }).toList();
 
-    if (CampSessionService.hasCampsForBranch(widget.branchId) || widget.branchId.toLowerCase().contains('karachi')) {
+    if (CampSessionService.hasCampsForBranch(widget.branchId) || CampSessionService.isKarachiFamily(widget.branchId)) {
       final activeCamp = _selectedCampFilter ?? 'all';
 
       if (activeCamp.isNotEmpty && activeCamp != 'all') {
@@ -556,6 +582,15 @@ class _InventoryPageState extends State<InventoryPage>
             serial: (v['barcode'] ?? v['code'] ?? v['id'])?.toString(),
           );
         }).toList();
+
+        // Safety fallback: if activeCamp is haji_camp and filtered result is empty,
+        // but allMapDocs has Karachi items, do not leave the dispenser stranded with an empty screen
+        if (filtered.isEmpty && allMapDocs.isNotEmpty && CampSessionService.isKarachiFamily(widget.branchId)) {
+          filtered = allMapDocs.where((v) {
+            final b = v['branchId']?.toString().toLowerCase().trim() ?? '';
+            return b.isEmpty || CampSessionService.isKarachiFamily(b);
+          }).toList();
+        }
       }
     }
 
@@ -645,6 +680,7 @@ class _InventoryPageState extends State<InventoryPage>
       _searchCtrl.clear();
       _filterType = 'All';
       _filterBatch = 'All Batches';
+      _mergeByFormula = false;
       _sortField = 'name';
       _isAscending = true;
       _displayLimit = 50;
@@ -801,7 +837,7 @@ class _InventoryPageState extends State<InventoryPage>
     final Map<String, Map<String, dynamic>> map = {};
     for (final data in docs) {
       final name = (data['name'] ?? '').toString().trim();
-      final type = data['type'] ?? '';
+      final type = (data['type'] ?? '').toString().trim();
       final dose = (data['dose'] ?? '').toString().trim();
       final expiry = data['expiryDate']?.toString().trim() ?? '';
       final qty = _asInt(data['quantity']);
@@ -819,26 +855,85 @@ class _InventoryPageState extends State<InventoryPage>
       String doseDisplay = dose;
       if (type == 'Nebulization' && dose.isEmpty) doseDisplay = 'per session';
 
-      final key = '$name|$type|$dose|$monthYear';
+      final docId = (data['id'] ?? data['medicineId'] ?? 'unknown').toString();
+
+      String key;
+      String displayName = name;
+      String displayFormula = formula;
+
+      final itemCamp = (data['campId'] ?? data['dispensaryId'] ?? '').toString().toLowerCase().trim();
+      final campSuffix = (_selectedCampFilter == null || _selectedCampFilter == 'all') && itemCamp.isNotEmpty ? '|$itemCamp' : '';
+
+      if (_mergeByFormula) {
+        // Canonical formula resolution
+        final rawForm = formula.isNotEmpty ? formula : name;
+        final cleanForm = MasterProformaService.cleanBrandToFormula(rawForm).trim();
+        final effFormula = cleanForm.isNotEmpty ? cleanForm : rawForm.trim();
+
+        // Key groups strictly by normalized generic formula so same formula quantities merge together
+        key = '${effFormula.toLowerCase().trim()}$campSuffix';
+        displayFormula = effFormula;
+        displayName = effFormula;
+      } else {
+        // Normal mode: separated by batch (monthYear) and item name
+        key = '$name|$type|$dose|$monthYear$campSuffix';
+      }
+
       if (map.containsKey(key)) {
-        map[key]!['quantity'] = (map[key]!['quantity'] as int) + qty;
-        (map[key]!['_docIds'] as List<String>).add(data['id'] ?? data['medicineId'] ?? 'unknown');
+        final existing = map[key]!;
+        final existingDocIds = existing['_docIds'] as List<String>;
+        if (!existingDocIds.contains(docId)) {
+          existingDocIds.add(docId);
+          existing['quantity'] = (existing['quantity'] as int) + qty;
+          existing['_mergedCount'] = ((existing['_mergedCount'] as int?) ?? 1) + 1;
+        }
         // Keep the first non-empty barcode found for this batch
-        if ((map[key]!['barcode'] as String? ?? '').isEmpty && barcode.isNotEmpty) {
-          map[key]!['barcode'] = barcode;
+        if ((existing['barcode'] as String? ?? '').isEmpty && barcode.isNotEmpty) {
+          existing['barcode'] = barcode;
+        }
+
+        if (_mergeByFormula) {
+          // Combine dose if different (e.g. 500 mg, 250 mg)
+          final currentDose = (existing['dose'] ?? '').toString().trim();
+          if (doseDisplay.isNotEmpty && doseDisplay != '—' && currentDose.isNotEmpty && currentDose != '—' && !currentDose.contains(doseDisplay)) {
+            existing['dose'] = '$currentDose, $doseDisplay';
+          } else if (currentDose.isEmpty || currentDose == '—') {
+            existing['dose'] = doseDisplay;
+          }
+
+          // Combine type if different
+          final currentType = (existing['type'] ?? '').toString().trim();
+          if (type.isNotEmpty && currentType.isNotEmpty && !currentType.contains(type)) {
+            existing['type'] = '$currentType / $type';
+          }
+
+          // Track earliest expiry among merged batches
+          final currentExp = existing['expiryDate']?.toString() ?? '';
+          if (currentExp.isNotEmpty && monthYear.isNotEmpty && currentExp != monthYear) {
+            final d1 = _parseExpiry(currentExp);
+            final d2 = _parseExpiry(monthYear);
+            final earliest = d1.isBefore(d2) ? currentExp : monthYear;
+            existing['expiryDate'] = earliest;
+            existing['hasMultipleExpiries'] = true;
+          }
         }
       } else {
         map[key] = {
-          'name': name,
+          'name': displayName,
           'type': type,
           'dose': doseDisplay,
-          'formula': formula,
+          'formula': displayFormula,
           'barcode': barcode,
           'expiryDate': monthYear,
           'quantity': qty,
           'price': price,
           'batchKey': key,
-          '_docIds': <String>[data['id'] ?? data['medicineId'] ?? 'unknown'],
+          'campId': data['campId'] ?? itemCamp,
+          'dispensaryId': data['dispensaryId'] ?? itemCamp,
+          'branchId': data['branchId'],
+          '_docIds': <String>[docId],
+          '_mergedCount': 1,
+          '_isMerged': _mergeByFormula,
         };
       }
     }
@@ -1196,7 +1291,8 @@ class _InventoryPageState extends State<InventoryPage>
                   style: TextStyle(
                       color: Colors.white, fontWeight: FontWeight.bold)),
             ),
-      body: Row(
+      body: BlurredUnderDialogBackground(
+        child: Row(
         children: [
           if (!isMobile)
             Container(
@@ -1260,6 +1356,7 @@ class _InventoryPageState extends State<InventoryPage>
             ),
           ),
         ],
+      ),
       ),
     );
   }
@@ -1935,13 +2032,21 @@ class _InventoryPageState extends State<InventoryPage>
                       side: BorderSide(color: _isDark ? const Color(0xFF5EEAD4) : _teal),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
-                    onPressed: () {
-                      LocalStorageService.downloadInventory(widget.branchId, forceFull: true).then((_) {
-                        if (mounted) _loadDataFromHive();
-                      });
+                    onPressed: () async {
                       ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text('🔄 Syncing branch inventory from cloud...'), duration: Duration(seconds: 2)),
+                        const SnackBar(content: Text('🔄 Restoring and syncing branch inventory from cloud & server...'), duration: Duration(seconds: 3)),
                       );
+                      if (widget.branchId.toLowerCase().contains('karachi')) {
+                        await LocalStorageService.restoreAndSyncKarachiInventory(widget.branchId);
+                      } else {
+                        await LocalStorageService.downloadInventory(widget.branchId, forceFull: true, campId: _selectedCampFilter);
+                      }
+                      if (mounted) {
+                        _loadDataFromHive();
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(content: Text('✅ Inventory sync complete.'), backgroundColor: Color(0xFF00695C), duration: Duration(seconds: 2)),
+                        );
+                      }
                     },
                     icon: const Icon(Icons.cloud_sync_outlined, size: 18),
                     label: const Text('Sync Cloud'),
@@ -2101,7 +2206,7 @@ class _InventoryPageState extends State<InventoryPage>
           _displayLimit = 50;
           _loadDataFromHive();
         });
-        CampSessionService.setActiveCamp(campId);
+        CampSessionService.setActiveCamp(campId, isManual: true);
       },
       borderRadius: BorderRadius.circular(6),
       child: Container(
@@ -2391,6 +2496,8 @@ class _InventoryPageState extends State<InventoryPage>
                       ),
                     ),
                   ),
+                  const SizedBox(width: 6),
+                  _buildMergeFormulaCheckButton(isCompact: true),
 
                   if (_canDeleteInventoryItem && _showRemoveAllMeds) ...[
                     const SizedBox(width: 6),
@@ -2545,6 +2652,8 @@ class _InventoryPageState extends State<InventoryPage>
           ),
         ),
       ),
+      const SizedBox(width: 8),
+      _buildMergeFormulaCheckButton(isCompact: false),
       if (hasCamps && !widget.isDoctor && branchCamps.isNotEmpty) ...[
         const SizedBox(width: 8),
         Container(
@@ -2766,6 +2875,71 @@ class _InventoryPageState extends State<InventoryPage>
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: Row(children: widgets),
+      ),
+    );
+  }
+
+  Widget _buildMergeFormulaCheckButton({bool isCompact = false}) {
+    return Tooltip(
+      message: _mergeByFormula
+          ? 'Formulas merged: Showing combined quantities of same formula. Click to view normal separated batches.'
+          : 'Normal view: Batches separated. Click to check and merge quantities of the same formula.',
+      child: InkWell(
+        onTap: () {
+          setState(() {
+            _mergeByFormula = !_mergeByFormula;
+            if (_mergeByFormula) {
+              _filterBatch = 'All Batches';
+            }
+            _displayLimit = 50;
+            _processData();
+          });
+        },
+        borderRadius: BorderRadius.circular(isCompact ? 7 : 8),
+        child: Container(
+          height: isCompact ? 32 : 38,
+          padding: EdgeInsets.symmetric(horizontal: isCompact ? 8 : 10),
+          decoration: BoxDecoration(
+            color: _mergeByFormula
+                ? (_isDark ? const Color(0xFF0F766E) : _teal)
+                : (_isDark ? const Color(0xFF334155) : Colors.white),
+            borderRadius: BorderRadius.circular(isCompact ? 7 : 8),
+            border: Border.all(
+              color: _mergeByFormula
+                  ? (_isDark ? const Color(0xFF14B8A6) : _tealDark)
+                  : (_isDark ? const Color(0xFF475569) : Colors.grey.shade300),
+              width: _mergeByFormula ? 1.5 : 1.0,
+            ),
+            boxShadow: _mergeByFormula
+                ? [
+                    BoxShadow(
+                      color: _teal.withValues(alpha: 0.25),
+                      blurRadius: 4,
+                      offset: const Offset(0, 1),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                _mergeByFormula ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
+                size: isCompact ? 16 : 18,
+                color: _mergeByFormula ? Colors.white : (_isDark ? const Color(0xFF94A3B8) : _teal),
+              ),
+              const SizedBox(width: 5),
+              Text(
+                'Merge Formula',
+                style: TextStyle(
+                  fontSize: isCompact ? 11.5 : 12,
+                  fontWeight: FontWeight.bold,
+                  color: _mergeByFormula ? Colors.white : (_isDark ? Colors.white : _textDark),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -3513,22 +3687,47 @@ class _InventoryPageState extends State<InventoryPage>
                       style: TextStyle(color: _isDark ? const Color(0xFFF8FAFC) : _textDark, fontSize: 12.5))),
               _dCell(
                   cols[5].w,
-                  Text(NumberFormat('#,###').format(qty),
-                      style: TextStyle(
-                          color: _isDark
-                              ? (lowStock ? const Color(0xFFFF6B6B) : Colors.white)
-                              : (lowStock ? _red : _textDark),
-                          fontWeight: lowStock ? FontWeight.bold : FontWeight.w500,
-                          fontSize: 12.5))),
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(NumberFormat('#,###').format(qty),
+                          style: TextStyle(
+                              color: _isDark
+                                  ? (lowStock ? const Color(0xFFFF6B6B) : Colors.white)
+                                  : (lowStock ? _red : _textDark),
+                              fontWeight: lowStock ? FontWeight.bold : FontWeight.w500,
+                              fontSize: 12.5)),
+                      if (_mergeByFormula && (b['_mergedCount'] as int? ?? 1) > 1) ...[
+                        const SizedBox(width: 4),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                          decoration: BoxDecoration(
+                            color: _teal.withValues(alpha: _isDark ? 0.35 : 0.15),
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: _teal.withValues(alpha: 0.4), width: 0.8),
+                          ),
+                          child: Text(
+                            'Merged',
+                            style: TextStyle(
+                              fontSize: 9.5,
+                              fontWeight: FontWeight.bold,
+                              color: _isDark ? const Color(0xFF5EEAD4) : _tealDark,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  )),
               _dCell(
                   cols[6].w,
-                  Text(expText,
-                      style: TextStyle(
-                          color: _isDark
-                              ? (expSoon ? const Color(0xFFFF6B6B) : Colors.white)
-                              : (expSoon ? _red : _textDark),
-                          fontWeight: expSoon ? FontWeight.bold : FontWeight.normal,
-                          fontSize: 12.5))),
+                  Text(
+                    b['hasMultipleExpiries'] == true ? '$expText (Earliest)' : expText,
+                    style: TextStyle(
+                        color: _isDark
+                            ? (expSoon ? const Color(0xFFFF6B6B) : Colors.white)
+                            : (expSoon ? _red : _textDark),
+                        fontWeight: expSoon ? FontWeight.bold : FontWeight.normal,
+                        fontSize: 12.5))),
             ]),
           ],
         ),
@@ -3820,7 +4019,24 @@ class _InventoryPageState extends State<InventoryPage>
                     if (barcode.isNotEmpty)
                       _infoBadge(barcode, _isDark ? const Color(0xFF38BDF8) : _indigo, icon: Icons.qr_code_rounded),
                     _priceBadge(price),
-                    _expBadge(expText, expSoon),
+                    _expBadge(b['hasMultipleExpiries'] == true ? '$expText (Earliest)' : expText, expSoon),
+                    if (_mergeByFormula && (b['_mergedCount'] as int? ?? 1) > 1)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: _teal.withValues(alpha: _isDark ? 0.35 : 0.15),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: _teal.withValues(alpha: 0.4), width: 0.8),
+                        ),
+                        child: Text(
+                          'Merged (${b['_mergedCount']} batches)',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: _isDark ? const Color(0xFF5EEAD4) : _tealDark,
+                          ),
+                        ),
+                      ),
                     if (lowStock || expSoon)
                       _statusLabel(lowStock: lowStock, expSoon: expSoon),
                   ]),
@@ -4258,9 +4474,10 @@ class _InventoryPageState extends State<InventoryPage>
       return CampSessionService.getCampLabel(rawCamp);
     }
 
+    final isKarachi = CampSessionService.isKarachiFamily(widget.branchId);
     return (_selectedCampFilter != null && _selectedCampFilter != 'all')
-        ? CampSessionService.getCampLabel(_selectedCampFilter!)
-        : 'Saddar Camp';
+        ? CampSessionService.getCampLabel(_selectedCampFilter!, widget.branchId)
+        : (isKarachi ? 'Saddar Camp' : 'Main Facility');
   }
 
   Widget _requestCard(
@@ -4647,37 +4864,94 @@ class _InventoryPageState extends State<InventoryPage>
     final batch = FirebaseFirestore.instance.batch();
 
     final originalDocId = requestData['docId']?.toString();
+    final effCamp = (requestData['dispensaryId'] ?? requestData['campId'])?.toString();
 
     for (final item in items) {
       final name = (item['name'] ?? '').toString().trim();
       final type = (item['type'] ?? '').toString().trim();
       final dose = (item['dose'] ?? '').toString().trim();
-      final price = item['price']?.toString() ?? '0';
+      final formula = (item['formula'] ?? item['name'] ?? '').toString().trim();
+      final price = _parsePrice(item['price']);
       final expiry = (item['expiryDate'] ?? '').toString().trim();
-      final barcode = (item['barcode'] ?? '').toString().trim();
+      final barcode = (item['barcode'] ?? item['code'] ?? '').toString().trim();
+      final qty = (item['quantity'] is num)
+          ? (item['quantity'] as num).toInt()
+          : (int.tryParse(item['quantity']?.toString() ?? '') ?? 0);
+      final distilledWater = (item['distilledWater'] as num?)?.toInt();
+      final drops = (item['drops'] as num?)?.toInt();
 
       final updateData = <String, dynamic>{
         'name': name,
         'name_lower': name.toLowerCase(),
+        'formula': formula,
+        'formula_lower': formula.toLowerCase(),
         'type': type,
-        'dose': dose,
+        'dose': type == 'Nebulization' ? '' : dose,
+        'quantity': qty,
         'price': price,
-        'barcode': barcode,
+        if (barcode.isNotEmpty) 'barcode': barcode,
+        if (barcode.isNotEmpty) 'code': barcode,
         'expiryDate': expiry,
         'updatedAt': FieldValue.serverTimestamp(),
         'approvedBy': reviewerUid,
         'approvedByName': reviewerName ?? 'Supervisor',
+        if (effCamp != null && effCamp.isNotEmpty) 'dispensaryId': effCamp,
+        if (effCamp != null && effCamp.isNotEmpty)
+          'dispensaryTag': CampSessionService.getDispensaryKeyword(effCamp),
       };
-
-      final targetDocId =
-          originalDocId ?? item['oldId']?.toString();
-
-      if (targetDocId != null && targetDocId.isNotEmpty) {
-        batch.update(inventory.doc(targetDocId), updateData);
+      if (type == 'Nebulization') {
+        updateData['distilledWater'] = distilledWater ?? 0;
+        updateData['drops'] = drops ?? 0;
       }
+
+      String cleanDocId(dynamic raw) {
+        final s = (raw ?? '').toString().trim();
+        return s.startsWith('stock:') ? s.substring(6) : s;
+      }
+
+      final targetDocId = cleanDocId(originalDocId ?? item['oldId']);
+      final newId = RequestUtils.generateDocId(
+        name,
+        type,
+        type == 'Nebulization' ? '' : dose,
+        expiry,
+        distilledWater: distilledWater,
+        drops: drops,
+        campId: effCamp,
+      );
+
+      if (targetDocId.isNotEmpty && targetDocId == newId) {
+        batch.update(inventory.doc(targetDocId), updateData);
+      } else {
+        if (targetDocId.isNotEmpty) {
+          batch.delete(inventory.doc(targetDocId));
+          LocalStorageService.deleteLocalStockItem(targetDocId);
+          RealtimeManager().sendMessage({
+            'event_type': RealtimeEvents.deleteStockItem,
+            'id': targetDocId,
+            'branchId': widget.branchId,
+          });
+        }
+        updateData['addedAt'] = FieldValue.serverTimestamp();
+        batch.set(inventory.doc(newId), updateData);
+      }
+
+      final finalMedId =
+          (targetDocId.isNotEmpty && targetDocId == newId) ? targetDocId : newId;
+      final hiveData = Map<String, dynamic>.from(updateData);
+      hiveData['id'] = finalMedId;
+      hiveData['branchId'] = widget.branchId;
+      LocalStorageService.saveLocalInventoryItem(hiveData);
+
+      RealtimeManager().sendMessage({
+        'event_type': RealtimeEvents.saveStockItem,
+        'branchId': widget.branchId,
+        'data': hiveData,
+      });
     }
 
     await batch.commit();
+    _loadDataFromHive();
   }
 
   Future<void> _applyDeleteMedicine(

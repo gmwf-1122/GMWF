@@ -16,6 +16,7 @@ import 'package:gmwf/realtime/realtime_events.dart';
 import 'package:gmwf/services/camp_session_service.dart';
 import 'package:gmwf/pages/request.dart';
 import 'package:gmwf/widgets/app_back_button.dart';
+import 'package:gmwf/widgets/blurred_dialog_observer.dart';
 
 class UniversalProformaSheetPage extends StatefulWidget {
   final String branchId;
@@ -948,6 +949,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
     final String activeCamp = (CampSessionService.getActiveCamp() ?? '').toLowerCase().trim();
 
     final List<Map<String, dynamic>> existingStock = [];
+    final Set<String> seenStockIds = {};
     try {
       if (Hive.isBoxOpen(LocalStorageService.stockBox)) {
         final box = Hive.box(LocalStorageService.stockBox);
@@ -956,6 +958,15 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
           if (val is Map) {
             final m = Map<String, dynamic>.from(val);
             if (m['status'] == 'deleted') continue;
+
+            final kStr = k.toString();
+            final rawId = (m['id'] ?? m['medicineId'] ?? m['docId'])?.toString().trim();
+            final cleanId = (rawId != null && rawId.isNotEmpty && rawId != 'unknown' && rawId != 'null')
+                ? rawId.toLowerCase()
+                : (kStr.startsWith('stock:') ? kStr.substring(6).toLowerCase() : kStr.toLowerCase());
+            if (seenStockIds.contains(cleanId)) continue;
+            seenStockIds.add(cleanId);
+            m['id'] = cleanId;
 
             final itemBranch = (m['branchId'] ?? '').toString().trim().toLowerCase();
             if (activeBranch.isNotEmpty && activeBranch != 'default' && itemBranch.isNotEmpty && itemBranch != activeBranch.toLowerCase()) {
@@ -1580,23 +1591,25 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
           const SizedBox(width: 8),
         ],
       ),
-      body: Column(
-        children: [
-          // ── Top Search & Filter Bar ───────────────────────────────────────
-          _buildFilterHeader(),
+      body: BlurredUnderDialogBackground(
+        child: Column(
+          children: [
+            // ── Top Search & Filter Bar ───────────────────────────────────────
+            _buildFilterHeader(),
 
-          Expanded(
-            child: _filteredList.isEmpty
-                ? _buildEmptyState()
-                : LayoutBuilder(
-                    builder: (ctx, constraints) =>
-                        _buildExcelGridSheet(constraints.maxHeight),
-                  ),
-          ),
+            Expanded(
+              child: _filteredList.isEmpty
+                  ? _buildEmptyState()
+                  : LayoutBuilder(
+                      builder: (ctx, constraints) =>
+                          _buildExcelGridSheet(constraints.maxHeight),
+                    ),
+            ),
 
-          // ── Bottom Action Sticky Toolbar ──────────────────────────────────
-          _buildBottomToolbar(),
-        ],
+            // ── Bottom Action Sticky Toolbar ──────────────────────────────────
+            _buildBottomToolbar(),
+          ],
+        ),
       ),
     );
   }
