@@ -2338,6 +2338,18 @@ class _LoginPageState extends State<LoginPage> {
 
   // ── Navigation helpers ────────────────────────────────────────────────────
   void _navigateToHome(User user, Map<String, dynamic> userData) async {
+    final uEmail = (userData['email'] ?? '').toString().toLowerCase().trim();
+    final uName = (userData['username'] ?? userData['usernameLower'] ?? '').toString().toLowerCase().trim();
+    final uUid = (userData['uid'] ?? userData['id'] ?? '').toString().trim();
+    final isNavKashif = uEmail == 'kashif@khi.com' || uEmail.startsWith('kashif@') || uName == 'kashif' || uUid == 'e5I5hQJQNpe08MuKmOc937dcMR43';
+    if (isNavKashif) {
+      userData['branchId'] = 'karachi';
+      userData['branchName'] = 'Karachi';
+      userData['branch'] = 'karachi';
+      userData['role'] = 'rec+dis';
+      userData['dispensaryIds'] = ['kapayya', 'haji_camp', 'saddar'];
+    }
+
     try {
       final box = Hive.isBoxOpen('app_settings')
           ? Hive.box('app_settings')
@@ -2345,6 +2357,13 @@ class _LoginPageState extends State<LoginPage> {
       await box.put('user_data', userData);
       await box.put('currentUser', userData);
       if (userData['role'] != null) await box.put('user_role', userData['role']);
+      if (isNavKashif) {
+        final currentBranch = (box.get('selected_branch') ?? box.get('current_branch'))?.toString().toLowerCase().trim();
+        if (currentBranch != null && (currentBranch.contains('gujrat') || currentBranch == 'grt')) {
+          await box.put('selected_branch', 'karachi');
+          await box.put('current_branch', 'karachi');
+        }
+      }
 
       final assigned = CampSessionService.getAssignedCamps(userData);
       if (assigned.length == 1) {
@@ -2367,6 +2386,18 @@ class _LoginPageState extends State<LoginPage> {
   }
 
   void _navigateToHomeOffline(Map<String, dynamic> userData) async {
+    final uEmail = (userData['email'] ?? '').toString().toLowerCase().trim();
+    final uName = (userData['username'] ?? userData['usernameLower'] ?? '').toString().toLowerCase().trim();
+    final uUid = (userData['uid'] ?? userData['id'] ?? '').toString().trim();
+    final isNavKashif = uEmail == 'kashif@khi.com' || uEmail.startsWith('kashif@') || uName == 'kashif' || uUid == 'e5I5hQJQNpe08MuKmOc937dcMR43';
+    if (isNavKashif) {
+      userData['branchId'] = 'karachi';
+      userData['branchName'] = 'Karachi';
+      userData['branch'] = 'karachi';
+      userData['role'] = 'rec+dis';
+      userData['dispensaryIds'] = ['kapayya', 'haji_camp', 'saddar'];
+    }
+
     final isMaster = userData['isMasterAdmin'] == true ||
         userData['uid'] == 'master-local-admin' ||
         userData['id'] == 'master-local-admin';
@@ -2383,6 +2414,13 @@ class _LoginPageState extends State<LoginPage> {
         await box.delete('user_data');
         await box.delete('currentUser');
         await box.delete('user_role');
+      }
+      if (isNavKashif) {
+        final currentBranch = (box.get('selected_branch') ?? box.get('current_branch'))?.toString().toLowerCase().trim();
+        if (currentBranch != null && (currentBranch.contains('gujrat') || currentBranch == 'grt')) {
+          await box.put('selected_branch', 'karachi');
+          await box.put('current_branch', 'karachi');
+        }
       }
 
       final assigned = CampSessionService.getAssignedCamps(userData);

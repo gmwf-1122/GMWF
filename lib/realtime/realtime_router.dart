@@ -60,7 +60,7 @@ class RealtimeRouter {
   /// Removes dedup entries older than 24 hours.
   static void _pruneExpired() {
     try {
-      final box = Hive.box<String>(_dedupBox);
+      final box = Hive.box(_dedupBox);
       if (box.isEmpty) return;
 
       final cutoffMs = DateTime.now()
@@ -122,7 +122,7 @@ class RealtimeRouter {
     // Record seen
     _seenMessageIds.add(messageId);
     if (Hive.isBoxOpen(_dedupBox)) {
-      final box = Hive.box<String>(_dedupBox);
+      final box = Hive.box(_dedupBox);
       final dedupKey = '${DateTime.now().millisecondsSinceEpoch}_$messageId';
       box.put(dedupKey, messageId);
     }
@@ -135,13 +135,10 @@ class RealtimeRouter {
     if (incomingVersion > 0 && entityId.isNotEmpty) {
       try {
         // Use already-open box (opened once at startup in init()) instead of
-        // calling Hive.openBox on every message — openBox on an already-open
-        // box is idempotent but still causes async overhead and, during a
-        // catch-up batch of 100 tokens, creates 100 concurrent disk I/O ops
-        // that stall the Dart event loop and cause the UI "white screen trance".
+        // calling Hive.openBox on every message.
         final versionBox = Hive.isBoxOpen('realtime_entity_versions')
-            ? Hive.box<int>('realtime_entity_versions')
-            : await Hive.openBox<int>('realtime_entity_versions'); // fallback if init() was missed
+            ? Hive.box('realtime_entity_versions')
+            : await Hive.openBox('realtime_entity_versions'); // fallback if init() was missed
         final localVersion = versionBox.get(entityId) ?? 0;
         if (incomingVersion <= localVersion) {
           if (kDebugMode) {
