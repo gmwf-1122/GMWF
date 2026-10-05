@@ -115,9 +115,7 @@ class _HomeStatTileState extends State<HomeStatTile> with SingleTickerProviderSt
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(22),
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-          child: Container(
+        child: Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(22),
               gradient: LinearGradient(
@@ -304,8 +302,7 @@ class _HomeStatTileState extends State<HomeStatTile> with SingleTickerProviderSt
             ),
           ),
         ),
-      ),
-    );
+      );
 
     if (widget.onTap != null) {
       return MouseRegion(
@@ -551,9 +548,7 @@ class HomeBranchPerformanceTable extends StatelessWidget {
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(24),
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: Container(
+      child: Container(
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(24),
@@ -727,8 +722,7 @@ class HomeBranchPerformanceTable extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
+      );
   }
 }
 
@@ -1088,9 +1082,7 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(24),
-            child: BackdropFilter(
-              filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-              child: Container(
+            child: Container(
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(24),
@@ -1286,8 +1278,7 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
             ),
           ),
         ),
-      ),
-    );
+      );
   }
 
   Widget _metricRow(IconData icon, String label, String value, bool isDark, {Color? valueColor}) {
@@ -1354,9 +1345,7 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
     
     return ClipRRect(
       borderRadius: BorderRadius.circular(24),
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-        child: Container(
+      child: Container(
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(24),
@@ -1494,8 +1483,7 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
+      );
   }
 
   Widget _donutLegendItem(String label, int val, int total, Color color, IconData icon, bool isDark) {
@@ -3688,13 +3676,13 @@ Future<SnapshotDashboardData> buildLocalSnapshotDashboardData(Map<String, dynami
     }
     final branchIds = cleanBranchIds.toList();
 
-    final Map<String, TodayVsYesterday> statsMap = await fetchTodayVsYesterdayPerBranch(branchIds, allowRemoteFallback: true);
+    final Map<String, TodayVsYesterday> statsMap = await fetchTodayVsYesterdayPerBranch(branchIds, allowRemoteFallback: false);
     final weeklyPatients = await fetchWeeklyPatientCounts(branchIds);
     final List<HomeBranchRow> branchRows = [];
     final List<BranchStats> todayStatsList = [];
     final List<BranchStats> yesterdayStatsList = [];
 
-    final karachiCamps = await fetchKarachiCampBreakdown();
+    final karachiCamps = await fetchKarachiCampBreakdown(null, false);
 
     statsMap.forEach((bId, value) {
       if (bId == 'karachi') {
@@ -3778,13 +3766,13 @@ Future<SnapshotDashboardData> buildLocalSnapshotDashboardData(Map<String, dynami
   } else {
     final branchId = (userBranchId.isNotEmpty && userBranchId != 'all' && userBranchId != 'global') ? userBranchId : 'karachi';
 
-    final todayStats = await fetchLocalBranchStats(branchId, DateTime.now(), allowRemoteFallback: true);
-    final yesterdayStats = await fetchLocalBranchStats(branchId, DateTime.now().subtract(const Duration(days: 1)));
+    final todayStats = await fetchLocalBranchStats(branchId, DateTime.now(), allowRemoteFallback: false);
+    final yesterdayStats = await fetchLocalBranchStats(branchId, DateTime.now().subtract(const Duration(days: 1)), allowRemoteFallback: false);
     final weeklyPatients = await fetchWeeklyPatientCounts([branchId]);
 
     final List<HomeBranchRow> branchRows = [];
     if (branchId == 'karachi') {
-      final karachiCamps = await fetchKarachiCampBreakdown();
+      final karachiCamps = await fetchKarachiCampBreakdown(null, false);
       final hasCampBreakdown = karachiCamps.totalPatients > 0;
       branchRows.add(HomeBranchRow(
         id: 'karachi_saddar',

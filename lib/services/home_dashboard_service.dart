@@ -15,7 +15,6 @@ import '../widgets/dashboard_widgets.dart';
 import 'local_storage_service.dart';
 import 'camp_session_service.dart';
 import 'donations_local_storage.dart';
-import 'finance_local_storage.dart';
 import '../pages/madrassa/utils/madrassa_local_storage.dart';
 
 /// Indefinite cache for historical (non-today) BranchStats.
@@ -698,7 +697,7 @@ KarachiCampBreakdown? _cachedKarachiCampBreakdown;
 DateTime? _lastKarachiCampBreakdownTime;
 String? _cachedKarachiCampDateKey;
 
-Future<KarachiCampBreakdown> fetchKarachiCampBreakdown([DateTime? date]) async {
+Future<KarachiCampBreakdown> fetchKarachiCampBreakdown([DateTime? date, bool allowRemote = false]) async {
   final targetDate = date ?? DateTime.now();
   final ymd = DateFormat('yyyy-MM-dd').format(targetDate);
   final dmyy = DateFormat('ddMMyy').format(targetDate);
@@ -740,27 +739,24 @@ Future<KarachiCampBreakdown> fetchKarachiCampBreakdown([DateTime? date]) async {
     }
   }
 
-  // 1. Local entries strictly belonging to Karachi
+  // 1. Local entries strictly belonging to Karachi (fast values scan)
   try {
     if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
       final box = Hive.box(LocalStorageService.entriesBox);
-      for (final k in box.keys) {
-        final val = box.get(k);
+      for (final val in box.values) {
         if (val is Map) {
           final e = Map<String, dynamic>.from(val);
           final b = (e['branchId'] ?? '').toString().toLowerCase().trim();
-          final kStr = k.toString().toLowerCase();
-          if ((b.isNotEmpty && (b.contains('karachi') || b.contains('haji') || b.contains('kapaya') || b.contains('saddar'))) ||
-              kStr.contains('karachi') || kStr.contains('haji') || kStr.contains('kapaya') || kStr.contains('saddar')) {
-            addEntryIfValid(e, k);
+          if (b.isEmpty || b.contains('karachi') || b.contains('haji') || b.contains('kapaya') || b.contains('saddar')) {
+            addEntryIfValid(e, e['id'] ?? e['serial']);
           }
         }
       }
     }
   } catch (_) {}
 
-  // 2. Cloud entries fallback from Firestore serials
-  if (entryMap.isEmpty) {
+  // 2. Cloud entries fallback from Firestore serials only when explicitly permitted
+  if (allowRemote && entryMap.isEmpty) {
     try {
       final base = FirebaseFirestore.instance.collection('branches').doc('karachi').collection('serials');
       final fsResults = await Future.wait([
@@ -1337,6 +1333,24 @@ Future<List<HomeLineChartPoint>> fetchChartPoints(List<String> branchIds, {int m
 
 final Map<String, (DateTime, List<HomeLineChartPoint>)> _chartPointsMemoryCache = {};
 
+DateTime? _tryParseChartDate(dynamic raw) {
+  if (raw == null) return null;
+  if (raw is DateTime) return raw;
+  final str = raw.toString().trim();
+  if (str.isEmpty) return null;
+  final dt = DateTime.tryParse(str);
+  if (dt != null) return dt;
+  if (str.length == 6 && int.tryParse(str) != null) {
+    try {
+      final day = int.parse(str.substring(0, 2));
+      final month = int.parse(str.substring(2, 4));
+      final year = 2000 + int.parse(str.substring(4, 6));
+      return DateTime(year, month, day);
+    } catch (_) {}
+  }
+  return null;
+}
+
 Future<List<HomeLineChartPoint>> fetchLocalChartPoints(List<String> branchIds, {int months = 5}) async {
   if (branchIds.isEmpty) return [];
   final now = DateTime.now();
@@ -1349,98 +1363,239 @@ Future<List<HomeLineChartPoint>> fetchLocalChartPoints(List<String> branchIds, {
     return cached.$2;
   }
 
-  final monthFutures = List.generate(months, (i) async {
-    final monthStart = DateTime(today.year, today.month - (months - 1 - i), 1);
-    final nextMonth = DateTime(monthStart.year, monthStart.month + 1, 1);
-    final endOfMonth = nextMonth.subtract(const Duration(days: 1));
+  // Precompute month boundaries
+  final monthStarts = <DateTime>[];
+  final nextMonths = <DateTime>[];
+  final endOfMonths = <DateTime>[];
+  for (int i = 0; i < months; i++) {
+    final mStart = DateTime(today.year, today.month - (months - 1 - i), 1);
+    final nMonth = DateTime(mStart.year, mStart.month + 1, 1);
+    final eMonth = nMonth.subtract(const Duration(days: 1));
+    monthStarts.add(mStart);
+    nextMonths.add(nMonth);
+    endOfMonths.add(eMonth);
+  }
 
-    final dayFutures = List.generate(nextMonth.difference(monthStart).inDays, (d) async {
-      final date = monthStart.add(Duration(days: d));
-      final dateStr = DateFormat('yyyy-MM-dd').format(date);
-
-      int dRevenue = 0, dDonations = 0, dTokens = 0, dEmployeesPresent = 0;
-
-      final branchFutures = branchIds.map((id) async {
-        final stats = await fetchLocalBranchStats(id, date, allowRemoteFallback: false);
-        int empCount = 0;
-        try {
-          final atts = FinanceLocalStorage.getAttendanceForDate(id, dateStr);
-          for (final att in atts) {
-            if (att['status'] == 'present') empCount++;
-          }
-        } catch (_) {}
-
-        return (
-          revenue: stats.dispensaryRevenue,
-          donations: stats.donations,
-          tokens: stats.zakat + stats.nonZakat + stats.gmwf + stats.dasterkhwaan,
-          emp: empCount,
-        );
-      });
-
-      final branchStatsList = await Future.wait(branchFutures);
-      for (final bs in branchStatsList) {
-        dRevenue += bs.revenue;
-        dDonations += bs.donations;
-        dTokens += bs.tokens;
-        dEmployeesPresent += bs.emp;
+  int getMonthIndex(DateTime dt) {
+    for (int m = 0; m < months; m++) {
+      if (!dt.isBefore(monthStarts[m]) && dt.isBefore(nextMonths[m])) {
+        return m;
       }
-
-      return _DayPointData(
-        revenue: dRevenue,
-        donations: dDonations,
-        tokens: dTokens,
-        employeesPresent: dEmployeesPresent,
-      );
-    });
-
-    final daysData = await Future.wait(dayFutures);
-
-    int totalRevenue = 0, totalDonations = 0, totalTokens = 0, totalEmployeesPresent = 0;
-    for (final dd in daysData) {
-      totalRevenue += dd.revenue;
-      totalDonations += dd.donations;
-      totalTokens += dd.tokens;
-      totalEmployeesPresent += dd.employeesPresent;
     }
+    return -1;
+  }
 
+  bool isTargetBranch(String docBranch) {
+    final b = docBranch.toLowerCase().trim();
+    for (final id in branchIds) {
+      if (_isMatchingBranch(b, id)) return true;
+    }
+    return false;
+  }
+
+  final revList = List<int>.filled(months, 0);
+  final donList = List<int>.filled(months, 0);
+  final tokenList = List<int>.filled(months, 0);
+  final monthEmpDayCounts = List<Map<String, int>>.generate(months, (_) => <String, int>{});
+
+  // Single pass 1: Donations
+  try {
+    if (Hive.isBoxOpen(DonationsLocalStorage.donationsBox)) {
+      final donBox = Hive.box(DonationsLocalStorage.donationsBox);
+      for (final val in donBox.values) {
+        if (val is! Map) continue;
+        final b = (val['branchId'] as String? ?? '').toLowerCase().trim();
+        if (!isTargetBranch(b)) continue;
+
+        final status = val['status']?.toString().toLowerCase();
+        final syncStatus = val['syncStatus']?.toString().toLowerCase();
+        if (status == 'deleted' || syncStatus == 'deleted' || status == 'void') continue;
+
+        final payMethod = val['paymentMethod']?.toString().toLowerCase() ?? '';
+        if (payMethod == 'bank_deposit') continue;
+
+        final dt = _tryParseChartDate(val['date'] ?? val['createdAt'] ?? val['timestamp']);
+        if (dt == null) continue;
+        final m = getMonthIndex(dt);
+        if (m >= 0 && m < months) {
+          final amt = val['amount'];
+          final amtDouble = (amt is num) ? amt.toDouble() : (double.tryParse(amt?.toString() ?? '0') ?? 0.0);
+          donList[m] += amtDouble.toInt();
+        }
+      }
+    }
+  } catch (e) {
+    debugPrint('Error computing donations in chart points: $e');
+  }
+
+  // Single pass 2: Dispensary Entries
+  try {
+    if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+      final box = Hive.box(LocalStorageService.entriesBox);
+      for (final val in box.values) {
+        if (val is! Map) continue;
+        final status = val['status']?.toString().toLowerCase();
+        final syncStatus = val['syncStatus']?.toString().toLowerCase();
+        if (status == 'deleted' || syncStatus == 'deleted' || status == 'void' || status == 'cancelled') continue;
+
+        final b = (val['branchId'] as String? ?? '').toLowerCase().trim();
+        if (!isTargetBranch(b)) continue;
+
+        final dt = _tryParseChartDate(val['date'] ?? val['dateKey'] ?? val['createdAt'] ?? val['timestamp']);
+        if (dt == null) continue;
+        final m = getMonthIndex(dt);
+        if (m >= 0 && m < months) {
+          tokenList[m]++;
+          final type = (val['queueType'] ?? val['category'] ?? val['type'] ?? '').toString().toLowerCase();
+          final days = (val['daysOfMedicine'] as num?)?.toInt() ?? 1;
+          if (type.contains('zakat') && !type.contains('non')) {
+            revList[m] += 20 * days;
+          } else if (type.contains('non-zakat') || type.contains('nonzakat') || type.contains('non_zakat')) {
+            revList[m] += 100 * days;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    debugPrint('Error computing entries in chart points: $e');
+  }
+
+  // Single pass 3: Food tokens
+  try {
+    if (Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)) {
+      final tokenBox = Hive.box(LocalStorageService.dasterkhwaanTokensBox);
+      for (final raw in tokenBox.values) {
+        if (raw is! Map) continue;
+        final status = raw['status']?.toString().toLowerCase();
+        final syncStatus = raw['syncStatus']?.toString().toLowerCase();
+        if (status == 'deleted' || status == 'void' || syncStatus == 'deleted') continue;
+
+        final b = (raw['branchId'] as String? ?? '').toLowerCase().trim();
+        if (b.isNotEmpty && !isTargetBranch(b)) continue;
+
+        final dt = _tryParseChartDate(raw['date'] ?? raw['dateKey'] ?? raw['createdAt'] ?? raw['timestamp'] ?? raw['time']);
+        if (dt == null) continue;
+        final m = getMonthIndex(dt);
+        if (m >= 0 && m < months) {
+          tokenList[m]++;
+        }
+      }
+    }
+  } catch (e) {
+    debugPrint('Error computing food tokens in chart points: $e');
+  }
+
+  // Single pass 4: Employee attendance
+  try {
+    if (Hive.isBoxOpen('finance_attendance')) {
+      final attBox = Hive.box('finance_attendance');
+      for (final k in attBox.keys) {
+        final kStr = k.toString();
+        if (kStr.length >= 10) {
+          final dateStr = kStr.substring(0, 10);
+          final dt = DateTime.tryParse(dateStr);
+          if (dt != null) {
+            final m = getMonthIndex(dt);
+            if (m >= 0 && m < months) {
+              final val = attBox.get(k);
+              if (val is List) {
+                int dayPresent = 0;
+                for (final a in val) {
+                  if (a is Map) {
+                    final b = (a['branchId'] as String? ?? '').toLowerCase().trim();
+                    if (isTargetBranch(b) && a['status'] == 'present') {
+                      dayPresent++;
+                    }
+                  }
+                }
+                if (dayPresent > 0) {
+                  monthEmpDayCounts[m][dateStr] = (monthEmpDayCounts[m][dateStr] ?? 0) + dayPresent;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (e) {
+    debugPrint('Error computing attendance in chart points: $e');
+  }
+
+  final points = List.generate(months, (m) {
+    final empCounts = monthEmpDayCounts[m];
+    final empAvg = empCounts.isEmpty
+        ? 0
+        : (empCounts.values.reduce((a, b) => a + b) / empCounts.length).round();
     return HomeLineChartPoint(
-      date: endOfMonth,
-      patientsRevenue: totalRevenue,
-      donations: totalDonations,
-      tokens: totalTokens,
-      employeesPresent: daysData.isEmpty ? 0 : (totalEmployeesPresent / daysData.length).round(),
+      date: endOfMonths[m],
+      patientsRevenue: revList[m],
+      donations: donList[m],
+      tokens: tokenList[m],
+      employeesPresent: empAvg,
     );
   });
 
-  final points = await Future.wait(monthFutures);
   _chartPointsMemoryCache[cacheKey] = (now, points);
   return points;
 }
 
 Future<Map<String, int>> fetchWeeklyPatientCounts(List<String> branchIds) async {
-  final today = DateTime.now();
-  final dates = List.generate(7, (index) {
-    final date = today.subtract(Duration(days: 6 - index));
-    return DateTime(date.year, date.month, date.day);
-  });
-  final result = <String, int>{};
-  for (final branchId in branchIds) {
-    final daily = await Future.wait(
-      dates.map((date) => fetchHistoricalDayStats(branchId, date)),
-    );
-    result[branchId] = daily.fold<int>(
-      0,
-      (total, stats) => total + stats.zakat + stats.nonZakat + stats.gmwf,
-    );
-  }
-  return result;
-}
+  final result = <String, int>{for (final b in branchIds) b: 0};
+  if (branchIds.isEmpty) return result;
 
-class _DayPointData {
-  final int revenue;
-  final int donations;
-  final int tokens;
-  final int employeesPresent;
-  const _DayPointData({required this.revenue, required this.donations, required this.tokens, required this.employeesPresent});
+  final now = DateTime.now();
+  final startDate = DateTime(now.year, now.month, now.day).subtract(const Duration(days: 6));
+  final endDate = DateTime(now.year, now.month, now.day, 23, 59, 59);
+
+  try {
+    if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+      final box = Hive.box(LocalStorageService.entriesBox);
+      for (final val in box.values) {
+        if (val is! Map) continue;
+        final status = val['status']?.toString().toLowerCase();
+        final syncStatus = val['syncStatus']?.toString().toLowerCase();
+        if (status == 'deleted' || syncStatus == 'deleted' || status == 'void' || status == 'cancelled') continue;
+
+        final dt = _tryParseChartDate(val['date'] ?? val['dateKey'] ?? val['createdAt'] ?? val['timestamp']);
+        if (dt == null || dt.isBefore(startDate) || dt.isAfter(endDate)) continue;
+
+        final cat = (val['queueType'] ?? val['category'] ?? val['type'] ?? '').toString().toLowerCase();
+        if (!cat.contains('zakat') && !cat.contains('gmwf')) continue;
+
+        final docBranch = (val['branchId'] as String? ?? '').toLowerCase().trim();
+        for (final targetId in branchIds) {
+          if (_isMatchingBranch(docBranch, targetId)) {
+            result[targetId] = (result[targetId] ?? 0) + 1;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    debugPrint('Error computing weekly patient counts: $e');
+  }
+
+  // Also check if any branches have 0 in entries and have cached historical entries in LocalStorageService
+  for (final branchId in branchIds) {
+    if ((result[branchId] ?? 0) == 0) {
+      int branchCachedTotal = 0;
+      for (int i = 0; i < 7; i++) {
+        final d = now.subtract(Duration(days: i));
+        final dmyy = DateFormat('ddMMyy').format(d);
+        final cachedDocs = LocalStorageService.getBranchDayCache(branchId, dmyy, 'dispensary');
+        if (cachedDocs != null) {
+          for (final c in cachedDocs) {
+            final t = c['type']?.toString().toLowerCase() ?? '';
+            if (t == 'zakat' || t == 'non-zakat' || t == 'gmwf') {
+              branchCachedTotal++;
+            }
+          }
+        }
+      }
+      if (branchCachedTotal > 0) {
+        result[branchId] = branchCachedTotal;
+      }
+    }
+  }
+
+  return result;
 }

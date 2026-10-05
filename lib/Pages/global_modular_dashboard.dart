@@ -7,7 +7,6 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
 import 'dart:io';
-import 'dart:ui';
 import 'package:lottie/lottie.dart';
 
 import '../models/module_registry.dart';
@@ -1596,9 +1595,7 @@ class _Sidebar extends StatelessWidget {
               ],
             ),
             child: ClipRect(
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-                child: Container(
+              child: Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
@@ -1690,7 +1687,6 @@ class _Sidebar extends StatelessWidget {
             ),
           ),
         ),
-      ),
     );
   }
 
