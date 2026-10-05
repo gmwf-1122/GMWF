@@ -735,13 +735,26 @@ class AuthService {
   Future<Map<String, dynamic>?> _findUserByUsername(String username) async {
     final lower = username.trim().toLowerCase();
 
-    // 1. Live Firestore search first
+    // 1. Live Firestore search across BOTH places (Root /users and Branch /branches/{b}/users)
     try {
+      final knownBranches = <String>{'karachi', 'gujrat', 'sialkot', 'jalalpurjattan', 'rawalpindi', 'lahore', 'islamabad', 'main'};
+      try {
+        if (Hive.isBoxOpen(LocalStorageService.branchesBox)) {
+          final bBox = Hive.box(LocalStorageService.branchesBox);
+          for (final k in bBox.keys) {
+            final s = k.toString().replaceFirst('branch:', '').trim().toLowerCase();
+            if (s.isNotEmpty && !s.contains(' ') && s != 'null') knownBranches.add(s);
+          }
+        }
+      } catch (_) {}
+
       final queries = <Future<Map<String, dynamic>?>>[
+        // Root /users collection
         _firestore.collection('users').doc(lower).get().then((doc) {
           if (doc.exists && doc.data() != null) {
             final d = doc.data()!;
             return {
+              ...d,
               'email': d['email'] ?? '$lower@gmd.com',
               'username': d['username'] ?? doc.id,
               'role': d['role'] ?? 'unknown',
@@ -756,6 +769,7 @@ class AuthService {
           if (snap.docs.isNotEmpty) {
             final d = snap.docs.first.data();
             return {
+              ...d,
               'email': d['email'] ?? '$lower@gmd.com',
               'username': d['username'] ?? snap.docs.first.id,
               'role': d['role'] ?? 'unknown',
@@ -770,6 +784,7 @@ class AuthService {
           if (snap.docs.isNotEmpty) {
             final d = snap.docs.first.data();
             return {
+              ...d,
               'email': d['email'] ?? '$lower@gmd.com',
               'username': d['username'] ?? snap.docs.first.id,
               'role': d['role'] ?? 'unknown',
@@ -780,6 +795,70 @@ class AuthService {
           return null;
         }).catchError((_) => null),
 
+        _firestore.collection('users').where('email', isEqualTo: lower).limit(1).get().then((snap) {
+          if (snap.docs.isNotEmpty) {
+            final d = snap.docs.first.data();
+            return {
+              ...d,
+              'email': d['email'] ?? lower,
+              'username': d['username'] ?? snap.docs.first.id,
+              'role': d['role'] ?? 'unknown',
+              'branchId': d['branchId'] ?? 'all',
+              'uid': snap.docs.first.id,
+            };
+          }
+          return null;
+        }).catchError((_) => null),
+
+        // Branch /branches/{b}/users subcollections
+        for (final b in knownBranches) ...[
+          _firestore.collection('branches').doc(b).collection('users').doc(lower).get().then((doc) {
+            if (doc.exists && doc.data() != null) {
+              final d = doc.data()!;
+              return {
+                ...d,
+                'email': d['email'] ?? '$lower@khi.com',
+                'username': d['username'] ?? doc.id,
+                'role': d['role'] ?? 'unknown',
+                'branchId': d['branchId'] ?? b,
+                'uid': doc.id,
+              };
+            }
+            return null;
+          }).catchError((_) => null),
+
+          _firestore.collection('branches').doc(b).collection('users').where('usernameLower', isEqualTo: lower).limit(1).get().then((snap) {
+            if (snap.docs.isNotEmpty) {
+              final d = snap.docs.first.data();
+              return {
+                ...d,
+                'email': d['email'] ?? '$lower@khi.com',
+                'username': d['username'] ?? snap.docs.first.id,
+                'role': d['role'] ?? 'unknown',
+                'branchId': d['branchId'] ?? b,
+                'uid': snap.docs.first.id,
+              };
+            }
+            return null;
+          }).catchError((_) => null),
+
+          _firestore.collection('branches').doc(b).collection('users').where('email', isEqualTo: lower).limit(1).get().then((snap) {
+            if (snap.docs.isNotEmpty) {
+              final d = snap.docs.first.data();
+              return {
+                ...d,
+                'email': d['email'] ?? lower,
+                'username': d['username'] ?? snap.docs.first.id,
+                'role': d['role'] ?? 'unknown',
+                'branchId': d['branchId'] ?? b,
+                'uid': snap.docs.first.id,
+              };
+            }
+            return null;
+          }).catchError((_) => null),
+        ],
+
+        // CollectionGroup('users')
         _firestore.collectionGroup('users').where('usernameLower', isEqualTo: lower).limit(1).get().then((snap) {
           if (snap.docs.isNotEmpty) {
             final doc = snap.docs.first;
@@ -787,7 +866,26 @@ class AuthService {
             final pathParts = doc.reference.path.split('/');
             final branchId = d['branchId'] ?? (pathParts.length >= 2 ? pathParts[1] : 'unknown');
             return {
+              ...d,
               'email': d['email'] ?? '$lower@gmd.com',
+              'username': d['username'] ?? doc.id,
+              'role': d['role'] ?? 'unknown',
+              'branchId': branchId,
+              'uid': doc.id,
+            };
+          }
+          return null;
+        }).catchError((_) => null),
+
+        _firestore.collectionGroup('users').where('email', isEqualTo: lower).limit(1).get().then((snap) {
+          if (snap.docs.isNotEmpty) {
+            final doc = snap.docs.first;
+            final d = doc.data();
+            final pathParts = doc.reference.path.split('/');
+            final branchId = d['branchId'] ?? (pathParts.length >= 2 ? pathParts[1] : 'unknown');
+            return {
+              ...d,
+              'email': d['email'] ?? lower,
               'username': d['username'] ?? doc.id,
               'role': d['role'] ?? 'unknown',
               'branchId': branchId,

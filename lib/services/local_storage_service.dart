@@ -3193,6 +3193,18 @@ class LocalStorageService {
     await box.flush();
 
     final effectivePw = sanitized['password']?.toString() ?? '1122';
+    sanitized['password'] ??= effectivePw;
+    sanitized['passwordHash'] ??= hashPassword(effectivePw);
+
+    final offlineKeys = <String>{
+      if (uid.isNotEmpty) 'offline_pw__$uid',
+      if (email.isNotEmpty) 'offline_pw__$email',
+      if (usernameLower.isNotEmpty) 'offline_pw__$usernameLower',
+    };
+    for (final hk in offlineKeys) {
+      await box.put(hk, effectivePw);
+    }
+
     if (email.isNotEmpty) {
       unawaited(OfflineAuthService.saveCredentials(
         usernameOrEmail: email,
@@ -3204,6 +3216,14 @@ class LocalStorageService {
     if (usernameLower.isNotEmpty) {
       unawaited(OfflineAuthService.saveCredentials(
         usernameOrEmail: usernameLower,
+        password: effectivePw,
+        userData: sanitized,
+        setAsLastLoggedIn: false,
+      ));
+    }
+    if (uid.isNotEmpty) {
+      unawaited(OfflineAuthService.saveCredentials(
+        usernameOrEmail: uid,
         password: effectivePw,
         userData: sanitized,
         setAsLastLoggedIn: false,

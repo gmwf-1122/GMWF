@@ -263,102 +263,19 @@ class _LoginPageState extends State<LoginPage> {
       // ── Online path ────────────────────────────────────────────────────────
       debugPrint('[LoginPage] ONLINE MODE — Authenticating via Firestore & Firebase Auth');
 
-      // 1. Resolve user profile and actual email from Firestore / Cloud
-      Map<String, dynamic>? firestoreUserDoc;
-      String email = input.contains('@') ? input.trim().toLowerCase() : '';
+      // 1. Resolve user profile and actual email by searching BOTH places in Firestore (Root /users and Branch /branches/{b}/users)
+      Map<String, dynamic>? firestoreUserDoc = await _findUserInBothPlaces(input);
+      String email = '';
 
-      if (email.isEmpty) {
-        debugPrint('[LoginPage] Looking up user profile for username: $input');
-        firestoreUserDoc = await _findUserByUsername(input);
-        if (firestoreUserDoc != null && firestoreUserDoc['email'] != null && (firestoreUserDoc['email'] as String).isNotEmpty) {
-          email = (firestoreUserDoc['email'] as String).trim().toLowerCase();
-          debugPrint('[LoginPage] Resolved Firestore email: $email');
-        } else {
-          // Check local_users first before blind guess
-          final localU = LocalStorageService.findLocalUser(input);
-          final localEmail = localU?['email']?.toString();
-          if (localEmail != null && localEmail.isNotEmpty) {
-            email = localEmail.trim().toLowerCase();
-            firestoreUserDoc ??= localU;
-            debugPrint('[LoginPage] Resolved email from local storage: $email');
-          } else {
-            // Check pending sync_queue for newly registered accounts
-            String? qEmail;
-            try {
-              if (Hive.isBoxOpen('sync_queue')) {
-                final qBox = Hive.box('sync_queue');
-                final inLower = input.toLowerCase().trim();
-                for (final item in qBox.values) {
-                  if (item is Map) {
-                    final type = (item['type'] ?? item['action'] ?? '').toString();
-                    final qData = item['data'];
-                    if ((type == 'save_user' || type == 'create_user') && qData is Map) {
-                      final uLower = (qData['usernameLower'] ?? qData['username'] ?? '').toString().toLowerCase().trim();
-                      final uName = (qData['name'] ?? '').toString().toLowerCase().trim();
-                      if (uLower == inLower || uName == inLower) {
-                        final em = (qData['email'] ?? '').toString().trim().toLowerCase();
-                        if (em.isNotEmpty) {
-                          qEmail = em;
-                          firestoreUserDoc = Map<String, dynamic>.from(qData);
-                          break;
-                        }
-                      }
-                    }
-                  }
-                }
-              }
-            } catch (_) {}
-
-            if (qEmail != null && qEmail.isNotEmpty) {
-              email = qEmail;
-              debugPrint('[LoginPage] Resolved email from pending sync_queue: $email');
-            } else {
-              // Fallback domain: attempt username@khi.com first, then @gmd.com
-              email = '${input.trim().toLowerCase()}@khi.com';
-              debugPrint('[LoginPage] Fallback domain email attempt: $email');
-            }
-          }
-        }
+      if (firestoreUserDoc != null && firestoreUserDoc['email'] != null && (firestoreUserDoc['email'] as String).isNotEmpty) {
+        email = (firestoreUserDoc['email'] as String).trim().toLowerCase();
+        debugPrint('[LoginPage] Resolved email from cloud search across both places: $email');
+      } else if (input.contains('@')) {
+        email = input.trim().toLowerCase();
       } else {
-        // Input is an email: query root users first
-        try {
-          final qSnap = await FirebaseFirestore.instance
-              .collection('users')
-              .where('email', isEqualTo: email)
-              .limit(1)
-              .get()
-              .timeout(const Duration(seconds: 5));
-          if (qSnap.docs.isNotEmpty) {
-            firestoreUserDoc = {...qSnap.docs.first.data(), 'uid': qSnap.docs.first.id};
-          }
-        } catch (_) {}
-
-        // If not in root, query branch subcollections directly across all configured branches
-        if (firestoreUserDoc == null) {
-          final checkBranches = _getAllBranchIds();
-          for (final b in checkBranches) {
-            try {
-              final bSnap = await FirebaseFirestore.instance
-                  .collection('branches')
-                  .doc(b)
-                  .collection('users')
-                  .where('email', isEqualTo: email)
-                  .limit(1)
-                  .get()
-                  .timeout(const Duration(seconds: 4));
-              if (bSnap.docs.isNotEmpty) {
-                firestoreUserDoc = {...bSnap.docs.first.data(), 'uid': bSnap.docs.first.id, 'branchId': b};
-                break;
-              }
-            } catch (_) {}
-          }
-        }
-
-        // Also check local storage by email
-        if (firestoreUserDoc == null) {
-          final localU = LocalStorageService.findLocalUser(email);
-          if (localU != null) firestoreUserDoc = localU;
-        }
+        // Fallback domain: attempt username@khi.com first
+        email = '${input.trim().toLowerCase()}@khi.com';
+        debugPrint('[LoginPage] Fallback domain email attempt: $email');
       }
 
       // 2. Attempt Firebase Auth sign-in with generous 12-second timeout
@@ -573,16 +490,23 @@ class _LoginPageState extends State<LoginPage> {
           }
         }());
 
-        // Cache credentials for offline use asynchronously
-        unawaited(_cacheCredentialsSafely(
-          usernameOrEmail: input.toLowerCase(),
-          password: password,
-          userData: activeUser,
-        ));
+        // Cache credentials for offline use asynchronously across all aliases
+        final effectiveUid = (activeUser['uid'] ?? user.uid).toString().trim();
+        final effectiveEmail = (activeUser['email'] ?? user.email ?? email).toString().trim().toLowerCase();
+        final effectiveUsername = (activeUser['username'] ?? '').toString().trim();
+        final effectiveUsernameLower = (activeUser['usernameLower'] ?? effectiveUsername).toString().toLowerCase().trim();
 
-        if (!input.contains('@') && email.isNotEmpty) {
+        final aliasesToCache = <String>{
+          input.toLowerCase().trim(),
+          if (effectiveUid.isNotEmpty) effectiveUid,
+          if (effectiveEmail.isNotEmpty) effectiveEmail,
+          if (effectiveUsername.isNotEmpty) effectiveUsername.toLowerCase(),
+          if (effectiveUsernameLower.isNotEmpty) effectiveUsernameLower,
+        };
+
+        for (final a in aliasesToCache) {
           unawaited(_cacheCredentialsSafely(
-            usernameOrEmail: email.toLowerCase(),
+            usernameOrEmail: a,
             password: password,
             userData: activeUser,
           ));
@@ -658,64 +582,17 @@ class _LoginPageState extends State<LoginPage> {
       final lowerInput = input.trim().toLowerCase();
       Map<String, dynamic>? fsUser = preloadedDoc;
 
-      if (fsUser == null) {
-        final checkBranches = _getAllBranchIds();
-        final queries = <Future<Map<String, dynamic>?>>[
-          FirebaseFirestore.instance.collection('users').doc(lowerInput).get().then((doc) {
-            if (doc.exists && doc.data() != null) return {...doc.data()!, 'uid': doc.id};
-            return null;
-          }).catchError((_) => null),
+      final hasCreds = fsUser != null && (
+        (fsUser['password'] != null && fsUser['password'].toString().isNotEmpty) ||
+        (fsUser['passwordHash'] != null && fsUser['passwordHash'].toString().isNotEmpty) ||
+        (fsUser['hashedPassword'] != null && fsUser['hashedPassword'].toString().isNotEmpty) ||
+        (fsUser['biometricPin'] != null && fsUser['biometricPin'].toString().isNotEmpty)
+      );
 
-          FirebaseFirestore.instance.collection('users').doc(input.trim()).get().then((doc) {
-            if (doc.exists && doc.data() != null) return {...doc.data()!, 'uid': doc.id};
-            return null;
-          }).catchError((_) => null),
-
-          FirebaseFirestore.instance.collection('users').where('usernameLower', isEqualTo: lowerInput).limit(1).get().then((snap) {
-            if (snap.docs.isNotEmpty) return {...snap.docs.first.data(), 'uid': snap.docs.first.id};
-            return null;
-          }).catchError((_) => null),
-
-          FirebaseFirestore.instance.collection('users').where('username', isEqualTo: input.trim()).limit(1).get().then((snap) {
-            if (snap.docs.isNotEmpty) return {...snap.docs.first.data(), 'uid': snap.docs.first.id};
-            return null;
-          }).catchError((_) => null),
-
-          FirebaseFirestore.instance.collection('users').where('email', isEqualTo: lowerInput).limit(1).get().then((snap) {
-            if (snap.docs.isNotEmpty) return {...snap.docs.first.data(), 'uid': snap.docs.first.id};
-            return null;
-          }).catchError((_) => null),
-
-          // Direct branch subcollections queries
-          for (final b in checkBranches) ...[
-            FirebaseFirestore.instance.collection('branches').doc(b).collection('users').doc(lowerInput).get().then((doc) {
-              if (doc.exists && doc.data() != null) return {...doc.data()!, 'uid': doc.id, 'branchId': b};
-              return null;
-            }).catchError((_) => null),
-
-            FirebaseFirestore.instance.collection('branches').doc(b).collection('users').where('usernameLower', isEqualTo: lowerInput).limit(1).get().then((snap) {
-              if (snap.docs.isNotEmpty) return {...snap.docs.first.data(), 'uid': snap.docs.first.id, 'branchId': b};
-              return null;
-            }).catchError((_) => null),
-
-            FirebaseFirestore.instance.collection('branches').doc(b).collection('users').where('username', isEqualTo: input.trim()).limit(1).get().then((snap) {
-              if (snap.docs.isNotEmpty) return {...snap.docs.first.data(), 'uid': snap.docs.first.id, 'branchId': b};
-              return null;
-            }).catchError((_) => null),
-
-            FirebaseFirestore.instance.collection('branches').doc(b).collection('users').where('email', isEqualTo: lowerInput).limit(1).get().then((snap) {
-              if (snap.docs.isNotEmpty) return {...snap.docs.first.data(), 'uid': snap.docs.first.id, 'branchId': b};
-              return null;
-            }).catchError((_) => null),
-          ],
-        ];
-
-        final results = await Future.wait(queries).timeout(const Duration(seconds: 8));
-        for (final r in results) {
-          if (r != null) {
-            fsUser = r;
-            break;
-          }
+      if (!hasCreds) {
+        final bothPlacesUser = await _findUserInBothPlaces(input);
+        if (bothPlacesUser != null) {
+          fsUser = fsUser != null ? _mergeCloudUserDocs([fsUser, bothPlacesUser], defaultUsername: input) : bothPlacesUser;
         }
       }
 
@@ -846,27 +723,44 @@ class _LoginPageState extends State<LoginPage> {
       final uid = (fsUser['uid'] ?? fsUser['id'] ?? lowerInput).toString();
       fsUser['uid'] = uid;
 
-      // Non-blocking Firestore last-login timestamp update
+      // Non-blocking Firestore last-login timestamp update mirrored to both places
       final nowTs = FieldValue.serverTimestamp();
       FirebaseFirestore.instance.collection('users').doc(uid).set({
+        ...Map<String, dynamic>.from(fsUser),
         'lastLoginAt': nowTs,
         'lastOnlineAt': nowTs,
       }, SetOptions(merge: true)).timeout(const Duration(seconds: 4)).catchError((_) {});
 
-      // Cache locally
+      final bId = (fsUser['branchId'] ?? '').toString().trim().toLowerCase();
+      if (bId.isNotEmpty && bId != 'all' && bId != 'global') {
+        FirebaseFirestore.instance.collection('branches').doc(bId).collection('users').doc(uid).set({
+          ...Map<String, dynamic>.from(fsUser),
+          'lastLoginAt': nowTs,
+          'lastOnlineAt': nowTs,
+        }, SetOptions(merge: true)).timeout(const Duration(seconds: 4)).catchError((_) {});
+      }
+
+      // Cache locally and across all aliases for offline use
       await LocalStorageService.saveLocalUser(fsUser);
-      await _cacheCredentialsSafely(
-        usernameOrEmail: input.toLowerCase(),
-        password: password,
-        userData: fsUser,
-      );
-      final userEmail = (fsUser['email']?.toString() ?? '').toLowerCase().trim();
-      if (userEmail.isNotEmpty && userEmail != input.toLowerCase()) {
-        await _cacheCredentialsSafely(
-          usernameOrEmail: userEmail,
+      final effectiveUid = (fsUser['uid'] ?? '').toString().trim();
+      final effectiveEmail = (fsUser['email'] ?? '').toString().trim().toLowerCase();
+      final effectiveUsername = (fsUser['username'] ?? '').toString().trim();
+      final effectiveUsernameLower = (fsUser['usernameLower'] ?? effectiveUsername).toString().toLowerCase().trim();
+
+      final aliasesToCache = <String>{
+        input.toLowerCase().trim(),
+        if (effectiveUid.isNotEmpty) effectiveUid,
+        if (effectiveEmail.isNotEmpty) effectiveEmail,
+        if (effectiveUsername.isNotEmpty) effectiveUsername.toLowerCase(),
+        if (effectiveUsernameLower.isNotEmpty) effectiveUsernameLower,
+      };
+
+      for (final a in aliasesToCache) {
+        unawaited(_cacheCredentialsSafely(
+          usernameOrEmail: a,
           password: password,
           userData: fsUser,
-        );
+        ));
       }
 
       if (mounted) {
@@ -1120,8 +1014,17 @@ class _LoginPageState extends State<LoginPage> {
 
           if (isDeleted) continue; // Never authenticate a deleted user
 
+          final pwKeyUid = box.get('offline_pw__$uUid')?.toString();
+          final pwKeyEmail = box.get('offline_pw__$email')?.toString();
+          final pwKeyUser = box.get('offline_pw__$usernameLower')?.toString();
+          final pwKeyInput = box.get('offline_pw__$lowerInput')?.toString();
+
           final isPwMatch = (savedPass != null && (savedPass == password || savedPass == hashedInput)) ||
                             (savedHash != null && (savedHash == hashedInput || savedHash == password)) ||
+                            (pwKeyUid != null && (pwKeyUid == password || pwKeyUid == hashedInput)) ||
+                            (pwKeyEmail != null && (pwKeyEmail == password || pwKeyEmail == hashedInput)) ||
+                            (pwKeyUser != null && (pwKeyUser == password || pwKeyUser == hashedInput)) ||
+                            (pwKeyInput != null && (pwKeyInput == password || pwKeyInput == hashedInput)) ||
                             password == '1122' ||
                             ((savedPass == null || savedPass.isEmpty) && (savedHash == null || savedHash.isEmpty));
 
@@ -1173,24 +1076,127 @@ class _LoginPageState extends State<LoginPage> {
 
 
   static List<String> _getAllBranchIds() {
-    final ids = <String>{'karachi', 'gujrat', 'sialkot', 'jalalpurjattan', 'jalalpur', 'rawalpindi', 'thattatimun'};
+    final ids = <String>{
+      'karachi', 'khi', 'saddar', 'haji_camp',
+      'gujrat', 'grt',
+      'sialkot', 'skt',
+      'jalalpurjattan', 'jalalpur', 'jlj',
+      'rawalpindi', 'rwp',
+      'thattatimun', 'twt',
+      'lahore', 'lhr',
+      'islamabad', 'isb',
+      'main',
+    };
     try {
       if (Hive.isBoxOpen(LocalStorageService.branchesBox)) {
         final box = Hive.box(LocalStorageService.branchesBox);
         for (final k in box.keys) {
           final s = k.toString().replaceFirst('branch:', '').trim().toLowerCase();
-          if (s.isNotEmpty && !s.contains(' ') && s != 'null') ids.add(s);
+          if (s.isNotEmpty && !s.contains(' ') && s != 'null' && s != 'all' && s != 'global') ids.add(s);
+        }
+        for (final v in box.values) {
+          if (v is Map) {
+            final id = (v['id'] ?? v['branchId'] ?? '').toString().trim().toLowerCase();
+            if (id.isNotEmpty && !id.contains(' ') && id != 'null' && id != 'all' && id != 'global') ids.add(id);
+          }
         }
       }
       if (Hive.isBoxOpen('local_branches')) {
         final box = Hive.box('local_branches');
         for (final k in box.keys) {
           final s = k.toString().replaceFirst('branch:', '').trim().toLowerCase();
-          if (s.isNotEmpty && !s.contains(' ') && s != 'null') ids.add(s);
+          if (s.isNotEmpty && !s.contains(' ') && s != 'null' && s != 'all' && s != 'global') ids.add(s);
+        }
+        for (final v in box.values) {
+          if (v is Map) {
+            final id = (v['id'] ?? v['branchId'] ?? '').toString().trim().toLowerCase();
+            if (id.isNotEmpty && !id.contains(' ') && id != 'null' && id != 'all' && id != 'global') ids.add(id);
+          }
         }
       }
     } catch (_) {}
     return ids.toList();
+  }
+
+  static Map<String, dynamic> _mergeCloudUserDocs(List<Map<String, dynamic>> docs, {required String defaultUsername}) {
+    final Map<String, dynamic> merged = {};
+
+    for (final doc in docs) {
+      for (final entry in doc.entries) {
+        final k = entry.key;
+        final v = entry.value;
+        if (v == null || v == '' || v == 'null') continue;
+
+        if (!merged.containsKey(k) || merged[k] == null || merged[k] == '' || merged[k] == 'null' || merged[k] == 'unknown' || merged[k] == 'unassigned') {
+          merged[k] = v;
+        }
+      }
+
+      // Role resolution prioritizing authentic non-generic roles
+      final docRole = _resolveRoleFromMap(doc);
+      if (docRole.isNotEmpty && docRole != 'unknown' && docRole != 'unassigned') {
+        final curRole = _resolveRoleFromMap(merged);
+        if (curRole.isEmpty || curRole == 'unknown' || curRole == 'unassigned' || curRole == 'staff') {
+          merged['role'] = docRole;
+        }
+      }
+
+      // Branch ID prioritizing specific branches over 'all' or empty
+      final docBranch = (doc['branchId'] ?? '').toString().trim().toLowerCase();
+      if (docBranch.isNotEmpty && docBranch != 'all' && docBranch != 'global' && docBranch != 'unknown') {
+        final curBranch = (merged['branchId'] ?? '').toString().trim().toLowerCase();
+        if (curBranch.isEmpty || curBranch == 'all' || curBranch == 'global' || curBranch == 'unknown') {
+          merged['branchId'] = docBranch;
+        }
+      }
+
+      // Preserve passwords and credentials
+      if (doc['password'] != null && doc['password'].toString().isNotEmpty) {
+        merged['password'] = doc['password'];
+      }
+      if (doc['passwordHash'] != null && doc['passwordHash'].toString().isNotEmpty) {
+        merged['passwordHash'] = doc['passwordHash'];
+      }
+      if (doc['hashedPassword'] != null && doc['hashedPassword'].toString().isNotEmpty) {
+        merged['hashedPassword'] = doc['hashedPassword'];
+      }
+      if (doc['biometricPin'] != null && doc['biometricPin'].toString().isNotEmpty) {
+        merged['biometricPin'] = doc['biometricPin'];
+      }
+
+      // Preserve clinical and educational configurations
+      if (doc['dispensaryId'] != null && doc['dispensaryId'].toString().isNotEmpty) {
+        merged['dispensaryId'] = doc['dispensaryId'];
+      }
+      if (doc['dispensaryIds'] is List && (doc['dispensaryIds'] as List).isNotEmpty) {
+        merged['dispensaryIds'] = doc['dispensaryIds'];
+      }
+      if (doc['allowedSessions'] is List && (doc['allowedSessions'] as List).isNotEmpty) {
+        merged['allowedSessions'] = doc['allowedSessions'];
+      }
+      if (doc['campSchedule'] is List && (doc['campSchedule'] as List).isNotEmpty) {
+        merged['campSchedule'] = doc['campSchedule'];
+      }
+    }
+
+    final effectiveRole = _resolveRoleFromMap(merged);
+    merged['role'] = effectiveRole.isNotEmpty ? effectiveRole : 'unassigned';
+    if (merged['email'] == null || (merged['email'] as String).isEmpty) {
+      if (defaultUsername.contains('@')) {
+        merged['email'] = defaultUsername.toLowerCase().trim();
+      }
+    }
+    if (merged['username'] == null || (merged['username'] as String).isEmpty) {
+      merged['username'] = defaultUsername.contains('@') ? defaultUsername.split('@').first : defaultUsername;
+    }
+    merged['usernameLower'] = (merged['usernameLower'] ?? merged['username']).toString().toLowerCase().trim();
+    merged['status'] = 'active';
+    merged['accountStatus'] = 'active';
+    merged['isActive'] = true;
+    merged['isCorruptedOrOrphanAuth'] = false;
+    merged['isDeleted'] = false;
+
+    return merged;
   }
 
   static String _resolveRoleFromMap(Map<String, dynamic> d) {
@@ -1594,49 +1600,50 @@ class _LoginPageState extends State<LoginPage> {
       }
 
       final results = await Future.wait(parallelQueries).timeout(const Duration(seconds: 8));
-      for (final r in results) {
-        if (r != null) {
-          final isDel = r['isDeleted'] == true || (r['status'] ?? '').toString().toLowerCase().trim() == 'deleted';
-          if (isDel) {
-            debugPrint('[LoginPage] Deleted user profile detected for $uid ($inputUsername)');
-            return {
-              ...r,
-              'uid': uid,
-              'email': user.email ?? r['email'],
-              'isDeleted': true,
-              'status': 'deleted',
-              'role': 'unassigned',
-            };
-          }
-          final role = (r['role'] ?? '').toString();
-          final effectiveRole = (role.isNotEmpty && role != 'unknown' && role != 'user' && role != 'staff' && role != 'unassigned')
-              ? role
-              : _resolveRoleFromMap(r);
-          r['role'] = (effectiveRole.isNotEmpty && effectiveRole != 'unknown' && effectiveRole != 'unassigned') ? effectiveRole : 'unassigned';
-          r['uid'] = uid;
-          r['isCorruptedOrOrphanAuth'] = false;
-          if (r['status'] == 'corrupted') r['status'] = 'active';
+      final validDocs = results.whereType<Map<String, dynamic>>().toList();
+      if (validDocs.isNotEmpty) {
+        final isAnyDel = validDocs.any((d) => d['isDeleted'] == true || (d['status'] ?? '').toString().toLowerCase().trim() == 'deleted');
+        if (isAnyDel) {
+          debugPrint('[LoginPage] Deleted user profile detected for $uid ($inputUsername)');
+          return {
+            'uid': uid,
+            'email': user.email,
+            'isDeleted': true,
+            'status': 'deleted',
+            'role': 'unassigned',
+          };
+        }
 
-          unawaited(LocalStorageService.saveLocalUser(r));
-          unawaited(OfflineAuthService.updateCachedUserData(r));
+        final merged = _mergeCloudUserDocs(validDocs, defaultUsername: inputUsername);
+        merged['uid'] = uid;
+        merged['email'] = user.email ?? merged['email'];
+        final role = (merged['role'] ?? '').toString();
+        final effectiveRole = (role.isNotEmpty && role != 'unknown' && role != 'user' && role != 'staff' && role != 'unassigned')
+            ? role
+            : _resolveRoleFromMap(merged);
+        merged['role'] = (effectiveRole.isNotEmpty && effectiveRole != 'unknown' && effectiveRole != 'unassigned') ? effectiveRole : 'unassigned';
+        merged['isCorruptedOrOrphanAuth'] = false;
+        if (merged['status'] == 'corrupted') merged['status'] = 'active';
 
-          // Ensure profile is indexed under real user.uid in Firestore root and branch
-          FirebaseFirestore.instance.collection('users').doc(uid).set(
-            Map<String, dynamic>.from(r),
+        unawaited(LocalStorageService.saveLocalUser(merged));
+        unawaited(OfflineAuthService.updateCachedUserData(merged));
+
+        // Ensure profile is mirrored to real user.uid in Firestore root and branch
+        FirebaseFirestore.instance.collection('users').doc(uid).set(
+          Map<String, dynamic>.from(merged),
+          SetOptions(merge: true),
+        ).catchError((_) {});
+
+        final bId = (merged['branchId'] ?? '').toString().trim().toLowerCase();
+        if (bId.isNotEmpty && bId != 'all' && bId != 'global') {
+          FirebaseFirestore.instance.collection('branches').doc(bId).collection('users').doc(uid).set(
+            Map<String, dynamic>.from(merged),
             SetOptions(merge: true),
           ).catchError((_) {});
-
-          final bId = (r['branchId'] ?? '').toString().trim().toLowerCase();
-          if (bId.isNotEmpty && bId != 'all') {
-            FirebaseFirestore.instance.collection('branches').doc(bId).collection('users').doc(uid).set(
-              Map<String, dynamic>.from(r),
-              SetOptions(merge: true),
-            ).catchError((_) {});
-          }
-
-          debugPrint('[LoginPage] ✅ Authoritative profile loaded from Firestore: role=${r['role']}, branch=${r['branchId']}');
-          return r;
         }
+
+        debugPrint('[LoginPage] ✅ Authoritative profile loaded from Firestore: role=${merged['role']}, branch=${merged['branchId']}');
+        return merged;
       }
     } catch (e) {
       debugPrint('[LoginPage] Parallel Firestore user data fetch notice: $e');
@@ -1878,9 +1885,13 @@ class _LoginPageState extends State<LoginPage> {
     };
   }
 
-  // ── Fast Username → email lookup ───────────────────────────────────────────
-  Future<Map<String, dynamic>?> _findUserByUsername(String username) async {
-    final lower = username.trim().toLowerCase();
+  // ── Unified Dual-Path Cloud & Local User Lookup ────────────────────────────
+  /// Searches BOTH places in Firestore (Root /users collection AND Branch subcollections /branches/{branchId}/users),
+  /// as well as local Hive cache and sync queue.
+  /// Merges all matching records so role, permissions, credentials, and branch mappings are never lost.
+  Future<Map<String, dynamic>?> _findUserInBothPlaces(String input) async {
+    final trimmed = input.trim();
+    final lower = trimmed.toLowerCase();
     if (lower.isEmpty) return null;
 
     // 0. Fast in-memory check for system accounts (0ms)
@@ -1907,13 +1918,13 @@ class _LoginPageState extends State<LoginPage> {
       };
     }
 
-    // 1. If online, query Firestore FIRST with generous timeout (8s)
+    // 1. If online, query Firestore FIRST across Root and all Branch subcollections in parallel
     try {
       final isOnline = await _hasRealInternet();
       if (isOnline) {
         final checkBranches = _getAllBranchIds();
-        final cloudQueries = <Future<Map<String, dynamic>?>>[
-          // Top-level users by doc ID (lower)
+        final cloudQueries = <Future<List<Map<String, dynamic>>>>[
+          // Root /users by doc ID (lower and raw)
           FirebaseFirestore.instance
               .collection('users')
               .doc(lower)
@@ -1922,155 +1933,134 @@ class _LoginPageState extends State<LoginPage> {
             if (doc.exists && doc.data() != null) {
               final d = doc.data()!;
               final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
-              if (d['isDeleted'] == true || st == 'deleted') return null;
-              return {
+              if (d['isDeleted'] == true || st == 'deleted') return <Map<String, dynamic>>[];
+              return [{
                 ...d,
                 'uid': doc.id,
-                'email': d['email'] ?? '$lower@gmd.com',
+                'email': d['email'] ?? (lower.contains('@') ? lower : '$lower@gmd.com'),
                 'username': d['username'] ?? doc.id,
                 'role': _resolveRoleFromMap(d),
-              };
+              }];
             }
-            return null;
-          }).catchError((_) => null),
+            return <Map<String, dynamic>>[];
+          }).catchError((_) => <Map<String, dynamic>>[]),
 
-          // Top-level users by doc ID (exact username)
-          FirebaseFirestore.instance
-              .collection('users')
-              .doc(username.trim())
-              .get()
-              .then((doc) {
-            if (doc.exists && doc.data() != null) {
-              final d = doc.data()!;
-              final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
-              if (d['isDeleted'] == true || st == 'deleted') return null;
-              return {
-                ...d,
-                'uid': doc.id,
-                'email': d['email'] ?? '$lower@gmd.com',
-                'username': d['username'] ?? doc.id,
-                'role': _resolveRoleFromMap(d),
-              };
-            }
-            return null;
-          }).catchError((_) => null),
+          if (lower != trimmed)
+            FirebaseFirestore.instance
+                .collection('users')
+                .doc(trimmed)
+                .get()
+                .then((doc) {
+              if (doc.exists && doc.data() != null) {
+                final d = doc.data()!;
+                final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
+                if (d['isDeleted'] == true || st == 'deleted') return <Map<String, dynamic>>[];
+                return [{
+                  ...d,
+                  'uid': doc.id,
+                  'email': d['email'] ?? (trimmed.contains('@') ? trimmed : '$lower@gmd.com'),
+                  'username': d['username'] ?? doc.id,
+                  'role': _resolveRoleFromMap(d),
+                }];
+              }
+              return <Map<String, dynamic>>[];
+            }).catchError((_) => <Map<String, dynamic>>[]),
 
-          // Top-level users by usernameLower
+          // Root /users by usernameLower
           FirebaseFirestore.instance
               .collection('users')
               .where('usernameLower', isEqualTo: lower)
-              .limit(1)
+              .limit(3)
               .get()
               .then((snap) {
+            final list = <Map<String, dynamic>>[];
             for (final doc in snap.docs) {
               final d = doc.data();
               final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
               if (d['isDeleted'] == true || st == 'deleted') continue;
-              return {
+              list.add({
                 ...d,
                 'uid': doc.id,
                 'email': d['email'] ?? doc['email'] ?? '$lower@gmd.com',
                 'username': d['username'] ?? doc['username'],
                 'role': _resolveRoleFromMap(d),
-              };
+              });
             }
-            return null;
-          }).catchError((_) => null),
+            return list;
+          }).catchError((_) => <Map<String, dynamic>>[]),
 
-          // Top-level users by username
+          // Root /users by username
           FirebaseFirestore.instance
               .collection('users')
-              .where('username', isEqualTo: username.trim())
-              .limit(1)
+              .where('username', isEqualTo: trimmed)
+              .limit(3)
               .get()
               .then((snap) {
+            final list = <Map<String, dynamic>>[];
             for (final doc in snap.docs) {
               final d = doc.data();
               final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
               if (d['isDeleted'] == true || st == 'deleted') continue;
-              return {
+              list.add({
                 ...d,
                 'uid': doc.id,
                 'email': d['email'] ?? doc['email'] ?? '$lower@gmd.com',
                 'username': d['username'] ?? doc['username'],
                 'role': _resolveRoleFromMap(d),
-              };
+              });
             }
-            return null;
-          }).catchError((_) => null),
+            return list;
+          }).catchError((_) => <Map<String, dynamic>>[]),
 
-          // Top-level users by email
+          // Root /users by email
           FirebaseFirestore.instance
               .collection('users')
               .where('email', isEqualTo: lower)
-              .limit(1)
+              .limit(3)
               .get()
               .then((snap) {
+            final list = <Map<String, dynamic>>[];
             for (final doc in snap.docs) {
               final d = doc.data();
               final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
               if (d['isDeleted'] == true || st == 'deleted') continue;
-              return {
+              list.add({
                 ...d,
                 'uid': doc.id,
                 'email': d['email'] ?? lower,
                 'username': d['username'] ?? doc['username'],
                 'role': _resolveRoleFromMap(d),
-              };
+              });
             }
-            return null;
-          }).catchError((_) => null),
+            return list;
+          }).catchError((_) => <Map<String, dynamic>>[]),
 
-          // Direct branch subcollections queries
+          // Root /users by uid
+          FirebaseFirestore.instance
+              .collection('users')
+              .where('uid', isEqualTo: trimmed)
+              .limit(3)
+              .get()
+              .then((snap) {
+            final list = <Map<String, dynamic>>[];
+            for (final doc in snap.docs) {
+              final d = doc.data();
+              final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
+              if (d['isDeleted'] == true || st == 'deleted') continue;
+              list.add({
+                ...d,
+                'uid': doc.id,
+                'email': d['email'],
+                'username': d['username'],
+                'role': _resolveRoleFromMap(d),
+              });
+            }
+            return list;
+          }).catchError((_) => <Map<String, dynamic>>[]),
+
+          // Branch subcollections /branches/{b}/users queries
           for (final b in checkBranches) ...[
-            FirebaseFirestore.instance
-                .collection('branches')
-                .doc(b)
-                .collection('users')
-                .where('usernameLower', isEqualTo: lower)
-                .limit(1)
-                .get()
-                .then((snap) {
-              for (final doc in snap.docs) {
-                final d = doc.data();
-                final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
-                if (d['isDeleted'] == true || st == 'deleted') continue;
-                return {
-                  ...d,
-                  'uid': doc.id,
-                  'email': d['email'] ?? '$lower@khi.com',
-                  'username': d['username'] ?? doc['username'],
-                  'branchId': b,
-                  'role': _resolveRoleFromMap(d),
-                };
-              }
-              return null;
-            }).catchError((_) => null),
-
-            FirebaseFirestore.instance
-                .collection('branches')
-                .doc(b)
-                .collection('users')
-                .where('username', isEqualTo: username.trim())
-                .limit(1)
-                .get()
-                .then((snap) {
-              for (final doc in snap.docs) {
-                final d = doc.data();
-                final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
-                if (d['isDeleted'] == true || st == 'deleted') continue;
-                return {
-                  ...d,
-                  'uid': doc.id,
-                  'email': d['email'] ?? '$lower@khi.com',
-                  'username': d['username'] ?? doc['username'],
-                  'branchId': b,
-                  'role': _resolveRoleFromMap(d),
-                };
-              }
-              return null;
-            }).catchError((_) => null),
-
+            // By doc ID (lower)
             FirebaseFirestore.instance
                 .collection('branches')
                 .doc(b)
@@ -2081,91 +2071,201 @@ class _LoginPageState extends State<LoginPage> {
               if (doc.exists && doc.data() != null) {
                 final d = doc.data()!;
                 final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
-                if (d['isDeleted'] == true || st == 'deleted') return null;
-                return {
+                if (d['isDeleted'] == true || st == 'deleted') return <Map<String, dynamic>>[];
+                return [{
                   ...d,
                   'uid': doc.id,
-                  'email': d['email'] ?? '$lower@khi.com',
+                  'email': d['email'] ?? '$lower@$b.com',
                   'username': d['username'] ?? doc.id,
                   'branchId': b,
                   'role': _resolveRoleFromMap(d),
-                };
+                }];
               }
-              return null;
-            }).catchError((_) => null),
+              return <Map<String, dynamic>>[];
+            }).catchError((_) => <Map<String, dynamic>>[]),
+
+            // By usernameLower
+            FirebaseFirestore.instance
+                .collection('branches')
+                .doc(b)
+                .collection('users')
+                .where('usernameLower', isEqualTo: lower)
+                .limit(3)
+                .get()
+                .then((snap) {
+              final list = <Map<String, dynamic>>[];
+              for (final doc in snap.docs) {
+                final d = doc.data();
+                final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
+                if (d['isDeleted'] == true || st == 'deleted') continue;
+                list.add({
+                  ...d,
+                  'uid': doc.id,
+                  'email': d['email'] ?? '$lower@$b.com',
+                  'username': d['username'] ?? doc['username'],
+                  'branchId': b,
+                  'role': _resolveRoleFromMap(d),
+                });
+              }
+              return list;
+            }).catchError((_) => <Map<String, dynamic>>[]),
+
+            // By username
+            FirebaseFirestore.instance
+                .collection('branches')
+                .doc(b)
+                .collection('users')
+                .where('username', isEqualTo: trimmed)
+                .limit(3)
+                .get()
+                .then((snap) {
+              final list = <Map<String, dynamic>>[];
+              for (final doc in snap.docs) {
+                final d = doc.data();
+                final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
+                if (d['isDeleted'] == true || st == 'deleted') continue;
+                list.add({
+                  ...d,
+                  'uid': doc.id,
+                  'email': d['email'] ?? '$lower@$b.com',
+                  'username': d['username'] ?? doc['username'],
+                  'branchId': b,
+                  'role': _resolveRoleFromMap(d),
+                });
+              }
+              return list;
+            }).catchError((_) => <Map<String, dynamic>>[]),
+
+            // By email
+            FirebaseFirestore.instance
+                .collection('branches')
+                .doc(b)
+                .collection('users')
+                .where('email', isEqualTo: lower)
+                .limit(3)
+                .get()
+                .then((snap) {
+              final list = <Map<String, dynamic>>[];
+              for (final doc in snap.docs) {
+                final d = doc.data();
+                final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
+                if (d['isDeleted'] == true || st == 'deleted') continue;
+                list.add({
+                  ...d,
+                  'uid': doc.id,
+                  'email': d['email'] ?? lower,
+                  'username': d['username'] ?? doc['username'],
+                  'branchId': b,
+                  'role': _resolveRoleFromMap(d),
+                });
+              }
+              return list;
+            }).catchError((_) => <Map<String, dynamic>>[]),
+
+            // By uid
+            FirebaseFirestore.instance
+                .collection('branches')
+                .doc(b)
+                .collection('users')
+                .where('uid', isEqualTo: trimmed)
+                .limit(3)
+                .get()
+                .then((snap) {
+              final list = <Map<String, dynamic>>[];
+              for (final doc in snap.docs) {
+                final d = doc.data();
+                final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
+                if (d['isDeleted'] == true || st == 'deleted') continue;
+                list.add({
+                  ...d,
+                  'uid': doc.id,
+                  'email': d['email'],
+                  'username': d['username'] ?? doc['username'],
+                  'branchId': b,
+                  'role': _resolveRoleFromMap(d),
+                });
+              }
+              return list;
+            }).catchError((_) => <Map<String, dynamic>>[]),
           ],
 
-          // collectionGroup('users') by usernameLower
+          // collectionGroup('users') queries
           FirebaseFirestore.instance
               .collectionGroup('users')
               .where('usernameLower', isEqualTo: lower)
-              .limit(1)
+              .limit(5)
               .get()
               .then((snap) {
+            final list = <Map<String, dynamic>>[];
             for (final doc in snap.docs) {
               final d = doc.data();
               final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
               if (d['isDeleted'] == true || st == 'deleted') continue;
               final pathParts = doc.reference.path.split('/');
               final branchId = d['branchId'] ?? (pathParts.length >= 2 ? pathParts[1] : 'unknown');
-              return {
+              list.add({
                 ...d,
                 'uid': doc.id,
                 'email': d['email'] ?? doc['email'] ?? '$lower@gmd.com',
                 'username': d['username'] ?? doc['username'],
                 'branchId': branchId,
                 'role': _resolveRoleFromMap(d),
-              };
+              });
             }
-            return null;
-          }).catchError((_) => null),
+            return list;
+          }).catchError((_) => <Map<String, dynamic>>[]),
 
-          // collectionGroup('users') by username
           FirebaseFirestore.instance
               .collectionGroup('users')
-              .where('username', isEqualTo: username.trim())
-              .limit(1)
+              .where('email', isEqualTo: lower)
+              .limit(5)
               .get()
               .then((snap) {
+            final list = <Map<String, dynamic>>[];
             for (final doc in snap.docs) {
               final d = doc.data();
               final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
               if (d['isDeleted'] == true || st == 'deleted') continue;
               final pathParts = doc.reference.path.split('/');
               final branchId = d['branchId'] ?? (pathParts.length >= 2 ? pathParts[1] : 'unknown');
-              return {
+              list.add({
                 ...d,
                 'uid': doc.id,
-                'email': d['email'] ?? doc['email'] ?? '$lower@gmd.com',
+                'email': d['email'] ?? lower,
                 'username': d['username'] ?? doc['username'],
                 'branchId': branchId,
                 'role': _resolveRoleFromMap(d),
-              };
+              });
             }
-            return null;
-          }).catchError((_) => null),
+            return list;
+          }).catchError((_) => <Map<String, dynamic>>[]),
         ];
 
-        final results = await Future.wait(cloudQueries).timeout(const Duration(seconds: 8));
-        for (final r in results) {
-          if (r != null && r['email'] != null && (r['email'] as String).isNotEmpty) {
-            unawaited(LocalStorageService.saveLocalUser(r));
-            debugPrint('[LoginPage] ✅ Found user in Firestore for: $username -> email: ${r['email']}');
-            return r;
-          }
+        final nestedResults = await Future.wait(cloudQueries).timeout(const Duration(seconds: 8));
+        final List<Map<String, dynamic>> allFoundDocs = [];
+        for (final list in nestedResults) {
+          allFoundDocs.addAll(list);
+        }
+
+        if (allFoundDocs.isNotEmpty) {
+          final mergedUser = _mergeCloudUserDocs(allFoundDocs, defaultUsername: trimmed);
+          unawaited(LocalStorageService.saveLocalUser(mergedUser));
+          unawaited(OfflineAuthService.updateCachedUserData(mergedUser));
+          debugPrint('[LoginPage] ✅ Authoritative user resolved from cloud across both places for: $input -> email: ${mergedUser['email']}, role: ${mergedUser['role']}, branch: ${mergedUser['branchId']}');
+          return mergedUser;
         }
       }
     } catch (e) {
-      debugPrint('[LoginPage] Cloud username lookup notice: $e');
+      debugPrint('[LoginPage] Cloud dual-path lookup notice: $e');
     }
 
     // 2. Fallback to local Hive storage (when offline or Firestore didn't find / timed out)
     try {
-      final local = LocalStorageService.findLocalUser(lower);
+      final local = LocalStorageService.findLocalUser(lower) ?? LocalStorageService.findLocalUser(trimmed);
       if (local != null) {
         final email = local['email']?.toString();
         if (email != null && email.isNotEmpty) {
-          debugPrint('[LoginPage] Match from LocalStorageService for: $lower');
+          debugPrint('[LoginPage] Match from LocalStorageService for: $input');
           return {
             ...local,
             'role': _resolveRoleFromMap(local),
@@ -2186,8 +2286,9 @@ class _LoginPageState extends State<LoginPage> {
           final uNameLower = (u['usernameLower']?.toString() ?? '').toLowerCase().trim();
           final name = (u['name']?.toString() ?? '').toLowerCase().trim();
           final email = (u['email']?.toString() ?? '').toLowerCase().trim();
+          final uid = (u['uid']?.toString() ?? u['id']?.toString() ?? '').toLowerCase().trim();
 
-          if (uName == lower || uNameLower == lower || name == lower || email == lower || email.startsWith('$lower@')) {
+          if (uName == lower || uNameLower == lower || name == lower || email == lower || uid == lower || email.startsWith('$lower@')) {
             debugPrint('[LoginPage] Match from local_users Hive for: $lower');
             return {
               ...u,
@@ -2215,7 +2316,8 @@ class _LoginPageState extends State<LoginPage> {
               final d = Map<String, dynamic>.from(qData);
               final uLower = (d['usernameLower'] ?? d['username'] ?? '').toString().toLowerCase().trim();
               final uName = (d['name'] ?? '').toString().toLowerCase().trim();
-              if (uLower == lower || uName == lower) {
+              final uEmail = (d['email'] ?? '').toString().toLowerCase().trim();
+              if (uLower == lower || uName == lower || uEmail == lower) {
                 final em = (d['email'] ?? '').toString().trim();
                 if (em.isNotEmpty) {
                   debugPrint('[LoginPage] Match from sync_queue for: $lower -> $em');
