@@ -438,7 +438,10 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
         for (final raw in box.values) {
           if (raw is Map) {
             final t = Map<String, dynamic>.from(raw);
-            if (t['dateKey'] == today && t['branchId'] == _branchId) {
+            final tB = (t['branchId']?.toString() ?? '').toLowerCase().trim();
+            final activeB = (_branchId ?? '').toLowerCase().trim();
+            final isBranchMatch = tB == activeB || (activeB == 'karachi' && (tB.contains('karachi') || tB == 'saddar' || tB == 'haji'));
+            if (t['dateKey'] == today && isBranchMatch) {
               final n = (t['number'] as num?)?.toInt() ?? 0;
               if (n > 0 && !seenTokenNumbers.add(n)) {
                 // duplicate token number for today, skip it
@@ -575,7 +578,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
 
       final firstNum = tokensList.isNotEmpty ? tokensList.first['number'] : 1;
       final lastNum = tokensList.isNotEmpty ? tokensList.last['number'] : quantity;
-      final batchId = 'dst_batch_${_branchId}_${today}_${firstNum}_$lastNum';
+      final batchId = 'dst_batch_${_branchId}_${today}_${firstNum}_${lastNum}_${DateTime.now().millisecondsSinceEpoch}';
 
       // ── STEP 2: Send to LAN Server (if connected) ──────────────────────
       final isLanConnected = RealtimeManager().isConnected;
@@ -647,6 +650,8 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
                       : FieldValue.serverTimestamp(),
                   'issuedBy': t['issuedBy'] ?? '',
                   'localId': tokenId,
+                  'branchId': _branchId,
+                  'dateKey': today,
                 }, SetOptions(merge: true));
               }
             }
@@ -654,6 +659,9 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
               'totalTokens': FieldValue.increment(quantity),
               'session_${_selectedSession}_total': FieldValue.increment(quantity),
               'lastUpdated': FieldValue.serverTimestamp(),
+              'date': today,
+              'dateKey': today,
+              'branchId': _branchId,
             }, SetOptions(merge: true));
             unawaited(batch.commit().catchError((_) {}));
           }
@@ -944,7 +952,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
         for (final entry in byDate.entries) {
           final firstNum = entry.value.isNotEmpty ? (entry.value.first['number'] ?? '') : '';
           final lastNum = entry.value.isNotEmpty ? (entry.value.last['number'] ?? '') : '';
-          final batchId = 'dst_backfill_${_branchId}_${entry.key}_${firstNum}_$lastNum';
+          final batchId = 'dst_backfill_${_branchId}_${entry.key}_${firstNum}_${lastNum}_${DateTime.now().millisecondsSinceEpoch}';
           await LocalStorageService.enqueueSync({
             'type': 'save_dasterkhwan_tokens',
             'entityId': batchId,

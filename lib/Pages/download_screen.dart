@@ -2,6 +2,7 @@
 // Note: excel package aliased as 'xl' to avoid Border conflict with Flutter
 
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:excel/excel.dart' as xl;
@@ -11,10 +12,12 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../services/local_storage_service.dart';
+import '../services/finance_local_storage.dart';
 import 'school/utils/school_local_storage.dart';
 import '../theme/role_theme_provider.dart';
 import '../theme/app_theme.dart';
 import '../design/design_system.dart';
+import '../widgets/file_action_helper.dart';
 
 // ─── Date Filter Mode ────────────────────────────────────────────────────────
 enum DateFilterMode { allTime, singleDay, dateRange }
@@ -718,14 +721,46 @@ class _DownloadScreenState extends State<DownloadScreen>
 
       // ── 8. HR & PAYROLL ──
       if (hasHR) {
+        final seenEmpMap = <String, Map<String, dynamic>>{};
+
+        // A. Load local Hive records first (instant and offline-ready)
+        final localHr = FinanceLocalStorage.getEmployees(bid);
+        for (final emp in localHr) {
+          if (FinanceLocalStorage.isExecutiveEmployee(emp)) continue;
+          final key = (emp['cnic'] ?? emp['localId'] ?? emp['id'] ?? '').toString().trim();
+          if (key.isNotEmpty) {
+            seenEmpMap[key] = {
+              ...emp,
+              'id': emp['localId'] ?? emp['id'],
+              'branchId': bid,
+              'department': FinanceLocalStorage.normalizeDepartment(emp['department']?.toString()),
+              'camp': FinanceLocalStorage.getEmployeeCamp(emp),
+            };
+          }
+        }
+
+        // B. Query Firestore if online
         try {
-          final snap = await db.collection('branches').doc(bid).collection('employees').get();
+          final snap = await db.collection('branches').doc(bid).collection('employees').get().timeout(const Duration(seconds: 4));
           for (final doc in snap.docs) {
-            final d = doc.data(); d['id'] = doc.id; d['branchId'] = bid;
-            allEmployees.add(_sanitizeForJson(d)); employees++;
+            final d = doc.data();
+            d['id'] = doc.id;
+            d['branchId'] = bid;
+            if (FinanceLocalStorage.isExecutiveEmployee(d)) continue;
+            final key = (d['cnic'] ?? d['id'] ?? '').toString().trim();
+            if (key.isNotEmpty && !seenEmpMap.containsKey(key)) {
+              seenEmpMap[key] = {
+                ...d,
+                'department': FinanceLocalStorage.normalizeDepartment(d['department']?.toString()),
+                'camp': FinanceLocalStorage.getEmployeeCamp(d),
+              };
+            }
           }
         } catch (_) {}
-        _addUniqueRecords(allEmployees, _getHiveData(LocalStorageService.employeesBox, bid), 'id');
+
+        for (final emp in seenEmpMap.values) {
+          allEmployees.add(_sanitizeForJson(emp));
+        }
         employees = allEmployees.length;
 
         try {
@@ -920,20 +955,38 @@ class _DownloadScreenState extends State<DownloadScreen>
           : _availableBranches.firstWhere((b) => b['id'] == _selectedBranch, orElse: () => {'name': _selectedBranch ?? 'Unknown'})['name']!.toLowerCase();
       final fileName = 'backup_${branchStr}_${rangeStr}_$dateStr.json';
 
-      final result = await FilePicker.platform.saveFile(
-        dialogTitle: 'Save JSON Backup',
-        fileName: fileName,
-        bytes: jsonBytes,
-        type: FileType.custom,
-        allowedExtensions: ['json'],
-      );
-      if (result != null) {
-        Clipboard.setData(ClipboardData(text: result));
-        _showSnack(
-            '✓ JSON Backup saved — $totalRecords total records across ${_selectedCategories.length} modules\n$result',
-            color: t.accent);
+      String? savePath;
+      try {
+        savePath = await FilePicker.platform.saveFile(
+          dialogTitle: 'Save JSON Backup',
+          fileName: fileName,
+          bytes: jsonBytes,
+          type: FileType.custom,
+          allowedExtensions: ['json'],
+        );
+      } catch (_) {}
+
+      if (savePath != null && savePath.isNotEmpty) {
+        try {
+          final file = File(savePath);
+          await file.writeAsBytes(jsonBytes, flush: true);
+        } catch (_) {}
       } else {
-        _showSnack('Cancelled', color: Colors.orange.shade700);
+        savePath = await FileActionHelper.getTempFilePath(fileName, jsonBytes);
+      }
+
+      if (mounted) {
+        Clipboard.setData(ClipboardData(text: savePath));
+        _showSnack(
+            '✓ JSON Backup saved — $totalRecords total records across ${_selectedCategories.length} modules\n$savePath',
+            color: t.accent);
+        FileActionHelper.showFileOptions(
+          context,
+          filePath: savePath,
+          bytes: jsonBytes,
+          fileName: fileName,
+          title: 'JSON Backup Ready',
+        );
       }
     } catch (e) {
       _showSnack('JSON failed: $e', color: t.danger);
@@ -1020,20 +1073,38 @@ class _DownloadScreenState extends State<DownloadScreen>
           : _availableBranches.firstWhere((b) => b['id'] == _selectedBranch, orElse: () => {'name': _selectedBranch ?? 'Unknown'})['name']!.toLowerCase();
       final fileName = 'backup_${branchStr}_${rangeStr}_$dateStr.xlsx';
 
-      final result = await FilePicker.platform.saveFile(
-        dialogTitle: 'Save Excel Backup',
-        fileName: fileName,
-        bytes: excelBytes,
-        type: FileType.custom,
-        allowedExtensions: ['xlsx'],
-      );
-      if (result != null) {
-        Clipboard.setData(ClipboardData(text: result));
-        _showSnack(
-            '✓ Excel Backup saved — ${data.length} sheets, $totalRecords total rows\n$result',
-            color: const Color(0xFF2E7D32));
+      String? savePath;
+      try {
+        savePath = await FilePicker.platform.saveFile(
+          dialogTitle: 'Save Excel Backup',
+          fileName: fileName,
+          bytes: excelBytes,
+          type: FileType.custom,
+          allowedExtensions: ['xlsx'],
+        );
+      } catch (_) {}
+
+      if (savePath != null && savePath.isNotEmpty) {
+        try {
+          final file = File(savePath);
+          await file.writeAsBytes(excelBytes, flush: true);
+        } catch (_) {}
       } else {
-        _showSnack('Cancelled', color: Colors.orange.shade700);
+        savePath = await FileActionHelper.getTempFilePath(fileName, excelBytes);
+      }
+
+      if (mounted) {
+        Clipboard.setData(ClipboardData(text: savePath));
+        _showSnack(
+            '✓ Excel Backup saved — ${data.length} sheets, $totalRecords total rows\n$savePath',
+            color: const Color(0xFF2E7D32));
+        FileActionHelper.showFileOptions(
+          context,
+          filePath: savePath,
+          bytes: excelBytes,
+          fileName: fileName,
+          title: 'Excel Backup Ready',
+        );
       }
     } catch (e) {
       _showSnack('Excel failed: $e', color: Colors.red);

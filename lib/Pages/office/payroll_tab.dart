@@ -71,21 +71,42 @@ class _PayrollTabState extends State<PayrollTab> {
 
   Future<void> _runPayrollCalculation() async {
     if (!mounted) return;
-    setState(() => _isCalculating = true);
+    // 1. Immediately calculate and render from local cache with 0ms blocking
     try {
-      final res = await PayrollCalculatorService().calculatePayroll(
+      final cachedRes = await PayrollCalculatorService().calculatePayroll(
         branchId: widget.branchId,
         monthKey: widget.monthKey,
       );
-      if (!mounted) return;
-      setState(() {
-        _calculatedPayroll = res;
-        _isCalculating = false;
-      });
-    } catch (e) {
-      if (!mounted) return;
-      setState(() => _isCalculating = false);
+      if (mounted && cachedRes.isNotEmpty) {
+        setState(() {
+          _calculatedPayroll = cachedRes;
+          _isCalculating = false;
+        });
+      } else if (mounted) {
+        setState(() => _isCalculating = true);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isCalculating = true);
     }
+
+    // 2. Fetch fresh network updates in background without freezing UI
+    Future.microtask(() async {
+      try {
+        await FinanceLocalStorage.downloadAttendance(widget.branchId, monthKey: widget.monthKey);
+        final freshRes = await PayrollCalculatorService().calculatePayroll(
+          branchId: widget.branchId,
+          monthKey: widget.monthKey,
+        );
+        if (mounted) {
+          setState(() {
+            _calculatedPayroll = freshRes;
+            _isCalculating = false;
+          });
+        }
+      } catch (e) {
+        if (mounted) setState(() => _isCalculating = false);
+      }
+    });
   }
 
   @override
@@ -603,6 +624,7 @@ class _PayrollTabState extends State<PayrollTab> {
                               'name': item['empName'] ?? item['employeeName'] ?? 'Staff',
                               'role': item['empRole'] ?? 'Employee',
                               'department': item['empDepartment'] ?? deptName,
+                              'camp': item['empCamp'] ?? '',
                               'localId': empId,
                               'isActive': item['empIsActive'] ?? true,
                               'branchId': item['empBranchId'] ?? branchId,
@@ -651,6 +673,9 @@ class _PayrollTabState extends State<PayrollTab> {
                               advance: _asNumDouble(item['advanceInstallment']),
                               isExpanded: isExpanded,
                               payouts: payouts,
+                              presentDates: (item['presentDates'] as List?) ?? const [],
+                              absentDates: (item['absentDates'] as List?) ?? const [],
+                              paidLeaveDates: (item['paidLeaveDates'] as List?) ?? const [],
                             ));
                           } catch (e, stack) {
                             debugPrint('[PayrollTab] Error rendering employee row: $e\n$stack');
@@ -725,6 +750,9 @@ class _PayrollTabState extends State<PayrollTab> {
     required double advance,
     required bool isExpanded,
     required List payouts,
+    required List presentDates,
+    required List absentDates,
+    required List paidLeaveDates,
   }) {
     final name = emp['name']?.toString() ?? '';
     final role = emp['role']?.toString() ?? '';
@@ -768,7 +796,41 @@ class _PayrollTabState extends State<PayrollTab> {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(name, style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 14), overflow: TextOverflow.ellipsis),
-                                  Text('$role • $dept', style: TextStyle(color: t.textSecondary, fontSize: 11), overflow: TextOverflow.ellipsis),
+                                  Row(
+                                    children: [
+                                      Flexible(
+                                        child: Text('$role • $dept', style: TextStyle(color: t.textSecondary, fontSize: 11), overflow: TextOverflow.ellipsis),
+                                      ),
+                                      if (emp['camp'] != null && emp['camp'].toString().isNotEmpty) ...[
+                                        const SizedBox(width: 6),
+                                        Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
+                                          decoration: BoxDecoration(
+                                            color: emp['camp'].toString().contains('Haji')
+                                                ? const Color(0xFF0284C7).withOpacity(0.12)
+                                                : const Color(0xFF059669).withOpacity(0.12),
+                                            borderRadius: BorderRadius.circular(4),
+                                            border: Border.all(
+                                              color: emp['camp'].toString().contains('Haji')
+                                                  ? const Color(0xFF0284C7)
+                                                  : const Color(0xFF059669),
+                                              width: 0.8,
+                                            ),
+                                          ),
+                                          child: Text(
+                                            emp['camp'].toString(),
+                                            style: TextStyle(
+                                              fontSize: 9.5,
+                                              fontWeight: FontWeight.bold,
+                                              color: emp['camp'].toString().contains('Haji')
+                                                  ? const Color(0xFF0369A1)
+                                                  : const Color(0xFF047857),
+                                            ),
+                                          ),
+                                        ),
+                                      ],
+                                    ],
+                                  ),
                                 ],
                               ),
                             ),
@@ -853,6 +915,54 @@ class _PayrollTabState extends State<PayrollTab> {
                             '${totalEmployedDays < totalDays ? "Contract: $totalEmployedDays/$totalDays days" : "Full Month ($totalDays days)"} • Pay for $paidDaysStr days • worked ${_formatDayCount(workingDays)} d • ${_formatDayCount(absentDays)} abs • ${_formatDayCount(unpaidLeaves)} unpaid lv${sundayOvertimeDays > 0 ? " • sun OT: ${_formatDayCount(sundayOvertimeDays)}" : ""}',
                             style: TextStyle(color: t.textTertiary, fontSize: 11),
                           ),
+                          if (absentDates.isNotEmpty) ...[
+                            const SizedBox(height: 6),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Icon(Icons.cancel_outlined, size: 13, color: Colors.redAccent),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    'Absent on: ${FinanceLocalStorage.formatDayRanges(absentDates)}',
+                                    style: const TextStyle(color: Colors.redAccent, fontSize: 11, fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                          if (paidLeaveDates.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Icon(Icons.event_busy_outlined, size: 13, color: Colors.orangeAccent),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    'Leave on: ${FinanceLocalStorage.formatDayRanges(paidLeaveDates)}',
+                                    style: const TextStyle(color: Colors.orangeAccent, fontSize: 11, fontWeight: FontWeight.w600),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                          if (presentDates.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Icon(Icons.check_circle_outline, size: 13, color: Colors.green),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Text(
+                                    'Present on: ${FinanceLocalStorage.formatDayRanges(presentDates)}',
+                                    style: TextStyle(color: t.textSecondary, fontSize: 11),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                           if (!isPaid && totalEmployedDays < totalDays) ...[
                             const SizedBox(height: 4),
                             Text('Salary Rate: PKR ${_fmtCurrency((emp['currentSalary'] as num?)?.toDouble() ?? 0.0)}', style: TextStyle(color: t.textTertiary, fontSize: 11)),

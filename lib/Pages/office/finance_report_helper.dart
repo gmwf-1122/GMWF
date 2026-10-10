@@ -1,5 +1,3 @@
-// lib/pages/office/finance_report_helper.dart
-
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -10,17 +8,176 @@ import 'package:file_picker/file_picker.dart';
 import 'package:intl/intl.dart';
 import 'package:collection/collection.dart';
 import 'package:hive_flutter/hive_flutter.dart';
+import 'package:path_provider/path_provider.dart';
 
 import 'package:flutter/material.dart';
 import '../../widgets/file_action_helper.dart';
 import '../../services/finance_local_storage.dart';
 import '../../services/finance_expenses_storage.dart';
-import '../../services/local_storage_service.dart';
 
 class FinanceReportHelper {
   // Helper to format currency
   static String _fmtCurrency(double amt) {
-    return NumberFormat('#,###').format(amt);
+    if (amt == 0) return '0';
+    return NumberFormat('#,##0').format(amt);
+  }
+
+  static pw.ImageProvider? _cachedLogo;
+
+  /// Loads the official GMWF logo for inclusion in PDF document headers
+  static Future<pw.ImageProvider?> _loadGmwfLogo() async {
+    if (_cachedLogo != null) return _cachedLogo;
+    try {
+      final data = await rootBundle.load('assets/logo/gmwf-1.png');
+      final bytes = data.buffer.asUint8List();
+      _cachedLogo = pw.MemoryImage(bytes);
+      return _cachedLogo;
+    } catch (e) {
+      debugPrint('[FinanceReportHelper] Failed to load gmwf-1.png: $e, trying webp');
+      try {
+        final data = await rootBundle.load('assets/logo/gmwf-1.webp');
+        final bytes = data.buffer.asUint8List();
+        _cachedLogo = pw.MemoryImage(bytes);
+        return _cachedLogo;
+      } catch (_) {
+        return null;
+      }
+    }
+  }
+
+  /// Converts month key like '2026-10' to readable 'October 2026'
+  static String _formatMonthKeyFull(String monthKey) {
+    try {
+      final parts = monthKey.split('-');
+      if (parts.length >= 2) {
+        final yr = int.tryParse(parts[0]);
+        final mo = int.tryParse(parts[1]);
+        if (yr != null && mo != null) {
+          final dt = DateTime(yr, mo);
+          return DateFormat('MMMM yyyy').format(dt);
+        }
+      }
+    } catch (_) {}
+    return monthKey;
+  }
+
+  /// Clean, easily understandable attendance text for PDF cells
+  static String _formatCleanAttendance({
+    required double pCount,
+    required double aCount,
+    required double lCount,
+    required List absentDates,
+    required List leaveDates,
+  }) {
+    final pStr = (pCount % 1 == 0) ? '${pCount.toInt()}' : pCount.toStringAsFixed(1);
+    final aStr = (aCount % 1 == 0) ? '${aCount.toInt()}' : aCount.toStringAsFixed(1);
+    final lStr = (lCount % 1 == 0) ? '${lCount.toInt()}' : lCount.toStringAsFixed(1);
+
+    final buffer = StringBuffer();
+    buffer.write('$pStr Present');
+
+    if (aCount > 0) {
+      buffer.write('\n$aStr Absent');
+      if (absentDates.isNotEmpty) {
+        buffer.write(' (${FinanceLocalStorage.formatDayRanges(absentDates)})');
+      }
+    } else {
+      buffer.write(' • 0 Absent');
+    }
+
+    if (lCount > 0) {
+      buffer.write('\n$lStr Leave');
+      if (leaveDates.isNotEmpty) {
+        buffer.write(' (${FinanceLocalStorage.formatDayRanges(leaveDates)})');
+      }
+    }
+
+    return buffer.toString();
+  }
+
+  static pw.Widget _buildKpiCard(String title, String value, PdfColor valueColor, {bool isHighlight = false}) {
+    return pw.Container(
+      padding: isHighlight ? const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 4) : pw.EdgeInsets.zero,
+      decoration: isHighlight
+          ? pw.BoxDecoration(
+              color: const PdfColor.fromInt(0xFFE0F2F1),
+              borderRadius: pw.BorderRadius.circular(4),
+              border: pw.Border.all(color: const PdfColor.fromInt(0xFF00695C), width: 0.8),
+            )
+          : null,
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.center,
+        children: [
+          pw.Text(title, style: const pw.TextStyle(fontSize: 7.5, color: PdfColors.grey700)),
+          pw.SizedBox(height: 2),
+          pw.Text(value, style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold, color: valueColor)),
+        ],
+      ),
+    );
+  }
+
+  static pw.Widget _buildSignatureLine(String label, String designation) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.center,
+      children: [
+        pw.SizedBox(height: 20),
+        pw.Container(
+          width: 140,
+          decoration: const pw.BoxDecoration(
+            border: pw.Border(top: pw.BorderSide(color: PdfColors.grey600, width: 0.8)),
+          ),
+        ),
+        pw.SizedBox(height: 3),
+        pw.Text(label, style: pw.TextStyle(fontSize: 8, fontWeight: pw.FontWeight.bold, color: PdfColors.grey800)),
+        pw.Text(designation, style: const pw.TextStyle(fontSize: 7, color: PdfColors.grey600)),
+      ],
+    );
+  }
+
+  /// Fast file picker on desktop that defaults to local Downloads/Documents directory
+  /// to avoid Microsoft OneDrive / cloud folder network sync freezing on Desktop.
+  static Future<String?> pickSavePathFast({
+    required String dialogTitle,
+    required String fileName,
+    required List<String> allowedExtensions,
+    Uint8List? bytes,
+  }) async {
+    String? initialDir;
+    if (Platform.isWindows) {
+      try {
+        final downloads = await getDownloadsDirectory();
+        if (downloads != null && downloads.existsSync()) {
+          initialDir = downloads.path;
+        } else {
+          final docs = await getApplicationDocumentsDirectory();
+          if (docs.existsSync()) initialDir = docs.path;
+        }
+      } catch (_) {}
+    }
+
+    String? path;
+    try {
+      path = await FilePicker.platform.saveFile(
+        dialogTitle: dialogTitle,
+        fileName: fileName,
+        initialDirectory: initialDir,
+        bytes: bytes,
+        type: FileType.custom,
+        allowedExtensions: allowedExtensions,
+      );
+    } catch (e) {
+      debugPrint('[FinanceReportHelper] pickSavePathFast error: $e');
+    }
+
+    if (path != null && bytes != null && bytes.isNotEmpty) {
+      try {
+        final file = File(path);
+        await file.writeAsBytes(bytes, flush: true);
+      } catch (e) {
+        debugPrint('[FinanceReportHelper] writeAsBytes error: $e');
+      }
+    }
+    return path;
   }
 
   // ── 1. Individual Employee PDF Report ──────────────────────────────────────
@@ -41,6 +198,9 @@ class FinanceReportHelper {
       final history = FinanceLocalStorage.getSalaryHistory(employeeId);
       final transfers = FinanceLocalStorage.getTransfersForEmployee(employeeId);
 
+      // Load official GMWF Logo
+      final logoImage = await _loadGmwfLogo();
+
       // Create PDF Document
       final pdf = pw.Document();
 
@@ -52,36 +212,57 @@ class FinanceReportHelper {
             // Header
             pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
               children: [
-                pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                pw.Row(
+                  crossAxisAlignment: pw.CrossAxisAlignment.center,
                   children: [
-                    pw.Text('GULAB DEVI MEMORIAL WELFARE FOUNDATION',
-                        style: pw.TextStyle(
-                            fontSize: 12, fontWeight: pw.FontWeight.bold)),
-                    pw.Text('EMPLOYEE DOSSIER & RECORD SHEET',
-                        style: pw.TextStyle(
-                            fontSize: 16,
-                            fontWeight: pw.FontWeight.bold,
-                            color: PdfColors.teal)),
+                    if (logoImage != null) ...[
+                      pw.Container(
+                        width: 44,
+                        height: 44,
+                        decoration: pw.BoxDecoration(
+                          shape: pw.BoxShape.circle,
+                          border: pw.Border.all(color: const PdfColor.fromInt(0xFF00695C), width: 1.2),
+                        ),
+                        padding: const pw.EdgeInsets.all(2),
+                        child: pw.ClipOval(
+                          child: pw.Image(logoImage, fit: pw.BoxFit.contain),
+                        ),
+                      ),
+                      pw.SizedBox(width: 12),
+                    ],
+                    pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text('GULZAR MADINA WELFARE FOUNDATION',
+                            style: pw.TextStyle(
+                                fontSize: 11, fontWeight: pw.FontWeight.bold, color: const PdfColor.fromInt(0xFF004D40))),
+                        pw.Text('EMPLOYEE DOSSIER & RECORD SHEET',
+                            style: pw.TextStyle(
+                                fontSize: 15,
+                                fontWeight: pw.FontWeight.bold,
+                                color: const PdfColor.fromInt(0xFF00796B))),
+                      ],
+                    ),
                   ],
                 ),
                 pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.end,
                   children: [
                     pw.Text('Generated: ${DateFormat('yyyy-MM-dd').format(DateTime.now())}',
-                        style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey)),
+                        style: const pw.TextStyle(fontSize: 8.5, color: PdfColors.grey700)),
                     pw.Text('Status: ${emp['status']?.toString().toUpperCase() ?? 'ACTIVE'}',
                         style: pw.TextStyle(
                             fontSize: 9,
                             fontWeight: pw.FontWeight.bold,
-                            color: emp['isActive'] == true ? PdfColors.green : PdfColors.red)),
+                            color: emp['isActive'] == true ? PdfColors.green700 : PdfColors.red700)),
                   ],
                 ),
               ],
             ),
             pw.SizedBox(height: 10),
-            pw.Divider(thickness: 1, color: PdfColors.grey300),
+            pw.Divider(thickness: 1, color: const PdfColor.fromInt(0xFF00695C)),
             pw.SizedBox(height: 14),
 
             // Profile Summary Grid
@@ -167,11 +348,10 @@ class FinanceReportHelper {
       final dateStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
       final safeName = name.replaceAll(RegExp(r'[^\w\s\-]'), '').replaceAll(' ', '_').toLowerCase();
 
-      await FilePicker.platform.saveFile(
+      await pickSavePathFast(
         dialogTitle: 'Save Employee PDF Profile',
         fileName: 'dossier_${safeName}_$dateStr.pdf',
         bytes: pdfBytes,
-        type: FileType.custom,
         allowedExtensions: ['pdf'],
       );
     } catch (_) {}
@@ -254,6 +434,9 @@ class FinanceReportHelper {
         }
       }
 
+      // Load official GMWF Logo
+      final logoImage = await _loadGmwfLogo();
+
       // Compile PDF
       final pdf = pw.Document();
 
@@ -265,29 +448,54 @@ class FinanceReportHelper {
             // Header
             pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
               children: [
-                pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                pw.Row(
+                  crossAxisAlignment: pw.CrossAxisAlignment.center,
                   children: [
-                    pw.Text('GULAB DEVI MEMORIAL WELFARE FOUNDATION',
-                        style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),
-                    pw.Text('EMPLOYEE PAYMENT HISTORY REPORT',
-                        style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold, color: PdfColors.teal700)),
+                    if (logoImage != null) ...[
+                      pw.Container(
+                        width: 44,
+                        height: 44,
+                        decoration: pw.BoxDecoration(
+                          shape: pw.BoxShape.circle,
+                          border: pw.Border.all(color: const PdfColor.fromInt(0xFF00695C), width: 1.2),
+                        ),
+                        padding: const pw.EdgeInsets.all(2),
+                        child: pw.ClipOval(
+                          child: pw.Image(logoImage, fit: pw.BoxFit.contain),
+                        ),
+                      ),
+                      pw.SizedBox(width: 12),
+                    ],
+                    pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text('GULZAR MADINA WELFARE FOUNDATION',
+                            style: pw.TextStyle(
+                                fontSize: 11, fontWeight: pw.FontWeight.bold, color: const PdfColor.fromInt(0xFF004D40))),
+                        pw.Text('EMPLOYEE PAYMENT HISTORY REPORT',
+                            style: pw.TextStyle(
+                                fontSize: 15,
+                                fontWeight: pw.FontWeight.bold,
+                                color: const PdfColor.fromInt(0xFF00796B))),
+                      ],
+                    ),
                   ],
                 ),
                 pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.end,
                   children: [
                     pw.Text('Generated: ${DateFormat('yyyy-MM-dd').format(DateTime.now())}',
-                        style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey)),
+                        style: const pw.TextStyle(fontSize: 8.5, color: PdfColors.grey700)),
                     pw.Text('Branch: ${branchId.toUpperCase()}',
-                        style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold)),
+                        style: pw.TextStyle(fontSize: 9, fontWeight: pw.FontWeight.bold, color: const PdfColor.fromInt(0xFF004D40))),
                   ],
                 ),
               ],
             ),
             pw.SizedBox(height: 10),
-            pw.Divider(thickness: 1, color: PdfColors.grey300),
+            pw.Divider(thickness: 1, color: const PdfColor.fromInt(0xFF00695C)),
             pw.SizedBox(height: 14),
 
             // Profile Summary Grid
@@ -417,11 +625,10 @@ class FinanceReportHelper {
       final dateStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
       final safeName = name.replaceAll(RegExp(r'[^\w\s\-]'), '').replaceAll(' ', '_').toLowerCase();
 
-      await FilePicker.platform.saveFile(
+      await pickSavePathFast(
         dialogTitle: 'Save Employee Payment Report',
         fileName: 'payment_report_${safeName}_$dateStr.pdf',
         bytes: pdfBytes,
-        type: FileType.custom,
         allowedExtensions: ['pdf'],
       );
     } catch (_) {}
@@ -451,6 +658,9 @@ class FinanceReportHelper {
       final outstandingMinor = (principalMinor - paidMinor).clamp(0, 9999999999);
       final isClosed = loan['status'] == 'closed' || outstandingMinor <= 0;
 
+      // Load official GMWF Logo
+      final logoImage = await _loadGmwfLogo();
+
       final pdf = pw.Document();
 
       pdf.addPage(
@@ -461,33 +671,58 @@ class FinanceReportHelper {
             // Header
             pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
               children: [
-                pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                pw.Row(
+                  crossAxisAlignment: pw.CrossAxisAlignment.center,
                   children: [
-                    pw.Text('GULAB DEVI MEMORIAL WELFARE FOUNDATION',
-                        style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),
-                    pw.Text('LOAN & REPAYMENT STATEMENT',
-                        style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold, color: PdfColors.teal700)),
+                    if (logoImage != null) ...[
+                      pw.Container(
+                        width: 44,
+                        height: 44,
+                        decoration: pw.BoxDecoration(
+                          shape: pw.BoxShape.circle,
+                          border: pw.Border.all(color: const PdfColor.fromInt(0xFF00695C), width: 1.2),
+                        ),
+                        padding: const pw.EdgeInsets.all(2),
+                        child: pw.ClipOval(
+                          child: pw.Image(logoImage, fit: pw.BoxFit.contain),
+                        ),
+                      ),
+                      pw.SizedBox(width: 12),
+                    ],
+                    pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text('GULZAR MADINA WELFARE FOUNDATION',
+                            style: pw.TextStyle(
+                                fontSize: 11, fontWeight: pw.FontWeight.bold, color: const PdfColor.fromInt(0xFF004D40))),
+                        pw.Text('LOAN & REPAYMENT STATEMENT',
+                            style: pw.TextStyle(
+                                fontSize: 15,
+                                fontWeight: pw.FontWeight.bold,
+                                color: const PdfColor.fromInt(0xFF00796B))),
+                      ],
+                    ),
                   ],
                 ),
                 pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.end,
                   children: [
                     pw.Text('Generated: ${DateFormat('yyyy-MM-dd').format(DateTime.now())}',
-                        style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey)),
+                        style: const pw.TextStyle(fontSize: 8.5, color: PdfColors.grey700)),
                     pw.Text('Status: ${isClosed ? "PAID OFF / CLOSED" : "ACTIVE LOAN"}',
                         style: pw.TextStyle(
                           fontSize: 9,
                           fontWeight: pw.FontWeight.bold,
-                          color: isClosed ? PdfColors.green : PdfColors.orange,
+                          color: isClosed ? PdfColors.green700 : PdfColors.orange800,
                         )),
                   ],
                 ),
               ],
             ),
             pw.SizedBox(height: 10),
-            pw.Divider(thickness: 1, color: PdfColors.grey300),
+            pw.Divider(thickness: 1, color: const PdfColor.fromInt(0xFF00695C)),
             pw.SizedBox(height: 14),
 
             // Profile Summary Grid
@@ -583,11 +818,10 @@ class FinanceReportHelper {
       final dateStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
       final safeName = empName.replaceAll(RegExp(r'[^\w\s\-]'), '').replaceAll(' ', '_').toLowerCase();
 
-      await FilePicker.platform.saveFile(
+      await pickSavePathFast(
         dialogTitle: 'Save Loan Statement PDF',
         fileName: 'loan_statement_${safeName}_$dateStr.pdf',
         bytes: pdfBytes,
-        type: FileType.custom,
         allowedExtensions: ['pdf'],
       );
     } catch (_) {}
@@ -617,16 +851,351 @@ class FinanceReportHelper {
     );
   }
 
-  // ── 2. Excel Monthly Payroll & Attendance Sheet (Branch / Department) ──────
+  // ── 1d. Individual Employee Monthly Attendance Calendar PDF ───────────────────
+  static Future<Map<String, dynamic>?> exportAttendanceCalendarPdf({
+    required String employeeId,
+    required String monthKey,
+    BuildContext? context,
+  }) async {
+    try {
+      final emp = FinanceLocalStorage.getEmployee(employeeId);
+      if (emp == null) throw Exception('Employee not found');
+
+      final logoImage = await _loadGmwfLogo();
+
+      final name = emp['name']?.toString() ?? 'Employee';
+      final pin = (emp['biometricPin'] ?? emp['pin'] ?? '').toString().trim();
+      final role = emp['role']?.toString() ?? 'Staff';
+      final dept = emp['department']?.toString() ?? 'General';
+      final branchId = emp['branchId']?.toString() ?? 'HQ';
+      final camp = FinanceLocalStorage.getEmployeeCamp(emp);
+
+      final summary = FinanceLocalStorage.getPayrollAttendanceSummary(employeeId, monthKey);
+      final presentDays = (summary['workingDays'] as num?)?.toDouble() ?? 0.0;
+      final absentDays = (summary['absentDays'] as num?)?.toDouble() ?? 0.0;
+      final lateDays = (summary['lateDays'] as num?)?.toDouble() ?? 0.0;
+      final paidLeaves = (summary['paidLeaves'] as num?)?.toDouble() ?? 0.0;
+      final unpaidLeaves = (summary['unpaidLeaves'] as num?)?.toDouble() ?? 0.0;
+      final totalLeaves = paidLeaves + unpaidLeaves;
+      final holidayCount = (summary['holidayCount'] as num?)?.toInt() ?? 0;
+      final totalEmployed = (summary['totalEmployedDays'] as num?)?.toInt() ?? 0;
+      final pct = totalEmployed > 0 ? (presentDays / totalEmployed * 100) : 0.0;
+
+      final dailyStatus = (summary['dailyStatus'] as Map?)?.cast<int, Map<String, dynamic>>() ?? <int, Map<String, dynamic>>{};
+
+      final parts = monthKey.split('-');
+      final yr = int.parse(parts[0]);
+      final mo = int.parse(parts[1]);
+      final daysInMonth = FinanceLocalStorage.getDaysInMonth(monthKey);
+
+      final pdf = pw.Document();
+
+      final List<List<String>> ledgerRows = [];
+
+      for (var d = 1; d <= daysInMonth; d++) {
+        final date = DateTime(yr, mo, d);
+        final dateStr = DateFormat('dd MMM yyyy (EEE)').format(date);
+        final st = dailyStatus[d] ?? {};
+        final statusRaw = st['status']?.toString().toLowerCase() ?? '';
+        final isSunday = date.weekday == DateTime.sunday;
+        final isHoliday = st['isHoliday'] == true;
+
+        String statusLabel = '—';
+        if (statusRaw == 'present') {
+          statusLabel = 'Present';
+        } else if (statusRaw == 'late') {
+          statusLabel = 'Late';
+        } else if (statusRaw == 'leave' || statusRaw == 'paid_leave' || statusRaw == 'half_day') {
+          statusLabel = 'On Leave';
+        } else if (statusRaw == 'absent') {
+          statusLabel = 'Absent';
+        } else if (isHoliday) {
+          statusLabel = 'Holiday';
+        } else if (isSunday) {
+          statusLabel = 'Sunday Off';
+        }
+
+        final inTime = st['checkInTime']?.toString() ?? '';
+        final outTime = st['checkOutTime']?.toString() ?? '';
+        final isRunning = st['isRunning'] == true;
+        final rawDur = st['workDurationFormatted']?.toString() ?? '';
+
+        String timeDisplay = '—';
+        if (inTime.isNotEmpty) {
+          if (isRunning) {
+            timeDisplay = '$inTime (Running)';
+          } else if (outTime.isNotEmpty) {
+            timeDisplay = '$inTime - $outTime';
+          } else {
+            timeDisplay = inTime;
+          }
+        }
+
+        String durDisplay = rawDur.isNotEmpty ? rawDur : '—';
+        final notes = st['notes']?.toString() ?? '';
+
+        ledgerRows.add([
+          '$d',
+          dateStr,
+          statusLabel,
+          timeDisplay,
+          durDisplay,
+          notes.isNotEmpty ? notes : (isSunday ? 'Weekly Rest Day' : '—'),
+        ]);
+      }
+
+      pdf.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          margin: const pw.EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+          build: (context) => [
+            // Institutional Header
+            pw.Row(
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
+              children: [
+                if (logoImage != null) ...[
+                  pw.Container(
+                    width: 52,
+                    height: 52,
+                    decoration: pw.BoxDecoration(
+                      shape: pw.BoxShape.circle,
+                      border: pw.Border.all(color: const PdfColor.fromInt(0xFF00695C), width: 1.5),
+                    ),
+                    padding: const pw.EdgeInsets.all(3),
+                    child: pw.ClipOval(
+                      child: pw.Image(logoImage, fit: pw.BoxFit.contain),
+                    ),
+                  ),
+                  pw.SizedBox(width: 14),
+                ],
+                pw.Expanded(
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text(
+                        'GULZAR MADINA WELFARE FOUNDATION',
+                        style: pw.TextStyle(
+                          fontSize: 13,
+                          fontWeight: pw.FontWeight.bold,
+                          color: const PdfColor.fromInt(0xFF004D40),
+                        ),
+                      ),
+                      pw.SizedBox(height: 2),
+                      pw.Text(
+                        'MONTHLY ATTENDANCE STATEMENT & DUTY LOG',
+                        style: pw.TextStyle(
+                          fontSize: 10,
+                          fontWeight: pw.FontWeight.bold,
+                          color: const PdfColor.fromInt(0xFF00796B),
+                        ),
+                      ),
+                      pw.SizedBox(height: 3),
+                      pw.Text(
+                        'Employee: $name ${pin.isNotEmpty ? '(PIN: $pin)' : ''} • Role: $role • Dept: $dept${camp.isNotEmpty ? ' • [$camp]' : ''}',
+                        style: const pw.TextStyle(fontSize: 8.5, color: PdfColors.grey700),
+                      ),
+                    ],
+                  ),
+                ),
+                pw.Container(
+                  padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  decoration: pw.BoxDecoration(
+                    color: const PdfColor.fromInt(0xFFE0F2F1),
+                    borderRadius: pw.BorderRadius.circular(6),
+                    border: pw.Border.all(color: const PdfColor.fromInt(0xFF80CBC4), width: 1),
+                  ),
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                    children: [
+                      pw.Text(
+                        _formatMonthKeyFull(monthKey).toUpperCase(),
+                        style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold, color: const PdfColor.fromInt(0xFF004D40)),
+                      ),
+                      pw.SizedBox(height: 2),
+                      pw.Text(
+                        'Branch: ${branchId.toUpperCase()}',
+                        style: const pw.TextStyle(fontSize: 7.5, color: PdfColors.grey700),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            pw.SizedBox(height: 8),
+            pw.Divider(thickness: 1, color: const PdfColor.fromInt(0xFF00695C)),
+            pw.SizedBox(height: 8),
+
+            // KPI Badges Summary
+            pw.Container(
+              padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: pw.BoxDecoration(
+                color: const PdfColor.fromInt(0xFFF4FBF9),
+                borderRadius: pw.BorderRadius.circular(6),
+                border: pw.Border.all(color: const PdfColor.fromInt(0xFFB2DFDB), width: 0.8),
+              ),
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+                children: [
+                  _buildKpiCard('Present Days', '${presentDays.toInt()} Days', PdfColors.green800),
+                  _buildKpiCard('Late Days', '${lateDays.toInt()} Days', lateDays > 0 ? PdfColors.orange800 : PdfColors.grey700),
+                  _buildKpiCard('Paid / Leaves', '${totalLeaves.toInt()} Days', totalLeaves > 0 ? PdfColors.blue800 : PdfColors.grey700),
+                  _buildKpiCard('Public Holidays', '$holidayCount Days', PdfColors.purple800),
+                  _buildKpiCard('Absent Days', '${absentDays.toInt()} Days', absentDays > 0 ? PdfColors.red800 : PdfColors.grey700),
+                  _buildKpiCard('Duty Fulfillment', '${pct.toStringAsFixed(0)}% (${presentDays.toInt()}/$totalEmployed)', const PdfColor.fromInt(0xFF00695C), isHighlight: true),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 12),
+
+            // Daily Punch Table
+            pw.TableHelper.fromTextArray(
+              border: pw.TableBorder(
+                horizontalInside: const pw.BorderSide(color: PdfColor.fromInt(0xFFCFD8DC), width: 0.5),
+                verticalInside: const pw.BorderSide(color: PdfColor.fromInt(0xFFCFD8DC), width: 0.5),
+                top: const pw.BorderSide(color: PdfColor.fromInt(0xFF004D40), width: 1.2),
+                bottom: const pw.BorderSide(color: PdfColor.fromInt(0xFF004D40), width: 1.2),
+                left: const pw.BorderSide(color: PdfColor.fromInt(0xFF004D40), width: 1.2),
+                right: const pw.BorderSide(color: PdfColor.fromInt(0xFF004D40), width: 1.2),
+              ),
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8, color: PdfColors.white),
+              headerDecoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFF004D40)),
+              headerPadding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+              cellStyle: const pw.TextStyle(fontSize: 7.5),
+              cellPadding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 4.5),
+              rowDecoration: const pw.BoxDecoration(color: PdfColors.white),
+              oddRowDecoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFFF7FAFA)),
+              headers: ['Day', 'Date', 'Status', 'Check-In / Out Times', 'Duty Duration', 'Notes / Remarks'],
+              data: ledgerRows,
+              cellAlignments: {
+                0: pw.Alignment.center,
+                1: pw.Alignment.centerLeft,
+                2: pw.Alignment.center,
+                3: pw.Alignment.center,
+                4: pw.Alignment.center,
+                5: pw.Alignment.centerLeft,
+              },
+              headerAlignments: {
+                0: pw.Alignment.center,
+                1: pw.Alignment.centerLeft,
+                2: pw.Alignment.center,
+                3: pw.Alignment.center,
+                4: pw.Alignment.center,
+                5: pw.Alignment.centerLeft,
+              },
+              columnWidths: {
+                0: const pw.FlexColumnWidth(0.5),
+                1: const pw.FlexColumnWidth(1.8),
+                2: const pw.FlexColumnWidth(1.2),
+                3: const pw.FlexColumnWidth(2.2),
+                4: const pw.FlexColumnWidth(1.4),
+                5: const pw.FlexColumnWidth(2.0),
+              },
+            ),
+            pw.SizedBox(height: 14),
+
+            // Signatures block
+            pw.Container(
+              padding: const pw.EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(color: const PdfColor.fromInt(0xFFCFD8DC), width: 0.5),
+                borderRadius: pw.BorderRadius.circular(4),
+              ),
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  _buildSignatureLine('Employee Signature', name),
+                  _buildSignatureLine('Verified By', 'Admin / HR Manager'),
+                  _buildSignatureLine('Approved By', 'Branch Incharge / Director'),
+                ],
+              ),
+            ),
+          ],
+          footer: (context) => pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text(
+                'Gulzar Madina Welfare Foundation • Official Attendance & Biometric Duty Record',
+                style: const pw.TextStyle(fontSize: 7.5, color: PdfColors.grey600),
+              ),
+              pw.Text(
+                'Page ${context.pageNumber} of ${context.pagesCount}',
+                style: pw.TextStyle(fontSize: 7.5, color: PdfColors.grey700, fontWeight: pw.FontWeight.bold),
+              ),
+            ],
+          ),
+        ),
+      );
+
+      final pdfBytes = await pdf.save();
+      final safeName = name.replaceAll(RegExp(r'[^\w\s\-]'), '').replaceAll(' ', '_').toLowerCase();
+      final fileName = 'attendance_${safeName}_$monthKey.pdf';
+
+      String? path;
+      try {
+        path = await pickSavePathFast(
+          dialogTitle: 'Save Attendance Statement PDF',
+          fileName: fileName,
+          bytes: pdfBytes,
+          allowedExtensions: ['pdf'],
+        );
+      } catch (_) {}
+
+      final result = {'path': path, 'bytes': pdfBytes, 'name': fileName};
+      if (context != null && context.mounted) {
+        FileActionHelper.showFileOptions(
+          context,
+          filePath: path,
+          bytes: pdfBytes,
+          fileName: fileName,
+          title: 'Attendance Statement Ready',
+        );
+      }
+      return result;
+    } catch (e) {
+      debugPrint('[FinanceReportHelper] exportAttendanceCalendarPdf error: $e');
+      return null;
+    }
+  }
+
+  // ── 2. Excel Monthly Payroll & Attendance Sheet (Branch / Department / Camp) ──────
   static Future<Map<String, dynamic>?> exportMonthlyExcel({
     required String branchId,
     required String monthKey,
     String? department,
+    String? camp,
+    List<String>? employeeIds,
     BuildContext? context,
   }) async {
     try {
+      try {
+        await FinanceLocalStorage.downloadAttendance(branchId, monthKey: monthKey, force: false, camp: camp)
+            .timeout(const Duration(seconds: 2));
+      } catch (_) {}
+
       final employees = FinanceLocalStorage.getEmployees(branchId).where((emp) {
-        if (department != null && emp['department'] != department) return false;
+        // Exclude executive level (CEO, Chairman, Directors, etc.)
+        if (FinanceLocalStorage.isExecutiveEmployee(emp)) return false;
+
+        // Filter specific department if requested
+        if (department != null && department.isNotEmpty && department != 'All' && department != 'All Departments') {
+          final d1 = FinanceLocalStorage.normalizeDepartment(emp['department']?.toString());
+          final d2 = FinanceLocalStorage.normalizeDepartment(department);
+          if (d1.toLowerCase() != d2.toLowerCase()) return false;
+        }
+
+        // Filter specific camp if requested
+        if (camp != null && camp.isNotEmpty && camp != 'All' && camp != 'All Camps') {
+          final empCamp = FinanceLocalStorage.getEmployeeCamp(emp);
+          if (empCamp.toLowerCase() != camp.toLowerCase()) return false;
+        }
+
+        // Filter specific people if selected
+        if (employeeIds != null && employeeIds.isNotEmpty) {
+          final id = emp['localId']?.toString() ?? '';
+          final rId = emp['remoteId']?.toString() ?? '';
+          if (!employeeIds.contains(id) && !employeeIds.contains(rId)) return false;
+        }
+
         return true;
       }).toList();
 
@@ -636,13 +1205,17 @@ class FinanceReportHelper {
       final sheet = excel['Payroll Sheet'];
 
       // Header info
-      sheet.appendRow([xl.TextCellValue('GULAB DEVI MEMORIAL WELFARE FOUNDATION')]);
+      sheet.appendRow([xl.TextCellValue('GULZAR MADINA WELFARE FOUNDATION')]);
       sheet.appendRow([xl.TextCellValue('Payroll & Attendance Monthly Sheet')]);
-      sheet.appendRow([
+      final headerMeta = <xl.CellValue>[
         xl.TextCellValue('Branch: ${branchId.toUpperCase()}'),
         xl.TextCellValue('Month: $monthKey'),
-        xl.TextCellValue(department != null ? 'Department: $department' : 'Department: All Departments'),
-      ]);
+        xl.TextCellValue(department != null && department != 'All' && department != 'All Departments' ? 'Department: $department' : 'Department: All Departments'),
+      ];
+      if (camp != null && camp.isNotEmpty && camp != 'All' && camp != 'All Camps') {
+        headerMeta.add(xl.TextCellValue('Camp: $camp'));
+      }
+      sheet.appendRow(headerMeta);
       sheet.appendRow([]); // empty spacing
 
       // Table Headers
@@ -652,12 +1225,16 @@ class FinanceReportHelper {
         'CNIC',
         'Role',
         'Department',
+        'Camp / Location',
         'Joining Date',
         'Status',
         'Base Salary',
         'Present Days',
+        'Present Dates',
         'Absent Days',
+        'Absent Dates',
         'Paid Leaves',
+        'Leave Dates',
         'Unpaid Leaves',
         'Unmarked Days',
         'Earned Base Pay',
@@ -691,27 +1268,44 @@ class FinanceReportHelper {
         2: 18,  // CNIC
         3: 22,  // Role
         4: 18,  // Department
-        5: 15,  // Joining Date
-        6: 12,  // Status
-        7: 15,  // Base Salary
-        8: 12,  // Present Days
-        9: 12,  // Absent Days
-        10: 12, // Paid Leaves
-        11: 12, // Unpaid Leaves
-        12: 14, // Unmarked Days
-        13: 16, // Earned Base Pay
-        14: 16, // Absence Deductions
-        15: 16, // Advance Recovered
-        16: 16, // Holiday Bonus
-        17: 18, // Sunday Overtime Bonus
-        18: 18, // Net Payable Salary
-        19: 16, // Payment Method
-        20: 20, // Bank Name
-        21: 24, // Account / IBAN
+        5: 18,  // Camp / Location
+        6: 15,  // Joining Date
+        7: 12,  // Status
+        8: 15,  // Base Salary
+        9: 12,  // Present Days
+        10: 20, // Present Dates
+        11: 12, // Absent Days
+        12: 18, // Absent Dates
+        13: 12, // Paid Leaves
+        14: 18, // Leave Dates
+        15: 12, // Unpaid Leaves
+        16: 14, // Unmarked Days
+        17: 16, // Earned Base Pay
+        18: 16, // Absence Deductions
+        19: 16, // Advance Recovered
+        20: 16, // Holiday Bonus
+        21: 18, // Sunday Overtime Bonus
+        22: 18, // Net Payable Salary
+        23: 16, // Payment Method
+        24: 20, // Bank Name
+        25: 24, // Account / IBAN
       };
       colWidths.forEach((colIndex, width) {
         sheet.setColumnWidth(colIndex, width);
       });
+
+      final advanceDeductionsByEmp = <String, double>{};
+      for (final val in FinanceLocalStorage.salaryLedgerBox.values) {
+        if (val is Map) {
+          final entry = Map<String, dynamic>.from(val);
+          if (entry['monthKey'] == monthKey && entry['type'] == 'payout' && entry['isVoided'] != true) {
+            final eId = entry['employeeId']?.toString();
+            if (eId != null && !advanceDeductionsByEmp.containsKey(eId)) {
+              advanceDeductionsByEmp[eId] = (entry['advanceDeductions'] as num?)?.toDouble() ?? 0.0;
+            }
+          }
+        }
+      }
 
       // Row Data
       for (final emp in employees) {
@@ -720,25 +1314,13 @@ class FinanceReportHelper {
         final cnic = emp['cnic']?.toString() ?? 'N/A';
         final role = emp['role']?.toString() ?? 'N/A';
         final dept = emp['department']?.toString() ?? 'N/A';
+        final empCamp = FinanceLocalStorage.getEmployeeCamp(emp);
         final joining = emp['joiningDate']?.toString() ?? 'N/A';
         final activeStatus = emp['status']?.toString() ?? 'Active';
 
         final summary = FinanceLocalStorage.getPayrollAttendanceSummary(empId, monthKey);
         final baseSalary = (emp['currentSalary'] as num?)?.toDouble() ?? 0.0;
-
-        double advanceRecovered = 0.0;
-        final monthPayments = FinanceLocalStorage.salaryLedgerBox.values.where((val) {
-          if (val is! Map) return false;
-          final entry = Map<String, dynamic>.from(val);
-          return entry['employeeId'] == empId &&
-              entry['monthKey'] == monthKey &&
-              entry['type'] == 'payout' &&
-              entry['isVoided'] != true;
-        }).toList();
-
-        if (monthPayments.isNotEmpty) {
-          advanceRecovered = (monthPayments.first['advanceDeductions'] as num?)?.toDouble() ?? 0.0;
-        }
+        final advanceRecovered = advanceDeductionsByEmp[empId] ?? 0.0;
 
         final earnedBase = (summary['baseSalaryEarned'] as num?)?.toDouble() ?? 0.0;
         final absenceDed = (summary['absenceDeductions'] as num?)?.toDouble() ?? 0.0;
@@ -753,12 +1335,16 @@ class FinanceReportHelper {
           xl.TextCellValue(cnic),
           xl.TextCellValue(role),
           xl.TextCellValue(dept),
+          xl.TextCellValue(empCamp.isNotEmpty ? empCamp : (branchId.toLowerCase().contains('karachi') ? 'Main Branch' : '-')),
           xl.TextCellValue(joining),
           xl.TextCellValue(activeStatus),
           xl.DoubleCellValue(baseSalary),
           xl.DoubleCellValue((summary['workingDays'] as num?)?.toDouble() ?? 0.0),
+          xl.TextCellValue(FinanceLocalStorage.formatDayRanges(summary['presentDates'] as List? ?? [])),
           xl.DoubleCellValue((summary['absentDays'] as num?)?.toDouble() ?? 0.0),
+          xl.TextCellValue(FinanceLocalStorage.formatDayRanges(summary['absentDates'] as List? ?? [])),
           xl.DoubleCellValue((summary['paidLeaves'] as num?)?.toDouble() ?? 0.0),
+          xl.TextCellValue(FinanceLocalStorage.formatDayRanges(summary['paidLeaveDates'] as List? ?? [])),
           xl.DoubleCellValue((summary['unpaidLeaves'] as num?)?.toDouble() ?? 0.0),
           xl.IntCellValue((summary['unmarkedDays'] as num?)?.toInt() ?? 0),
           xl.DoubleCellValue(earnedBase),
@@ -777,15 +1363,14 @@ class FinanceReportHelper {
       final excelBytes = excel.encode() != null ? Uint8List.fromList(excel.encode()!) : Uint8List(0);
       final dateStr = DateFormat('yyyy-MM').format(DateTime.now());
       final deptStr = department != null ? '_${department.toLowerCase()}' : '';
-      final fileName = 'payroll_${branchId}_${monthKey}${deptStr}_$dateStr.xlsx';
+      final fileName = 'payroll_${branchId}_$monthKey${deptStr}_$dateStr.xlsx';
 
       String? path;
       try {
-        path = await FilePicker.platform.saveFile(
+        path = await pickSavePathFast(
           dialogTitle: 'Save Excel Report',
           fileName: fileName,
           bytes: excelBytes,
-          type: FileType.custom,
           allowedExtensions: ['xlsx'],
         );
       } catch (_) {}
@@ -818,7 +1403,7 @@ class FinanceReportHelper {
       excel.rename('Sheet1', 'Summary Overview');
 
       final summarySheet = excel['Summary Overview'];
-      summarySheet.appendRow([xl.TextCellValue('GULAB DEVI MEMORIAL WELFARE FOUNDATION')]);
+      summarySheet.appendRow([xl.TextCellValue('GULZAR MADINA WELFARE FOUNDATION')]);
       summarySheet.appendRow([xl.TextCellValue('CONSOLIDATED ALL-BRANCHES PAYROLL SHEET')]);
       summarySheet.appendRow([xl.TextCellValue('Month context: $monthKey'), xl.TextCellValue('Exported: ${DateTime.now()}')]);
       summarySheet.appendRow([]);
@@ -847,7 +1432,9 @@ class FinanceReportHelper {
         final bName = b['name']?.toString() ?? bId;
         if (bId == 'all' || bId.isEmpty) continue;
 
-        final list = FinanceLocalStorage.getEmployees(bId);
+        final list = FinanceLocalStorage.getEmployees(bId)
+            .where((e) => !FinanceLocalStorage.isExecutiveEmployee(e))
+            .toList();
         final activeList = list.where((e) => e['isActive'] == true).toList();
         final totalBaseSalary = activeList.map((e) => (e['currentSalary'] as num?)?.toDouble() ?? 0.0).sum;
 
@@ -875,6 +1462,7 @@ class FinanceReportHelper {
           'CNIC',
           'Role',
           'Department',
+          'Camp / Location',
           'Status',
           'Joining Date',
           'Current Salary Rate',
@@ -893,22 +1481,25 @@ class FinanceReportHelper {
           2: 18,  // CNIC
           3: 22,  // Role
           4: 18,  // Department
-          5: 12,  // Status
-          6: 15,  // Joining Date
-          7: 20,  // Current Salary Rate
-          8: 20,  // Advance Balance
+          5: 18,  // Camp / Location
+          6: 12,  // Status
+          7: 15,  // Joining Date
+          8: 20,  // Current Salary Rate
+          9: 20,  // Advance Balance
         };
         brColWidths.forEach((colIndex, width) {
           brSheet.setColumnWidth(colIndex, width);
         });
 
         for (final emp in list) {
+          final empCamp = FinanceLocalStorage.getEmployeeCamp(emp);
           brSheet.appendRow([
-            xl.TextCellValue(emp['localId']?.toString().substring(0, 8) ?? 'N/A'),
+            xl.TextCellValue(emp['localId']?.toString().substring(0, min((emp['localId']?.toString() ?? '').length, 8)) ?? 'N/A'),
             xl.TextCellValue(emp['name']?.toString() ?? 'N/A'),
             xl.TextCellValue(emp['cnic']?.toString() ?? 'N/A'),
             xl.TextCellValue(emp['role']?.toString() ?? 'N/A'),
             xl.TextCellValue(emp['department']?.toString() ?? 'N/A'),
+            xl.TextCellValue(empCamp.isNotEmpty ? empCamp : (bId.toLowerCase().contains('karachi') ? 'Main Branch' : '-')),
             xl.TextCellValue(emp['status']?.toString() ?? 'Active'),
             xl.TextCellValue(emp['joiningDate']?.toString() ?? 'N/A'),
             xl.DoubleCellValue((emp['currentSalary'] as num?)?.toDouble() ?? 0.0),
@@ -923,11 +1514,10 @@ class FinanceReportHelper {
 
       String? path;
       try {
-        path = await FilePicker.platform.saveFile(
+        path = await pickSavePathFast(
           dialogTitle: 'Save Consolidated Report',
           fileName: fileName,
           bytes: excelBytes,
-          type: FileType.custom,
           allowedExtensions: ['xlsx'],
         );
       } catch (_) {}
@@ -949,18 +1539,50 @@ class FinanceReportHelper {
     }
   }
 
-  // ── 4. PDF Monthly Payroll & Attendance Sheet (Branch / Department) ────────
+  // ── 4. PDF Monthly Payroll & Attendance Sheet (Branch / Department / Camp) ────────
   static Future<Map<String, dynamic>?> exportMonthlyPdf({
     required String branchId,
     required String monthKey,
     String? department,
+    String? camp,
+    List<String>? employeeIds,
     BuildContext? context,
   }) async {
     try {
+      try {
+        await FinanceLocalStorage.downloadAttendance(branchId, monthKey: monthKey, force: false, camp: camp)
+            .timeout(const Duration(seconds: 2));
+      } catch (_) {}
+
       final employees = FinanceLocalStorage.getEmployees(branchId).where((emp) {
-        if (department != null && emp['department'] != department) return false;
+        // Exclude executive level (CEO, Chairman, Directors, etc.)
+        if (FinanceLocalStorage.isExecutiveEmployee(emp)) return false;
+
+        // Filter specific department if requested
+        if (department != null && department.isNotEmpty && department != 'All' && department != 'All Departments') {
+          final d1 = FinanceLocalStorage.normalizeDepartment(emp['department']?.toString());
+          final d2 = FinanceLocalStorage.normalizeDepartment(department);
+          if (d1.toLowerCase() != d2.toLowerCase()) return false;
+        }
+
+        // Filter specific camp if requested
+        if (camp != null && camp.isNotEmpty && camp != 'All' && camp != 'All Camps') {
+          final empCamp = FinanceLocalStorage.getEmployeeCamp(emp);
+          if (empCamp.toLowerCase() != camp.toLowerCase()) return false;
+        }
+
+        // Filter specific people if selected
+        if (employeeIds != null && employeeIds.isNotEmpty) {
+          final id = emp['localId']?.toString() ?? '';
+          final rId = emp['remoteId']?.toString() ?? '';
+          if (!employeeIds.contains(id) && !employeeIds.contains(rId)) return false;
+        }
+
         return true;
       }).toList();
+
+      // 1. Load official GMWF Logo
+      final logoImage = await _loadGmwfLogo();
 
       final pdf = pw.Document();
 
@@ -969,29 +1591,34 @@ class FinanceReportHelper {
       double totalDeductions = 0.0;
       double totalBonuses = 0.0;
       double totalNet = 0.0;
+      double totalPresentDays = 0.0;
+      double totalAbsentDays = 0.0;
 
+      final advanceDeductionsByEmp = <String, double>{};
+      for (final val in FinanceLocalStorage.salaryLedgerBox.values) {
+        if (val is Map) {
+          final entry = Map<String, dynamic>.from(val);
+          if (entry['monthKey'] == monthKey && entry['type'] == 'payout' && entry['isVoided'] != true) {
+            final eId = entry['employeeId']?.toString();
+            if (eId != null && !advanceDeductionsByEmp.containsKey(eId)) {
+              advanceDeductionsByEmp[eId] = (entry['advanceDeductions'] as num?)?.toDouble() ?? 0.0;
+            }
+          }
+        }
+      }
+
+      int sr = 1;
       for (final emp in employees) {
         final empId = emp['localId']?.toString() ?? '';
         final name = emp['name']?.toString() ?? 'N/A';
+        final pin = (emp['biometricPin'] ?? emp['pin'] ?? '').toString().trim();
         final role = emp['role']?.toString() ?? 'N/A';
         final dept = emp['department']?.toString() ?? 'N/A';
+        final empCamp = FinanceLocalStorage.getEmployeeCamp(emp);
 
         final summary = FinanceLocalStorage.getPayrollAttendanceSummary(empId, monthKey);
         final baseSalary = (emp['currentSalary'] as num?)?.toDouble() ?? 0.0;
-
-        double advanceRecovered = 0.0;
-        final monthPayments = FinanceLocalStorage.salaryLedgerBox.values.where((val) {
-          if (val is! Map) return false;
-          final entry = Map<String, dynamic>.from(val);
-          return entry['employeeId'] == empId &&
-              entry['monthKey'] == monthKey &&
-              entry['type'] == 'payout' &&
-              entry['isVoided'] != true;
-        }).toList();
-
-        if (monthPayments.isNotEmpty) {
-          advanceRecovered = (monthPayments.first['advanceDeductions'] as num?)?.toDouble() ?? 0.0;
-        }
+        final advanceRecovered = advanceDeductionsByEmp[empId] ?? 0.0;
 
         final earnedBase = (summary['baseSalaryEarned'] as num?)?.toDouble() ?? 0.0;
         final absenceDed = (summary['absenceDeductions'] as num?)?.toDouble() ?? 0.0;
@@ -1007,106 +1634,277 @@ class FinanceReportHelper {
         totalBonuses += bonuses;
         totalNet += netPayable;
 
+        final pCount = (summary['workingDays'] as num?)?.toDouble() ?? 0.0;
+        final aCount = (summary['absentDays'] as num?)?.toDouble() ?? 0.0;
+        final lCount = (summary['paidLeaves'] as num?)?.toDouble() ?? 0.0;
+        final absentDates = summary['absentDates'] as List? ?? [];
+        final leaveDates = summary['paidLeaveDates'] as List? ?? [];
+
+        totalPresentDays += pCount;
+        totalAbsentDays += aCount;
+
+        // Clean, easily understandable attendance display
+        final attDisplay = _formatCleanAttendance(
+          pCount: pCount,
+          aCount: aCount,
+          lCount: lCount,
+          absentDates: absentDates,
+          leaveDates: leaveDates,
+        );
+
+        final pinTag = pin.isNotEmpty ? '\nPIN: $pin' : '';
+        final campTag = empCamp.isNotEmpty ? ' • $empCamp' : '';
+
         tableData.add([
-          name,
-          '$role\n($dept)',
-          'PKR ${_fmtCurrency(baseSalary)}',
-          'P: ${(summary['workingDays'] as num?)?.toDouble() ?? 0.0}\nA: ${(summary['absentDays'] as num?)?.toDouble() ?? 0.0}\nL: ${(summary['paidLeaves'] as num?)?.toDouble() ?? 0.0}',
-          'PKR ${_fmtCurrency(deductions)}',
-          'PKR ${_fmtCurrency(bonuses)}',
-          'PKR ${_fmtCurrency(netPayable)}',
+          '$sr',
+          '$name$pinTag',
+          '$role\n$dept$campTag',
+          attDisplay,
+          _fmtCurrency(baseSalary),
+          deductions > 0 ? _fmtCurrency(deductions) : '-',
+          bonuses > 0 ? _fmtCurrency(bonuses) : '-',
+          _fmtCurrency(netPayable),
         ]);
+        sr++;
       }
 
       // Add Grand Totals Row
+      final pTotalStr = (totalPresentDays % 1 == 0) ? '${totalPresentDays.toInt()}' : totalPresentDays.toStringAsFixed(1);
+      final aTotalStr = (totalAbsentDays % 1 == 0) ? '${totalAbsentDays.toInt()}' : totalAbsentDays.toStringAsFixed(1);
       tableData.add([
-        'GRAND TOTALS',
-        '${employees.length} Employees',
-        'PKR ${_fmtCurrency(totalBase)}',
         '',
-        'PKR ${_fmtCurrency(totalDeductions)}',
-        'PKR ${_fmtCurrency(totalBonuses)}',
-        'PKR ${_fmtCurrency(totalNet)}',
+        'GRAND TOTALS',
+        '${employees.length} Staff Members',
+        '$pTotalStr P • $aTotalStr A',
+        _fmtCurrency(totalBase),
+        _fmtCurrency(totalDeductions),
+        _fmtCurrency(totalBonuses),
+        _fmtCurrency(totalNet),
       ]);
 
       pdf.addPage(
         pw.MultiPage(
           pageFormat: PdfPageFormat.a4.landscape,
-          margin: const pw.EdgeInsets.all(24),
+          margin: const pw.EdgeInsets.symmetric(horizontal: 22, vertical: 20),
           build: (context) => [
-            // Header
+            // 1. Official Institutional Header with GMWF Logo
             pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
               children: [
-                pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
-                  children: [
-                    pw.Text('GULAB DEVI MEMORIAL WELFARE FOUNDATION',
-                        style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),
-                    pw.Text('MONTHLY PAYROLL & ATTENDANCE REPORT',
-                        style: pw.TextStyle(fontSize: 15, fontWeight: pw.FontWeight.bold, color: PdfColors.teal)),
-                  ],
+                if (logoImage != null) ...[
+                  pw.Container(
+                    width: 52,
+                    height: 52,
+                    decoration: pw.BoxDecoration(
+                      shape: pw.BoxShape.circle,
+                      border: pw.Border.all(color: const PdfColor.fromInt(0xFF00695C), width: 1.5),
+                    ),
+                    padding: const pw.EdgeInsets.all(3),
+                    child: pw.ClipOval(
+                      child: pw.Image(logoImage, fit: pw.BoxFit.contain),
+                    ),
+                  ),
+                  pw.SizedBox(width: 14),
+                ],
+                pw.Expanded(
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.start,
+                    children: [
+                      pw.Text(
+                        'GULZAR MADINA WELFARE FOUNDATION',
+                        style: pw.TextStyle(
+                          fontSize: 13,
+                          fontWeight: pw.FontWeight.bold,
+                          color: const PdfColor.fromInt(0xFF004D40),
+                          letterSpacing: 0.5,
+                        ),
+                      ),
+                      pw.SizedBox(height: 2),
+                      pw.Text(
+                        'MONTHLY STAFF PAYROLL & ATTENDANCE STATEMENT',
+                        style: pw.TextStyle(
+                          fontSize: 10,
+                          fontWeight: pw.FontWeight.bold,
+                          color: const PdfColor.fromInt(0xFF00796B),
+                        ),
+                      ),
+                      pw.SizedBox(height: 3),
+                      pw.Text(
+                        'Branch: ${branchId.toUpperCase()}${camp != null && camp.isNotEmpty && camp != 'All' && camp != 'All Camps' ? ' • Camp: $camp' : ''}${department != null && department.isNotEmpty && department != 'All' && department != 'All Departments' ? ' • Dept: $department' : ''}',
+                        style: const pw.TextStyle(fontSize: 8.5, color: PdfColors.grey700),
+                      ),
+                    ],
+                  ),
                 ),
-                pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.end,
-                  children: [
-                    pw.Text('Branch: ${branchId.toUpperCase()}',
-                        style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-                    pw.Text('Month Key: $monthKey',
-                        style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-                    if (department != null)
-                      pw.Text('Department: $department',
-                          style: pw.TextStyle(fontSize: 9, color: PdfColors.grey700)),
-                  ],
+                pw.Container(
+                  padding: const pw.EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: pw.BoxDecoration(
+                    color: const PdfColor.fromInt(0xFFE0F2F1),
+                    borderRadius: pw.BorderRadius.circular(6),
+                    border: pw.Border.all(color: const PdfColor.fromInt(0xFF80CBC4), width: 1),
+                  ),
+                  child: pw.Column(
+                    crossAxisAlignment: pw.CrossAxisAlignment.end,
+                    children: [
+                      pw.Text(
+                        _formatMonthKeyFull(monthKey).toUpperCase(),
+                        style: pw.TextStyle(
+                          fontSize: 11,
+                          fontWeight: pw.FontWeight.bold,
+                          color: const PdfColor.fromInt(0xFF004D40),
+                        ),
+                      ),
+                      pw.SizedBox(height: 2),
+                      pw.Text(
+                        'Generated: ${DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.now())}',
+                        style: const pw.TextStyle(fontSize: 7.5, color: PdfColors.grey700),
+                      ),
+                      pw.Text(
+                        'Total Staff: ${employees.length} Members',
+                        style: pw.TextStyle(fontSize: 7.5, fontWeight: pw.FontWeight.bold, color: PdfColors.grey800),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
             pw.SizedBox(height: 10),
-            pw.Divider(thickness: 1, color: PdfColors.grey300),
-            pw.SizedBox(height: 10),
+            pw.Divider(thickness: 1, color: const PdfColor.fromInt(0xFF00695C)),
+            pw.SizedBox(height: 8),
 
-            // Table
+            // 2. Executive Financial KPI Summary Cards
+            pw.Container(
+              padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+              decoration: pw.BoxDecoration(
+                color: const PdfColor.fromInt(0xFFF4FBF9),
+                borderRadius: pw.BorderRadius.circular(6),
+                border: pw.Border.all(color: const PdfColor.fromInt(0xFFB2DFDB), width: 0.8),
+              ),
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceAround,
+                children: [
+                  _buildKpiCard('Total Employees', '${employees.length} Staff', const PdfColor.fromInt(0xFF004D40)),
+                  _buildKpiCard('Gross Base Salary', 'PKR ${_fmtCurrency(totalBase)}', const PdfColor.fromInt(0xFF004D40)),
+                  _buildKpiCard('Total Deductions', 'PKR ${_fmtCurrency(totalDeductions)}', totalDeductions > 0 ? PdfColors.red800 : PdfColors.grey700),
+                  _buildKpiCard('Total Bonuses / OT', 'PKR ${_fmtCurrency(totalBonuses)}', totalBonuses > 0 ? PdfColors.green800 : PdfColors.grey700),
+                  _buildKpiCard('Net Disbursement Payable', 'PKR ${_fmtCurrency(totalNet)}', const PdfColor.fromInt(0xFF00695C), isHighlight: true),
+                ],
+              ),
+            ),
+            pw.SizedBox(height: 12),
+
+            // 3. Clear, Institutional Payroll Table
             pw.TableHelper.fromTextArray(
-              border: pw.TableBorder.all(color: PdfColors.grey300, width: 0.5),
-              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8),
-              cellStyle: const pw.TextStyle(fontSize: 8),
-              headerDecoration: const pw.BoxDecoration(color: PdfColors.grey100),
+              border: pw.TableBorder(
+                horizontalInside: const pw.BorderSide(color: PdfColor.fromInt(0xFFCFD8DC), width: 0.5),
+                verticalInside: const pw.BorderSide(color: PdfColor.fromInt(0xFFCFD8DC), width: 0.5),
+                top: const pw.BorderSide(color: PdfColor.fromInt(0xFF004D40), width: 1.2),
+                bottom: const pw.BorderSide(color: PdfColor.fromInt(0xFF004D40), width: 1.2),
+                left: const pw.BorderSide(color: PdfColor.fromInt(0xFF004D40), width: 1.2),
+                right: const pw.BorderSide(color: PdfColor.fromInt(0xFF004D40), width: 1.2),
+              ),
+              headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 8, color: PdfColors.white),
+              headerDecoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFF004D40)),
+              headerPadding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+              cellStyle: const pw.TextStyle(fontSize: 7.5),
+              cellPadding: const pw.EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+              rowDecoration: const pw.BoxDecoration(color: PdfColors.white),
+              oddRowDecoration: const pw.BoxDecoration(color: PdfColor.fromInt(0xFFF7FAFA)),
+              cellDecoration: (int colIndex, dynamic cellData, int rowIndex) {
+                if (rowIndex == tableData.length - 1) {
+                  return const pw.BoxDecoration(color: PdfColor.fromInt(0xFFE0F2F1));
+                }
+                return const pw.BoxDecoration();
+              },
               headers: [
-                'Employee Name',
-                'Designation',
-                'Base Salary',
-                'Attendance (P/A/L)',
-                'Total Deductions',
-                'Total Bonuses',
-                'Net Payable'
+                'Sr.',
+                'Employee Details',
+                'Designation & Dept',
+                'Attendance Summary',
+                'Base Salary\n(PKR)',
+                'Deductions\n(PKR)',
+                'Bonuses\n(PKR)',
+                'Net Payable\n(PKR)',
               ],
               data: tableData,
+              cellAlignments: {
+                0: pw.Alignment.center,
+                1: pw.Alignment.centerLeft,
+                2: pw.Alignment.centerLeft,
+                3: pw.Alignment.centerLeft,
+                4: pw.Alignment.centerRight,
+                5: pw.Alignment.centerRight,
+                6: pw.Alignment.centerRight,
+                7: pw.Alignment.centerRight,
+              },
+              headerAlignments: {
+                0: pw.Alignment.center,
+                1: pw.Alignment.centerLeft,
+                2: pw.Alignment.centerLeft,
+                3: pw.Alignment.centerLeft,
+                4: pw.Alignment.centerRight,
+                5: pw.Alignment.centerRight,
+                6: pw.Alignment.centerRight,
+                7: pw.Alignment.centerRight,
+              },
               columnWidths: {
-                0: const pw.FlexColumnWidth(2.0),
-                1: const pw.FlexColumnWidth(2.0),
-                2: const pw.FlexColumnWidth(1.2),
-                3: const pw.FlexColumnWidth(1.2),
-                4: const pw.FlexColumnWidth(1.2),
+                0: const pw.FlexColumnWidth(0.5),
+                1: const pw.FlexColumnWidth(2.2),
+                2: const pw.FlexColumnWidth(2.0),
+                3: const pw.FlexColumnWidth(1.9),
+                4: const pw.FlexColumnWidth(1.3),
                 5: const pw.FlexColumnWidth(1.2),
-                6: const pw.FlexColumnWidth(1.5),
+                6: const pw.FlexColumnWidth(1.1),
+                7: const pw.FlexColumnWidth(1.6),
               },
             ),
+
+            pw.SizedBox(height: 14),
+            // 4. Official Sign-off and Authorization Signatures
+            pw.Container(
+              padding: const pw.EdgeInsets.symmetric(vertical: 8, horizontal: 12),
+              decoration: pw.BoxDecoration(
+                border: pw.Border.all(color: const PdfColor.fromInt(0xFFCFD8DC), width: 0.5),
+                borderRadius: pw.BorderRadius.circular(4),
+              ),
+              child: pw.Row(
+                mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+                children: [
+                  _buildSignatureLine('Prepared By', 'Accountant / Data Operator'),
+                  _buildSignatureLine('Verified By', 'Admin / HR Manager'),
+                  _buildSignatureLine('Approved By', 'Finance Secretary / President'),
+                ],
+              ),
+            ),
           ],
+          footer: (context) => pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            children: [
+              pw.Text(
+                'Gulzar Madina Welfare Foundation • Confidential Official Payroll Record',
+                style: const pw.TextStyle(fontSize: 7.5, color: PdfColors.grey600),
+              ),
+              pw.Text(
+                'Page ${context.pageNumber} of ${context.pagesCount}',
+                style: pw.TextStyle(fontSize: 7.5, color: PdfColors.grey700, fontWeight: pw.FontWeight.bold),
+              ),
+            ],
+          ),
         ),
       );
 
       final pdfBytes = await pdf.save();
       final dateStr = DateFormat('yyyy-MM').format(DateTime.now());
-      final deptStr = department != null ? '_${department.toLowerCase()}' : '';
-      final fileName = 'payroll_${branchId}_${monthKey}${deptStr}_$dateStr.pdf';
+      final deptStr = department != null && department != 'All' && department != 'All Departments' ? '_${department.toLowerCase().replaceAll(' ', '_')}' : '';
+      final campStr = camp != null && camp != 'All' && camp != 'All Camps' ? '_${camp.toLowerCase().replaceAll(' ', '_')}' : '';
+      final fileName = 'payroll_${branchId}_$monthKey$deptStr${campStr}_$dateStr.pdf';
 
       String? path;
       try {
-        path = await FilePicker.platform.saveFile(
+        path = await pickSavePathFast(
           dialogTitle: 'Save Monthly PDF Report',
           fileName: fileName,
           bytes: pdfBytes,
-          type: FileType.custom,
           allowedExtensions: ['pdf'],
         );
       } catch (_) {}
@@ -1161,7 +1959,7 @@ class FinanceReportHelper {
       final sheet = excel['Expense Log'];
 
       // Header block
-      sheet.appendRow([xl.TextCellValue('GULAB DEVI MEMORIAL WELFARE FOUNDATION')]);
+      sheet.appendRow([xl.TextCellValue('GULZAR MADINA WELFARE FOUNDATION')]);
       sheet.appendRow([xl.TextCellValue('DAILY EXPENSES LOG')]);
       sheet.appendRow([
         xl.TextCellValue('Branch: ${branchId == "all" ? "All Branches" : branchId.toUpperCase()}'),
@@ -1206,7 +2004,6 @@ class FinanceReportHelper {
       // Data rows grouped by date
       final sortedDates = grouped.keys.toList()..sort();
       double grandTotal = 0.0;
-      int rowsWritten = 0;
 
       for (final dateKey in sortedDates) {
         final dayExpenses = grouped[dateKey]!;
@@ -1216,7 +2013,6 @@ class FinanceReportHelper {
         final dayLabel = DateFormat('EEEE, d MMM yyyy')
             .format(DateTime.parse(dateKey));
         sheet.appendRow([xl.TextCellValue('── $dayLabel ──')]);
-        rowsWritten++;
 
         for (final exp in dayExpenses) {
           final isVoided = exp['isVoided'] == true;
@@ -1241,7 +2037,6 @@ class FinanceReportHelper {
             xl.TextCellValue(isVoided ? 'VOIDED' : 'Active'),
             xl.TextCellValue(isVoided ? (exp['voidReason']?.toString() ?? '') : ''),
           ]);
-          rowsWritten++;
         }
 
         // Day totals sub-footer
@@ -1256,7 +2051,6 @@ class FinanceReportHelper {
           xl.TextCellValue(''),
         ]);
         sheet.appendRow([]); // spacer between days
-        rowsWritten += 2;
       }
 
       // Grand Total footer row
@@ -1324,15 +2118,14 @@ class FinanceReportHelper {
           ? Uint8List.fromList(excel.encode()!)
           : Uint8List(0);
       final branchStr = branchId == 'all' ? 'all_branches' : branchId;
-      final fileName = 'expenses_${branchStr}_${monthKey}.xlsx';
+      final fileName = 'expenses_${branchStr}_$monthKey.xlsx';
 
       String? path;
       try {
-        path = await FilePicker.platform.saveFile(
+        path = await pickSavePathFast(
           dialogTitle: 'Save Expenses Report',
           fileName: fileName,
           bytes: excelBytes,
-          type: FileType.custom,
           allowedExtensions: ['xlsx'],
         );
       } catch (_) {}
@@ -1362,6 +2155,9 @@ class FinanceReportHelper {
     BuildContext? context,
   }) async {
     try {
+      // Load official GMWF Logo
+      final logoImage = await _loadGmwfLogo();
+
       final pdf = pw.Document();
 
       final reconciledCount = items.where((i) => i['isReconciled'] == true).length;
@@ -1387,29 +2183,54 @@ class FinanceReportHelper {
           build: (pwContext) => [
             pw.Row(
               mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: pw.CrossAxisAlignment.center,
               children: [
-                pw.Column(
-                  crossAxisAlignment: pw.CrossAxisAlignment.start,
+                pw.Row(
+                  crossAxisAlignment: pw.CrossAxisAlignment.center,
                   children: [
-                    pw.Text('GULAB DEVI MEMORIAL WELFARE FOUNDATION',
-                        style: pw.TextStyle(fontSize: 11, fontWeight: pw.FontWeight.bold)),
-                    pw.Text('BANK & CASH RECONCILIATION AUDIT REPORT',
-                        style: pw.TextStyle(fontSize: 14, fontWeight: pw.FontWeight.bold, color: PdfColors.teal)),
+                    if (logoImage != null) ...[
+                      pw.Container(
+                        width: 44,
+                        height: 44,
+                        decoration: pw.BoxDecoration(
+                          shape: pw.BoxShape.circle,
+                          border: pw.Border.all(color: const PdfColor.fromInt(0xFF00695C), width: 1.2),
+                        ),
+                        padding: const pw.EdgeInsets.all(2),
+                        child: pw.ClipOval(
+                          child: pw.Image(logoImage, fit: pw.BoxFit.contain),
+                        ),
+                      ),
+                      pw.SizedBox(width: 12),
+                    ],
+                    pw.Column(
+                      crossAxisAlignment: pw.CrossAxisAlignment.start,
+                      children: [
+                        pw.Text('GULZAR MADINA WELFARE FOUNDATION',
+                            style: pw.TextStyle(
+                                fontSize: 11, fontWeight: pw.FontWeight.bold, color: const PdfColor.fromInt(0xFF004D40))),
+                        pw.Text('BANK & CASH RECONCILIATION AUDIT REPORT',
+                            style: pw.TextStyle(
+                                fontSize: 14,
+                                fontWeight: pw.FontWeight.bold,
+                                color: const PdfColor.fromInt(0xFF00796B))),
+                      ],
+                    ),
                   ],
                 ),
                 pw.Column(
                   crossAxisAlignment: pw.CrossAxisAlignment.end,
                   children: [
-                    pw.Text('Branch: ${branchId.toUpperCase()}', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
-                    pw.Text('Period: $monthKey', style: pw.TextStyle(fontSize: 10, fontWeight: pw.FontWeight.bold)),
+                    pw.Text('Branch: ${branchId.toUpperCase()}', style: pw.TextStyle(fontSize: 9.5, fontWeight: pw.FontWeight.bold, color: const PdfColor.fromInt(0xFF004D40))),
+                    pw.Text('Period: $monthKey', style: const pw.TextStyle(fontSize: 9, color: PdfColors.grey800)),
                     pw.Text('Generated: ${DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now())}',
-                        style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey)),
+                        style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey700)),
                   ],
                 ),
               ],
             ),
             pw.SizedBox(height: 10),
-            pw.Divider(thickness: 1, color: PdfColors.grey300),
+            pw.Divider(thickness: 1, color: const PdfColor.fromInt(0xFF00695C)),
             pw.SizedBox(height: 10),
 
             // Summary Grid
@@ -1452,15 +2273,14 @@ class FinanceReportHelper {
       );
 
       final pdfBytes = await pdf.save();
-      final fileName = 'reconciliation_${branchId}_${monthKey}.pdf';
+      final fileName = 'reconciliation_${branchId}_$monthKey.pdf';
 
       String? path;
       try {
-        path = await FilePicker.platform.saveFile(
+        path = await pickSavePathFast(
           dialogTitle: 'Save Bank Reconciliation Report',
           fileName: fileName,
           bytes: pdfBytes,
-          type: FileType.custom,
           allowedExtensions: ['pdf'],
         );
       } catch (_) {}

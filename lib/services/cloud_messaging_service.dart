@@ -30,12 +30,12 @@ import '../pages/notification_screen.dart';
 import '../pages/request.dart';
 import '../widgets/update_dialog_widget.dart';
 
-const String kAppTitle = 'Gulzar-e-Madina Welfare Foundation';
+const String kAppTitle = 'Gulzar Madina Welfare Foundation';
 const String kAppLogoAsset = 'assets/logo/gmwf-1.png';
 
 const AndroidNotificationChannel _kHighImportanceChannel = AndroidNotificationChannel(
   'gmwf_high_importance_channel',
-  'Gulzar-e-Madina Welfare Foundation Notifications',
+  'Gulzar Madina Welfare Foundation Notifications',
   description: 'Notifications for approvals, donation verification, medical alerts, reports, and payments.',
   importance: Importance.max,
   playSound: true,
@@ -712,7 +712,7 @@ $xmlString
       title: 'New Version $newVersion Available',
       message: releaseNotes.isNotEmpty
           ? releaseNotes
-          : 'A new version of Gulzar-e-Madina Welfare Foundation application is ready to install.',
+          : 'A new version of Gulzar Madina Welfare Foundation application is ready to install.',
       category: 'App Update',
       titleUr: 'نیا ورژن $newVersion دستیاب ہے',
       messageUr: 'جی ایم ڈبلیو ایف کا نیا ورژن اپ ڈیٹ کے لیے دستیاب ہے۔ انسٹال کرنے کے لیے کلک کریں۔',

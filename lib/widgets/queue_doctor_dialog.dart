@@ -40,26 +40,99 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
     return counts;
   }
 
+  String _healingProgressMessage = '';
+
   Future<void> _runHealing() async {
-    setState(() => _isHealing = true);
+    setState(() {
+      _isHealing = true;
+      _healingProgressMessage = 'Diagnosing & auto-repairing queued records...';
+    });
     try {
+      final initialCount = Hive.isBoxOpen(LocalStorageService.syncBox)
+          ? Hive.box(LocalStorageService.syncBox).length
+          : 0;
+
       final report = await QueueSelfHealingService().healEntireQueue();
-      // Launch high-speed background upload via Python Firebase Admin uploader
-      unawaited(HiddenForceUploader.instance.runSilentForceUpload());
-      // Also kick off Dart upload pass
-      unawaited(SyncService().triggerUpload(force: true));
+
+      if (mounted) {
+        setState(() => _healingProgressMessage = 'Uploading backlog to Cloud Firestore...');
+      }
+
+      // 1. Run Python Firebase Admin high-speed bulk uploader
+      try {
+        await HiddenForceUploader.instance.runSilentForceUpload();
+      } catch (e) {
+        debugPrint('[QueueDoctorDialog] Python upload pass notice: $e');
+      }
+
+      // 2. Also run Dart upload pass to flush any items or finish state transitions
+      try {
+        await SyncService().triggerUpload(force: true);
+      } catch (e) {
+        debugPrint('[QueueDoctorDialog] Dart upload pass notice: $e');
+      }
+
+      final finalCount = Hive.isBoxOpen(LocalStorageService.syncBox)
+          ? Hive.box(LocalStorageService.syncBox).length
+          : 0;
+      final uploadedCount = (initialCount - finalCount).clamp(0, 99999);
+
       if (mounted) {
         setState(() {
           _lastReport = report;
           _isHealing = false;
+          _healingProgressMessage = '';
         });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(uploadedCount > 0
+                ? '✅ Successfully uploaded $uploadedCount records to Cloud Firestore! ($finalCount remaining)'
+                : 'Self-healing finished. $finalCount items in queue.'),
+            backgroundColor: const Color(0xFF00695C),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
-        setState(() => _isHealing = false);
+        setState(() {
+          _isHealing = false;
+          _healingProgressMessage = '';
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(content: Text('Healing error: $e'), backgroundColor: Colors.red),
         );
+      }
+    }
+  }
+
+  Future<void> _runBroadcast() async {
+    setState(() {
+      _isHealing = true;
+      _healingProgressMessage = 'Broadcasting Universal Force Upload across LAN & Cloud...';
+    });
+    try {
+      await SyncService().broadcastUniversalForceUpload();
+      await SyncService().triggerUpload(force: true);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('📡 Universal Force Upload broadcasted to all connected stations and Cloud!'),
+            backgroundColor: Color(0xFF00695C),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Broadcast notice: $e'), backgroundColor: Colors.orange),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isHealing = false;
+          _healingProgressMessage = '';
+        });
       }
     }
   }
@@ -317,6 +390,28 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
               ),
 
               const SizedBox(height: 16),
+              if (_isHealing && _healingProgressMessage.isNotEmpty) ...[
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Row(
+                    children: [
+                      const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00897B))),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          _healingProgressMessage,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? const Color(0xFF4DB6AC) : const Color(0xFF00695C),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+
               // Action Buttons
               Row(
                 children: [
@@ -326,7 +421,7 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
-                      onPressed: _isHealing ? null : () => SyncService().broadcastUniversalForceUpload(),
+                      onPressed: _isHealing ? null : _runBroadcast,
                       icon: const Icon(Icons.broadcast_on_personal_rounded, size: 18),
                       label: const Text('Universal Force Broadcast'),
                     ),

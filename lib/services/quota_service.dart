@@ -14,14 +14,14 @@ class QuotaService {
 
   // ── Daily Write Counter ──────────────────────────────────────────────────
   // Raised ceiling to accommodate multi-branch operations and massive backlog flushes.
-  static const int _dailyWriteCeiling = 200000;
+  static const int _dailyWriteCeiling = 500000;
   static const String _writeCountKey = 'quota_daily_writes';
   static const String _writeDateKey = 'quota_daily_date';
   static const String _quotaPausedUntilKey = 'quota_paused_until';
 
   /// Returns true if a write operation is allowed. Records the write.
   /// Call this BEFORE every Firestore write in SyncService.
-  /// If [isPriority] is true (e.g. Tokens, Donations, Madrassa, Employees), writes proceed even during soft pauses.
+  /// If [isPriority] is true (e.g. Tokens, Donations, Madrassa, Employees, School), writes proceed even during soft pauses.
   static bool canWrite({int count = 1, bool isPriority = false}) {
     try {
       if (isPriority) {
@@ -29,7 +29,15 @@ class QuotaService {
         return true;
       }
 
-      if (isQuotaExhausted) return false;
+      if (isQuotaExhausted) {
+        // Auto-recover after 2 minutes if no new quota error occurred
+        final lastExhausted = quotaExhaustedTimestampNotifier.value;
+        if (lastExhausted != null && DateTime.now().difference(lastExhausted).inMinutes >= 2) {
+          recordSuccess();
+        } else {
+          return false;
+        }
+      }
 
       // Check if paused due to a quota error backoff
       final pausedUntilStr = _getFlag(_quotaPausedUntilKey);
@@ -82,9 +90,10 @@ class QuotaService {
     }
   }
 
-  /// Pause uploads for a specified duration (used on quota errors)
+  /// Pause uploads for a specified duration (used on quota errors, capped at 30 seconds max)
   static void pauseForDuration(Duration duration) {
-    final until = DateTime.now().add(duration);
+    final effectiveDuration = duration > const Duration(seconds: 30) ? const Duration(seconds: 30) : duration;
+    final until = DateTime.now().add(effectiveDuration);
     _setFlag(_quotaPausedUntilKey, until.toIso8601String());
     debugPrint('[QuotaService] ⏸️ Uploads paused until ${until.toIso8601String()}');
   }
@@ -111,11 +120,11 @@ class QuotaService {
     debugPrint('🚨 [QuotaService] Cloud Quota Exhaustion Detected: $effectiveReason');
   }
 
-  /// Record a successful cloud operation to recover state after midnight reset
+  /// Record a successful cloud operation to recover state after midnight reset or transient error
   static void recordSuccess() {
     if (isQuotaExhaustedNotifier.value) {
       final lastExhausted = quotaExhaustedTimestampNotifier.value;
-      if (lastExhausted == null || DateTime.now().difference(lastExhausted).inMinutes > 15) {
+      if (lastExhausted == null || DateTime.now().difference(lastExhausted).inMinutes >= 2) {
         isQuotaExhaustedNotifier.value = false;
         quotaExhaustedReasonNotifier.value = null;
         debugPrint('✅ [QuotaService] Firestore connection restored / quota reset.');

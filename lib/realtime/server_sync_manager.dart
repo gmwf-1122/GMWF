@@ -683,14 +683,19 @@ class ServerSyncManager {
       });
     }
 
-    LocalStorageService.saveEntryLocal(branchId, serial, entry);
-    _enqueue({
-      'type':      'save_entry',
-      'branchId':  branchId,
-      'dateKey':   dateKey,
-      'queueType': queueType,
-      'serial':    serial,
-      'data':      entry,
+    LocalStorageService.saveEntryLocal(branchId, serial, entry).then((stored) {
+      // A serial collision (same serial already held by another patient) is kept locally
+      // for supervisor review; uploading it would merge this patient into the other
+      // patient's cloud record for that serial.
+      if (!stored) return;
+      _enqueue({
+        'type':      'save_entry',
+        'branchId':  branchId,
+        'dateKey':   dateKey,
+        'queueType': queueType,
+        'serial':    serial,
+        'data':      entry,
+      });
     });
   }
 
@@ -2165,8 +2170,25 @@ class ServerSyncManager {
 
       for (final doc in snap.docs) {
         final d = doc.data();
-        d['medicineId'] = doc.id;
+        final medId = doc.id;
+        d['medicineId'] = medId;
         d['branchId']   = _branchId;
+
+        // Protect local higher stock quantities from being overwritten by stale cloud cache
+        try {
+          if (Hive.isBoxOpen(LocalStorageService.stockBox)) {
+            final stockBox = Hive.box(LocalStorageService.stockBox);
+            final localItem = stockBox.get('stock:$medId') ?? stockBox.get(medId);
+            if (localItem is Map) {
+              final localQty = (localItem['quantity'] as num?)?.toInt() ?? 0;
+              final remoteQty = (d['quantity'] as num?)?.toInt() ?? 0;
+              if (localQty > remoteQty) {
+                d['quantity'] = localQty;
+              }
+            }
+          }
+        } catch (_) {}
+
         LocalStorageService.saveLocalInventoryItem(d);
       }
       debugPrint('[SSM] Downloaded ${snap.docs.length} inventory items for $_branchId');

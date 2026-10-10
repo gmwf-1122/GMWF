@@ -1,6 +1,7 @@
 // lib/pages/dispensary/hybrid_dispensary_screen.dart
 
 import 'dart:async';
+import '../../widgets/lazy_indexed_stack.dart';
 import 'package:flutter/material.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -26,7 +27,8 @@ import 'receptionist/receptionist_screen.dart';
 import 'dispensar/dispensar_screen.dart';
 import 'dispensar/inventory.dart';
 import 'doctor/doctor_screen.dart';
-import 'package:gmwf/pages/login_page.dart';
+import 'package:gmwf/constants/navigator_key.dart';
+import 'package:gmwf/main.dart';
 import 'package:gmwf/utils/formatters.dart';
 
 class HybridDispensaryScreen extends StatefulWidget {
@@ -60,16 +62,73 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
   String? _branchName;
   String? _resolvedName;
 
-  ConnectionStatus _connectionStatus = const ConnectionStatus(
-    state: LanConnectionState.disconnected,
-    message: 'Not connected',
-  );
+  ConnectionStatus _connectionStatus = ConnectionManager().status;
 
   static const Color _teal = Color(0xFF00695C);
 
   StreamSubscription? _restockRealtimeSub;
   StreamSubscription? _restockFirestoreSub;
   List<Map<String, dynamic>> _pendingRestockAlerts = [];
+
+  // Dispenser tab badge: today's prescribed patients not yet dispensed.
+  int _readyToDispenseCount = 0;
+  StreamSubscription? _readyCountSub;
+  Timer? _readyCountDebounce;
+
+  bool get _isStockTabActive {
+    final i = _tabController.index;
+    if (i < 0 || i >= _tabs.length) return false;
+    final title = (_tabs[i]['title'] as String).toLowerCase();
+    return title.contains('stock') || title.contains('inventory');
+  }
+
+  void _startReadyToDispenseCounter() {
+    final hasDispenserTab = _tabs.any((t) => (t['title'] as String).toLowerCase().contains('dispens'));
+    if (!hasDispenserTab) return;
+    CampSessionService.activeCampNotifier.addListener(_scheduleReadyCount);
+    // The entries box is opened asynchronously on desk entry — wait for it instead of giving up.
+    LocalStorageService.ensureBoxOpen(LocalStorageService.entriesBox).then((box) {
+      if (!mounted) return;
+      _recomputeReadyToDispense();
+      _readyCountSub?.cancel();
+      // Debounced: a catch-up writes many entries in a burst; count once after it settles.
+      _readyCountSub = box.watch().listen((_) => _scheduleReadyCount());
+    }).catchError((e) {
+      debugPrint('[HybridScreen] Ready-to-dispense counter could not start: $e');
+    });
+  }
+
+  void _scheduleReadyCount() {
+    _readyCountDebounce?.cancel();
+    _readyCountDebounce = Timer(const Duration(milliseconds: 800), _recomputeReadyToDispense);
+  }
+
+  void _recomputeReadyToDispense() {
+    if (!mounted || !Hive.isBoxOpen(LocalStorageService.entriesBox)) return;
+    final today = CampSessionService.resolveShiftAndDateKey(null, widget.branchId).dateKey;
+    final camp = CampSessionService.getActiveCamp(widget.branchId);
+    final byCamp = camp != null && camp.isNotEmpty && camp != 'all';
+    final seen = <String>{};
+    var count = 0;
+    for (final e in LocalStorageService.getLocalEntries(widget.branchId, dispensaryId: camp, filterByCamp: byCamp)) {
+      final serial = (e['serial'] ?? e['id'] ?? '').toString().trim().toUpperCase();
+      if (serial.isEmpty || !seen.add(serial)) continue;
+      final dk = (e['dateKey'] ?? '').toString().trim();
+      if (dk != today && CampSessionService.getDateKeyFromSerial(serial) != today) continue;
+      // Same rule as the Receptionist list's "Waiting for Dispense" label.
+      final s = (e['status'] ?? 'waiting').toString().toLowerCase().trim();
+      if (s == 'cancelled' || s == 'rejected' || s == 'reversed' || s == 'deleted' || s == 'skipped') continue;
+      final isDispensed = s == 'dispensed' || e['dispensedAt'] != null ||
+          (e['dispenseStatus'] ?? '').toString().toLowerCase().trim() == 'dispensed';
+      if (isDispensed) continue;
+      final hasPrescription = (e['prescriptionId']?.toString().isNotEmpty ?? false) || e['prescription'] is Map;
+      if (hasPrescription || s == 'completed' || s == 'prescribed' ||
+          s == 'waiting_to_dispense' || s == 'waiting_for_dispense') {
+        count++;
+      }
+    }
+    if (count != _readyToDispenseCount) setState(() => _readyToDispenseCount = count);
+  }
 
   bool get _shouldShowRestockAlert {
     final r = widget.role.toLowerCase().trim();
@@ -78,16 +137,81 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
     return hasDispenser && !hasDoctor;
   }
 
+  static String? _lastActiveTabTitle;
+  static int? _lastActiveTabIndex;
+
+  void _saveCurrentActiveTab(int idx) {
+    if (idx >= 0 && idx < _tabs.length) {
+      _lastActiveTabIndex = idx;
+      final title = _tabs[idx]['title'] as String?;
+      if (title != null && title.isNotEmpty) {
+        _lastActiveTabTitle = title;
+        try {
+          if (Hive.isBoxOpen('app_settings')) {
+            Hive.box('app_settings').put('last_hybrid_tab_title', title);
+          }
+        } catch (_) {}
+      }
+    }
+  }
+
+  int _resolveInitialTabIndex() {
+    if (_tabs.isEmpty) return 0;
+    // 1. Try in-memory static last active index
+    if (_lastActiveTabIndex != null && _lastActiveTabIndex! >= 0 && _lastActiveTabIndex! < _tabs.length) {
+      return _lastActiveTabIndex!;
+    }
+    // 2. Try in-memory static last active title
+    if (_lastActiveTabTitle != null) {
+      final idx = _tabs.indexWhere((t) => t['title'] == _lastActiveTabTitle);
+      if (idx >= 0) return idx;
+    }
+    // 3. Try Hive app_settings
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final saved = Hive.box('app_settings').get('last_hybrid_tab_title')?.toString();
+        if (saved != null && saved.isNotEmpty) {
+          final idx = _tabs.indexWhere((t) => t['title'] == saved);
+          if (idx >= 0) return idx;
+        }
+      }
+    } catch (_) {}
+    // 4. Fallback based on role: if role has dispenser or stock, do NOT default to Receptionist
+    final r = widget.role.toLowerCase().trim();
+    if (r.contains('dis') || r.contains('dispenser') || r.contains('dispensar')) {
+      final disIdx = _tabs.indexWhere((t) =>
+          (t['title'] as String).toLowerCase().contains('dispens') ||
+          (t['title'] as String).toLowerCase().contains('stock') ||
+          (t['title'] as String).toLowerCase().contains('inventory'));
+      if (disIdx >= 0) return disIdx;
+    }
+    return 0;
+  }
+
+  void _onTabControllerChanged() {
+    if (_tabController.index < _tabs.length) {
+      _saveCurrentActiveTab(_tabController.index);
+    }
+  }
+
   @override
   void initState() {
     super.initState();
+    debugPrint("[Lifecycle] HybridDispensaryScreen initState");
 
     _parseRole();
-    _tabController = TabController(length: _tabs.length, vsync: this);
+    final initialIdx = _resolveInitialTabIndex();
+    _tabController = TabController(
+      length: _tabs.length,
+      initialIndex: initialIdx.clamp(0, _tabs.length - 1),
+      vsync: this,
+    );
+    _tabController.addListener(_onTabControllerChanged);
 
     if (_shouldShowRestockAlert) {
       _listenRestockRequests();
     }
+    _startReadyToDispenseCounter();
 
     // Start services once
     SyncService().start(widget.branchId);
@@ -96,6 +220,7 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
 
     _fetchUserNameAndConnect();
 
+    _connectionStatus = ConnectionManager().status;
     _connectionSub = ConnectionManager().statusStream.listen((status) {
       if (mounted) setState(() => _connectionStatus = status);
     });
@@ -138,7 +263,10 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
       });
     }
     if (r.contains('rec') || r.contains('receptionist')) {
-      final suppressPrescriptionNotifications = r.contains('doc') || r.contains('doctor');
+      // Doctor desks write the prescriptions; dispenser desks get the Dispenser tab badge.
+      // Either way a popup per prescription on the Receptionist tab is noise.
+      final suppressPrescriptionNotifications = r.contains('doc') || r.contains('doctor') ||
+          r.contains('dis') || r.contains('dispenser') || r.contains('dispensar');
       _tabs.add({
         'title': 'Receptionist',
         'icon': Icons.support_agent_rounded,
@@ -189,13 +317,16 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
 
     try {
       final oldIndex = _tabController.index;
+      final targetIndex = (_tabController.index < _tabs.length) ? oldIndex : _resolveInitialTabIndex();
       if (_tabController.length != _tabs.length) {
+        _tabController.removeListener(_onTabControllerChanged);
         _tabController.dispose();
         _tabController = TabController(
           length: _tabs.length,
-          initialIndex: oldIndex.clamp(0, _tabs.length - 1),
+          initialIndex: targetIndex.clamp(0, _tabs.length - 1),
           vsync: this,
         );
+        _tabController.addListener(_onTabControllerChanged);
       }
     } catch (_) {}
   }
@@ -363,17 +494,17 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
   Future<void> _logout() async {
     final confirm = await showDialog<bool>(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (dialogCtx) => AlertDialog(
         title: const Text('Log Out'),
         content: const Text('Are you sure you want to log out of GMWF?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
+            onPressed: () => Navigator.of(dialogCtx).pop(false),
             child: const Text('Cancel'),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: _teal),
-            onPressed: () => Navigator.pop(context, true),
+            onPressed: () => Navigator.of(dialogCtx).pop(true),
             child: const Text('Log Out', style: TextStyle(color: Colors.white)),
           ),
         ],
@@ -381,15 +512,33 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
     );
 
     if (confirm == true) {
+      try { _connectionSub?.cancel(); _connSub?.cancel(); } catch (_) {}
+      try { ConnectionManager().stop().catchError((_) {}); } catch (_) {}
       try {
-        await AuthService().signOut();
+        await AuthService().signOut().timeout(const Duration(seconds: 4));
       } catch (_) {}
-      if (mounted) {
-        Navigator.pushAndRemoveUntil(
-          context,
-          MaterialPageRoute(builder: (_) => const LoginPage()),
-          (r) => false,
-        );
+
+      // Guarantee session is wiped from local storage
+      try {
+        if (Hive.isBoxOpen('app_settings')) {
+          final box = Hive.box('app_settings');
+          await box.delete('user_data');
+          await box.delete('currentUser');
+          await box.delete('user_role');
+          await box.delete('role');
+          await box.delete('auth_token');
+          await box.delete('server_authenticated');
+          await box.flush();
+        }
+      } catch (_) {}
+
+      AuthHomeWrapper.clearSession();
+
+      // Route directly to /login using the global navigatorKey
+      if (navigatorKey.currentState != null) {
+        navigatorKey.currentState!.pushNamedAndRemoveUntil('/login', (r) => false);
+      } else if (mounted) {
+        Navigator.of(context, rootNavigator: true).pushNamedAndRemoveUntil('/login', (r) => false);
       }
     }
   }
@@ -400,10 +549,15 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
     CampSessionService.stopAutoCampTimer();
     _restockRealtimeSub?.cancel();
     _restockFirestoreSub?.cancel();
+    _readyCountSub?.cancel();
+    _readyCountDebounce?.cancel();
+    CampSessionService.activeCampNotifier.removeListener(_scheduleReadyCount);
     _connSub?.cancel();
     _connectionSub?.cancel();
+    _tabController.removeListener(_onTabControllerChanged);
     _tabController.dispose();
     ConnectionManager().stop();
+    debugPrint("[Lifecycle] HybridDispensaryScreen dispose");
     super.dispose();
   }
 
@@ -522,6 +676,7 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
                           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
                           child: TabBar(
                             controller: _tabController,
+                            onTap: (idx) => _saveCurrentActiveTab(idx),
                             isScrollable: false,
                             indicator: BoxDecoration(
                               color: isDark ? const Color(0xFF0F766E).withValues(alpha: 0.35) : const Color(0xFFE8F5E9),
@@ -567,10 +722,31 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
                                                 : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
                                           ),
                                         ),
+                                        // Patients prescribed and waiting to be dispensed.
+                                        if (_readyToDispenseCount > 0 &&
+                                            (t['title'] as String).toLowerCase().contains('dispens')) ...[
+                                          const SizedBox(width: 6),
+                                          Container(
+                                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                            decoration: BoxDecoration(
+                                              color: const Color(0xFF00875A),
+                                              borderRadius: BorderRadius.circular(10),
+                                            ),
+                                            child: Text(
+                                              '$_readyToDispenseCount',
+                                              style: const TextStyle(
+                                                color: Colors.white,
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.bold,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                        // Restock requests belong to the inventory only.
                                         if (_shouldShowRestockAlert &&
                                             _pendingRestockAlerts.isNotEmpty &&
-                                            ((t['title'] as String).toLowerCase().contains('dispens') ||
-                                                (t['title'] as String).toLowerCase().contains('stock'))) ...[
+                                            ((t['title'] as String).toLowerCase().contains('stock') ||
+                                                (t['title'] as String).toLowerCase().contains('inventory'))) ...[
                                           const SizedBox(width: 6),
                                           Container(
                                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -601,13 +777,19 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
           ),
           body: Column(
             children: [
-              _buildRestockBanner(isDark),
+              // Restock requests are shown only inside Stock & Inventory.
+              AnimatedBuilder(
+                animation: _tabController,
+                builder: (context, _) => _isStockTabActive
+                    ? _buildRestockBanner(isDark)
+                    : const SizedBox.shrink(),
+              ),
               Expanded(
                 child: AnimatedBuilder(
                   animation: _tabController,
                   builder: (context, _) {
                     final safeIndex = _tabs.isEmpty ? 0 : _tabController.index.clamp(0, _tabs.length - 1);
-                    return IndexedStack(
+                    return LazyIndexedStack(
                       index: safeIndex,
                       children: _tabs.map((t) => t['widget'] as Widget).toList(),
                     );
@@ -659,6 +841,7 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
                   return Expanded(
                     child: InkWell(
                       onTap: () {
+                        _saveCurrentActiveTab(idx);
                         if (_tabController.index != idx) {
                           _tabController.animateTo(idx);
                         }
@@ -743,49 +926,8 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
           _pendingRestockAlerts.insert(0, reqData);
         }
 
-        if (mounted) {
-          setState(() {});
-          ScaffoldMessenger.of(context).hideCurrentSnackBar();
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(
-              content: Row(
-                children: [
-                  const Icon(Icons.warning_amber_rounded, color: Colors.amberAccent, size: 28),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'RESTOCK ALERT: $medName',
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white),
-                        ),
-                        Text(
-                          '$doctor reported low stock (Current: $currentQty). Please restock.${notes.isNotEmpty ? ' ($notes)' : ''}',
-                          style: const TextStyle(fontSize: 11.5, color: Colors.white70),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              backgroundColor: const Color(0xFFB91C1C),
-              behavior: SnackBarBehavior.floating,
-              duration: const Duration(seconds: 8),
-              action: SnackBarAction(
-                label: 'OPEN INVENTORY',
-                textColor: Colors.amberAccent,
-                onPressed: () {
-                  final stockIdx = _tabs.indexWhere((t) =>
-                      (t['title'] as String).toLowerCase().contains('stock') ||
-                      (t['title'] as String).toLowerCase().contains('inventory'));
-                  if (stockIdx >= 0) _tabController.animateTo(stockIdx);
-                },
-              ),
-            ),
-          );
-        }
+        // No popup: the Stock & Inventory tab badge and the banner inside it show the request.
+        if (mounted) setState(() {});
       }
     });
 

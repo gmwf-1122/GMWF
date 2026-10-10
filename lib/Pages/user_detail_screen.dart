@@ -1441,7 +1441,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       'accountStatus': _selectedStatus ?? 'Active',
       'isActive': (_selectedStatus ?? 'Active') == 'Active',
       'password': passCtrl.text.trim().isEmpty
-          ? (old['password']?.toString().isNotEmpty == true ? old['password'].toString() : '1122')
+          ? (old['password']?.toString().isNotEmpty == true ? old['password'].toString() : '112233')
           : passCtrl.text.trim(),
       'dispensaryIds': dispensaryIds,
       'dispensaryId': dispensaryIds.isNotEmpty ? dispensaryIds.first : null,
@@ -1529,7 +1529,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
           newRole.contains('student');
 
       final String oldEmail = old['email']?.toString() ?? '';
-      final String oldPassword = old['password']?.toString() ?? '1122';
+      final String oldPassword = old['password']?.toString() ?? '112233';
       final String newEmail = (updates['email'] ?? oldEmail).toString();
       final String newPassword = (updates['password'] ?? oldPassword).toString();
       final String newName = (updates['name'] ?? updates['username'] ?? old['name'] ?? old['username'])?.toString() ?? '';

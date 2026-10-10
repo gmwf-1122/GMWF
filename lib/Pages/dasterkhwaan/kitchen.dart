@@ -6,6 +6,7 @@
 //   • widgets/stock_dialogs.dart — inventory add / adjust
 
 import 'dart:convert';
+import '../../widgets/lazy_indexed_stack.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -207,87 +208,144 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
       }
     } catch (_) {}
 
-    final branches =
-        await FirebaseFirestore.instance.collection('branches').get();
-    for (final branch in branches.docs) {
-      final doc =
-          await branch.reference.collection('users').doc(user.uid).get();
-      if (doc.exists) {
-        final data = doc.data()!;
-        SyncService().start(branch.id);
-        setState(() {
-          _username = data['username'] ??
-              user.email?.split('@').first ??
-              'Kitchen Staff';
-          _branchId = branch.id;
-          _role ??= data['role'];
-        });
-        await _loadAllStockItems();
-        await _applyPreviousDaySaved();
-        return;
+    try {
+      final userDoc = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .get()
+          .timeout(const Duration(seconds: 3));
+      if (userDoc.exists && userDoc.data() != null) {
+        final data = userDoc.data()!;
+        final b = (data['branchId'] ?? data['branch'])?.toString();
+        if (b != null && b.isNotEmpty && b != 'all') {
+          SyncService().start(b);
+          if (mounted) {
+            setState(() {
+              _username = data['username'] ??
+                  user.email?.split('@').first ??
+                  'Kitchen Staff';
+              _branchId = b;
+              _role ??= data['role'];
+            });
+          }
+          await _loadAllStockItems();
+          await _applyPreviousDaySaved();
+          return;
+        }
       }
-    }
+    } catch (_) {}
+
+    try {
+      final branches = await FirebaseFirestore.instance
+          .collection('branches')
+          .get()
+          .timeout(const Duration(seconds: 4));
+      for (final branch in branches.docs) {
+        final doc = await branch.reference
+            .collection('users')
+            .doc(user.uid)
+            .get()
+            .timeout(const Duration(seconds: 2));
+        if (doc.exists) {
+          final data = doc.data()!;
+          SyncService().start(branch.id);
+          if (mounted) {
+            setState(() {
+              _username = data['username'] ??
+                  user.email?.split('@').first ??
+                  'Kitchen Staff';
+              _branchId = branch.id;
+              _role ??= data['role'];
+            });
+          }
+          await _loadAllStockItems();
+          await _applyPreviousDaySaved();
+          return;
+        }
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadAllStockItems() async {
     if (_branchId == null) return;
-    final snap = await FirebaseFirestore.instance
-        .collection('branches')
-        .doc(_branchId)
-        .collection('dasterkhwaan_stock')
-        .orderBy('name')
-        .get();
-
-    List<StockItem> items =
-        snap.docs.map((e) => StockItem.fromMap(e.data(), e.id)).toList();
-
-    if (items.isEmpty) {
-      final batch = FirebaseFirestore.instance.batch();
-      for (final item in _defaultStockItems) {
-        batch.set(
-          FirebaseFirestore.instance
-              .collection('branches')
-              .doc(_branchId)
-              .collection('dasterkhwaan_stock')
-              .doc(item['name']!),
-          {
-            'name':        item['name'],
-            'quantity':    0.0,
-            'unit':        item['unit'],
-            'lastUpdated': FieldValue.serverTimestamp(),
-          },
-        );
-      }
-      await batch.commit();
-      final newSnap = await FirebaseFirestore.instance
+    try {
+      final snap = await FirebaseFirestore.instance
           .collection('branches')
           .doc(_branchId)
           .collection('dasterkhwaan_stock')
           .orderBy('name')
-          .get();
-      items = newSnap.docs
-          .map((e) => StockItem.fromMap(e.data(), e.id))
-          .toList();
-    }
+          .get()
+          .timeout(const Duration(seconds: 4));
 
-    setState(() {
-      _allStockItems = items..sort((a, b) => a.name.compareTo(b.name));
-      _stockLoaded   = true;
-    });
+      List<StockItem> items =
+          snap.docs.map((e) => StockItem.fromMap(e.data(), e.id)).toList();
+
+      if (items.isEmpty) {
+        final batch = FirebaseFirestore.instance.batch();
+        for (final item in _defaultStockItems) {
+          batch.set(
+            FirebaseFirestore.instance
+                .collection('branches')
+                .doc(_branchId)
+                .collection('dasterkhwaan_stock')
+                .doc(item['name']!),
+            {
+              'name':        item['name'],
+              'quantity':    0.0,
+              'unit':        item['unit'],
+              'lastUpdated': FieldValue.serverTimestamp(),
+            },
+          );
+        }
+        await batch.commit().timeout(const Duration(seconds: 4));
+        final newSnap = await FirebaseFirestore.instance
+            .collection('branches')
+            .doc(_branchId)
+            .collection('dasterkhwaan_stock')
+            .orderBy('name')
+            .get()
+            .timeout(const Duration(seconds: 4));
+        items = newSnap.docs
+            .map((e) => StockItem.fromMap(e.data(), e.id))
+            .toList();
+      }
+
+      if (mounted) {
+        setState(() {
+          _allStockItems = items..sort((a, b) => a.name.compareTo(b.name));
+          _stockLoaded   = true;
+        });
+      }
+    } catch (e) {
+      debugPrint('[Kitchen] Stock load warning: $e');
+      if (mounted) {
+        setState(() {
+          _allStockItems = _defaultStockItems.map((item) => StockItem(
+            id: item['name']!,
+            name: item['name']!,
+            quantity: 0.0,
+            unit: item['unit']!,
+            lastUpdated: Timestamp.now(),
+          )).toList();
+          _stockLoaded = true;
+        });
+      }
+    }
   }
 
   Future<void> _applyPreviousDaySaved() async {
     if (_branchId == null) return;
-    final yesterday = _dateFmt
-        .format(DateTime.now().subtract(const Duration(days: 1)));
-    final dayRef = FirebaseFirestore.instance
-        .collection('branches')
-        .doc(_branchId)
-        .collection('dasterkhwaan')
-        .doc(yesterday);
+    try {
+      final yesterday = _dateFmt
+          .format(DateTime.now().subtract(const Duration(days: 1)));
+      final dayRef = FirebaseFirestore.instance
+          .collection('branches')
+          .doc(_branchId)
+          .collection('dasterkhwaan')
+          .doc(yesterday);
 
-    final daySnap = await dayRef.get();
-    if (!daySnap.exists) return;
+      final daySnap = await dayRef.get().timeout(const Duration(seconds: 4));
+      if (!daySnap.exists) return;
     final dayData = daySnap.data()!;
     if (dayData['savedCarriedOver'] == true) return;
 
@@ -328,7 +386,10 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
     } else {
       await dayRef.update({'savedCarriedOver': true});
     }
+  } catch (e) {
+    debugPrint('[Kitchen] _applyPreviousDaySaved error: $e');
   }
+}
 
   Future<void> _adjustStock(String itemName, double delta) async {
     final ref = FirebaseFirestore.instance
@@ -584,7 +645,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
               onLogout:   _logout,
               onSettings: _openSettings,
             )
-          : IndexedStack(
+          : LazyIndexedStack(
               index: _currentNav,
               children: [
                 _TokensTab(

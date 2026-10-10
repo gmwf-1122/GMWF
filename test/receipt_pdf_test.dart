@@ -7,7 +7,7 @@ void main() {
     final testData = <String, dynamic>{
       'categoryId': 'gmwf',
       'donorName': 'A very long donor name to test text wrapping and height issues on small screens',
-      'branchName': 'Gulzar-e-Madina Welfare Foundation Head Office',
+      'branchName': 'Gulzar Madina Welfare Foundation Head Office',
       'branchId': 'hq',
       'recordedBy': 'Muhammad Ahmad Raza Al-Azhari',
       'paymentMethod': 'Bank Deposit / Online Transfer',
@@ -34,7 +34,7 @@ void main() {
     final testData = <String, dynamic>{
       'categoryId': 'gmwf',
       'donorName': 'A very long donor name to test text wrapping and height issues on small screens',
-      'branchName': 'Gulzar-e-Madina Welfare Foundation Head Office',
+      'branchName': 'Gulzar Madina Welfare Foundation Head Office',
       'branchId': 'hq',
       'recordedBy': 'Muhammad Ahmad Raza Al-Azhari',
       'paymentMethod': 'Bank Deposit / Online Transfer',

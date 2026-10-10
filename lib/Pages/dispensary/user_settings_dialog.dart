@@ -5,6 +5,9 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../services/offline_auth_service.dart';
+import '../../services/local_storage_service.dart';
+import '../../realtime/realtime_manager.dart';
+import '../../realtime/realtime_events.dart';
 
 class DispensaryUserSettingsDialog {
   static Future<void> show(
@@ -238,6 +241,8 @@ class DispensaryUserSettingsDialog {
                                             final updates = {
                                               'username': newName,
                                               'usernameLower': newName.toLowerCase(),
+                                              'name': newName,
+                                              'displayName': newName,
                                             };
                                             await FirebaseFirestore.instance
                                                 .collection('branches')
@@ -252,6 +257,41 @@ class DispensaryUserSettingsDialog {
                                                 .doc(currentUid)
                                                 .update(updates)
                                                 .catchError((_) {});
+
+                                            // Enqueue for offline durable cloud sync
+                                            try {
+                                              await LocalStorageService.enqueueSync({
+                                                'type': 'save_user',
+                                                'uid': currentUid,
+                                                'branchId': branchId,
+                                                'data': updates,
+                                              });
+                                            } catch (_) {}
+
+                                            // Update local users box
+                                            try {
+                                              if (Hive.isBoxOpen(LocalStorageService.usersBox)) {
+                                                final uBox = Hive.box(LocalStorageService.usersBox);
+                                                final existingU = uBox.get(currentUid);
+                                                if (existingU is Map) {
+                                                  final uMerged = Map<String, dynamic>.from(existingU)..addAll(updates);
+                                                  await uBox.put(currentUid, uMerged);
+                                                }
+                                              }
+                                            } catch (_) {}
+
+                                            // Broadcast over LAN WebSocket to all connected stations
+                                            try {
+                                              RealtimeManager().sendMessage(RealtimeEvents.payload(
+                                                type: 'user_updated',
+                                                branchId: branchId,
+                                                data: {
+                                                  'uid': currentUid,
+                                                  ...updates,
+                                                },
+                                              ));
+                                              RealtimeManager().updateUsername(newName);
+                                            } catch (_) {}
                                           }
 
                                           // Update Hive app_settings user_data
@@ -262,6 +302,8 @@ class DispensaryUserSettingsDialog {
                                               final updatedMap = Map<String, dynamic>.from(uData);
                                               updatedMap['username'] = newName;
                                               updatedMap['usernameLower'] = newName.toLowerCase();
+                                              updatedMap['name'] = newName;
+                                              updatedMap['displayName'] = newName;
                                               await box.put('user_data', updatedMap);
                                             }
                                           }

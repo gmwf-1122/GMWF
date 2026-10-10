@@ -75,6 +75,7 @@ class _DailyLogViewState extends ConsumerState<DailyLogView> {
   bool _hasInitialScrollDone = false;
   bool _showBackToTop = false;
   bool? _localAllowStudentLeave;
+  String get _effectiveBranch => MadrassaLocalStorage.normalizeBranch(widget.branchId);
 
   @override
   void initState() {
@@ -107,10 +108,10 @@ class _DailyLogViewState extends ConsumerState<DailyLogView> {
 
   // Initialise streams/downloads for the selected date
   void _updateDateStreams() {
-    MadrassaLocalStorage.downloadStudents(widget.branchId);
+    MadrassaLocalStorage.downloadStudents(_effectiveBranch);
     MadrassaLocalStorage.downloadLogsForMonth(
-        widget.branchId, _selectedDate.year, _selectedDate.month);
-    MadrassaLocalStorage.downloadHolidays(widget.branchId);
+        _effectiveBranch, _selectedDate.year, _selectedDate.month);
+    MadrassaLocalStorage.downloadHolidays(_effectiveBranch);
   }
 
   bool _isFutureDate(DateTime date) {
@@ -264,26 +265,39 @@ class _DailyLogViewState extends ConsumerState<DailyLogView> {
 
       // Save locally (updates cached student currentLines, enqueues sync tasks, enqueues audit logs)
       await MadrassaLocalStorage.saveLogRecordLocal(
-        branchId: widget.branchId,
+        branchId: _effectiveBranch,
         dateKey: dateKey,
         logData: _localChanges,
         editorName: widget.editorName,
         editorRole: widget.editorRole,
       );
 
-      // If any Nazra student had Qaida completed, ensure student profile is updated
+      // If any Nazra student had Qaida completed or reverted, ensure student profile is updated
       for (var entry in _localChanges.entries) {
         final sId = entry.key;
         final data = entry.value;
         if (data['qaidaSabak'] == 'completed' || data['qaidaCompleted'] == true) {
-          final cached = MadrassaLocalStorage.getStudentCached(widget.branchId, sId);
+          final cached = MadrassaLocalStorage.getStudentCached(_effectiveBranch, sId);
           if (cached != null && cached['qaidaCompleted'] != true) {
             cached['qaidaCompleted'] = true;
             cached['qaidaSabak'] = 'completed';
-            await MadrassaLocalStorage.cacheStudent(widget.branchId, sId, cached);
+            await MadrassaLocalStorage.cacheStudent(_effectiveBranch, sId, cached);
             await LocalStorageService.enqueueSync({
               'type': 'save_madrassa_student',
-              'branchId': widget.branchId,
+              'branchId': _effectiveBranch,
+              'studentId': sId,
+              'data': cached,
+            });
+          }
+        } else if (data['qaidaCompleted'] == false || (data.containsKey('qaidaSabak') && data['qaidaSabak'] != 'completed' && data['qaidaSabak'] != null && data['qaidaSabak'] != '-')) {
+          final cached = MadrassaLocalStorage.getStudentCached(_effectiveBranch, sId);
+          if (cached != null && (cached['qaidaCompleted'] == true || cached['qaidaSabak'] == 'completed')) {
+            cached['qaidaCompleted'] = false;
+            cached['qaidaSabak'] = data['qaidaSabak'] ?? '21';
+            await MadrassaLocalStorage.cacheStudent(_effectiveBranch, sId, cached);
+            await LocalStorageService.enqueueSync({
+              'type': 'save_madrassa_student',
+              'branchId': _effectiveBranch,
               'studentId': sId,
               'data': cached,
             });
@@ -293,7 +307,7 @@ class _DailyLogViewState extends ConsumerState<DailyLogView> {
 
       // Write audit log entry in background
       unawaited(MadrassaAuditService.logAction(
-        branchId: widget.branchId,
+        branchId: _effectiveBranch,
         editor: widget.editorName.isNotEmpty && widget.editorName != 'Unknown' ? widget.editorName : 'Teacher',
         role: widget.editorRole,
         type: 'daily_log_edit',
@@ -342,7 +356,7 @@ _changeNotifier.value++;
   void _updateLocalSilent(String sId, String key, dynamic value) {
     if (!_localChanges.containsKey(sId)) {
       final dateKey = DateFormat('yyyy-MM-dd').format(_selectedDate);
-      final logData = ref.read(madrassaDailyLogProvider((branchId: widget.branchId, dateKey: dateKey))).value ?? {};
+      final logData = ref.read(madrassaDailyLogProvider((branchId: _effectiveBranch, dateKey: dateKey))).value ?? {};
       final dbLog = _safeMap(logData[sId]);
       _localChanges[sId] = Map<String, dynamic>.from(dbLog);
     }
@@ -356,11 +370,11 @@ _changeNotifier.value++;
 
   void _updateSabakLines(String sId, int newSabak) {
     final dateKey = DateFormat('yyyy-MM-dd').format(_selectedDate);
-    final logData = ref.read(madrassaDailyLogProvider((branchId: widget.branchId, dateKey: dateKey))).value ?? {};
+    final logData = ref.read(madrassaDailyLogProvider((branchId: _effectiveBranch, dateKey: dateKey))).value ?? {};
     final dbLog = _safeMap(logData[sId]);
     final currentLocal = _localChanges[sId] ?? dbLog;
 
-    final studentCache = MadrassaLocalStorage.getStudentCached(widget.branchId, sId);
+    final studentCache = MadrassaLocalStorage.getStudentCached(_effectiveBranch, sId);
     final initialCurrentLines = (studentCache?['currentLines'] as num?)?.toInt() ?? 0;
 
     int existingCurrent = (currentLocal['currentLines'] as num?)?.toInt() ?? initialCurrentLines;
@@ -505,11 +519,11 @@ _changeNotifier.value++;
   Widget build(BuildContext context) {
     final isDesktop = GBreakpoint.isDesktop(context);
     
-    final configAsyncValue = ref.watch(madrassaConfigProvider(widget.branchId));
-    final holidaysAsyncValue = ref.watch(madrassaHolidaysProvider(widget.branchId));
+    final configAsyncValue = ref.watch(madrassaConfigProvider(_effectiveBranch));
+    final holidaysAsyncValue = ref.watch(madrassaHolidaysProvider(_effectiveBranch));
     final dateKey = DateFormat('yyyy-MM-dd').format(_selectedDate);
-    final filteredStudentsAsyncValue = ref.watch(madrassaFilteredStudentsProvider((branchId: widget.branchId, selectedDate: _selectedDate)));
-    final logAsyncValue = ref.watch(madrassaDailyLogProvider((branchId: widget.branchId, dateKey: dateKey)));
+    final filteredStudentsAsyncValue = ref.watch(madrassaFilteredStudentsProvider((branchId: _effectiveBranch, selectedDate: _selectedDate)));
+    final logAsyncValue = ref.watch(madrassaDailyLogProvider((branchId: _effectiveBranch, dateKey: dateKey)));
 
     return configAsyncValue.when(
       loading: () => const Scaffold(body: Center(child: CircularProgressIndicator())),
@@ -573,10 +587,10 @@ _changeNotifier.value++;
               RefreshIndicator(
                 onRefresh: () async {
                   final dateStr = DateFormat('yyyy-MM-dd').format(_selectedDate);
-                  await MadrassaLocalStorage.downloadLogsForMonth(widget.branchId, _selectedDate.year, _selectedDate.month);
-                  await MadrassaLocalStorage.downloadStudents(widget.branchId, force: true);
-                  ref.invalidate(madrassaDailyLogProvider((branchId: widget.branchId, dateKey: dateStr)));
-                  ref.invalidate(madrassaFilteredStudentsProvider((branchId: widget.branchId, selectedDate: _selectedDate)));
+                  await MadrassaLocalStorage.downloadLogsForMonth(_effectiveBranch, _selectedDate.year, _selectedDate.month);
+                  await MadrassaLocalStorage.downloadStudents(_effectiveBranch, force: false);
+                  ref.invalidate(madrassaDailyLogProvider((branchId: _effectiveBranch, dateKey: dateStr)));
+                  ref.invalidate(madrassaFilteredStudentsProvider((branchId: _effectiveBranch, selectedDate: _selectedDate)));
                   if (mounted) setState(() {});
                 },
                 child: CustomScrollView(
@@ -903,8 +917,8 @@ _changeNotifier.value++;
                       ),
                       data: (logData) {
                         final double paddingVal = GBreakpoint.isMobile(context) ? Gsp.s16 : Gsp.s24;
-                        final isNazraOnly = LocalStorageService.isMadrassaNazraOnly(widget.branchId);
-                        final branchSessions = CampSessionService.getMadrassaSessions(widget.branchId);
+                        final isNazraOnly = LocalStorageService.isMadrassaNazraOnly(_effectiveBranch);
+                        final branchSessions = CampSessionService.getMadrassaSessions(_effectiveBranch);
 
                         final displayedStudents = students.where((s) {
                           if (_selectedSessionFilter != 'all') {
@@ -1147,7 +1161,7 @@ _changeNotifier.value++;
                                   logNotifier: notifier,
                                   isPtmDay: isPtmDay,
                                   isReadOnly: isReadOnly,
-                                  branchId: widget.branchId,
+                                  branchId: _effectiveBranch,
                                   allowStudentLeave: effectiveAllowLeave,
                                   editorRole: widget.editorRole,
                                   uploadStatus: _uploadStates[sId],
@@ -1415,7 +1429,7 @@ _changeNotifier.value++;
                       unawaited(
                         FirebaseFirestore.instance
                             .collection('branches')
-                            .doc(widget.branchId)
+                            .doc(_effectiveBranch)
                             .collection('madrassa_config')
                             .doc('current')
                             .set({'allowStudentLeave': newAllowState}, SetOptions(merge: true))
@@ -2108,25 +2122,25 @@ _changeNotifier.value++;
         return;
       }
 
-      final studentCache = MadrassaLocalStorage.getStudentCached(widget.branchId, studentId) ?? <String, dynamic>{'id': studentId};
+      final studentCache = MadrassaLocalStorage.getStudentCached(_effectiveBranch, studentId) ?? <String, dynamic>{'id': studentId};
       studentCache['photoUrl'] = b64;
       studentCache['photoBase64'] = b64;
       studentCache['studentPhotoBase64'] = b64;
-      await MadrassaLocalStorage.cacheStudent(widget.branchId, studentId, studentCache);
+      await MadrassaLocalStorage.cacheStudent(_effectiveBranch, studentId, studentCache);
 
       // Broadcast via LAN
       try {
         RealtimeManager().sendMessage(RealtimeEvents.payload(
           type: RealtimeEvents.saveMadrassaStudent,
           data: studentCache,
-          branchId: widget.branchId,
+          branchId: _effectiveBranch,
         ));
       } catch (_) {}
 
       // Always enqueue sync
       await LocalStorageService.enqueueSync({
         'type': 'save_madrassa_student',
-        'branchId': widget.branchId,
+        'branchId': _effectiveBranch,
         'studentId': studentId,
         'data': studentCache,
       });
@@ -2292,14 +2306,18 @@ _changeNotifier.value++;
     final rollNumber = studentData['rollNumber'] ?? '?';
 
     // Check student program
-    final isNazraOnly = LocalStorageService.isMadrassaNazraOnly(widget.branchId);
+    final isNazraOnly = LocalStorageService.isMadrassaNazraOnly(_effectiveBranch);
     final isStudentNazra = isNazraOnly ||
         (studentData['isNazra'] == true) ||
         (studentData['program']?.toString().toLowerCase() == 'nazra') ||
         (studentData['class']?.toString().toLowerCase() == 'nazra');
-    final isQaidaCompleted = studentData['qaidaCompleted'] == true ||
-        currentLog['qaidaCompleted'] == true ||
-        currentLog['qaidaSabak'] == 'completed';
+    final bool logQaidaCompExplicit = currentLog['qaidaCompleted'] == true;
+    final bool logQaidaReverted = currentLog['qaidaCompleted'] == false;
+    final bool isQaidaCompleted = !logQaidaReverted && (
+        studentData['qaidaCompleted'] == true ||
+        logQaidaCompExplicit ||
+        currentLog['qaidaSabak'] == 'completed'
+    );
     final int rukuParaVal = currentLog['rukuPara'] is int ? currentLog['rukuPara'] as int : (int.tryParse(currentLog['rukuPara']?.toString() ?? '') ?? 0);
     final rukuVal = currentLog['ruku']?.toString();
     final qaidaVal = currentLog['qaidaSabak']?.toString();
@@ -2399,7 +2417,7 @@ _changeNotifier.value++;
       final name = s['name'] ?? '—';
       final roll = s['rollNumber'] ?? '?';
 
-      final isNazraOnly = LocalStorageService.isMadrassaNazraOnly(widget.branchId);
+      final isNazraOnly = LocalStorageService.isMadrassaNazraOnly(_effectiveBranch);
       final isNazraStudent = isNazraOnly ||
           (s['isNazra'] == true) ||
           (s['program']?.toString().toLowerCase() == 'nazra') ||
@@ -3109,43 +3127,249 @@ class _StudentLogCard extends StatelessWidget {
     );
   }
 
+  Future<void> _showRevertQaidaDialog(BuildContext context, String sId) async {
+    String selectedLesson = '21';
+    final studentName = student['name'] ?? 'Student';
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (dialogCtx, setDialogState) {
+            final isUrdu = ctx.isUrdu;
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(Icons.undo_rounded, color: Colors.amber.shade800, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      isUrdu ? 'قاعدہ تکمیل منسوخ کریں' : 'Revert Qaida Completion',
+                      style: ctx.urduStyle(style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    isUrdu
+                        ? 'کیا آپ $studentName کے لیے قاعدہ کی تکمیل منسوخ کرنا چاہتے ہیں؟ موجودہ تختی / سبق منتخب کریں:'
+                        : 'Revert Qaida completion for $studentName back to active learning. Select the current lesson:',
+                    style: ctx.urduStyle(style: const TextStyle(fontSize: 13, color: Colors.black87)),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    isUrdu ? 'سبق / تختی:' : 'Qaida Lesson (1–21):',
+                    style: ctx.urduStyle(style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: selectedLesson,
+                        isExpanded: true,
+                        items: [
+                          for (int i = 21; i >= 1; i--)
+                            DropdownMenuItem<String>(
+                              value: '$i',
+                              child: Text(
+                                isUrdu ? 'سبق $i (تختی $i)' : 'Lesson $i',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                              ),
+                            ),
+                        ],
+                        onChanged: (val) {
+                          if (val != null) {
+                            setDialogState(() {
+                              selectedLesson = val;
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: Text(isUrdu ? 'منسوخ' : 'Cancel'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.amber.shade800,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: Text(isUrdu ? 'منسوخ اور محفوظ کریں' : 'Revert & Continue'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (confirmed == true) {
+      onUpdateLocal(sId, 'qaidaCompleted', false);
+      onUpdateLocal(sId, 'qaidaSabak', selectedLesson);
+      student['qaidaCompleted'] = false;
+      student['qaidaSabak'] = selectedLesson;
+
+      final cached = MadrassaLocalStorage.getStudentCached(branchId, sId);
+      if (cached != null) {
+        cached['qaidaCompleted'] = false;
+        cached['qaidaSabak'] = selectedLesson;
+        await MadrassaLocalStorage.cacheStudent(branchId, sId, cached);
+        await LocalStorageService.enqueueSync({
+          'type': 'save_madrassa_student',
+          'branchId': branchId,
+          'studentId': sId,
+          'data': cached,
+        });
+        unawaited(SyncService().triggerUpload());
+      }
+
+      unawaited(MadrassaAuditService.logAction(
+        branchId: branchId,
+        editor: 'Teacher',
+        role: editorRole,
+        type: 'qaida_reverted',
+        message: 'Reverted Qaida completed for $studentName to Lesson $selectedLesson',
+        studentId: sId,
+        studentName: studentName,
+      ));
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              context.isUrdu
+                  ? '$studentName کے لیے قاعدہ تکمیل منسوخ ہو گئی (سبق $selectedLesson)'
+                  : 'Qaida completed reverted for $studentName (Lesson $selectedLesson)',
+            ),
+            backgroundColor: Colors.amber.shade800,
+          ),
+        );
+      }
+    }
+  }
+
   Widget _buildQaidaField(BuildContext context, String sId, bool isQaidaCompleted, dynamic currentQaidaSabak, {bool isDark = false}) {
     if (isQaidaCompleted) {
       return Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            context.isUrdu ? 'قاعدہ سبق' : 'Qaida Sabak',
-            style: context.urduStyle(
-              style: TextStyle(
-                fontSize: 11,
-                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF495057),
-                fontWeight: FontWeight.bold,
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                context.isUrdu ? 'قاعدہ سبق' : 'Qaida Sabak',
+                style: context.urduStyle(
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF495057),
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
               ),
-            ),
+              if (!isReadOnly)
+                InkWell(
+                  onTap: () => _showRevertQaidaDialog(context, sId),
+                  borderRadius: BorderRadius.circular(4),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.undo_rounded, size: 11, color: Colors.amber.shade800),
+                        const SizedBox(width: 2),
+                        Text(
+                          context.isUrdu ? 'واپس کریں' : 'Revert',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.amber.shade900,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+            ],
           ),
           const SizedBox(height: 4),
           Container(
             height: 36,
-            padding: const EdgeInsets.symmetric(horizontal: 10),
+            padding: const EdgeInsets.symmetric(horizontal: 8),
             decoration: BoxDecoration(
               color: isDark ? const Color(0xFF064E3B).withValues(alpha: 0.3) : const Color(0xFFECFDF5),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.5)),
             ),
             child: Row(
-              mainAxisAlignment: MainAxisAlignment.center,
               children: [
                 const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 16),
                 const SizedBox(width: 6),
-                Text(
-                  context.isUrdu ? 'قاعدہ مکمل ✅' : 'Qaida Completed ✅',
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 12,
-                    color: Color(0xFF059669),
+                Expanded(
+                  child: Text(
+                    context.isUrdu ? 'قاعدہ مکمل ✅' : 'Qaida Completed ✅',
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 12,
+                      color: Color(0xFF059669),
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
+                if (!isReadOnly)
+                  Tooltip(
+                    message: context.isUrdu ? 'قاعدہ تکمیل منسوخ کریں' : 'Revert accidental Qaida completion',
+                    child: InkWell(
+                      onTap: () => _showRevertQaidaDialog(context, sId),
+                      borderRadius: BorderRadius.circular(6),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: Colors.amber.shade700.withValues(alpha: 0.5)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(Icons.undo_rounded, size: 12, color: Colors.amber.shade800),
+                            const SizedBox(width: 3),
+                            Text(
+                              context.isUrdu ? 'منسوخ' : 'Revert',
+                              style: TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.amber.shade900,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -3239,8 +3463,25 @@ class _StudentLogCard extends StatelessWidget {
                     unawaited(SyncService().triggerUpload());
                   }
                   student['qaidaCompleted'] = true;
+                  student['qaidaSabak'] = 'completed';
                 } else {
                   onUpdateLocal(sId, 'qaidaSabak', val ?? '-');
+                  onUpdateLocal(sId, 'qaidaCompleted', false);
+                  student['qaidaCompleted'] = false;
+                  student['qaidaSabak'] = val ?? '-';
+                  final cached = MadrassaLocalStorage.getStudentCached(branchId, sId);
+                  if (cached != null && (cached['qaidaCompleted'] == true || cached['qaidaSabak'] == 'completed')) {
+                    cached['qaidaCompleted'] = false;
+                    cached['qaidaSabak'] = val ?? '21';
+                    MadrassaLocalStorage.cacheStudent(branchId, sId, cached);
+                    LocalStorageService.enqueueSync({
+                      'type': 'save_madrassa_student',
+                      'branchId': branchId,
+                      'studentId': sId,
+                      'data': cached,
+                    });
+                    unawaited(SyncService().triggerUpload());
+                  }
                 }
               },
             ),
@@ -3285,7 +3526,13 @@ class _StudentLogCard extends StatelessWidget {
 
         final name = studentData['name'] ?? '—';
         final rollNumber = studentData['rollNumber']?.toString() ?? '?';
-        final photoUrl = studentData['photoUrl'] ?? studentData['photo_url'];
+        final photoUrl = studentData['photoUrl'] ??
+            studentData['photo_url'] ??
+            studentData['photoBase64'] ??
+            studentData['studentPhotoBase64'] ??
+            studentData['avatarUrl'] ??
+            studentData['imageUrl'] ??
+            studentData['profileImage'];
 
         final att = log['attendance'] ?? 'absent';
         final uni = log['uniform'] ?? false;
@@ -3310,10 +3557,15 @@ class _StudentLogCard extends StatelessWidget {
         final String? manzilRatio = log['manzilRatio']?.toString();
         final int rukuPara = log['rukuPara'] is int ? log['rukuPara'] as int : (int.tryParse(log['rukuPara']?.toString() ?? '') ?? 0);
         final dynamic rukuVal = log['ruku'];
-        final dynamic qaidaSabakVal = log['qaidaSabak'] ?? studentData['qaidaSabak'];
-        final bool isQaidaCompleted = studentData['qaidaCompleted'] == true ||
-            log['qaidaCompleted'] == true ||
-            log['qaidaSabak'] == 'completed';
+        final bool logQaidaCompExplicit = log['qaidaCompleted'] == true;
+        final bool logQaidaReverted = log['qaidaCompleted'] == false;
+        final bool isQaidaCompleted = !logQaidaReverted && (
+            studentData['qaidaCompleted'] == true ||
+            logQaidaCompExplicit ||
+            log['qaidaSabak'] == 'completed'
+        );
+        final dynamic qaidaSabakVal = log['qaidaSabak'] ??
+            (studentData['qaidaSabak'] == 'completed' ? '21' : studentData['qaidaSabak']);
 
         Widget avatarWidget;
         if (uploadStatus == PhotoUploadStatus.uploading) {

@@ -16,9 +16,7 @@ import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
 import 'package:gmwf/services/camp_session_service.dart';
 import 'package:gmwf/widgets/clock_skew_warning_banner.dart';
-import 'package:gmwf/widgets/connection_status_widget.dart';
 import 'package:gmwf/widgets/gmwf_app_bar.dart';
-import 'package:gmwf/widgets/camp_selection_dialog.dart';
 import 'package:gmwf/widgets/update_dialog_widget.dart';
 import 'package:gmwf/utils/notification_deduper.dart';
 import 'package:gmwf/utils/formatters.dart';
@@ -59,10 +57,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
   bool _isLoggingOut = false;
   bool _showingForm = false;
 
-  ConnectionStatus _connectionStatus = const ConnectionStatus(
-    state: LanConnectionState.disconnected,
-    message: 'Not connected',
-  );
+  ConnectionStatus _connectionStatus = ConnectionManager().status;
 
   String? _dispenserName;
   String? _branchName;
@@ -76,6 +71,15 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
   // [BUG-12] Debounce + guard for reconnect-triggered sync
   Timer? _syncDebounce;
   bool _reconnectSyncing = false;
+
+  // Debounce rapid catch-up setState storms on dispenser screen
+  Timer? _refreshDebounce;
+  void _scheduleRefresh() {
+    _refreshDebounce?.cancel();
+    _refreshDebounce = Timer(const Duration(milliseconds: 100), () {
+      if (mounted) setState(() {});
+    });
+  }
 
   static const Color _teal = Color(0xFF00695C);
 
@@ -98,6 +102,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
     _fetchDispenserName();
     _loadBranchName();
 
+    _connectionStatus = ConnectionManager().status;
     _connectionSub = ConnectionManager().statusStream.listen((status) {
       if (mounted) setState(() => _connectionStatus = status);
       // [BUG-12] Debounce: only trigger sync after 300 ms of stable connection
@@ -323,15 +328,12 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
 
     // ── Handle INVENTORY events (no patient serial) ───────────────────────────
     if (type == RealtimeEvents.saveStockItem || type == 'save_stock_item' || type == 'medicine_registered' || type == 'inventory_stock_sync') {
-      // RealtimeRouter._handleSaveStockItem / _handleInventoryStockSync already ran (before this stream listener fires)
-      // and correctly persisted the stock update to Hive.
-      // We refresh the UI state here.
-      if (mounted) setState(() {});
+      _scheduleRefresh();
       return;
     } else if (type == RealtimeEvents.deleteStockItem || type == 'delete_stock_item') {
       final mId = (data['id'] ?? data['medicineId'])?.toString();
       if (mId != null) LocalStorageService.deleteLocalStockItem(mId);
-      if (mounted) setState(() {});
+      _scheduleRefresh();
       return;
     } else if (type == RealtimeEvents.restockRequest || type == 'restock_request') {
       final medName = (data['medicineName'] ?? data['name'] ?? 'Medicine').toString();
@@ -353,7 +355,8 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
       }
       if (mounted) setState(() {});
 
-      if (mounted) {
+      // In the Hybrid Desk restock requests are shown only in Stock & Inventory.
+      if (mounted && !widget.isEmbedded) {
         ScaffoldMessenger.of(context).hideCurrentSnackBar();
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -439,7 +442,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
       LocalStorageService.saveLocalPrescription(data);
 
       dynamic entry;
-      final cleanSerial = (serial ?? data['serial'] ?? data['id'] ?? '').toString().trim();
+      final cleanSerial = serial.trim();
       if (cleanSerial.isNotEmpty) {
         final normBranch = widget.branchId.toLowerCase().trim();
         final normSerial = cleanSerial.toLowerCase();
@@ -495,16 +498,17 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
           _selectedQueueEntry = updated;
         }
       }
-      if (mounted) setState(() {});
+      _scheduleRefresh();
 
-      final entryMap = (entry is Map) ? entry as Map : null;
+      final entryMap = (entry is Map) ? entry : null;
       final isAlreadyDispensed = (entryMap?['dispenseStatus'] ?? data['dispenseStatus']) == 'dispensed';
 
       final rawTime = data['completedAt'] ?? data['createdAt'] ?? data['timestamp'];
       final dt = rawTime != null ? DateTime.tryParse(rawTime.toString()) : null;
       final isRecent = dt == null || DateTime.now().difference(dt).inMinutes <= 3;
 
-      if (!isReplay && isToday && !isAlreadyDispensed && isRecent && matchesActiveCamp) {
+      // Hybrid Desk: the Dispenser tab badge shows waiting patients instead of a popup each.
+      if (!widget.isEmbedded && !isReplay && isToday && !isAlreadyDispensed && isRecent && matchesActiveCamp) {
         if (NotificationDeduper.shouldShow('dispenser_presc_${widget.branchId}_$serial', window: const Duration(minutes: 5))) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) {
@@ -521,7 +525,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
     } else if (type == RealtimeEvents.saveEntry || type == 'token_created') {
       // [BUG-14] Use saveEntryLocal for proper sanitisation
       LocalStorageService.saveEntryLocal(widget.branchId, serial, data);
-      if (mounted) setState(() {});
+      _scheduleRefresh();
 
       final status = (data['status'] ?? 'waiting').toString().toLowerCase();
       final isWaiting = status == 'waiting';
@@ -531,7 +535,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
       final dt = rawTime != null ? DateTime.tryParse(rawTime.toString()) : null;
       final isRecent = dt == null || DateTime.now().difference(dt).inMinutes <= 3;
 
-      if (!isReplay && isToday && isWaiting && !isAlreadyDispensed && isRecent && matchesActiveCamp) {
+      if (!widget.isEmbedded && !isReplay && isToday && isWaiting && !isAlreadyDispensed && isRecent && matchesActiveCamp) {
         if (NotificationDeduper.shouldShow('dispenser_token_${widget.branchId}_$serial', window: const Duration(minutes: 5))) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) {
@@ -546,20 +550,38 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
       }
 
     } else if (type == 'dispense_completed') {
-      final box = Hive.box(LocalStorageService.entriesBox);
-      final key = '${widget.branchId}-$serial';
-      final entry = box.get(key);
-      if (entry != null) {
-        final updated = Map<String, dynamic>.from(entry);
-        updated['dispenseStatus'] = 'dispensed';
-        box.put(key, updated);
+      LocalStorageService.updateDispenseStatus(widget.branchId, serial, 'dispensed');
+      final cleanSerial = serial.trim();
+      final normBranch = widget.branchId.toLowerCase().trim();
+      final normSerial = cleanSerial.toLowerCase();
+      final upperSerial = cleanSerial.toUpperCase();
+      if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+        final box = Hive.box(LocalStorageService.entriesBox);
+        for (final k in [
+          '$normBranch-$cleanSerial',
+          '$normBranch-$upperSerial',
+          '$normBranch-$normSerial',
+          cleanSerial,
+          upperSerial,
+          normSerial
+        ]) {
+          final entry = box.get(k);
+          if (entry != null && entry is Map) {
+            final updated = Map<String, dynamic>.from(entry);
+            updated['dispenseStatus'] = 'dispensed';
+            updated['status'] = 'completed';
+            box.put(k, updated);
+          }
+        }
       }
-      if (serial == _selectedQueueEntry?['serial'] && mounted) {
+      final curSerial = (_selectedQueueEntry?['serial'] ?? _selectedQueueEntry?['id'] ?? '').toString().trim().toUpperCase();
+      if (upperSerial == curSerial && mounted) {
         setState(() {
           _selectedQueueEntry = null;
           _showingForm = false;
         });
       }
+      _scheduleRefresh();
     }
   }
 
@@ -567,14 +589,18 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
 
   Future<void> _loadBranchName() async {
     if (widget.branchId.isEmpty) {
-      if (mounted) setState(() { _branchName = 'Free Dispensary'; _loadingBranch = false; });
+      if (mounted) {
+        setState(() { _branchName = 'Free Dispensary'; _loadingBranch = false; });
+      }
       return;
     }
     if (_cachedBranchNames.containsKey(widget.branchId)) {
-      if (mounted) setState(() {
-        _branchName = _cachedBranchNames[widget.branchId];
-        _loadingBranch = false;
-      });
+      if (mounted) {
+        setState(() {
+          _branchName = _cachedBranchNames[widget.branchId];
+          _loadingBranch = false;
+        });
+      }
       return;
     }
     try {
@@ -768,6 +794,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
         Divider(height: 1, color: _isDark ? const Color(0xFF334155) : null),
         Expanded(
           child: PatientForm(
+            key: ValueKey(_selectedQueueEntry!['serial'] ?? _selectedQueueEntry!['id']),
             branchId: widget.branchId,
             queueEntry: _selectedQueueEntry!,
             onDispensed: () => setState(() { _selectedQueueEntry = null; _showingForm = false; }),
@@ -907,9 +934,13 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
   }
 
   Future<void> _dismissRestockAlert(String reqId) async {
-    setState(() {
+    if (mounted) {
+      setState(() {
+        _pendingRestockAlerts.removeWhere((r) => r['id'] == reqId);
+      });
+    } else {
       _pendingRestockAlerts.removeWhere((r) => r['id'] == reqId);
-    });
+    }
     await LocalStorageService.updateRestockRequestStatus(widget.branchId, reqId, 'acknowledged');
     try {
       await FirebaseFirestore.instance
@@ -922,17 +953,25 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
   }
 
   Widget _buildRestockBanner(bool isDark) {
+    // If embedded, the parent screen (e.g. HybridDispensaryScreen) displays the global restock banner
+    if (widget.isEmbedded) return const SizedBox.shrink();
     if (_pendingRestockAlerts.isEmpty) return const SizedBox.shrink();
 
     // Auto-dismiss alerts for medicines that have already been restocked in stockBox
+    final toRemove = <String>[];
+    final displayedAlerts = <Map<String, dynamic>>[];
+
     if (Hive.isBoxOpen(LocalStorageService.stockBox)) {
       final stockBox = Hive.box(LocalStorageService.stockBox);
       final normBranch = widget.branchId.toLowerCase().trim();
-      final toRemove = <String>[];
 
-      for (final alert in _pendingRestockAlerts) {
+      for (final rawAlert in _pendingRestockAlerts) {
+        final alert = Map<String, dynamic>.from(rawAlert);
         final alertMed = (alert['medicineName'] ?? alert['name'] ?? '').toString().toLowerCase().trim();
-        if (alertMed.isEmpty) continue;
+        if (alertMed.isEmpty) {
+          displayedAlerts.add(alert);
+          continue;
+        }
         double liveQty = 0;
         for (final val in stockBox.values) {
           if (val is Map) {
@@ -949,27 +988,34 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
             }
           }
         }
-        // If stock is now replenished (> 15), auto-dismiss
+        // If stock is now replenished (> 15), mark to auto-dismiss safely after frame
         if (liveQty >= 15) {
           final id = alert['id']?.toString();
           if (id != null) {
             toRemove.add(id);
-            _dismissRestockAlert(id);
           }
         } else {
           alert['liveQty'] = liveQty.toInt();
+          displayedAlerts.add(alert);
         }
       }
 
       if (toRemove.isNotEmpty) {
-        _pendingRestockAlerts.removeWhere((a) => toRemove.contains(a['id']?.toString()));
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          for (final id in toRemove) {
+            _dismissRestockAlert(id);
+          }
+        });
       }
+    } else {
+      displayedAlerts.addAll(_pendingRestockAlerts);
     }
 
-    if (_pendingRestockAlerts.isEmpty) return const SizedBox.shrink();
+    if (displayedAlerts.isEmpty) return const SizedBox.shrink();
 
-    final first = _pendingRestockAlerts.first;
-    final count = _pendingRestockAlerts.length;
+    final first = displayedAlerts.first;
+    final count = displayedAlerts.length;
     final medName = first['medicineName'] ?? first['name'] ?? 'Medicine';
     final doctor = first['requestedBy'] ?? 'Doctor';
     final currentQty = first['liveQty'] ?? first['currentQty'] ?? first['quantity'] ?? '0';
@@ -1057,6 +1103,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
 
   @override
   void dispose() {
+    _refreshDebounce?.cancel();
     _syncDebounce?.cancel();
     _restockSub?.cancel();
     for (final s in _inventoryLiveSubs) {

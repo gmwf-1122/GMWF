@@ -1,5 +1,6 @@
 // lib/pages/dispensary/dispensar/inventory.dart
 
+import 'package:gmwf/utils/debounced_box_listenable.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -177,6 +178,20 @@ class _InventoryPageState extends State<InventoryPage>
 
   late final TabController _tabCtrl;
   final _searchCtrl = TextEditingController();
+  Timer? _searchDebounce;
+
+  void _onSearchChanged() {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 180), () {
+      if (mounted) {
+        setState(() {
+          _displayLimit = 50;
+          _processData();
+        });
+      }
+    });
+  }
+
   String _filterType = 'All';
   String _filterBatch = 'All Batches';
   bool _mergeByFormula = false;
@@ -282,6 +297,9 @@ class _InventoryPageState extends State<InventoryPage>
     _tabCtrl = TabController(length: tabCount, vsync: this);
     _tabCtrl.addListener(() {
       if (mounted && !_tabCtrl.indexIsChanging) {
+        debugPrint('[InventoryPage] tab -> ${_tabCtrl.index}'
+            ' (previous ${_tabCtrl.previousIndex}) from: '
+            '${StackTrace.current.toString().split("\n").skip(1).take(4).map((l) => l.trim()).join(" <- ")}');
         setState(() {});
       }
     });
@@ -382,8 +400,11 @@ class _InventoryPageState extends State<InventoryPage>
     // Zero continuous Firestore listeners.
     try {
       if (Hive.isBoxOpen(LocalStorageService.syncBox)) {
+        // Debounced: a sync pass writes the queue once per item, and each rescan walks the
+        // whole queue on the UI thread — undebounced, that froze the window ("Not Responding").
         final localSyncStream = Hive.box(LocalStorageService.syncBox)
             .watch()
+            .debounceTime(const Duration(milliseconds: 500))
             .map((_) => _getPendingLogs());
         _logCombinedSub = localSyncStream
             .startWith(_getPendingLogs())
@@ -450,9 +471,11 @@ class _InventoryPageState extends State<InventoryPage>
     final box = Hive.box(LocalStorageService.syncBox);
     final pending = <Map<String, dynamic>>[];
     for (final key in box.keys) {
-      final item = Map<String, dynamic>.from(box.get(key) as Map);
-      final type = item['type']?.toString();
+      final raw = box.get(key);
+      if (raw is! Map) continue;
+      final type = raw['type']?.toString();
       if (type == 'add_inventory_stock' || type == 'register_medicine') {
+        final item = Map<String, dynamic>.from(raw);
         final data = Map<String, dynamic>.from(item['data'] ?? item);
         pending.add({
           ...data,
@@ -468,6 +491,7 @@ class _InventoryPageState extends State<InventoryPage>
 
   @override
   void dispose() {
+    _searchDebounce?.cancel();
     HardwareKeyboard.instance.removeHandler(_handleKeyboardShortcuts);
     _debounceLoadTimer?.cancel();
     CampSessionService.activeCampNotifier.removeListener(_onActiveCampChanged);
@@ -554,6 +578,41 @@ class _InventoryPageState extends State<InventoryPage>
 
         allMapDocs.add(m);
       }
+    }
+
+    // Collapse ghost copies of the same batch (same name/type/dose/expiry/camp saved under
+    // different ids). Without this their quantities were added together, so the Stock table
+    // showed double what the Update Stock screen (which already de-duplicates) showed.
+    {
+      final byBatch = <String, Map<String, dynamic>>{};
+      for (final m in allMapDocs) {
+        final name = (m['name'] ?? m['formula'] ?? '').toString().trim().toLowerCase();
+        final type = (m['type'] ?? m['dosageForm'] ?? m['form'] ?? '').toString().trim().toLowerCase();
+        final dose = (m['dose'] ?? '').toString().trim().toLowerCase();
+        final camp = (m['campId'] ?? m['dispensaryId'] ?? '').toString().trim().toLowerCase();
+        final exp = (m['expiryDate'] ?? '').toString().trim();
+        final monthYear = (exp.length == 10 && exp[2] == '-' && exp[5] == '-') ? exp.substring(3) : exp;
+        if (name.isEmpty || type.isEmpty) {
+          byBatch['id:${m['id']}|$camp'] = m;
+          continue;
+        }
+        final key = '$name|$type|$dose|$monthYear|$camp';
+        final existing = byBatch[key];
+        if (existing == null) {
+          byBatch[key] = m;
+          continue;
+        }
+        final nUp = DateTime.tryParse((m['updatedAt'] ?? m['lastUpdated'] ?? '').toString());
+        final eUp = DateTime.tryParse((existing['updatedAt'] ?? existing['lastUpdated'] ?? '').toString());
+        final newer = (nUp != null && eUp != null)
+            ? nUp.isAfter(eUp)
+            : (nUp != null && eUp == null) ||
+                (nUp == null && eUp == null && _asInt(m['quantity']) > 0 && _asInt(existing['quantity']) == 0);
+        if (newer) byBatch[key] = m;
+      }
+      allMapDocs
+        ..clear()
+        ..addAll(byBatch.values);
     }
 
     var filtered = allMapDocs.where((v) {
@@ -1858,7 +1917,7 @@ class _InventoryPageState extends State<InventoryPage>
           ),
           const SizedBox(width: 6),
           ValueListenableBuilder(
-            valueListenable: Hive.box(LocalStorageService.syncBox).listenable(),
+            valueListenable: DebouncedBoxListenable.shared(Hive.box(LocalStorageService.syncBox), cooldown: const Duration(seconds: 2)),
             builder: (context, Box box, _) {
               final failuresCount = box.values
                   .whereType<Map>()
@@ -1897,57 +1956,131 @@ class _InventoryPageState extends State<InventoryPage>
         ],
       );
 
+  /// Items that failed to upload and are waiting in the retry queue, with their Hive keys.
+  List<MapEntry<dynamic, Map>> _failedSyncEntries() {
+    final box = Hive.box(LocalStorageService.syncBox);
+    return box
+        .toMap()
+        .entries
+        .where((e) => e.value is Map && ((e.value as Map)['attempts'] ?? 0) > 0)
+        .map((e) => MapEntry<dynamic, Map>(e.key, e.value as Map))
+        .toList();
+  }
+
+  /// "Clearing" moves the item to the dead-letter queue instead of deleting it, so it is
+  /// no longer retried but can still be recovered. The local record itself is untouched.
+  Future<void> _dismissSyncEntry(dynamic key, Map item) async {
+    await LocalStorageService.moveToDeadLetterQueue(
+      LocalStorageService.syncBox,
+      key,
+      Map<String, dynamic>.from(item),
+      reason: 'Dismissed by user from Sync Retry Queue',
+    );
+  }
+
   void _showSyncFailuresDialog(BuildContext context) {
     showDialog(
       context: context,
-      builder: (context) {
-        final box = Hive.box(LocalStorageService.syncBox);
-        final failedActions = box.values
-            .whereType<Map>()
-            .where((action) => (action['attempts'] ?? 0) > 0)
-            .toList();
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            final failed = _failedSyncEntries();
 
-        return AlertDialog(
-          title: const Row(
-            children: [
-              Icon(Icons.sync_problem_rounded, color: Colors.orange),
-              SizedBox(width: 8),
-              Text('Sync Retry Queue'),
-            ],
-          ),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: failedActions.isEmpty
-                ? const Text('All sync operations are running smoothly.')
-                : ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: failedActions.length,
-                    itemBuilder: (context, index) {
-                      final item = failedActions[index];
-                      final type = item['type'] ?? 'Unknown';
-                      final attempts = item['attempts'] ?? 0;
-                      final error = item['lastError'] ?? 'Unknown network timeout';
-                      final data = item['data'] is Map ? item['data'] as Map : {};
-                      final name = data['name'] ?? item['medicineName'] ?? 'General Sync Item';
+            Future<void> clearAll() async {
+              final confirmed = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Clear all failed items?'),
+                  content: Text(
+                      '${failed.length} items that could not be uploaded will stop retrying. '
+                      'The data stays saved on this computer and the items are kept in the '
+                      'dead-letter queue, but they will not reach the cloud unless re-queued.'),
+                  actions: [
+                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
+                    FilledButton(
+                      style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Clear all'),
+                    ),
+                  ],
+                ),
+              );
+              if (confirmed != true) return;
+              for (final e in failed) {
+                await _dismissSyncEntry(e.key, e.value);
+              }
+              if (context.mounted) setDialogState(() {});
+            }
 
-                      return Card(
-                        margin: const EdgeInsets.symmetric(vertical: 4),
-                        child: ListTile(
-                          title: Text('$name ($type)'),
-                          subtitle: Text('Error: $error\nRetries: $attempts'),
-                          isThreeLine: true,
-                          leading: const Icon(Icons.error_outline_rounded, color: Colors.red),
-                        ),
+            return AlertDialog(
+              title: const Row(
+                children: [
+                  Icon(Icons.sync_problem_rounded, color: Colors.orange),
+                  SizedBox(width: 8),
+                  Text('Sync Retry Queue'),
+                ],
+              ),
+              content: SizedBox(
+                width: double.maxFinite,
+                child: failed.isEmpty
+                    ? const Text('All sync operations are running smoothly.')
+                    : ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: failed.length,
+                        itemBuilder: (context, index) {
+                          final entry = failed[index];
+                          final item = entry.value;
+                          final type = item['type'] ?? 'Unknown';
+                          final attempts = item['attempts'] ?? 0;
+                          final error = item['lastError'] ?? 'Unknown network timeout';
+                          final data = item['data'] is Map ? item['data'] as Map : {};
+                          final name = data['name'] ?? item['medicineName'] ?? 'General Sync Item';
+
+                          return Card(
+                            margin: const EdgeInsets.symmetric(vertical: 4),
+                            child: ListTile(
+                              title: Text('$name ($type)'),
+                              subtitle: Text('Error: $error\nRetries: $attempts'),
+                              isThreeLine: true,
+                              leading: const Icon(Icons.error_outline_rounded, color: Colors.red),
+                              trailing: IconButton(
+                                tooltip: 'Clear this item (stop retrying)',
+                                icon: const Icon(Icons.delete_outline_rounded),
+                                onPressed: () async {
+                                  await _dismissSyncEntry(entry.key, item);
+                                  if (context.mounted) setDialogState(() {});
+                                },
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+              ),
+              actions: [
+                if (failed.isNotEmpty) ...[
+                  TextButton.icon(
+                    onPressed: clearAll,
+                    icon: const Icon(Icons.delete_sweep_rounded, color: Colors.red),
+                    label: const Text('Clear all', style: TextStyle(color: Colors.red)),
+                  ),
+                  TextButton.icon(
+                    onPressed: () {
+                      SyncService().triggerUpload(force: true);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Retrying upload now…'), duration: Duration(seconds: 2)),
                       );
                     },
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('Retry now'),
                   ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Close'),
-            ),
-          ],
+                ],
+                TextButton(
+                  onPressed: () => Navigator.pop(dialogContext),
+                  child: const Text('Close'),
+                ),
+              ],
+            );
+          },
         );
       },
     );
@@ -2256,10 +2389,7 @@ class _InventoryPageState extends State<InventoryPage>
                     child: TextField(
                       controller: _searchCtrl,
                       cursorColor: _isDark ? const Color(0xFF38BDF8) : _teal,
-                      onChanged: (_) => setState(() {
-                        _displayLimit = 50;
-                        _processData();
-                      }),
+                      onChanged: (_) => _onSearchChanged(),
                       style: TextStyle(fontSize: 13, color: _isDark ? Colors.white : _textDark),
                       decoration: InputDecoration(
                         prefixIcon: Icon(Icons.search_rounded, color: _isDark ? const Color(0xFF94A3B8) : _textLight, size: 18),
@@ -2573,10 +2703,7 @@ class _InventoryPageState extends State<InventoryPage>
           child: TextField(
             controller: _searchCtrl,
             cursorColor: _isDark ? const Color(0xFF38BDF8) : _teal,
-            onChanged: (_) => setState(() {
-              _displayLimit = 50;
-              _processData();
-            }),
+            onChanged: (_) => _onSearchChanged(),
             style: TextStyle(fontSize: 13, color: _isDark ? Colors.white : _textDark),
             decoration: InputDecoration(
               prefixIcon: Icon(Icons.search_rounded, color: _isDark ? const Color(0xFF94A3B8) : _textLight, size: 18),
@@ -2872,9 +2999,12 @@ class _InventoryPageState extends State<InventoryPage>
     return Container(
       color: _isDark ? const Color(0xFF0F172A) : _bg,
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-      child: SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(children: widgets),
+      // Wrap instead of a sideways-scrolling row so every control stays visible on any width.
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: widgets.where((w) => w is! SizedBox || (w.width == null && w.height == null && w.child != null)).toList(),
       ),
     );
   }
@@ -5637,6 +5767,10 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
           'expiryDate': _expiryCtrl.text.trim(),
           'updatedAt': FieldValue.serverTimestamp(),
         };
+
+        // Populate Firestore batch
+        batch.set(ref, uData, SetOptions(merge: true));
+
         try {
           final stockBox = Hive.box(LocalStorageService.stockBox);
           final existing = stockBox.get('stock:$id') ?? stockBox.get(id);
@@ -5650,14 +5784,13 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
             'data': updated,
           });
 
-          if (!RealtimeManager().isConnected) {
-            LocalStorageService.enqueueSync({
-              'type': 'register_medicine',
-              'branchId': widget.branchId,
-              'medicineId': id,
-              'data': updated,
-            });
-          }
+          // Always enqueue sync to ensure durability across cloud & offline
+          LocalStorageService.enqueueSync({
+            'type': 'register_medicine',
+            'branchId': widget.branchId,
+            'medicineId': id,
+            'data': updated,
+          });
         } catch (_) {}
       }
 
@@ -5665,6 +5798,7 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
       unawaited(batch.commit().catchError((e) {
         debugPrint('[Inventory] Background batch commit error: $e');
       }));
+      SyncService().triggerUpload();
 
       if (!mounted) return;
       Navigator.pop(context);

@@ -1,3 +1,6 @@
+import 'dart:io';
+
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
@@ -5,6 +8,20 @@ import 'package:gmwf/services/local_storage_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  final tempDir = Directory.systemTemp.createTempSync('gmwf_user_delete_test_');
+
+  // Hive.initFlutter() asks path_provider for a directory; there is no plugin in unit tests.
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(
+    const MethodChannel('plugins.flutter.io/path_provider'),
+    (call) async => tempDir.path,
+  );
+
+  tearDownAll(() {
+    try {
+      tempDir.deleteSync(recursive: true);
+    } catch (_) {}
+  });
 
   setUp(() async {
     await Hive.initFlutter();

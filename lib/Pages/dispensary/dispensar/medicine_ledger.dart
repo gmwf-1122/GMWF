@@ -501,7 +501,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
 
       final results = await Future.wait(fetchFutures);
       for (final res in results) {
-        totalRemoved += (res['totalRemoved'] as double);
+        totalRemoved += ((res['totalRemoved'] as num?)?.toDouble() ?? 0.0);
         logs.addAll((res['logs'] as List<Map<String, dynamic>>));
       }
 
@@ -938,11 +938,20 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
     final logs = (report['logs'] as List?) ?? [];
     final Map<String, Map<String, dynamic>> groups = {};
 
-    for (final l in logs) {
+    for (final raw in logs) {
+      // Synced/legacy log rows can be malformed (non-Map, qty as text); never let one break the view.
+      if (raw is! Map) continue;
+      final l = raw;
       final rawName = l['medicineName']?.toString() ?? 'Unknown Medicine';
-      final name = MasterProformaService.cleanBrandToFormula(rawName);
+      String name;
+      try {
+        name = MasterProformaService.cleanBrandToFormula(rawName);
+      } catch (_) {
+        name = rawName;
+      }
       final type = l['type']?.toString() ?? 'removed';
-      final qty = (l['qty'] as num?)?.toDouble() ?? 0.0;
+      final qtyRaw = l['qty'];
+      final qty = qtyRaw is num ? qtyRaw.toDouble() : (double.tryParse(qtyRaw?.toString() ?? '') ?? 0.0);
       final patientId = l['patientCnic'] ?? l['patientName'] ?? '';
 
       groups.putIfAbsent(name, () => {
@@ -971,9 +980,14 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
         borderRadius: BorderRadius.circular(16),
         side: BorderSide(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
       ),
-      child: Theme(
+      // Own storage bucket: the tile's open/closed state otherwise collides with the parent
+      // ListView's saved scroll offset in PageStorage ("double is not a subtype of bool?").
+      child: PageStorage(
+       bucket: PageStorageBucket(),
+       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
         child: ExpansionTile(
+          key: const ValueKey('ledger_breakdown_tile'),
           initiallyExpanded: false,
           leading: Icon(Icons.analytics_rounded, color: isDark ? const Color(0xFF38BDF8) : _teal),
           title: Text(
@@ -1048,6 +1062,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
             ),
           ],
         ),
+       ),
       ),
     );
   }

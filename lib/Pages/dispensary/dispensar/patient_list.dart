@@ -12,6 +12,7 @@ import 'package:gmwf/services/camp_session_service.dart';
 import 'package:gmwf/services/serials_service.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
+import 'package:gmwf/realtime/connection_manager.dart';
 import 'package:gmwf/design/design_system.dart';
 
 class PatientList extends StatefulWidget {
@@ -139,8 +140,10 @@ class _PatientListState extends State<PatientList> {
       }
     }
     CampSessionService.activeCampNotifier.addListener(_onActiveCampChanged);
+    ConnectionManager().addReconnectListener(_onLanReconnected);
 
     if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+      _refreshQueueCache();
       _entriesBoxSub = Hive.box(LocalStorageService.entriesBox).watch().listen((_) {
         _debouncedRebuild();
       });
@@ -154,22 +157,50 @@ class _PatientListState extends State<PatientList> {
 
       final eventBranch = (data?['branchId'] ?? event['branchId'])?.toString().trim().toLowerCase();
       final myBranch    = widget.branchId.toLowerCase().trim();
-      if (eventBranch != null && eventBranch.isNotEmpty && eventBranch != myBranch) return;
+      if (eventBranch != null &&
+          eventBranch.isNotEmpty &&
+          eventBranch != 'all' &&
+          eventBranch != 'default' &&
+          myBranch.isNotEmpty &&
+          myBranch != 'all' &&
+          myBranch != 'default' &&
+          !CampSessionService.areBranchesMatching(eventBranch, myBranch)) {
+        return;
+      }
 
       if (type == RealtimeEvents.savePrescription ||
           type == 'prescription_created' ||
           type == 'save_prescription') {
         if (data != null) {
           LocalStorageService.saveLocalPrescription(data);
-          // [FIX] Link prescription → entry in entriesBox (mirrors server SSM).
-          // Without this, the dispenser queue shows 'waiting' even after doctor prescribes.
+          // Link prescription → entry in entriesBox
           final serial = (data['serial'] ?? data['id'])?.toString().trim();
           if (serial != null && serial.isNotEmpty) {
             try {
               final eBox = Hive.box(LocalStorageService.entriesBox);
               final normBranch = myBranch;
-              final key = '$normBranch-$serial';
-              final existing = eBox.get(key) ?? eBox.get('$normBranch-${serial.toUpperCase()}');
+              final upperSerial = serial.toUpperCase();
+              final lowerSerial = serial.toLowerCase();
+              dynamic existingKey;
+              dynamic existing;
+
+              for (final k in [
+                '$normBranch-$serial',
+                '$normBranch-$upperSerial',
+                '$normBranch-$lowerSerial',
+                if (eventBranch != null && eventBranch.isNotEmpty) '$eventBranch-$serial',
+                if (eventBranch != null && eventBranch.isNotEmpty) '$eventBranch-$upperSerial',
+                serial,
+                upperSerial,
+                lowerSerial
+              ]) {
+                if (eBox.containsKey(k)) {
+                  existingKey = k;
+                  existing = eBox.get(k);
+                  break;
+                }
+              }
+
               final updated = (existing is Map)
                   ? Map<String, dynamic>.from(existing)
                   : <String, dynamic>{
@@ -193,13 +224,15 @@ class _PatientListState extends State<PatientList> {
                 updated['patientName'] = pName;
                 updated['name'] = pName;
               }
-              if (data['patientCnic'] != null && data['patientCnic'].toString().isNotEmpty) {
-                updated['patientCnic'] = data['patientCnic'];
-                updated['cnic'] ??= data['patientCnic'];
+              final incomingP = data['patientCnic']?.toString().trim();
+              if (incomingP != null && incomingP.isNotEmpty && !incomingP.startsWith('unknown_') && incomingP != '00000-0000000-0' && incomingP != '-') {
+                updated['patientCnic'] = incomingP;
+                updated['cnic'] ??= incomingP;
               }
-              if (data['cnic'] != null && data['cnic'].toString().isNotEmpty) {
-                updated['cnic'] = data['cnic'];
-                updated['patientCnic'] ??= data['cnic'];
+              final incomingC = data['cnic']?.toString().trim();
+              if (incomingC != null && incomingC.isNotEmpty && !incomingC.startsWith('unknown_') && incomingC != '00000-0000000-0' && incomingC != '-') {
+                updated['cnic'] = incomingC;
+                updated['patientCnic'] ??= incomingC;
               }
               if (data['guardianCnic'] != null) updated['guardianCnic'] = data['guardianCnic'];
               if (data['patientAge'] != null) updated['patientAge'] = data['patientAge'];
@@ -209,11 +242,12 @@ class _PatientListState extends State<PatientList> {
               if (data['campId'] != null) updated['campId'] = data['campId'];
               if (data['campName'] != null) updated['campName'] = data['campName'];
               if (data['session'] != null) updated['session'] = data['session'];
+              if (data['dispenseStatus'] != null) updated['dispenseStatus'] = data['dispenseStatus'];
 
-              final writeKey = (existing != null && existing == eBox.get('$normBranch-${serial.toUpperCase()}'))
-                  ? '$normBranch-${serial.toUpperCase()}'
-                  : key;
+              final writeKey = existingKey ?? '$normBranch-$upperSerial';
               await eBox.put(writeKey, updated);
+              await eBox.put('$normBranch-$upperSerial', updated);
+              await eBox.put('$normBranch-$serial', updated);
             } catch (_) {}
           }
         }
@@ -241,6 +275,7 @@ class _PatientListState extends State<PatientList> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _tryAutoSelectSmallestPending();
+      RealtimeManager().requestCatchUp(branchId: widget.branchId);
     });
   }
 
@@ -255,13 +290,25 @@ class _PatientListState extends State<PatientList> {
     }
   }
 
+  List<Map<String, dynamic>> _cachedAllPatients = [];
+  bool _isQueueInitialized = false;
+
+  void _refreshQueueCache() {
+    try {
+      _cachedAllPatients = _getSortedQueue(filterOverride: 'all');
+      _isQueueInitialized = true;
+    } catch (e) {
+      debugPrint('[PatientList] Error refreshing queue cache: $e');
+    }
+  }
+
   void _onActiveCampChanged() {
     if (!mounted || !_hasMultiCamps) return;
     final active = CampSessionService.getActiveCamp(widget.branchId);
     if (active != null && active.isNotEmpty && active != 'all' && active != _selectedCampFilter) {
-      setState(() {
-        _selectedCampFilter = active;
-      });
+      _selectedCampFilter = active;
+      _refreshQueueCache();
+      setState(() {});
       WidgetsBinding.instance.addPostFrameCallback((_) {
         _tryAutoSelectSmallestPending();
       });
@@ -271,8 +318,9 @@ class _PatientListState extends State<PatientList> {
   // ─── Debounce rebuild to batch events ──────────────────────────────
   void _debouncedRebuild() {
     _debounceRebuildTimer?.cancel();
-    _debounceRebuildTimer = Timer(const Duration(milliseconds: 300), () {
+    _debounceRebuildTimer = Timer(const Duration(milliseconds: 150), () {
       if (mounted) {
+        _refreshQueueCache();
         setState(() {});
         WidgetsBinding.instance.addPostFrameCallback((_) {
           _tryAutoSelectSmallestPending();
@@ -289,7 +337,17 @@ class _PatientListState extends State<PatientList> {
     _realtimeSub?.cancel();
     _entriesBoxSub?.cancel();
     CampSessionService.activeCampNotifier.removeListener(_onActiveCampChanged);
+    ConnectionManager().removeReconnectListener(_onLanReconnected);
     super.dispose();
+  }
+
+  void _onLanReconnected() {
+    if (!mounted) return;
+    debugPrint('[PatientList] 🔄 LAN reconnected — requesting catch-up from server');
+    try {
+      RealtimeManager().requestCatchUp(branchId: widget.branchId);
+    } catch (_) {}
+    _debouncedRebuild();
   }
 
   // ─── Manual Cloud Recovery Pull (On-Demand with 30s Debounce) ─────────
@@ -414,7 +472,30 @@ class _PatientListState extends State<PatientList> {
     return 1;
   }
 
+  List<Map<String, dynamic>>? _queueMemo;
+  List<Map<String, dynamic>>? _queueMemoSrc;
+  String _queueMemoKey = '';
+  DateTime _queueMemoAt = DateTime.fromMillisecondsSinceEpoch(0);
+
   List<Map<String, dynamic>> _getSortedQueue({String? filterOverride}) {
+    final src = LocalStorageService.getLocalEntries(widget.branchId);
+    final key = '${filterOverride ?? ''}|$_selectedSessionFilter|$_selectedCampFilter|$_todayKey|${widget.branchId}';
+    final now = DateTime.now();
+    if (_queueMemo != null &&
+        identical(src, _queueMemoSrc) &&
+        key == _queueMemoKey &&
+        now.difference(_queueMemoAt).inMilliseconds < 1500) {
+      return _queueMemo!;
+    }
+    final result = _computeSortedQueue(filterOverride: filterOverride);
+    _queueMemo = result;
+    _queueMemoSrc = src;
+    _queueMemoKey = key;
+    _queueMemoAt = now;
+    return result;
+  }
+
+  List<Map<String, dynamic>> _computeSortedQueue({String? filterOverride}) {
     final activeShift = CampSessionService.getCurrentSession(null, widget.branchId);
     final userData = _getUserData();
     final scheduledCamps = CampSessionService.getMatchingScheduledCamps(userData);
@@ -665,8 +746,10 @@ class _PatientListState extends State<PatientList> {
 
   void _tryAutoSelectSmallestPending() {
     if (!mounted) return;
-    final queue = _getSortedQueue(filterOverride: 'pending');
-    final activePending = queue
+    if (!_isQueueInitialized) {
+      _refreshQueueCache();
+    }
+    final activePending = _cachedAllPatients
         .where((p) {
           final ds = (p['dispenseStatus'] ?? '').toString().toLowerCase();
           return ds != 'dispensed' && ds != 'on_hold' && ds != 'hold';
@@ -694,22 +777,22 @@ class _PatientListState extends State<PatientList> {
   @override
   Widget build(BuildContext context) {
     if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
-      final box = Hive.box(LocalStorageService.entriesBox);
-      if (box.isOpen) {
-        return ValueListenableBuilder<Box>(
-          valueListenable: box.listenable(),
-          builder: (context, box, _) => _buildListContent(context),
-        );
+      if (!_isQueueInitialized) {
+        _refreshQueueCache();
       }
+      return _buildListContent(context);
     }
     return FutureBuilder<Box>(
       future: LocalStorageService.ensureBoxOpen(LocalStorageService.entriesBox),
       builder: (context, snapshot) {
         if (snapshot.hasData && snapshot.data != null && snapshot.data!.isOpen) {
-          return ValueListenableBuilder<Box>(
-            valueListenable: snapshot.data!.listenable(),
-            builder: (context, box, _) => _buildListContent(context),
-          );
+          if (!_isQueueInitialized) {
+            _refreshQueueCache();
+            _entriesBoxSub ??= snapshot.data!.watch().listen((_) {
+              _debouncedRebuild();
+            });
+          }
+          return _buildListContent(context);
         }
         return const Center(
           child: Padding(
@@ -724,7 +807,10 @@ class _PatientListState extends State<PatientList> {
   Widget _buildListContent(BuildContext context) {
     final isMobile = GBreakpoint.isMobile(context);
 
-    final allPatients = _getSortedQueue(filterOverride: 'all');
+    if (!_isQueueInitialized) {
+      _refreshQueueCache();
+    }
+    final allPatients = _cachedAllPatients;
 
         final pendingList = allPatients
             .where((p) =>
@@ -929,14 +1015,14 @@ class _PatientListState extends State<PatientList> {
                             ),
                           ),
 
-                          // Filters Row
+                          // Header Row (Patient Count)
                           Row(
                             children: [
                               Text(
                                 '$totalCount patients',
                                 style: TextStyle(
                                   color: _isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700,
-                                  fontSize: 12.5,
+                                  fontSize: 13,
                                   fontWeight: FontWeight.w600,
                                 ),
                               ),

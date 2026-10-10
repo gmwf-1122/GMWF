@@ -12,9 +12,11 @@ import 'package:hive/hive.dart';
 import 'package:uuid/uuid.dart';
 import 'package:gmwf/pages/dispensary/dispensar/inventory.dart';
 import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/services/sync_service.dart';
 import 'package:gmwf/tools/legacy_data_migration_adapter.dart';
 
 void main() {
+  SyncService.suppressUploadsForTests = true;
   late Directory tempDir;
 
   setUpAll(() async {

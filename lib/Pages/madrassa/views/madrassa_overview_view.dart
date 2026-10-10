@@ -134,7 +134,13 @@ class MadrassaOverviewView extends ConsumerWidget {
       context: context,
       builder: (_) => StudentProgressDialog(
         studentName: studentData['name'] ?? 'Student',
-        photoUrl: studentData['photoUrl'],
+        photoUrl: studentData['photoUrl'] ??
+            studentData['photo_url'] ??
+            studentData['photoBase64'] ??
+            studentData['studentPhotoBase64'] ??
+            studentData['avatarUrl'] ??
+            studentData['imageUrl'] ??
+            studentData['profileImage'],
         className: studentData['class']?.toString() ?? 'Hifz',
         rollNumber: studentData['rollNumber']?.toString() ?? '?',
         joinDate: joinDate,

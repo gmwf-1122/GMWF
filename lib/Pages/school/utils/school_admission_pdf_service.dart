@@ -96,7 +96,7 @@ class SchoolAdmissionPdfService {
                           ),
                           pw.SizedBox(height: 2),
                           pw.Text(
-                            'GULZAR-E-MADINA WELFARE FOUNDATION GUJRAT',
+                            'GULZAR MADINA WELFARE FOUNDATION GUJRAT',
                             style: const pw.TextStyle(fontSize: 8.5, color: PdfColors.grey700),
                           ),
                           pw.Text(

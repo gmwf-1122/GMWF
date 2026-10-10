@@ -298,7 +298,7 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
         _guardianPhoneCtrl.text = _formatPhoneDigits(selected['contactPhone'] ?? selected['guardianPhone'] ?? selected['phone'] ?? '');
         _addressCtrl.text = selected['address'] ?? '';
         _fatherProfessionCtrl.text = selected['fatherProfession'] ?? '';
-        _previousSchoolCtrl.text = 'مدرسہ گلزار مدینہ (Madrassa Gulzar-e-Madina Hifz)';
+        _previousSchoolCtrl.text = 'مدرسہ گلزار مدینہ (Madrassa Gulzar Madina Hifz)';
         _photoUrl = selected['photoUrl'] ?? _photoUrl;
         _guardianCnicUrl = selected['guardianCnicUrl'] ?? _guardianCnicUrl;
         _bformUrl = selected['bFormUrl'] ?? selected['bformUrl'] ?? _bformUrl;

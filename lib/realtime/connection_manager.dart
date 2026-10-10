@@ -35,6 +35,7 @@
 //               AP isolation vs server-not-running issues.
 
 import 'dart:async';
+import 'dart:io' as io;
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -80,8 +81,21 @@ class ConnectionManager {
     state: LanConnectionState.disconnected,
     message: 'Not connected',
   );
-  ConnectionStatus get status      => _current;
-  bool             get isConnected => _current.isConnected;
+  ConnectionStatus get status {
+    final rm = RealtimeManager();
+    if (rm.isConnected && rm.isServerIdentified) {
+      final rmIp = rm.serverIp;
+      final rmPort = rm.port;
+      return ConnectionStatus(
+        state: LanConnectionState.connected,
+        ip: rmIp ?? _current.ip,
+        port: rmPort,
+        message: 'Connected to ${rmIp ?? _current.ip}:$rmPort',
+      );
+    }
+    return _current;
+  }
+  bool get isConnected => status.isConnected;
 
   String? _role;
   String? _branchId;
@@ -90,6 +104,7 @@ class ConnectionManager {
   DateTime? _lastFirestoreProbeTime;
   Timer? _reconnectTimer;
   Timer? _heartbeatTimer;
+  StreamSubscription<List<ConnectivityResult>>? _connSub;
   int    _reconnectAttempts = 0;
   bool   _running  = false;
   bool   _disposed = false;
@@ -130,19 +145,73 @@ class ConnectionManager {
     _disposed = false;
     _reconnectAttempts = 0;
 
+    _connSub?.cancel();
+    _connSub = Connectivity().onConnectivityChanged.listen((results) {
+      if (!_running || _disposed) return;
+      final hasNet = results.any((r) => r != ConnectivityResult.none);
+      if (hasNet) {
+        if (!isConnected && !_discovering) {
+          debugPrint('[ConnectionManager] ⚡ OS network restored — triggering immediate reconnectNow()');
+          reconnectNow();
+        }
+      } else if (!kIsWeb && (io.Platform.isWindows || io.Platform.isLinux || io.Platform.isMacOS)) {
+        // Unreliable on desktop (see _tryConnectInner): ignore instead of showing "Disconnected".
+        debugPrint('[ConnectionManager] OS reported no network on desktop; ignoring (unreliable signal)');
+      } else {
+        debugPrint('[ConnectionManager] ⚠️ OS reports network disconnected');
+        _emit(const ConnectionStatus(
+          state: LanConnectionState.disconnected,
+          message: 'No WiFi or LAN detected.',
+        ));
+      }
+    });
+
     RealtimeManager().onNeedRediscovery = () {
       if (!_running || _disposed) return;
+      // Do NOT re-arm the timer on every disconnect callback: doing so cancelled
+      // the pending rediscovery over and over so it never actually ran.
+      if (_discovering) return;
+      if (_reconnectTimer != null && _reconnectTimer!.isActive) return;
       debugPrint('[ConnectionManager] RealtimeManager requested rediscovery after failed retries');
-      _scheduleReconnect();
+      _reconnectAttempts = 0;
+      _reconnectTimer?.cancel();
+      _reconnectTimer = Timer(const Duration(milliseconds: 300), _tryConnect);
     };
 
     debugPrint('[ConnectionManager] Starting: role=$_role branch=$_branchId'
         '${AppNetwork.useDedicatedServer ? " [dedicated: ${AppNetwork.dedicatedServerIp}]" : ""}');
+
+    if (isConnected && _current.ip != null) {
+      debugPrint('[ConnectionManager] Already connected to ${_current.ip}:${_current.port} — updating identity without rediscovery');
+      await RealtimeManager().initialize(
+        role: _role!,
+        branchId: _branchId!,
+        serverIp: _current.ip!,
+        port: _current.port ?? AppNetwork.websocketPort,
+        username: _username,
+      );
+      _emit(status);
+      return;
+    }
+
     await _tryConnect();
   }
 
   // ── Discovery + connect loop ───────────────────────────────────────────────
+  bool _discovering = false;
+
   Future<void> _tryConnect() async {
+    if (!_running || _disposed) return;
+    if (_discovering) return;
+    _discovering = true;
+    try {
+      await _tryConnectInner();
+    } finally {
+      _discovering = false;
+    }
+  }
+
+  Future<void> _tryConnectInner() async {
     if (!_running || _disposed) return;
 
     // ── Dedicated-server mode ──────────────────────────────────────────────────
@@ -176,6 +245,7 @@ class ConnectionManager {
     }
 
     // ── Fast-path 1: Try last-known server (instant sub-second connection) ─────
+    bool savedFailed = false;
     final saved = _getSavedServer();
     if (saved != null) {
       debugPrint('[ConnectionManager] Trying saved server: ${saved.$1}:${saved.$2}');
@@ -183,15 +253,18 @@ class ConnectionManager {
       if (reachable) {
         final ok = await _connectTo(saved.$1, saved.$2);
         if (ok) return;
-      } else {
-        debugPrint('[ConnectionManager] Saved server unreachable, trying Firestore discovery');
       }
+      // Saved IP is stale (DHCP gave the server a new address). Forget it so
+      // we never hammer a dead / foreign device again.
+      savedFailed = true;
+      debugPrint('[ConnectionManager] Saved server ${saved.$1} not responding → clearing and rediscovering');
+      _clearSavedServer();
     }
 
-    // ── Fast-path 2: Query Firestore for activeServerIp published by branch server (5m cooldown) ──
     final now = DateTime.now();
     final canProbeFirestore = _isFirebaseReady &&
-        (_lastFirestoreProbeTime == null || now.difference(_lastFirestoreProbeTime!).inMinutes >= 5);
+        (savedFailed || _lastFirestoreProbeTime == null || now.difference(_lastFirestoreProbeTime!).inMinutes >= 5);
+    Future<bool> probeFirestoreServer() async {
     if (canProbeFirestore) {
       _lastFirestoreProbeTime = now;
       final candidates = <String>[
@@ -226,7 +299,7 @@ class ConnectionManager {
             final reachable = await LanDiscovery.isReachable(fsIp, fsPort);
             if (reachable) {
               final ok = await _connectTo(fsIp, fsPort);
-              if (ok) return;
+              if (ok) return true;
             }
           }
         } catch (_) {}
@@ -244,11 +317,16 @@ class ConnectionManager {
           final reachable = await LanDiscovery.isReachable(metaIp, metaPort);
           if (reachable) {
             final ok = await _connectTo(metaIp, metaPort);
-            if (ok) return;
+            if (ok) return true;
           }
         }
       } catch (_) {}
     }
+    return false;
+    }
+
+    // Web has no LAN scan, so Firestore is the first resort there.
+    if (kIsWeb && await probeFirestoreServer()) return;
 
     // Web fallback if no LAN discovery available
     if (kIsWeb) {
@@ -286,7 +364,13 @@ class ConnectionManager {
     // ── Auto-discovery path (UDP broadcast + fast parallel subnet scan + mDNS) ─
     if (!kIsWeb) {
       final connList = await Connectivity().checkConnectivity();
-      final hasNetwork = connList.contains(ConnectivityResult.wifi) ||
+      // connectivity_plus often reports an empty list (or only "none") on Windows desktops that are
+      // perfectly connected (virtual adapters, several NICs). Treating that as "no network" stopped
+      // discovery before it started, so the client sat on "Disconnected" forever. On desktop we
+      // never block on it: the scan below simply fails if the network really is down.
+      final isDesktop = io.Platform.isWindows || io.Platform.isLinux || io.Platform.isMacOS;
+      final hasNetwork = isDesktop ||
+          connList.contains(ConnectivityResult.wifi) ||
           connList.contains(ConnectivityResult.ethernet) ||
           connList.contains(ConnectivityResult.other);
 
@@ -314,6 +398,8 @@ class ConnectionManager {
     );
 
     if (found == null) {
+      // LAN scan failed → last resort: server IP published in Firestore.
+      if (await probeFirestoreServer()) return;
       _emit(const ConnectionStatus(
         state: LanConnectionState.disconnected,
         message: 'Server not found. Ensure all devices are on the same WiFi/LAN '
@@ -420,8 +506,8 @@ class ConnectionManager {
     Timer(Duration(seconds: timeoutSeconds), () {
       if (!completer.isCompleted) {
         sub.cancel();
-        // Only return true if actively connected and confirmed
-        completer.complete(RealtimeManager().isConnected);
+        // Only return true if actively identified and confirmed by server
+        completer.complete(RealtimeManager().isServerIdentified);
       }
     });
 
@@ -442,7 +528,7 @@ class ConnectionManager {
     _heartbeatTimer =
         Timer.periodic(const Duration(seconds: 10), (_) async {
       // [BUG-11] Explicit disposed guard.
-      if (!_running || _disposed) return;
+      if (!_running || _disposed || _discovering) return;
 
       final rm = RealtimeManager();
       // Case 1: RealtimeManager is disconnected and no reconnect is actively scheduled.
@@ -468,7 +554,7 @@ class ConnectionManager {
     _heartbeatTimer?.cancel();
     _reconnectTimer?.cancel();
 
-    const delays = [3, 5, 10, 15, 20];
+    const delays = [2, 3, 5, 5, 5];
     final delay =
         delays[_reconnectAttempts.clamp(0, delays.length - 1)];
     _reconnectAttempts++;
@@ -535,6 +621,16 @@ class ConnectionManager {
     return null;
   }
 
+  void _clearSavedServer() {
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final box = Hive.box('app_settings');
+        box.delete(_savedIpKey);
+        box.delete(_savedPortKey);
+      }
+    } catch (_) {}
+  }
+
   void _saveServer(String ip, int port) {
     if (AppNetwork.useDedicatedServer) return; // no need to cache a fixed address
     if (ip.isEmpty || ip == '127.0.0.1' || ip == 'localhost') return; // NEVER cache loopback address
@@ -562,6 +658,8 @@ class ConnectionManager {
     // removeReconnectListener in their own dispose().
     _reconnectTimer?.cancel();
     _heartbeatTimer?.cancel();
+    _connSub?.cancel();
+    _connSub = null;
     await RealtimeManager().dispose();
     _emit(const ConnectionStatus(
       state: LanConnectionState.disconnected,

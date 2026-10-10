@@ -1,5 +1,6 @@
 // lib/pages/dispensary/doctor/patient_queue.dart
 
+import 'package:gmwf/utils/debounced_box_listenable.dart';
 import 'dart:async';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -52,6 +53,7 @@ class _PatientQueueState extends State<PatientQueue> {
   
   // ─── HANG FIX: Debounce + Cache ────────────────────────────────────
   Timer? _debounceRebuildTimer;  // Batch multiple events into single rebuild
+  Timer? _queueCatchUpTimer;     // Periodic auto-catchup to prevent token delays
   List<Map<String, dynamic>>? _cachedQueue;  // Cache sorted queue
   DateTime? _queueCacheTime;  // Track cache freshness
   static const _queueCacheTTL = Duration(milliseconds: 500);  // Cache for 500ms
@@ -470,7 +472,7 @@ class _PatientQueueState extends State<PatientQueue> {
         }
         _debouncedRebuild();
       } else if (type == 'dispense_completed') {
-        final serial = (data['serial'] ?? data['id'])?.toString();
+        final serial = (data['serial'] ?? data['id'] ?? event['serial'] ?? event['id'])?.toString();
         if (serial != null && serial.isNotEmpty) {
           LocalStorageService.updateDispenseStatus(widget.branchId, serial, 'dispensed');
         }
@@ -561,6 +563,19 @@ class _PatientQueueState extends State<PatientQueue> {
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _tryAutoSelectSmallestWaiting();
+      // Instantly request catch-up on mount so if the PC just booted after power cut,
+      // all tokens are fetched from the LAN server in <100ms instead of waiting 2 minutes!
+      RealtimeManager().requestCatchUp(branchId: widget.branchId);
+    });
+
+    // Auto-catchup loop: if LAN drops, pull from cloud every 15s; if LAN connected, verify catch-up every 30s
+    _queueCatchUpTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      if (!mounted) return;
+      if (!RealtimeManager().isConnected) {
+        manualCloudPull(showToast: false);
+      } else {
+        RealtimeManager().requestCatchUp(branchId: widget.branchId);
+      }
     });
   }
 
@@ -591,6 +606,7 @@ class _PatientQueueState extends State<PatientQueue> {
   @override
   void dispose() {
     _debounceRebuildTimer?.cancel();
+    _queueCatchUpTimer?.cancel();
     _realtimeSub.cancel();
     _connSub?.cancel();
     CampSessionService.activeCampNotifier.removeListener(_onActiveCampChanged);
@@ -602,10 +618,7 @@ class _PatientQueueState extends State<PatientQueue> {
     if (!mounted) return;
     debugPrint('[PatientQueue] 🔄 LAN reconnected — requesting catch-up from server');
     try {
-      RealtimeManager().sendMessage({
-        'event_type': 'request_catch_up',
-        'branchId': widget.branchId,
-      });
+      RealtimeManager().requestCatchUp(branchId: widget.branchId);
     } catch (_) {}
     _debouncedRebuild();
   }
@@ -614,21 +627,28 @@ class _PatientQueueState extends State<PatientQueue> {
   void _debouncedRebuild() {
     if (_debounceRebuildTimer?.isActive ?? false) return;
     _debounceRebuildTimer = Timer(const Duration(milliseconds: 150), () {
-      if (mounted) setState(() {});
+      if (mounted) {
+        _cachedQueue = null; // Clear cache so debounced pass computes fresh queue
+        setState(() {});
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _tryAutoSelectSmallestWaiting();
+        });
+      }
     });
   }
 
-  // ─── On-Demand Cloud Recovery with 30s Cooldown (Zero Continuous Reads) ───
+  // ─── On-Demand Cloud Recovery with Cooldown (Zero Continuous Reads) ───
   DateTime? _lastCloudPullTime;
   bool _isCloudPulling = false;
 
-  Future<void> manualCloudPull({bool showToast = true}) async {
+  Future<void> manualCloudPull({bool showToast = true, bool force = false}) async {
     final now = DateTime.now();
-    if (_lastCloudPullTime != null && now.difference(_lastCloudPullTime!) < const Duration(seconds: 30)) {
+    final cooldown = RealtimeManager().isConnected ? const Duration(seconds: 30) : const Duration(seconds: 10);
+    if (!force && _lastCloudPullTime != null && now.difference(_lastCloudPullTime!) < cooldown) {
       if (showToast && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Please wait 30 seconds before pulling from cloud again.'),
-          duration: Duration(seconds: 2),
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Please wait ${cooldown.inSeconds} seconds before pulling from cloud again.'),
+          duration: const Duration(seconds: 2),
         ));
       }
       return;
@@ -868,30 +888,9 @@ class _PatientQueueState extends State<PatientQueue> {
   void _tryAutoSelectSmallestWaiting() {
     if (!mounted) return;
 
-    // Check if current selected patient is still active and waiting
+    // If a patient is currently selected, do NOT switch or re-select behind the doctor's back!
     if (widget.selectedPatient != null) {
-      final currentSelSerial = (widget.selectedPatient?['serial'] ?? widget.selectedPatient?['id'])?.toString().trim().toUpperCase() ?? '';
-      if (currentSelSerial.isNotEmpty) {
-        final queueNow = _cachedQueue ?? _getSortedQueue();
-        final match = queueNow.firstWhere(
-          (p) => (p['serial'] ?? p['id'] ?? '').toString().trim().toUpperCase() == currentSelSerial,
-          orElse: () => <String, dynamic>{},
-        );
-        if (match.isNotEmpty) {
-          final s = (match['status'] ?? '').toString().toLowerCase();
-          final isDisp = (match['dispenseStatus'] ?? '').toString().toLowerCase() == 'dispensed' || s == 'dispensed';
-          final presc = match['prescription'];
-          final hasRealPresc = presc is Map && (
-            (presc['prescriptions'] is List && (presc['prescriptions'] as List).isNotEmpty) ||
-            (presc['medicines'] is List && (presc['medicines'] as List).isNotEmpty) ||
-            (presc['isVitalsOnly'] == true && presc['completedAt'] != null)
-          );
-          final isDone = s == 'completed' || s == 'prescribed' || isDisp || hasRealPresc;
-          if (!isDone && s != 'skipped') {
-            return; // Current patient is still active and waiting in queue
-          }
-        }
-      }
+      return;
     }
     
     // ← HANG FIX: Use cached queue if fresh, avoid recalculation
@@ -975,6 +974,11 @@ class _PatientQueueState extends State<PatientQueue> {
     return abbrev;
   }
 
+  static bool _isInventoryMed(Map<String, dynamic> m) {
+    final id = (m['inventoryId'] ?? m['medicineId'])?.toString().trim();
+    return id != null && id.isNotEmpty && id != 'null' && id != 'unknown';
+  }
+
   int _getAvailableStock(
     Map<String, dynamic>? inventoryMed, {
     required String branchId,
@@ -987,65 +991,71 @@ class _PatientQueueState extends State<PatientQueue> {
     final totalStock = (invQty is num ? invQty.toInt() : int.tryParse(invQty?.toString() ?? '') ?? 0);
     final inventoryId = inventoryMed['id']?.toString() ?? '';
 
-    // Quantity reserved by OTHER pending patients (from Hive scan)
-    if (!Hive.isBoxOpen(LocalStorageService.prescriptionsBox) || !Hive.isBoxOpen(LocalStorageService.entriesBox)) {
-      return totalStock;
-    }
-    final prescBox   = Hive.box(LocalStorageService.prescriptionsBox);
-    final entriesBox = Hive.box(LocalStorageService.entriesBox);
-    final mySerial   = excludeSerial?.trim().toLowerCase();
-
-    int reservedByOthers = 0;
-    for (final key in prescBox.keys) {
-      final raw = prescBox.get(key);
-      if (raw is! Map) continue;
-      final presc = Map<String, dynamic>.from(raw);
-
-      final prescSerial = (presc['serial'] ?? presc['id'] ?? '')
-          .toString().trim().toLowerCase();
-      if (prescSerial == mySerial) continue;
-
-      final entryKey = '$branchId-$prescSerial';
-      final entry    = entriesBox.get(entryKey);
-      if (entry is Map) {
-        final dispenseStatus =
-            (entry['dispenseStatus'] ?? '').toString().toLowerCase();
-        if (dispenseStatus == 'dispensed') continue;
+    try {
+      // Quantity reserved by OTHER pending patients (from Hive scan)
+      if (!Hive.isBoxOpen(LocalStorageService.prescriptionsBox) || !Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+        return totalStock;
       }
+      final prescBox   = Hive.box(LocalStorageService.prescriptionsBox);
+      final entriesBox = Hive.box(LocalStorageService.entriesBox);
+      final mySerial   = excludeSerial?.trim().toLowerCase();
 
-      final dispenseStatusOnPresc =
-          (presc['dispenseStatus'] ?? '').toString().toLowerCase();
-      if (dispenseStatusOnPresc == 'dispensed') continue;
+      int reservedByOthers = 0;
+      for (final key in prescBox.keys) {
+        final raw = prescBox.get(key);
+        if (raw is! Map) continue;
+        final presc = Map<String, dynamic>.from(raw);
 
-      final meds = presc['prescriptions'];
-      if (meds is! List) continue;
+        final prescSerial = (presc['serial'] ?? presc['id'] ?? '')
+            .toString().trim().toLowerCase();
+        if (prescSerial == mySerial) continue;
 
-      for (final med in meds) {
-        if (med is! Map) continue;
-        if (med['inventoryId']?.toString() == inventoryId) {
-          final medQty = med['quantity'];
-          final qty = (medQty is num ? medQty.toInt() : int.tryParse(medQty?.toString() ?? '') ?? 0);
-          final days = (presc['daysOfMedicine'] as int?) ?? 1;
-          final type = (med['type'] ?? '').toString().toLowerCase();
-          final isInj = type.contains('injection') || type.contains('inj') ||
-              type.contains('drip') || type.contains('syringe') ||
-              type.contains('nebulization');
-          reservedByOthers += isInj ? qty : qty * days;
+        final entryKey = '$branchId-$prescSerial';
+        final entry    = entriesBox.get(entryKey);
+        if (entry is Map) {
+          final dispenseStatus =
+              (entry['dispenseStatus'] ?? '').toString().toLowerCase();
+          if (dispenseStatus == 'dispensed') continue;
+        }
+
+        final dispenseStatusOnPresc =
+            (presc['dispenseStatus'] ?? '').toString().toLowerCase();
+        if (dispenseStatusOnPresc == 'dispensed') continue;
+
+        final meds = presc['prescriptions'];
+        if (meds is! List) continue;
+
+        for (final med in meds) {
+          if (med is! Map) continue;
+          if (med['inventoryId']?.toString() == inventoryId) {
+            final medQty = med['quantity'];
+            final qty = (medQty is num ? medQty.toInt() : int.tryParse(medQty?.toString() ?? '') ?? 0);
+            final daysRaw = presc['daysOfMedicine'];
+            final days = (daysRaw is num ? daysRaw.toInt() : int.tryParse(daysRaw?.toString() ?? '') ?? 1);
+            final type = (med['type'] ?? '').toString().toLowerCase();
+            final isInj = type.contains('injection') || type.contains('inj') ||
+                type.contains('drip') || type.contains('syringe') ||
+                type.contains('nebulization');
+            reservedByOthers += isInj ? qty : qty * days;
+          }
         }
       }
-    }
 
-    // Quantity already added in THIS dialog/edit session for this patient
-    int sessionQty = 0;
-    for (final med in currentMeds) {
-      if (med['inventoryId']?.toString() == inventoryId) {
-        final medQty = med['quantity'];
-        sessionQty += (medQty is num ? medQty.toInt() : int.tryParse(medQty?.toString() ?? '') ?? 0);
+      // Quantity already added in THIS dialog/edit session for this patient
+      int sessionQty = 0;
+      for (final med in currentMeds) {
+        if (med['inventoryId']?.toString() == inventoryId) {
+          final medQty = med['quantity'];
+          sessionQty += (medQty is num ? medQty.toInt() : int.tryParse(medQty?.toString() ?? '') ?? 0);
+        }
       }
-    }
 
-    final available = totalStock - reservedByOthers - sessionQty;
-    return available < 0 ? 0 : available;
+      final available = totalStock - reservedByOthers - sessionQty;
+      return available < 0 ? 0 : available;
+    } catch (e) {
+      debugPrint('[PatientQueue] _getAvailableStock error: $e');
+      return totalStock;
+    }
   }
 
   // ─── Add medicine sub-dialog ───────────────────────────────────────────────
@@ -1055,21 +1065,47 @@ class _PatientQueueState extends State<PatientQueue> {
     required int daysOfMedicine,
     String? excludeSerial,
     Map<String, dynamic>? inventoryMed,
+    Map<String, dynamic>? existingMed,
   }) async {
-    final isInventory = inventoryMed != null;
-    final nameCtrl    = TextEditingController(text: isInventory ? inventoryMed['name'] : '');
-    final timingCtrl  = TextEditingController();
-    final qtyCtrl     = TextEditingController(text: '1');
+    final isEditing   = existingMed != null;
+    final isInventory = inventoryMed != null || (isEditing && existingMed['inventoryId'] != null);
+    final nameCtrl    = TextEditingController(text: isEditing ? (existingMed['name'] ?? '') : (isInventory ? (inventoryMed!['name'] ?? '') : ''));
+    final qtyCtrl     = TextEditingController(text: isEditing ? (existingMed['quantity']?.toString() ?? '1') : '1');
+    const validMealTimings = ['Empty Stomach', 'Before Meal', 'During Meal', 'After Meal', 'Before Sleep'];
+    final rawMeal = isEditing ? (existingMed['meal'] ?? 'After Meal').toString() : 'After Meal';
     String mealTiming = 'After Meal';
-    String dosage     = '1 spoon';
+    final lowerMeal = rawMeal.toLowerCase();
+    if (lowerMeal.contains('empty')) {
+      mealTiming = 'Empty Stomach';
+    } else if (lowerMeal.contains('before') && (lowerMeal.contains('sleep') || lowerMeal.contains('bed'))) {
+      mealTiming = 'Before Sleep';
+    } else if (lowerMeal.contains('before')) {
+      mealTiming = 'Before Meal';
+    } else if (lowerMeal.contains('during') || lowerMeal.contains('with')) {
+      mealTiming = 'During Meal';
+    } else if (validMealTimings.contains(rawMeal)) {
+      mealTiming = rawMeal;
+    }
+
+    const validDosages = ['1 spoon', '1/2 spoon', '1/3 spoon', '1/4 spoon'];
+    final rawDosage = isEditing ? (existingMed['dosage'] ?? '1 spoon').toString() : '1 spoon';
+    String dosage = validDosages.contains(rawDosage) ? rawDosage : '1 spoon';
     bool isSyrup      = false;
     bool isInjection  = false;
     String? stockError;
 
     void updateFields() {
-      if (isInventory) {
+      if (isInventory && inventoryMed != null) {
         final type  = (inventoryMed['type'] ?? '').toString().toLowerCase();
         final name  = (inventoryMed['name'] ?? '').toString().toLowerCase();
+        isInjection = type.contains('injection') || type.contains('inj') ||
+                      type.contains('infusion') || type.contains('inf') ||
+                      type.contains('drip') ||
+                      name.contains('inj') || name.contains('infusion') || name.contains('drip');
+        isSyrup     = type.contains('syrup')     || type.contains('syp') || name.contains('syp') || name.contains('syrup');
+      } else if (isEditing) {
+        final type  = (existingMed['type'] ?? '').toString().toLowerCase();
+        final name  = (existingMed['name'] ?? '').toString().toLowerCase();
         isInjection = type.contains('injection') || type.contains('inj') ||
                       type.contains('infusion') || type.contains('inf') ||
                       type.contains('drip') ||
@@ -1085,6 +1121,7 @@ class _PatientQueueState extends State<PatientQueue> {
     }
 
     updateFields();
+    final timingCtrl  = TextEditingController(text: isEditing ? (existingMed['timing'] ?? '1+0+1') : (isInjection ? '' : '1+0+1'));
 
     final int availableStock = isInventory
         ? _getAvailableStock(
@@ -1107,7 +1144,9 @@ class _PatientQueueState extends State<PatientQueue> {
           }
 
           return AlertDialog(
-            title: Text(isInventory ? 'Add Inventory Medicine' : 'Add Custom Medicine'),
+            title: Text(isEditing
+                ? (isInventory ? 'Edit Inventory Medicine' : 'Edit Custom Medicine')
+                : (isInventory ? 'Add Inventory Medicine' : 'Add Custom Medicine')),
             content: SingleChildScrollView(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1147,29 +1186,41 @@ class _PatientQueueState extends State<PatientQueue> {
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       margin: const EdgeInsets.only(bottom: 12),
                       decoration: BoxDecoration(
-                        color: availableStock > 0 ? const Color(0xFFE8F5E9) : const Color(0xFFFFEBEE),
+                        color: availableStock <= 0
+                            ? const Color(0xFFFFEBEE)
+                            : (availableStock <= 10 ? const Color(0xFFFFF7ED) : const Color(0xFFE8F5E9)),
                         borderRadius: BorderRadius.circular(8),
                         border: Border.all(
-                          color: availableStock > 0 ? const Color(0xFFA5D6A7) : const Color(0xFFEF9A9A),
+                          color: availableStock <= 0
+                              ? const Color(0xFFEF9A9A)
+                              : (availableStock <= 10 ? const Color(0xFFFED7AA) : const Color(0xFFA5D6A7)),
                         ),
                       ),
                       child: Row(
                         children: [
                           Icon(
-                            availableStock > 0 ? Icons.inventory_2_outlined : Icons.warning_amber_rounded,
+                            availableStock <= 0
+                                ? Icons.warning_amber_rounded
+                                : (availableStock <= 10 ? Icons.info_outline : Icons.inventory_2_outlined),
                             size: 16,
-                            color: availableStock > 0 ? const Color(0xFF00695C) : Colors.red.shade800,
+                            color: availableStock <= 0
+                                ? Colors.red.shade800
+                                : (availableStock <= 10 ? Colors.orange.shade900 : const Color(0xFF00695C)),
                           ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              availableStock > 0
-                                  ? 'Available Stock: $availableStock units'
-                                  : '⚠️ Out of Stock! (0 units available)',
+                              availableStock <= 0
+                                  ? '⚠️ Out of Stock! (0 units available)'
+                                  : (availableStock <= 10
+                                      ? '⚠️ Low Stock: Only $availableStock units available'
+                                      : 'Available Stock: $availableStock units'),
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.bold,
-                                color: availableStock > 0 ? const Color(0xFF00695C) : Colors.red.shade800,
+                                color: availableStock <= 0
+                                    ? Colors.red.shade800
+                                    : (availableStock <= 10 ? Colors.orange.shade900 : const Color(0xFF00695C)),
                               ),
                             ),
                           ),
@@ -1192,44 +1243,85 @@ class _PatientQueueState extends State<PatientQueue> {
                   ),
                   const SizedBox(height: 12),
                   if (!isInjection) ...[
-                    const Text('Timing (M+E+N):'),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text('Timing (Morning+Evening+Night):', style: TextStyle(fontWeight: FontWeight.w600)),
+                        Text('e.g. 1+0+1', style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontStyle: FontStyle.italic)),
+                      ],
+                    ),
                     const SizedBox(height: 6),
                     TextField(
                       controller: timingCtrl,
-                      keyboardType: TextInputType.number,
+                      keyboardType: TextInputType.text,
                       inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(3),
+                        FilteringTextInputFormatter.allow(RegExp(r'[0-9+]')),
+                        LengthLimitingTextInputFormatter(7),
                       ],
                       decoration: const InputDecoration(
-                        hintText: 'e.g. 1+0+2',
+                        hintText: 'e.g. 1+0+1 or 1+1+1',
                         border: OutlineInputBorder(),
                       ),
                       onChanged: (value) {
                         setStateDialog(() => stockError = null);
-                        final digits = value.replaceAll('+', '');
-                        if (digits.length > 3) return;
-                        final formatted = digits.split('').join('+');
-                        if (timingCtrl.text != formatted) {
+                        final trimmed = value.trim();
+                        if (RegExp(r'^\d{2,3}$').hasMatch(trimmed)) {
+                          final formatted = trimmed.split('').join('+');
                           timingCtrl.text = formatted;
                           timingCtrl.selection =
                               TextSelection.collapsed(offset: formatted.length);
                         }
                       },
                     ),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: ['1+0+1', '1+1+1', '1+0+0', '0+0+1', '0+1+0', '1+1+0'].map((chip) {
+                        final isSelected = timingCtrl.text == chip;
+                        return InkWell(
+                          onTap: () {
+                            setStateDialog(() {
+                              timingCtrl.text = chip;
+                              timingCtrl.selection = TextSelection.collapsed(offset: chip.length);
+                              stockError = null;
+                            });
+                          },
+                          borderRadius: BorderRadius.circular(16),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: isSelected ? _teal : Colors.grey.shade100,
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(
+                                color: isSelected ? _teal : Colors.grey.shade300,
+                              ),
+                            ),
+                            child: Text(
+                              chip,
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                fontWeight: FontWeight.w600,
+                                color: isSelected ? Colors.white : Colors.grey.shade800,
+                              ),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
                     const SizedBox(height: 12),
                     DropdownButtonFormField<String>(
-                      initialValue: mealTiming,
+                      value: validMealTimings.contains(mealTiming) ? mealTiming : 'After Meal',
                       decoration: const InputDecoration(
                         labelText: 'Timing Instruction',
                         border: OutlineInputBorder(),
                       ),
-                      items: ['Empty Stomach', 'Before Meal', 'During Meal', 'After Meal', 'Before Sleep']
+                      items: validMealTimings
                           .map((d) => DropdownMenuItem(value: d, child: Text(d)))
                           .toList(),
                       onChanged: (v) {
                         setStateDialog(() {
-                          mealTiming = v!;
+                          mealTiming = v ?? mealTiming;
                           stockError = null;
                         });
                       },
@@ -1237,17 +1329,17 @@ class _PatientQueueState extends State<PatientQueue> {
                     if (isSyrup) ...[
                       const SizedBox(height: 12),
                       DropdownButtonFormField<String>(
-                        initialValue: dosage,
+                        value: validDosages.contains(dosage) ? dosage : '1 spoon',
                         decoration: const InputDecoration(
                           labelText: 'Dosage',
                           border: OutlineInputBorder(),
                         ),
-                        items: ['1 spoon', '1/2 spoon', '1/3 spoon', '1/4 spoon']
+                        items: validDosages
                             .map((d) => DropdownMenuItem(value: d, child: Text(d)))
                             .toList(),
                         onChanged: (v) {
                           setStateDialog(() {
-                            dosage = v!;
+                            dosage = v ?? dosage;
                             stockError = null;
                           });
                         },
@@ -1270,6 +1362,15 @@ class _PatientQueueState extends State<PatientQueue> {
               ),
             ),
             actions: [
+              if (isEditing) ...[
+                TextButton.icon(
+                  style: TextButton.styleFrom(foregroundColor: Colors.red),
+                  icon: const Icon(Icons.delete_outline, size: 16),
+                  label: const Text('Remove'),
+                  onPressed: () => Navigator.pop(ctx, {'_deleted': true}),
+                ),
+                const SizedBox(width: 24),
+              ],
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
                 child: const Text('Cancel', style: TextStyle(color: _teal)),
@@ -1293,50 +1394,72 @@ class _PatientQueueState extends State<PatientQueue> {
                       return;
                     }
                     if (isInventory) {
-                      if (qty > availableStock) {
-                        setStateDialog(() => stockError =
-                            '⚠️ Stock Limit Exceeded! Available: $availableStock units.');
-                        return;
-                      }
+                      final bool isStockZero = availableStock <= 0;
+                      final bool exceedsStock = qty > availableStock;
+                      newMed = {
+                        'name': name,
+                        'formula': (inventoryMed?['formula'] ?? existingMed?['formula'] ?? '').toString().trim(),
+                        'quantity': qty,
+                        'type': 'Injection',
+                        'inventoryId': inventoryMed?['id'] ?? existingMed?['inventoryId'],
+                        if (isStockZero || exceedsStock) 'isExternal': true,
+                        if (isStockZero) 'outOfStock': true,
+                        if (exceedsStock) 'stockShortage': qty - (availableStock > 0 ? availableStock : 0),
+                      };
+                    } else {
+                      newMed = {
+                        'name': name,
+                        'formula': (inventoryMed?['formula'] ?? existingMed?['formula'] ?? '').toString().trim(),
+                        'quantity': qty,
+                        'type': 'Injection',
+                        'inventoryId': inventoryMed?['id'] ?? existingMed?['inventoryId'],
+                      };
                     }
-                    newMed = {
-                      'name': name,
-                      'quantity': qty,
-                      'type': 'Injection',
-                      'inventoryId': inventoryMed?['id'],
-                    };
                   } else {
-                    final digits = timingCtrl.text.replaceAll('+', '');
-                    final m      = int.tryParse(digits.isNotEmpty ? digits[0] : '0') ?? 0;
+                    final rawTiming = timingCtrl.text.trim();
+                    final timingStr = rawTiming.isNotEmpty ? rawTiming : '1+0+1';
+                    final digits = timingStr.replaceAll('+', '').trim();
+                    final m      = int.tryParse(digits.isNotEmpty ? digits[0] : '1') ?? 1;
                     final e      = digits.length > 1 ? int.tryParse(digits[1]) ?? 0 : 0;
-                    final n      = digits.length > 2 ? int.tryParse(digits[2]) ?? 0 : 0;
-                    final sum    = m + e + n;
-                    final qty    = (mealTiming == 'Before Sleep' && sum == 0) ? 1 : sum;
-                    if (qty == 0) {
-                      setStateDialog(() => stockError = 'Please enter timing (e.g. 1+0+1)');
-                      return;
+                    final n      = digits.length > 2 ? int.tryParse(digits[2]) ?? 1 : 1;
+                    int sum    = m + e + n;
+                    if (sum == 0 && digits.length == 1) {
+                      sum = int.tryParse(digits) ?? 1;
                     }
+                    final qty    = (mealTiming == 'Before Sleep' && sum == 0) ? 1 : (sum > 0 ? sum : 1);
+                    final totalRequired = qty * daysOfMedicine;
                     if (isInventory) {
-                      final totalRequired = qty * daysOfMedicine;
-                      if (totalRequired > availableStock) {
-                        setStateDialog(() => stockError =
-                            '⚠️ Stock Limit Exceeded! Need $totalRequired but only $availableStock available.');
-                        return;
-                      }
+                      final bool isStockZero = availableStock <= 0;
+                      final bool exceedsStock = totalRequired > availableStock;
+                      newMed = {
+                        'name': name,
+                        'formula': (inventoryMed?['formula'] ?? existingMed?['formula'] ?? '').toString().trim(),
+                        'quantity': qty,
+                        'timing': timingStr,
+                        'meal': mealTiming,
+                        'dosage': isSyrup ? dosage : '',
+                        'type': isSyrup ? 'Syrup' : 'Tablet',
+                        'inventoryId': inventoryMed?['id'] ?? existingMed?['inventoryId'],
+                        if (isStockZero || exceedsStock) 'isExternal': true,
+                        if (isStockZero) 'outOfStock': true,
+                        if (exceedsStock) 'stockShortage': totalRequired - (availableStock > 0 ? availableStock : 0),
+                      };
+                    } else {
+                      newMed = {
+                        'name': name,
+                        'formula': (inventoryMed?['formula'] ?? existingMed?['formula'] ?? '').toString().trim(),
+                        'quantity': qty,
+                        'timing': timingStr,
+                        'meal': mealTiming,
+                        'dosage': isSyrup ? dosage : '',
+                        'type': isSyrup ? 'Syrup' : 'Tablet',
+                        'inventoryId': inventoryMed?['id'] ?? existingMed?['inventoryId'],
+                      };
                     }
-                    newMed = {
-                      'name': name,
-                      'quantity': qty,
-                      'timing': '$m+$e+$n',
-                      'meal': mealTiming,
-                      'dosage': isSyrup ? dosage : '',
-                      'type': isSyrup ? 'Syrup' : 'Tablet',
-                      'inventoryId': inventoryMed?['id'],
-                    };
                   }
                   Navigator.pop(ctx, newMed);
                 },
-                child: const Text('Add'),
+                child: Text(isEditing ? 'Update' : 'Add'),
               ),
             ],
           );
@@ -1344,7 +1467,11 @@ class _PatientQueueState extends State<PatientQueue> {
       ),
     );
 
-    nameCtrl.dispose(); timingCtrl.dispose(); qtyCtrl.dispose();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      nameCtrl.dispose();
+      timingCtrl.dispose();
+      qtyCtrl.dispose();
+    });
     return result;
   }
 
@@ -1532,9 +1659,12 @@ class _PatientQueueState extends State<PatientQueue> {
     String selectedCategory = 'all';
 
     final allStock = LocalStorageService.getAllLocalStockItems(branchId: branchId, dispensaryId: patientCamp);
-    final fallbackStock = allStock.isEmpty && patientCamp != null && patientCamp.isNotEmpty
+    var fallbackStock = allStock.isEmpty
         ? LocalStorageService.getAllLocalStockItems(branchId: branchId, filterByCamp: false)
         : allStock;
+    if (fallbackStock.isEmpty) {
+      fallbackStock = LocalStorageService.getAllLocalStockItems(filterByCamp: false);
+    }
 
     const quickSearchKeywords = [
       'Paracetamol', 'Amoxicillin', 'Cipro', 'Omeprazole',
@@ -1749,6 +1879,96 @@ class _PatientQueueState extends State<PatientQueue> {
                     ),
                   ),
 
+                  // ── Active Selected Medicines Tray ───────────────
+                  if (currentMeds.isNotEmpty) ...[
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                        border: Border(bottom: BorderSide(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.check_circle, size: 14, color: _teal),
+                              const SizedBox(width: 6),
+                              Text(
+                                'Selected Medicines (${currentMeds.length})',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: isDark ? const Color(0xFF2DD4BF) : _teal,
+                                ),
+                              ),
+                              const Spacer(),
+                              Text(
+                                'Tap to edit • ✕ to remove',
+                                style: TextStyle(fontSize: 10.5, color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade500),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 6),
+                          SingleChildScrollView(
+                            scrollDirection: Axis.horizontal,
+                            child: Row(
+                              children: currentMeds.map((m) {
+                                final name = (m['name'] ?? '').toString().trim();
+                                final abbrev = _getMedAbbrev(m);
+                                final isInj = _isInjectionOrDrip(m);
+                                final isCust = !_isInventoryMed(m);
+                                final timing = (m['timing'] ?? '').toString().trim();
+                                final qty = m['quantity'] ?? 1;
+                                final chipBg = isInj
+                                    ? Colors.orange.shade800
+                                    : (isCust ? const Color(0xFF475569) : _teal);
+
+                                return Padding(
+                                  padding: const EdgeInsets.only(right: 6),
+                                  child: InputChip(
+                                    avatar: Icon(isCust ? Icons.auto_awesome : Icons.edit, size: 11, color: Colors.white70),
+                                    label: Text(
+                                      '${abbrev.isNotEmpty && !name.toLowerCase().startsWith(abbrev.toLowerCase()) ? "$abbrev " : ""}$name ×$qty${timing.isNotEmpty ? " ($timing)" : ""}',
+                                      style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Colors.white),
+                                    ),
+                                    backgroundColor: chipBg,
+                                    deleteIconColor: Colors.white70,
+                                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                    onPressed: () async {
+                                      final res = await _showAddMedicineSubDialog(
+                                        branchId: branchId,
+                                        currentMeds: currentMeds,
+                                        daysOfMedicine: daysOfMedicine,
+                                        excludeSerial: excludeSerial,
+                                        existingMed: m,
+                                      );
+                                      if (res != null) {
+                                        if (res['_deleted'] == true) {
+                                          currentMeds.remove(m);
+                                        } else {
+                                          final idx = currentMeds.indexOf(m);
+                                          if (idx != -1) currentMeds[idx] = res;
+                                        }
+                                        if (dialogCtx.mounted) setModalState(() {});
+                                      }
+                                    },
+                                    onDeleted: () {
+                                      currentMeds.remove(m);
+                                      if (dialogCtx.mounted) setModalState(() {});
+                                    },
+                                  ),
+                                );
+                              }).toList(),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+
                   // Results list
                   Flexible(
                     child: filteredMeds.isEmpty
@@ -1792,6 +2012,21 @@ class _PatientQueueState extends State<PatientQueue> {
                               );
                               final isOutOfStock = availableStock <= 0;
                               final isLowStock = availableStock > 0 && availableStock <= 10;
+                              final existingIdx = currentMeds.indexWhere((cm) {
+                                if (m['id'] != null && cm['inventoryId'] != null) {
+                                  return cm['inventoryId'].toString() == m['id'].toString();
+                                }
+                                final cmName = (cm['name'] ?? '').toString().trim().toLowerCase();
+                                final cmType = (cm['type'] ?? '').toString().toLowerCase().trim();
+                                final cmDose = (cm['dose'] ?? cm['dosage'] ?? '').toString().toLowerCase().trim();
+                                final nName = namePart.toLowerCase();
+                                final nType = medType.toLowerCase();
+                                final nDose = dose.toLowerCase();
+                                return cmName == nName &&
+                                    (cmType.isEmpty || nType.isEmpty || cmType == nType) &&
+                                    (cmDose.isEmpty || nDose.isEmpty || cmDose == nDose);
+                              });
+                              final isAlreadyPrescribed = existingIdx != -1;
 
                               final label = abbrev.isNotEmpty &&
                                       !namePart.toLowerCase().startsWith(abbrev.toLowerCase())
@@ -1800,6 +2035,7 @@ class _PatientQueueState extends State<PatientQueue> {
 
                               return ListTile(
                                 dense: true,
+                                tileColor: isAlreadyPrescribed ? _teal.withValues(alpha: 0.08) : null,
                                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                                 title: Row(
                                   children: [
@@ -1897,45 +2133,111 @@ class _PatientQueueState extends State<PatientQueue> {
                                       ),
                                     ),
                                     const SizedBox(width: 8),
-                                    ElevatedButton(
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: _teal,
-                                        foregroundColor: Colors.white,
-                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                        minimumSize: Size.zero,
-                                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                                      ),
-                                      onPressed: () async {
-                                        Navigator.pop(dialogCtx);
-                                        final newMed = await _showAddMedicineSubDialog(
-                                          branchId: branchId,
-                                          currentMeds: currentMeds,
-                                          daysOfMedicine: daysOfMedicine,
-                                          excludeSerial: excludeSerial,
-                                          inventoryMed: m,
-                                        );
-                                        if (newMed != null) {
-                                          onMedicineAdded(newMed);
-                                        }
-                                      },
-                                      child: const Text('Select', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
-                                    ),
-                                  ],
-                                ),
-                                onTap: () async {
-                                  Navigator.pop(dialogCtx);
-                                  final newMed = await _showAddMedicineSubDialog(
-                                    branchId: branchId,
-                                    currentMeds: currentMeds,
-                                    daysOfMedicine: daysOfMedicine,
-                                    excludeSerial: excludeSerial,
-                                    inventoryMed: m,
-                                  );
-                                  if (newMed != null) {
-                                    onMedicineAdded(newMed);
-                                  }
-                                },
+                                    Builder(
+                                      builder: (context) {
+                                         final existingIdx = currentMeds.indexWhere((cm) {
+                                           if (m['id'] != null && cm['inventoryId'] != null) {
+                                             return cm['inventoryId'].toString() == m['id'].toString();
+                                           }
+                                           final cmName = (cm['name'] ?? '').toString().trim().toLowerCase();
+                                           final cmType = (cm['type'] ?? '').toString().toLowerCase().trim();
+                                           final cmDose = (cm['dose'] ?? cm['dosage'] ?? '').toString().toLowerCase().trim();
+                                           final nName = (m['name'] ?? '').toString().trim().toLowerCase();
+                                           final nType = (m['type'] ?? m['dosageForm'] ?? m['form'] ?? '').toString().trim().toLowerCase();
+                                           final nDose = (m['dose'] ?? '').toString().trim().toLowerCase();
+                                           return cmName == nName &&
+                                               (cmType.isEmpty || nType.isEmpty || cmType == nType) &&
+                                               (cmDose.isEmpty || nDose.isEmpty || cmDose == nDose);
+                                         });
+                                         final isAlreadyPrescribed = existingIdx != -1;
+                                         final existingMed = isAlreadyPrescribed ? currentMeds[existingIdx] : null;
+
+                                         return ElevatedButton(
+                                           style: ElevatedButton.styleFrom(
+                                             backgroundColor: isAlreadyPrescribed
+                                                 ? Colors.green.shade600
+                                                 : (isOutOfStock
+                                                     ? Colors.grey.shade400
+                                                     : (isLowStock ? Colors.orange.shade800 : _teal)),
+                                             foregroundColor: Colors.white,
+                                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                             minimumSize: Size.zero,
+                                             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                           ),
+                                           onPressed: () async {
+                                                   final res = await _showAddMedicineSubDialog(
+                                                     branchId: branchId,
+                                                     currentMeds: currentMeds,
+                                                     daysOfMedicine: daysOfMedicine,
+                                                     excludeSerial: excludeSerial,
+                                                     inventoryMed: m,
+                                                     existingMed: existingMed,
+                                                   );
+                                                   if (res != null) {
+                                                     if (res['_deleted'] == true) {
+                                                       if (existingMed != null) currentMeds.remove(existingMed);
+                                                     } else if (existingIdx != -1) {
+                                                       currentMeds[existingIdx] = res;
+                                                     } else {
+                                                       onMedicineAdded(res);
+                                                     }
+                                                     if (dialogCtx.mounted) {
+                                                       setModalState(() {});
+                                                     }
+                                                   }
+                                                 },
+                                           child: Text(
+                                             isAlreadyPrescribed ? 'Added (Edit)' : (isOutOfStock ? 'Select (0 Stock)' : 'Select'),
+                                             style: TextStyle(
+                                               fontSize: 11.5,
+                                               fontWeight: FontWeight.bold,
+                                               color: Colors.white,
+                                             ),
+                                           ),
+                                         );
+                                       },
+                                     ),
+                                   ],
+                                 ),
+                                 onTap: () async {
+                                         final existingIdx = currentMeds.indexWhere((cm) {
+                                           if (m['id'] != null && cm['inventoryId'] != null) {
+                                             return cm['inventoryId'].toString() == m['id'].toString();
+                                           }
+                                           final cmName = (cm['name'] ?? '').toString().trim().toLowerCase();
+                                           final cmType = (cm['type'] ?? '').toString().toLowerCase().trim();
+                                           final cmDose = (cm['dose'] ?? cm['dosage'] ?? '').toString().toLowerCase().trim();
+                                           final nName = (m['name'] ?? '').toString().trim().toLowerCase();
+                                           final nType = (m['type'] ?? m['dosageForm'] ?? m['form'] ?? '').toString().trim().toLowerCase();
+                                           final nDose = (m['dose'] ?? '').toString().trim().toLowerCase();
+                                           return cmName == nName &&
+                                               (cmType.isEmpty || nType.isEmpty || cmType == nType) &&
+                                               (cmDose.isEmpty || nDose.isEmpty || cmDose == nDose);
+                                         });
+                                         final existingMed = existingIdx != -1 ? currentMeds[existingIdx] : null;
+
+                                         final res = await _showAddMedicineSubDialog(
+                                           branchId: branchId,
+                                           currentMeds: currentMeds,
+                                           daysOfMedicine: daysOfMedicine,
+                                           excludeSerial: excludeSerial,
+                                           inventoryMed: m,
+                                           existingMed: existingMed,
+                                         );
+                                         if (res != null) {
+                                           if (res['_deleted'] == true) {
+                                             if (existingMed != null) currentMeds.remove(existingMed);
+                                           } else if (existingIdx != -1) {
+                                             currentMeds[existingIdx] = res;
+                                           } else {
+                                             onMedicineAdded(res);
+                                           }
+                                           if (dialogCtx.mounted) {
+                                             setModalState(() {});
+                                           }
+                                         }
+                                       },
                               );
                             },
                           ),
@@ -1949,7 +2251,6 @@ class _PatientQueueState extends State<PatientQueue> {
                       children: [
                         OutlinedButton.icon(
                           onPressed: () async {
-                            Navigator.pop(dialogCtx);
                             final newMed = await _showAddMedicineSubDialog(
                               branchId: branchId,
                               currentMeds: currentMeds,
@@ -1959,6 +2260,9 @@ class _PatientQueueState extends State<PatientQueue> {
                             );
                             if (newMed != null) {
                               onMedicineAdded(newMed);
+                              if (dialogCtx.mounted) {
+                                setModalState(() {});
+                              }
                             }
                           },
                           icon: const Icon(Icons.add, size: 14),
@@ -1969,9 +2273,16 @@ class _PatientQueueState extends State<PatientQueue> {
                           ),
                         ),
                         const Spacer(),
-                        TextButton(
+                        ElevatedButton.icon(
                           onPressed: () => Navigator.pop(dialogCtx),
-                          child: const Text('Cancel'),
+                          icon: const Icon(Icons.done_all_rounded, size: 14),
+                          label: Text(currentMeds.isNotEmpty ? 'Done (${currentMeds.length})' : 'Close'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _teal,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
                         ),
                       ],
                     ),
@@ -2093,14 +2404,6 @@ class _PatientQueueState extends State<PatientQueue> {
       };
     }
 
-    final String resolvedCnic = (
-      prescData['patientCnic']?.toString() ??
-      prescData['cnic']?.toString() ??
-      entryData['patientCnic']?.toString() ??
-      entryData['cnic']?.toString() ??
-      patientCnic
-    ).replaceAll(RegExp(r'[-\s]'), '').toLowerCase();
-
     final String resolvedName = (
       prescData['patientName']?.toString() ??
       entryData['patientName']?.toString() ??
@@ -2116,14 +2419,16 @@ class _PatientQueueState extends State<PatientQueue> {
     debugPrint('[PrescEdit] resolved queueType=$queueType for serial=$serial');
 
     int editDays = (() {
-      final d = prescData['daysOfMedicine'] ??
+      final dRaw = prescData['daysOfMedicine'] ??
           entryData['daysOfMedicine'] ??
           (entryData['prescription'] is Map
               ? entryData['prescription']['daysOfMedicine']
               : null);
-      if (d is int && d >= 1 && d <= 3) return d;
-      final suggested = (entryData['suggestedDays'] as int?) ?? (patient['suggestedDays'] as int?);
-      if (suggested is int && suggested >= 1 && suggested <= 3) return suggested;
+      final d = (dRaw is num ? dRaw.toInt() : int.tryParse(dRaw?.toString() ?? ''));
+      if (d != null && d >= 1 && d <= 3) return d;
+      final sRaw = entryData['suggestedDays'] ?? patient['suggestedDays'];
+      final suggested = (sRaw is num ? sRaw.toInt() : int.tryParse(sRaw?.toString() ?? ''));
+      if (suggested != null && suggested >= 1 && suggested <= 3) return suggested;
       return 1;
     })();
 
@@ -2424,7 +2729,7 @@ class _PatientQueueState extends State<PatientQueue> {
                           final namePart = (med['name'] ?? '').trim();
                           final qty      = med['quantity'] ?? 1;
                           final isInj    = _isInjectionOrDrip(med);
-                          final isCustom = med['inventoryId'] == null;
+                          final isCustom = !_isInventoryMed(med);
                           final timing   = (med['timing'] ?? '').toString().trim();
                           final label    = abbrev.isNotEmpty &&
                                   !namePart.toLowerCase().startsWith(abbrev.toLowerCase())
@@ -2435,7 +2740,8 @@ class _PatientQueueState extends State<PatientQueue> {
                               ? Colors.orange.shade800
                               : (isCustom ? const Color(0xFF475569) : _teal);
 
-                          return Chip(
+                          return InputChip(
+                            avatar: const Icon(Icons.edit, size: 12, color: Colors.white70),
                             label: Text(
                               '$label${timing.isNotEmpty ? ' ($timing)' : ''}',
                               style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500),
@@ -2443,6 +2749,27 @@ class _PatientQueueState extends State<PatientQueue> {
                             backgroundColor: chipBg,
                             labelStyle: const TextStyle(color: Colors.white),
                             deleteIconColor: Colors.white70,
+                            onPressed: () async {
+                              final res = await _showAddMedicineSubDialog(
+                                branchId: branchId,
+                                currentMeds: currentMeds,
+                                daysOfMedicine: editDays,
+                                excludeSerial: serial,
+                                existingMed: med,
+                              );
+                              if (res != null) {
+                                setDialogState(() {
+                                  if (res['_deleted'] == true) {
+                                    currentMeds.remove(med);
+                                  } else {
+                                    final idx = currentMeds.indexOf(med);
+                                    if (idx != -1) {
+                                      currentMeds[idx] = res;
+                                    }
+                                  }
+                                });
+                              }
+                            },
                             onDeleted: () =>
                                 setDialogState(() => currentMeds.remove(med)),
                           );
@@ -2888,7 +3215,7 @@ class _PatientQueueState extends State<PatientQueue> {
       final box = Hive.box(LocalStorageService.entriesBox);
       if (box.isOpen) {
         return ValueListenableBuilder<Box>(
-          valueListenable: box.listenable(),
+          valueListenable: DebouncedBoxListenable.shared(box),
           builder: (context, box, _) => _buildQueueContent(context),
         );
       }
@@ -2898,7 +3225,7 @@ class _PatientQueueState extends State<PatientQueue> {
       builder: (context, snapshot) {
         if (snapshot.hasData && snapshot.data != null && snapshot.data!.isOpen) {
           return ValueListenableBuilder<Box>(
-            valueListenable: snapshot.data!.listenable(),
+            valueListenable: DebouncedBoxListenable.shared(snapshot.data!),
             builder: (context, box, _) => _buildQueueContent(context),
           );
         }
@@ -2913,7 +3240,16 @@ class _PatientQueueState extends State<PatientQueue> {
   }
 
   Widget _buildQueueContent(BuildContext context) {
-        final allPatients = _getSortedQueue();
+    try {
+      final now = DateTime.now();
+      final isCacheValid = _cachedQueue != null &&
+          _queueCacheTime != null &&
+          now.difference(_queueCacheTime!) < _queueCacheTTL;
+      final allPatients = isCacheValid ? _cachedQueue! : _getSortedQueue();
+      if (!isCacheValid) {
+        _cachedQueue = allPatients;
+        _queueCacheTime = now;
+      }
 
         bool isPatientDone(Map<String, dynamic> p) {
           final s = (p['status'] ?? '').toString().toLowerCase();
@@ -3083,10 +3419,14 @@ class _PatientQueueState extends State<PatientQueue> {
                     Container(height: 16, width: 1, color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
                     const SizedBox(width: 10),
                     _buildCampChip('all', '🏥 All Camps'),
-                    const SizedBox(width: 5),
-                    _buildCampChip('saddar', 'Saddar'),
-                    const SizedBox(width: 5),
-                    _buildCampChip('haji_camp', 'Haji Camp'),
+                    ...CampSessionService.getCampsForBranch(widget.branchId).map((c) {
+                      final cId = (c['id'] ?? '').toString();
+                      final cName = (c['name'] ?? CampSessionService.getCampLabel(cId, widget.branchId)).toString();
+                      return Padding(
+                        padding: const EdgeInsets.only(left: 5),
+                        child: _buildCampChip(cId, cName),
+                      );
+                    }),
                   ],
                 ],
               ),
@@ -3386,14 +3726,24 @@ class _PatientQueueState extends State<PatientQueue> {
                                 }),
                                 Builder(builder: (_) {
                                   if (!_hasMultiCamps) return const SizedBox.shrink();
+                                  final rawCamp = (patient['campId'] ?? patient['dispensaryId'] ?? '').toString();
                                   final ser = serial.toUpperCase();
-                                  final dispId = (patient['dispensaryId'] ?? patient['campId'])?.toString();
-                                  final isHaji = ser.contains('-HAJI-') || ser.contains('-HC-') || (dispId ?? '').contains('haji');
+                                  final isKarachi = CampSessionService.isKarachiFamily(widget.branchId);
+                                  final String campName;
+                                  if (isKarachi) {
+                                    final isHaji = ser.contains('-HAJI-') || ser.contains('-HC-') || rawCamp.toLowerCase().contains('haji');
+                                    campName = isHaji ? 'Haji Camp' : 'Saddar';
+                                  } else {
+                                    campName = rawCamp.isNotEmpty
+                                        ? CampSessionService.getCampLabel(rawCamp, widget.branchId)
+                                        : 'Main';
+                                  }
+                                  final isHajiColor = campName.toLowerCase().contains('haji');
                                   return Container(
                                     margin: const EdgeInsets.only(right: 4),
                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                     decoration: BoxDecoration(
-                                      color: isHaji ? const Color(0xFF6366F1) : const Color(0xFF0D9488),
+                                      color: isHajiColor ? const Color(0xFF6366F1) : const Color(0xFF0D9488),
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                     child: Row(
@@ -3402,7 +3752,7 @@ class _PatientQueueState extends State<PatientQueue> {
                                         const Icon(Icons.location_on_rounded, size: 10, color: Colors.white),
                                         const SizedBox(width: 2),
                                         Text(
-                                          isHaji ? 'Haji Camp' : 'Saddar',
+                                          campName,
                                           style: const TextStyle(color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.bold),
                                         ),
                                       ],
@@ -3581,6 +3931,31 @@ class _PatientQueueState extends State<PatientQueue> {
             ),
           ),
         ]);
+    } catch (e, st) {
+      debugPrint('[PatientQueue] Render error in _buildQueueContent: $e\n$st');
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.people_outline, size: 36, color: _teal),
+              const SizedBox(height: 12),
+              const Text('Queue updating...', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+              const SizedBox(height: 8),
+              ElevatedButton.icon(
+                icon: const Icon(Icons.refresh, size: 16),
+                label: const Text('Reload Queue'),
+                style: ElevatedButton.styleFrom(backgroundColor: _teal, foregroundColor: Colors.white),
+                onPressed: () {
+                  if (mounted) setState(() {});
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+    }
   }
 
   Widget _buildFilterTab(

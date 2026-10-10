@@ -3,8 +3,10 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 import 'package:gmwf/services/finance_local_storage.dart';
 import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/services/sync_service.dart';
 
 void main() {
+  SyncService.suppressUploadsForTests = true;
   TestWidgetsFlutterBinding.ensureInitialized();
   late Directory tempDir;
 

@@ -1,5 +1,7 @@
 // lib/pages/dispensary/receptionist/receptionist_screen.dart
 
+import 'package:gmwf/utils/perf_trace.dart';
+import 'package:gmwf/utils/debounced_box_listenable.dart';
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
@@ -8,7 +10,6 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:another_flushbar/flushbar.dart';
-import 'package:flutter/foundation.dart';
 import 'package:gmwf/services/auth_service.dart';
 import 'package:gmwf/services/local_storage_service.dart';
 import 'package:gmwf/services/local_storage_service.dart' as lss;
@@ -42,7 +43,6 @@ class ReceptionistScreen extends StatefulWidget {
     this.isEmbedded = false,
     this.suppressPrescriptionNotifications = false,
   });
-
   @override
   State<ReceptionistScreen> createState() => _ReceptionistScreenState();
 }
@@ -54,6 +54,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
   String? _username;
   String? _branchName;
   String _pendingCnic = '';
+  String? _pendingPatientId;
   String _activeSection = 'token';
 
   final GlobalKey<PatientRegisterPageState> _registerKey =
@@ -77,10 +78,9 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
   // Manual refresh notifier for token log
   final ValueNotifier<int> _refreshNotifier = ValueNotifier<int>(0);
 
-  ConnectionStatus _connectionStatus = const ConnectionStatus(
-    state: LanConnectionState.disconnected,
-    message: 'Not connected',
-  );
+  ConnectionStatus _connectionStatus = ConnectionManager().status;
+  final Set<String> _pendingReversalSerials = <String>{};
+  bool _isSubmittingReversal = false;
 
   static const Color _teal = Color(0xFF00695C);
   static const int _tabToken = 0;
@@ -133,8 +133,10 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     // [FIX-USERNAME] Load name first, then start ConnectionManager with it.
     // _fetchReceptionistName() starts the connection once the name is resolved.
     CampSessionService.activeCampNotifier.addListener(_onActiveCampChanged);
+    ConnectionManager().addReconnectListener(_onLanReconnected);
     _fetchReceptionistName();
 
+    _connectionStatus = ConnectionManager().status;
     _connectionSub = ConnectionManager().statusStream.listen((status) {
       if (mounted) setState(() => _connectionStatus = status);
     });
@@ -143,6 +145,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       if (mounted && !widget.isEmbedded) {
         UpdateDialogWidget.showUpdateDialogIfNeeded(context);
       }
+      RealtimeManager().requestCatchUp(branchId: widget.branchId);
     });
 
     _realtimeSub = RealtimeManager().messageStream.listen((event) async {
@@ -163,6 +166,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
         final tokenSerial = (data?['tokenSerial'] ?? data?['serial'] ?? data?['tokenId'])?.toString();
         if (tokenSerial != null && tokenSerial.isNotEmpty) {
+          _pendingReversalSerials.remove(tokenSerial.trim().toUpperCase());
           await lss.LocalStorageService.deleteLocalEntry(widget.branchId, tokenSerial);
           debugPrint('[Receptionist] ✅ Token reversal processed for $tokenSerial');
         }
@@ -173,6 +177,13 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
           setState(() {});
         }
         return;
+      }
+
+      if (type == 'token_reversal_rejected') {
+        final tokenSerial = (data?['tokenSerial'] ?? data?['serial'] ?? data?['tokenId'])?.toString();
+        if (tokenSerial != null) {
+          _pendingReversalSerials.remove(tokenSerial.trim().toUpperCase());
+        }
       }
 
       // PATIENT EDIT APPROVED
@@ -196,7 +207,10 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
               ..addAll(lss.LocalStorageService.sanitize(changes));
             await lss.LocalStorageService.saveLocalPatient(updated, isFromSync: true);
           } else {
-            await lss.LocalStorageService.downloadAllPatients(widget.branchId);
+            final newPatient = lss.LocalStorageService.sanitize(changes);
+            newPatient['patientId'] = patientId;
+            newPatient['branchId'] = widget.branchId;
+            await lss.LocalStorageService.saveLocalPatient(newPatient, isFromSync: true);
           }
           await lss.LocalStorageService.updateActiveEntriesForPatient(widget.branchId, patientId, changes);
 
@@ -249,7 +263,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
           type == 'dispense_completed' ||
           type == 'token_created' ||
           type == 'prescription_created') {
-        if (mounted) setState(() {});
+        _debouncedRebuild();
       }
     });
   }
@@ -266,6 +280,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         data['isCatchUp'] == true ||
         data['_isReplay'] == true;
     if (isReplay) return;
+    // Never alert this desk about its own action (Hybrid Desk: a Doctor tab on the same desk).
+    if (RealtimeManager().isOwnEvent(fullEvent)) return;
 
     final serial =
         (data['serial'] ?? data['tokenNumber'] ?? '').toString().trim();
@@ -568,6 +584,9 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       // Immediate UI feedback
       _refreshNotifier.value++;
 
+      // 0. Purge any phantom unknown tokens before reloading
+      await lss.LocalStorageService.purgePhantomUnknownTokens(widget.branchId);
+
       // 1. Force flush stuck outbox and request catch-up over LAN
       await RealtimeManager().forceFlushAndCatchUp();
 
@@ -599,6 +618,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
   void _handlePatientNotFound(String cnic) {
     setState(() {
       _pendingCnic = cnic;
+      _pendingPatientId = null;
       _activeSection = 'register';
     });
     _mobileTabController.animateTo(_tabRegister);
@@ -612,6 +632,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         ? patientIdOrCnic.split('_child_').first
         : patientIdOrCnic;
     setState(() {
+      _pendingPatientId = patientIdOrCnic;
       _pendingCnic = clean;
       _activeSection = 'token';
     });
@@ -619,13 +640,58 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       _mobileTabController.animateTo(_tabToken);
     }
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _tokenKey.currentState?.focusAndFillCnic(clean);
+      _tokenKey.currentState?.selectPatientDirectly(patientIdOrCnic, cnicFallback: clean);
+      // One-time hand-off: clear it once delivered. Left set, every rebuild of the token
+      // panel re-filled the search box with this CNIC and re-opened this patient — even
+      // after the receptionist searched a different (unregistered) CNIC.
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        setState(() {
+          _pendingPatientId = null;
+          _pendingCnic = '';
+        });
+      });
     });
   }
 
   Future<void> _requestTokenReverse(Map<String, dynamic> entry) async {
-    final serial = entry['serial'] as String? ?? 'N/A';
+    final serial = (entry['serial'] as String? ?? 'N/A').trim().toUpperCase();
     final patientName = entry['patientName'] as String? ?? 'Unknown';
+
+    // Anti-Spam Guard 1: In-flight or already submitted during this active session
+    if (_isSubmittingReversal || _pendingReversalSerials.contains(serial)) {
+      if (mounted) {
+        Flushbar(
+          message: 'A reversal request for Token #$serial is already pending supervisor review.',
+          backgroundColor: Colors.amber[900]!,
+          duration: const Duration(seconds: 3),
+        ).show(context);
+      }
+      return;
+    }
+
+    // Anti-Spam Guard 2: Persistent check against local_edit_requests
+    try {
+      if (Hive.isBoxOpen('local_edit_requests')) {
+        final box = Hive.box('local_edit_requests');
+        final alreadyPending = box.values.any((v) =>
+            v is Map &&
+            (v['tokenSerial'] ?? v['serial'])?.toString().trim().toUpperCase() == serial &&
+            v['status'] == 'pending');
+        if (alreadyPending) {
+          _pendingReversalSerials.add(serial);
+          if (mounted) {
+            Flushbar(
+              message: 'Token #$serial already has an active reversal request awaiting approval.',
+              backgroundColor: Colors.amber[900]!,
+              duration: const Duration(seconds: 3),
+            ).show(context);
+          }
+          return;
+        }
+      }
+    } catch (_) {}
+
     final reasonCtrl = TextEditingController();
 
     final confirmed = await showDialog<bool>(
@@ -666,6 +732,10 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     );
 
     if (confirmed != true) return;
+
+    if (_isSubmittingReversal) return;
+    _isSubmittingReversal = true;
+    _pendingReversalSerials.add(serial);
 
     final requesterName = (_username?.isNotEmpty == true)
         ? _username!
@@ -749,6 +819,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         ).show(context);
       }
     } catch (e) {
+      _pendingReversalSerials.remove(serial);
       if (mounted) {
         Flushbar(
           message: 'Failed to send request: $e',
@@ -756,6 +827,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
           duration: const Duration(seconds: 5),
         ).show(context);
       }
+    } finally {
+      _isSubmittingReversal = false;
     }
   }
 
@@ -877,8 +950,30 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     return false;
   }
 
+  Timer? _debounceRebuildTimer;
+  void _debouncedRebuild() {
+    if (_debounceRebuildTimer?.isActive ?? false) return;
+    _debounceRebuildTimer = Timer(const Duration(milliseconds: 120), () {
+      if (mounted) {
+        _cachedFilteredTokens = null;
+        setState(() {});
+      }
+    });
+  }
+
+  List<Map<String, dynamic>>? _cachedFilteredTokens;
+  DateTime? _cachedTokensTime;
+  String? _cachedTokensFilter;
+
   List<Map<String, dynamic>> _getFilteredTodayTokens() {
     if (!Hive.isBoxOpen(lss.LocalStorageService.entriesBox)) return [];
+    final now = DateTime.now();
+    if (_cachedFilteredTokens != null &&
+        _cachedTokensTime != null &&
+        now.difference(_cachedTokensTime!).inMilliseconds < 450 &&
+        _cachedTokensFilter == _selectedSessionFilter) {
+      return _cachedFilteredTokens!;
+    }
     try {
       final today = CampSessionService.resolveShiftAndDateKey(DateTime.now(), widget.branchId).dateKey;
       final todayIso = DateFormat('yyyy-MM-dd').format(DateTime.now());
@@ -992,7 +1087,11 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       }
     }
 
-    return uniqueBySerial.values.toList();
+    final result = uniqueBySerial.values.toList();
+    _cachedFilteredTokens = result;
+    _cachedTokensTime = now;
+    _cachedTokensFilter = _selectedSessionFilter;
+    return result;
     } catch (e) {
       debugPrint('[ReceptionistScreen] _getFilteredTodayTokens error: $e');
       return [];
@@ -1217,9 +1316,9 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     );
   }
 
-  Widget _buildSummaryCards(bool isMobile) {
+  Widget _buildSummaryCards([bool isMobile = false, List<Map<String, dynamic>>? precomputedEntries]) {
     try {
-      final todayEntries = _getFilteredTodayTokens();
+      final todayEntries = precomputedEntries ?? _getFilteredTodayTokens();
 
       int zakat = 0, nonZakat = 0, gmwf = 0;
       int zakatAmount = 0, nonZakatAmount = 0;
@@ -1436,8 +1535,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     );
   }
 
-  Widget _buildTokenLog(bool isMobile) {
-    final rawList = _getFilteredTodayTokens();
+  Widget _buildTokenLog([bool isMobile = false, List<Map<String, dynamic>>? precomputedEntries]) {
+    final rawList = List<Map<String, dynamic>>.from(precomputedEntries ?? _getFilteredTodayTokens());
 
     rawList.sort((a, b) {
       final sa = (a['serial'] as String? ?? '000000-000').split('-').last;
@@ -1499,8 +1598,14 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
           }
         }
 
-        if (name.isEmpty || cnic.isEmpty) {
-          if (pId.isNotEmpty) {
+        final isSyntheticCnic = cnic.isEmpty ||
+            cnic.startsWith('unknown_cnic_') ||
+            cnic.startsWith('unknown_') ||
+            cnic == '00000-0000000-0' ||
+            cnic == '-';
+
+        if (name.isEmpty || isSyntheticCnic) {
+          if (pId.isNotEmpty && !pId.startsWith('unknown_')) {
             final lp = lss.LocalStorageService.getLocalPatient(pId);
             if (lp != null) {
               final lpName = (lp['name'] ?? lp['patientName'] ?? lp['fullName'])?.toString().trim();
@@ -1514,14 +1619,15 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                 e['patientName'] = name;
               }
               final lpCnic = (lp['cnic'] ?? lp['guardianCnic'])?.toString().trim() ?? '';
-              if (cnic.isEmpty && lpCnic.isNotEmpty) {
+              if (isSyntheticCnic && lpCnic.isNotEmpty && !lpCnic.startsWith('unknown_')) {
                 cnic = lpCnic;
                 e['cnic'] = cnic;
+                e['patientCnic'] = cnic;
               }
             }
           }
           final isChildEntry = e['isAdult'] == false || pId.contains('_child_') || guardianCnic.isNotEmpty;
-          if (name.isEmpty && cnic.isNotEmpty && !isChildEntry) {
+          if (name.isEmpty && cnic.isNotEmpty && !isSyntheticCnic && !isChildEntry) {
             final lp = lss.LocalStorageService.getLocalPatientByCnic(cnic);
             if (lp != null) {
               final lpName = (lp['name'] ?? lp['patientName'] ?? lp['fullName'])?.toString().trim();
@@ -1532,6 +1638,22 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                   lpName.toLowerCase() != 'unknown patient') {
                 name = lpName;
                 e['patientName'] = name;
+              }
+            }
+          }
+          // CRITICAL: Look up by patient name if CNIC was corrupted or lost!
+          if (isSyntheticCnic && name.isNotEmpty && name != 'Unknown Patient') {
+            final lp = lss.LocalStorageService.findPatientByName(name);
+            if (lp != null) {
+              final realC = (lp['cnic'] ?? lp['patientCnic'] ?? lp['guardianCnic'])?.toString().trim() ?? '';
+              if (realC.isNotEmpty && !realC.startsWith('unknown_')) {
+                cnic = realC;
+                e['cnic'] = cnic;
+                e['patientCnic'] = cnic;
+                if (lp['guardianCnic'] != null) {
+                  guardianCnic = lp['guardianCnic'].toString().trim();
+                  e['guardianCnic'] = guardianCnic;
+                }
               }
             }
           }
@@ -1634,10 +1756,12 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
           statusIcon = Icons.hourglass_empty_rounded;
         }
 
-        final displayCnic = cnic.isNotEmpty
-            ? cnic
-            : guardianCnic.isNotEmpty
-                ? guardianCnic
+        final validCnic = cnic.isNotEmpty && !cnic.startsWith('unknown_') && cnic != '00000-0000000-0' && cnic != '-' ? cnic : '';
+        final validGuard = guardianCnic.isNotEmpty && !guardianCnic.startsWith('unknown_') && guardianCnic != '00000-0000000-0' && guardianCnic != '-' ? guardianCnic : '';
+        final displayCnic = validCnic.isNotEmpty
+            ? validCnic
+            : validGuard.isNotEmpty
+                ? validGuard
                 : '-';
 
         final seqNumber = serial.split('-').last.padLeft(3, '0');
@@ -1995,10 +2119,10 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       final box = Hive.box(lss.LocalStorageService.entriesBox);
       if (box.isOpen) {
         return ValueListenableBuilder<Box>(
-          valueListenable: box.listenable(),
+          valueListenable: DebouncedBoxListenable.shared(box),
           builder: (ctx, b, w) {
             try {
-              if (b == null || !b.isOpen) {
+              if (!b.isOpen) {
                 return const Center(
                   child: Padding(
                     padding: EdgeInsets.all(24),
@@ -2006,7 +2130,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                   ),
                 );
               }
-              return builder(ctx, b, w);
+              return PerfTrace.measure('receptionist list/summary build (${b.length} entries)', () => builder(ctx, b, w), thresholdMs: 30);
             } catch (e) {
               return const Center(
                 child: Padding(
@@ -2024,10 +2148,10 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       builder: (context, snapshot) {
         if (snapshot.hasData && snapshot.data != null && snapshot.data!.isOpen) {
           return ValueListenableBuilder<Box>(
-            valueListenable: snapshot.data!.listenable(),
+            valueListenable: DebouncedBoxListenable.shared(snapshot.data!),
             builder: (ctx, b, w) {
               try {
-                if (b == null || !b.isOpen) {
+                if (!b.isOpen) {
                   return const Center(
                     child: Padding(
                       padding: EdgeInsets.all(24),
@@ -2085,6 +2209,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                     receptionistId: widget.receptionistId,
                     receptionistName: widget.receptionistName,
                     initialCnic: _pendingCnic,
+                    targetPatientId: _pendingPatientId,
                     onPatientNotFound: _handlePatientNotFound,
                   ),
                 ),
@@ -2193,14 +2318,21 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                         child: Stack(
                           children: [
                             // ── Authentic Islamic Pattern Background (Vibrant Golden) ──
+                            // Performance: this used to be Opacity (a full-card offscreen layer) around a
+                            // tinted full-size image, repainted on every cursor blink and keystroke in the
+                            // form above it. Now the opacity is folded into the tint, the image is decoded
+                            // at a sensible size, and a RepaintBoundary lets Flutter keep it as a cached
+                            // layer that typing never touches.
                             Positioned.fill(
-                              child: IgnorePointer(
-                                child: Opacity(
-                                  opacity: _isDark ? 0.18 : 0.28,
+                              child: RepaintBoundary(
+                                child: IgnorePointer(
                                   child: Image.asset(
                                     'assets/images/islamic_pattern.webp',
                                     fit: BoxFit.cover,
-                                    color: _isDark ? const Color(0xFFF6C358) : const Color(0xFFD4AF37),
+                                    cacheWidth: 1400,
+                                    filterQuality: FilterQuality.low,
+                                    color: (_isDark ? const Color(0xFFF6C358) : const Color(0xFFD4AF37))
+                                        .withValues(alpha: _isDark ? 0.18 : 0.28),
                                     colorBlendMode: BlendMode.srcIn,
                                   ),
                                 ),
@@ -2211,7 +2343,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                             Padding(
                               padding: const EdgeInsets.all(28),
                               child: AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 400),
+                                duration: const Duration(milliseconds: 120),
                                 child: _activeSection == 'register'
                                     ? PatientRegisterPage(
                                         key: _registerKey,
@@ -2228,6 +2360,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                                         receptionistName:
                                             widget.receptionistName,
                                         initialCnic: _pendingCnic,
+                                        targetPatientId: _pendingPatientId,
                                         onPatientNotFound:
                                             _handlePatientNotFound,
                                       ),
@@ -2248,15 +2381,15 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                 child: ValueListenableBuilder<int>(
                   valueListenable: _refreshNotifier,
                   builder: (context, _, _) => _buildWithEntriesListenable(
-                    (context, _, _) => Column(
-                      children: [
-                        _buildSummaryCards(false),
-                        const SizedBox(height: 16),
-                        Expanded(
-                          child: Builder(
-                            builder: (context) {
-                              final todayCount = _getFilteredTodayTokens().length;
-                              return Card(
+                    (context, _, _) {
+                      final todayEntries = _getFilteredTodayTokens();
+                      final todayCount = todayEntries.length;
+                      return Column(
+                        children: [
+                          _buildSummaryCards(false, todayEntries),
+                          const SizedBox(height: 16),
+                          Expanded(
+                            child: Card(
                                 elevation: 8,
                                 color: _isDark ? const Color(0xFF1E293B) : Colors.white,
                                 shape: RoundedRectangleBorder(
@@ -2341,18 +2474,17 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                                             ],
                                           ),
                                           const Divider(height: 20),
-                                          Expanded(child: _buildTokenLog(false)),
+                                          Expanded(child: _buildTokenLog(false, todayEntries)),
                                         ],
                                       ),
                                     ),
                                   ],
                                 ),
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
+                              ),
+                            ),
+                        ],
+                      );
+                    },
                   ),
                 ),
               ),
@@ -2394,7 +2526,13 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                 label: 'Issue Token',
                 icon: Icons.confirmation_number_outlined,
                 isSelected: activeIndex == 0,
-                onTap: () => _mobileTabController.animateTo(0),
+                onTap: () {
+                  setState(() {
+                    _pendingCnic = '';
+                    _pendingPatientId = null;
+                  });
+                  _mobileTabController.animateTo(0);
+                },
               ),
               _buildMobileToggleButton(
                 label: 'Register Patient',
@@ -2571,7 +2709,11 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
             child: Material(
               color: Colors.transparent,
               child: InkWell(
-                onTap: () => setState(() => _activeSection = 'token'),
+                onTap: () => setState(() {
+                  _activeSection = 'token';
+                  _pendingCnic = '';
+                  _pendingPatientId = null;
+                }),
                 borderRadius: BorderRadius.circular(28),
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 250),
@@ -2632,7 +2774,9 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
   @override
   void dispose() {
+    _debounceRebuildTimer?.cancel();
     CampSessionService.activeCampNotifier.removeListener(_onActiveCampChanged);
+    ConnectionManager().removeReconnectListener(_onLanReconnected);
     _refreshNotifier.dispose();
     _mobileTabController.dispose();
     if (!widget.isEmbedded) {
@@ -2642,5 +2786,15 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     _connSub?.cancel();
     _realtimeSub?.cancel();
     super.dispose();
+  }
+
+  void _onLanReconnected() {
+    if (!mounted) return;
+    debugPrint('[Receptionist] 🔄 LAN reconnected — requesting catch-up from server');
+    try {
+      RealtimeManager().requestCatchUp(branchId: widget.branchId);
+    } catch (_) {}
+    _refreshNotifier.value++;
+    setState(() {});
   }
 }

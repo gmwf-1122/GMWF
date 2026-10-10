@@ -36,7 +36,7 @@ class _ExpensesTabState extends State<ExpensesTab> {
   final List<String> _categories = [
     'Office',
     'Administration',
-    'Dasterkhawaan',
+    'Dasterkhwaan',
     'Dispensary',
     'Madrassa',
     'School',
@@ -82,6 +82,7 @@ class _ExpensesTabState extends State<ExpensesTab> {
     switch (category.toLowerCase()) {
       case 'masjid':
         return Colors.teal;
+      case 'dasterkhwaan':
       case 'dasterkhawaan':
         return Colors.orange;
       case 'school':

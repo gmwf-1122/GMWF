@@ -33,11 +33,21 @@ def clean_branch(bid, default='karachi'):
     return b
 
 def format_date_doc(branch_id, date_key, camp_id=None, disp_tag=None, serial=None):
-    if serial and ('SADD' in serial.upper() or 'SAD' in serial.upper()):
+    b = str(branch_id or '').lower().strip()
+    c = str(camp_id or '').lower().strip()
+    tag = str(disp_tag or '').upper().strip()
+    s = str(serial or '').upper().strip()
+
+    # Check haji
+    if 'haji' in c or 'haji' in tag.lower() or 'HAJI' in s or '-HC-' in s or '-HC' in s:
+        return f"{date_key}_haji"
+    # Check saddar
+    if 'saddar' in c or 'saddar' in tag.lower() or 'SADD' in s or 'SAD' in s:
         return f"{date_key}_saddar"
-    if disp_tag and 'saddar' in str(disp_tag).lower():
-        return f"{date_key}_saddar"
-    if camp_id and 'saddar' in str(camp_id).lower():
+    # Dynamic camp ID if present
+    if c and c not in ('main', 'none', '', 'all'):
+        return f"{date_key}_{c}"
+    if b in ('karachi', 'khi'):
         return f"{date_key}_saddar"
     return str(date_key)
 
@@ -483,6 +493,56 @@ def run_sync(export_path, creds_path=None, out_path=None):
                 med_id = str(item.get('medicineId') or item.get('inventoryId') or data.get('medicineId') or data.get('id') or '').strip()
                 if med_id:
                     ref = db.collection('branches').document(bid).collection('inventory').document(med_id)
+                    current_batch.set(ref, sanitized_data, merge=True)
+                    batch_count += 1
+                    breakdown['others'] += 1
+                if item_key:
+                    batch_keys.append(item_key)
+
+            elif itype in ('delete_inventory_item', 'delete_medicine'):
+                med_id = str(item.get('medicineId') or item.get('inventoryId') or item.get('id') or data.get('medicineId') or data.get('inventoryId') or data.get('id') or data.get('docId') or '').strip()
+                if med_id:
+                    ref = db.collection('branches').document(bid).collection('inventory').document(med_id)
+                    current_batch.delete(ref)
+                    batch_count += 1
+                    breakdown['others'] += 1
+                if item_key:
+                    batch_keys.append(item_key)
+
+            elif itype in ('save_dasterkhwan_tokens', 'save_food_token', 'save_dasterkhwan_entry'):
+                date_key = str(item.get('dateKey') or data.get('dateKey') or datetime.now(timezone.utc).strftime('%Y-%m-%d')).strip()
+                tokens_list = data.get('tokens') if isinstance(data.get('tokens'), list) else []
+                qty = data.get('quantity') or len(tokens_list) or 1
+                session = str(data.get('session') or 'lunch')
+                day_ref = db.collection('branches').document(bid).collection('dasterkhwaan').document(date_key)
+                current_batch.set(day_ref, {
+                    'totalTokens': firestore.Increment(qty),
+                    f'session_{session}_total': firestore.Increment(qty),
+                    'lastUpdated': firestore.SERVER_TIMESTAMP,
+                    'date': date_key,
+                    'dateKey': date_key,
+                    'branchId': bid,
+                }, merge=True)
+                batch_count += 1
+                for t in tokens_list:
+                    if isinstance(t, dict):
+                        t_id = str(t.get('id') or '').strip()
+                        if t_id:
+                            t_data = sanitize_value(dict(t))
+                            t_data['branchId'] = bid
+                            t_data['dateKey'] = date_key
+                            t_data['lastSyncedAt'] = firestore.SERVER_TIMESTAMP
+                            t_ref = day_ref.collection('tokens').document(t_id)
+                            current_batch.set(t_ref, t_data, merge=True)
+                            batch_count += 1
+                breakdown['others'] += 1
+                if item_key:
+                    batch_keys.append(item_key)
+
+            elif itype == 'save_dasterkhwan_food_log':
+                log_id = str(data.get('id') or item.get('localId') or item_key or '').strip()
+                if log_id:
+                    ref = db.collection('branches').document(bid).collection('dasterkhwaan_food_logs').document(log_id)
                     current_batch.set(ref, sanitized_data, merge=True)
                     batch_count += 1
                     breakdown['others'] += 1

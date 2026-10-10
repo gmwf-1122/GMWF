@@ -115,7 +115,9 @@ class _HomeStatTileState extends State<HomeStatTile> with SingleTickerProviderSt
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(22),
-        child: Container(
+        child: BackdropFilter(
+          filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(22),
               gradient: LinearGradient(
@@ -302,7 +304,8 @@ class _HomeStatTileState extends State<HomeStatTile> with SingleTickerProviderSt
             ),
           ),
         ),
-      );
+      ),
+    );
 
     if (widget.onTap != null) {
       return MouseRegion(
@@ -532,7 +535,15 @@ class HomeBranchRow {
   final BranchStats today;
   final BranchStats yesterday;
   final int weeklyPatients;
-  const HomeBranchRow({required this.id, required this.name, required this.today, required this.yesterday, this.weeklyPatients = 0});
+  final String? subtitle;
+  const HomeBranchRow({
+    required this.id,
+    required this.name,
+    required this.today,
+    required this.yesterday,
+    this.weeklyPatients = 0,
+    this.subtitle,
+  });
 }
 
 class HomeBranchPerformanceTable extends StatelessWidget {
@@ -548,7 +559,9 @@ class HomeBranchPerformanceTable extends StatelessWidget {
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(24),
-      child: Container(
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(24),
@@ -629,7 +642,7 @@ class HomeBranchPerformanceTable extends StatelessWidget {
                 child: const Row(
                   children: [
                     Expanded(
-                      flex: 4,
+                      flex: 5,
                       child: Text('Dispensary / Camp', style: TextStyle(color: Color(0xFF64748B), fontSize: 10.5, fontWeight: FontWeight.w700, letterSpacing: 0.4)),
                     ),
                     Expanded(
@@ -685,6 +698,7 @@ class HomeBranchPerformanceTable extends StatelessWidget {
                               rev: rev,
                               revDelta: revDelta,
                               isDark: isDark,
+                              subtitle: row.subtitle,
                               onTap: onTapBranch != null ? () => onTapBranch!(row.id) : null,
                             );
                           }).toList(),
@@ -722,7 +736,8 @@ class HomeBranchPerformanceTable extends StatelessWidget {
             ],
           ),
         ),
-      );
+      ),
+    );
   }
 }
 
@@ -736,6 +751,7 @@ class _BranchPerformanceRow extends StatefulWidget {
   final int rev;
   final double? revDelta;
   final bool isDark;
+  final String? subtitle;
   final VoidCallback? onTap;
 
   const _BranchPerformanceRow({
@@ -748,6 +764,7 @@ class _BranchPerformanceRow extends StatefulWidget {
     required this.rev,
     required this.revDelta,
     required this.isDark,
+    this.subtitle,
     this.onTap,
   });
 
@@ -782,20 +799,41 @@ class _BranchPerformanceRowState extends State<_BranchPerformanceRow> {
             children: [
               // Branch name with rank
               Expanded(
-                flex: 4,
+                flex: 5,
                 child: Row(
                   children: [
                     _RankBadge(rank: widget.rank),
                     const SizedBox(width: 8),
                     Expanded(
-                      child: Text(
-                        widget.name,
-                        style: TextStyle(
-                          color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
-                          fontSize: 12,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        overflow: TextOverflow.ellipsis,
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            widget.name,
+                            style: TextStyle(
+                              color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                            ),
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                          if (widget.subtitle != null && widget.subtitle!.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Text(
+                                widget.subtitle!,
+                                style: const TextStyle(
+                                  color: Color(0xFF64748B),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                        ],
                       ),
                     ),
                   ],
@@ -1082,7 +1120,9 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(24),
-            child: Container(
+            child: BackdropFilter(
+              filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+              child: Container(
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(24),
@@ -1278,7 +1318,8 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
             ),
           ),
         ),
-      );
+      ),
+    );
   }
 
   Widget _metricRow(IconData icon, String label, String value, bool isDark, {Color? valueColor}) {
@@ -1345,7 +1386,9 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
     
     return ClipRRect(
       borderRadius: BorderRadius.circular(24),
-      child: Container(
+      child: BackdropFilter(
+        filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
+        child: Container(
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(24),
@@ -1483,7 +1526,8 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
             ],
           ),
         ),
-      );
+      ),
+    );
   }
 
   Widget _donutLegendItem(String label, int val, int total, Color color, IconData icon, bool isDark) {
@@ -2354,7 +2398,7 @@ class HomePatientsByBranchBarChart extends StatelessWidget {
             Expanded(
               child: ListView.separated(
                 physics: const NeverScrollableScrollPhysics(),
-                itemCount: min(5, sortedRows.length),
+                itemCount: min(8, sortedRows.length),
                 separatorBuilder: (_, __) => const SizedBox(height: 10),
                 itemBuilder: (context, i) {
                   final row = sortedRows[i];
@@ -3462,7 +3506,7 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
 
         branchRows.add(HomeBranchRow(
           id: 'karachi_haji',
-          name: 'Karachi — Haji Camp Dispensary',
+          name: 'Karachi — Haji Camp Dispensary', subtitle: 'Morning ${karachiCamps.hajiCampMorningPatients} • Evening ${karachiCamps.hajiCampEveningPatients}',
           today: hajiToday,
           yesterday: value.yesterday,
           weeklyPatients: 0,
@@ -3470,7 +3514,7 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
 
         branchRows.add(HomeBranchRow(
           id: 'karachi_saddar',
-          name: 'Karachi — Saddar Dispensary',
+          name: 'Karachi — Saddar Dispensary', subtitle: 'Morning ${karachiCamps.kapayaMorningPatients} • Evening ${karachiCamps.kapayaEveningPatients}',
           today: saddarToday,
           yesterday: value.yesterday,
           weeklyPatients: weeklyPatients['karachi'] ?? 0,
@@ -3531,7 +3575,7 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
       final karachiCamps = await fetchKarachiCampBreakdown();
       branchRows.add(HomeBranchRow(
         id: 'karachi_haji',
-        name: 'Karachi — Haji Camp Dispensary',
+        name: 'Karachi — Haji Camp Dispensary', subtitle: 'Morning ${karachiCamps.hajiCampMorningPatients} • Evening ${karachiCamps.hajiCampEveningPatients}',
         today: BranchStats(
           zakat: karachiCamps.hajiCampZakat,
           nonZakat: karachiCamps.hajiCampNonZakat,
@@ -3546,7 +3590,7 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
 
       branchRows.add(HomeBranchRow(
         id: 'karachi_saddar',
-        name: 'Karachi — Saddar Dispensary',
+        name: 'Karachi — Saddar Dispensary', subtitle: 'Morning ${karachiCamps.kapayaMorningPatients} • Evening ${karachiCamps.kapayaEveningPatients}',
         today: BranchStats(
           zakat: karachiCamps.kapayaZakat,
           nonZakat: karachiCamps.kapayaNonZakat,
@@ -3676,6 +3720,11 @@ Future<SnapshotDashboardData> buildLocalSnapshotDashboardData(Map<String, dynami
     }
     final branchIds = cleanBranchIds.toList();
 
+    // Background auto-sync of recent Dasterkhwaan tokens for visible branches
+    for (final b in branchIds) {
+      unawaited(LocalStorageService.downloadDasterkhwaanTokens(b, days: 2));
+    }
+
     final Map<String, TodayVsYesterday> statsMap = await fetchTodayVsYesterdayPerBranch(branchIds, allowRemoteFallback: false);
     final weeklyPatients = await fetchWeeklyPatientCounts(branchIds);
     final List<HomeBranchRow> branchRows = [];
@@ -3713,7 +3762,7 @@ Future<SnapshotDashboardData> buildLocalSnapshotDashboardData(Map<String, dynami
 
         branchRows.add(HomeBranchRow(
           id: 'karachi_haji',
-          name: 'Karachi — Haji Camp Dispensary',
+          name: 'Karachi — Haji Camp Dispensary', subtitle: 'Morning ${karachiCamps.hajiCampMorningPatients} • Evening ${karachiCamps.hajiCampEveningPatients}',
           today: hajiToday,
           yesterday: value.yesterday,
           weeklyPatients: hajiWeekly,
@@ -3721,7 +3770,7 @@ Future<SnapshotDashboardData> buildLocalSnapshotDashboardData(Map<String, dynami
 
         branchRows.add(HomeBranchRow(
           id: 'karachi_saddar',
-          name: 'Karachi — Saddar Dispensary',
+          name: 'Karachi — Saddar Dispensary', subtitle: 'Morning ${karachiCamps.kapayaMorningPatients} • Evening ${karachiCamps.kapayaEveningPatients}',
           today: saddarToday,
           yesterday: value.yesterday,
           weeklyPatients: saddarWeekly,
@@ -3765,6 +3814,7 @@ Future<SnapshotDashboardData> buildLocalSnapshotDashboardData(Map<String, dynami
     );
   } else {
     final branchId = (userBranchId.isNotEmpty && userBranchId != 'all' && userBranchId != 'global') ? userBranchId : 'karachi';
+    unawaited(LocalStorageService.downloadDasterkhwaanTokens(branchId, days: 2));
 
     final todayStats = await fetchLocalBranchStats(branchId, DateTime.now(), allowRemoteFallback: false);
     final yesterdayStats = await fetchLocalBranchStats(branchId, DateTime.now().subtract(const Duration(days: 1)), allowRemoteFallback: false);
@@ -3776,7 +3826,7 @@ Future<SnapshotDashboardData> buildLocalSnapshotDashboardData(Map<String, dynami
       final hasCampBreakdown = karachiCamps.totalPatients > 0;
       branchRows.add(HomeBranchRow(
         id: 'karachi_saddar',
-        name: 'Karachi — Saddar Dispensary',
+        name: 'Karachi — Saddar Dispensary', subtitle: 'Morning ${karachiCamps.kapayaMorningPatients} • Evening ${karachiCamps.kapayaEveningPatients}',
         today: BranchStats(
           zakat: hasCampBreakdown ? karachiCamps.kapayaZakat : todayStats.zakat,
           nonZakat: hasCampBreakdown ? karachiCamps.kapayaNonZakat : todayStats.nonZakat,
@@ -3792,7 +3842,7 @@ Future<SnapshotDashboardData> buildLocalSnapshotDashboardData(Map<String, dynami
       ));
       branchRows.add(HomeBranchRow(
         id: 'karachi_haji',
-        name: 'Karachi — Haji Camp Dispensary',
+        name: 'Karachi — Haji Camp Dispensary', subtitle: 'Morning ${karachiCamps.hajiCampMorningPatients} • Evening ${karachiCamps.hajiCampEveningPatients}',
         today: BranchStats(
           zakat: hasCampBreakdown ? karachiCamps.hajiCampZakat : 0,
           nonZakat: hasCampBreakdown ? karachiCamps.hajiCampNonZakat : 0,
@@ -3960,6 +4010,15 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
   }
 
   void _refresh() {
+    clearLocalStatsCache();
+    final uB = (widget.userData['branchId'] ?? widget.userData['branch'] ?? '').toString().toLowerCase().trim();
+    if (uB.isNotEmpty && uB != 'all' && uB != 'global') {
+      unawaited(LocalStorageService.downloadDasterkhwaanTokens(uB, days: 2, force: true));
+    } else {
+      for (final b in ['karachi', 'gujrat', 'sialkot', 'rawalpindi']) {
+        unawaited(LocalStorageService.downloadDasterkhwaanTokens(b, days: 2, force: true));
+      }
+    }
     setState(() {
       _localFuture = buildLocalSnapshotDashboardData(widget.userData);
     });
@@ -4426,7 +4485,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
 
         // Layout rows with GPU layer caching via RepaintBoundary
         final row2 = SizedBox(
-          height: 380,
+          height: 440,
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -4450,7 +4509,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
         );
 
         final row3 = SizedBox(
-          height: 385,
+          height: 470,
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -4567,8 +4626,6 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           });
         }
 
-        final roleStr = (widget.userData['role'] ?? widget.userData['userRole'] ?? '').toString().toLowerCase();
-        final isGlobalExecutive = roleStr.contains('ceo') || roleStr.contains('chairman') || roleStr.contains('hq') || roleStr.contains('global');
         final allLocalBranches = LocalStorageService.getLocalBranchesList();
 
         return ValueListenableBuilder<DashboardFilter>(
@@ -4680,7 +4737,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                             ];
 
                             final filteredRow3 = SizedBox(
-                              height: 385,
+                              height: 470,
                               child: Row(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
@@ -4788,17 +4845,9 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                 const SizedBox(height: DS.s3),
                 row3,
                 const SizedBox(height: DS.s3),
-                if (!isGlobalExecutive) ...[
-                  KarachiCampSnapshotWidget(t: widget.t),
-                  const SizedBox(height: DS.s3),
-                ],
                 row2,
                 const SizedBox(height: DS.s3),
                 row4,
-                if (isGlobalExecutive) ...[
-                  const SizedBox(height: DS.s3),
-                  KarachiCampSnapshotWidget(t: widget.t),
-                ],
               ] else ...[
                 SizedBox(
                   height: 270,
@@ -4811,10 +4860,6 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                 const SizedBox(height: DS.s2),
                 HomeStatTileRow(tiles: statTiles),
                 const SizedBox(height: DS.s2),
-                if (!isGlobalExecutive) ...[
-                  KarachiCampSnapshotWidget(t: widget.t),
-                  const SizedBox(height: DS.s2),
-                ],
                 if (bestBranch != null) ...[
                   HomeBestBranchSpotlight(
                     branchName: bestBranch.name,
@@ -4842,12 +4887,8 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                 const SizedBox(height: DS.s2),
                 HomeRevenueLineChart(points: data.chartPoints, t: widget.t),
                 const SizedBox(height: DS.s2),
-                SizedBox(height: 240, child: HomePatientsByBranchBarChart(t: widget.t, rows: data.branchRows)),
+                SizedBox(height: 340, child: HomePatientsByBranchBarChart(t: widget.t, rows: data.branchRows)),
                 const SizedBox(height: DS.s2),
-                if (isGlobalExecutive) ...[
-                  KarachiCampSnapshotWidget(t: widget.t),
-                  const SizedBox(height: DS.s2),
-                ],
                 const SizedBox(height: DS.s2),
                 SizedBox(
                   height: 330,

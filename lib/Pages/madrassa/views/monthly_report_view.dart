@@ -103,17 +103,19 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
     return fee;
   }
 
+  String get _effectiveBranch => MadrassaLocalStorage.normalizeBranch(widget.branchId);
+
   @override
   void initState() {
     super.initState();
-    MadrassaLocalStorage.downloadStudents(widget.branchId);
-    MadrassaLocalStorage.downloadHolidays(widget.branchId);
+    MadrassaLocalStorage.downloadStudents(_effectiveBranch);
+    MadrassaLocalStorage.downloadHolidays(_effectiveBranch);
   }
 
   @override
   Widget build(BuildContext context) {
-    final configAsyncValue = ref.watch(madrassaConfigProvider(widget.branchId));
-    final holidaysAsyncValue = ref.watch(madrassaHolidaysProvider(widget.branchId));
+    final configAsyncValue = ref.watch(madrassaConfigProvider(_effectiveBranch));
+    final holidaysAsyncValue = ref.watch(madrassaHolidaysProvider(_effectiveBranch));
 
     return configAsyncValue.when(
       loading: () => const Scaffold(body: Center(child: CircularProgressIndicator())),
@@ -134,7 +136,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
             .toList();
 
         final workingDays = MadrassaFeeLogic.getWorkingDaysCount(currentYear, currentMonth, holidays);
-        final isFeeEnabled = (config.enableFees != false) && LocalStorageService.isMadrassaFeeEnabled(widget.branchId);
+        final isFeeEnabled = (config.enableFees != false) && LocalStorageService.isMadrassaFeeEnabled(_effectiveBranch);
 
         final displayConfig = MadrassaConfig(
           id: config.id,
@@ -154,14 +156,14 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
           _downloadedYear = currentYear;
           _downloadedMonth = currentMonth;
           WidgetsBinding.instance.addPostFrameCallback((_) {
-            MadrassaLocalStorage.downloadLogsForMonth(widget.branchId, currentYear, currentMonth);
-            MadrassaLocalStorage.downloadFeePaymentsForMonth(widget.branchId, currentYear, currentMonth);
+            MadrassaLocalStorage.downloadLogsForMonth(_effectiveBranch, currentYear, currentMonth);
+            MadrassaLocalStorage.downloadFeePaymentsForMonth(_effectiveBranch, currentYear, currentMonth);
           });
         }
 
-        final studentsAsyncValue = ref.watch(madrassaStudentsProvider(widget.branchId));
-        final logsAsyncValue = ref.watch(madrassaMonthlyLogsProvider((branchId: widget.branchId, year: currentYear, month: currentMonth)));
-        final feePaymentsAsyncValue = ref.watch(madrassaFeePaymentsProvider((branchId: widget.branchId, year: currentYear, month: currentMonth)));
+        final studentsAsyncValue = ref.watch(madrassaStudentsProvider(_effectiveBranch));
+        final logsAsyncValue = ref.watch(madrassaMonthlyLogsProvider((branchId: _effectiveBranch, year: currentYear, month: currentMonth)));
+        final feePaymentsAsyncValue = ref.watch(madrassaFeePaymentsProvider((branchId: _effectiveBranch, year: currentYear, month: currentMonth)));
 
         return studentsAsyncValue.when(
           loading: () => const Scaffold(body: Center(child: CircularProgressIndicator())),
@@ -816,7 +818,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
         : earliestAllowed;
     final endMonthDate = DateTime(now.year, now.month, 1);
 
-    final holidaysList = MadrassaLocalStorage.getHolidaysCached(widget.branchId).map((h) {
+    final holidaysList = MadrassaLocalStorage.getHolidaysCached(_effectiveBranch).map((h) {
       final d = DateTime.tryParse(h['date']?.toString() ?? '');
       return d ?? DateTime.now();
     }).toList();
@@ -830,7 +832,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
 
       final mConfig = config.copyWith(year: y, month: m);
       final mWorkingDays = MadrassaFeeLogic.getWorkingDaysCount(y, m, holidaysList);
-      final mLogs = MadrassaLocalStorage.getLogsForMonthCached(widget.branchId, y, m);
+      final mLogs = MadrassaLocalStorage.getLogsForMonthCached(_effectiveBranch, y, m);
 
       final mFee = MadrassaFeeLogic.calculateStudentFee(
         studentId: studentId,
@@ -841,7 +843,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
         holidays: holidaysList,
       );
 
-      final mPayment = MadrassaLocalStorage.getFeePaymentCached(widget.branchId, y, m, studentId);
+      final mPayment = MadrassaLocalStorage.getFeePaymentCached(_effectiveBranch, y, m, studentId);
       final activeDays = (mFee['activeWorkingDays'] as num?)?.toInt() ?? 0;
 
       // Only show months where student had active working days or has an existing payment record
@@ -909,7 +911,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                   final due = item['amountDue'] as double;
 
                   await MadrassaLocalStorage.saveFeePaymentLocalAndSync(
-                    branchId: widget.branchId,
+                    branchId: _effectiveBranch,
                     studentId: studentId,
                     studentName: studentName,
                     rollNumber: rollNumber,
@@ -1254,7 +1256,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                             icon: const Icon(Icons.undo_rounded, size: 16, color: Colors.orange),
                                             onPressed: () async {
                                               await MadrassaLocalStorage.saveFeePaymentLocalAndSync(
-                                                branchId: widget.branchId,
+                                                branchId: _effectiveBranch,
                                                 studentId: studentId,
                                                 studentName: studentName,
                                                 rollNumber: rollNumber,
@@ -1892,10 +1894,10 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
     final studentName = studentData['name'] ?? '—';
     final rollNumber = studentData['rollNumber'] ?? '?';
 
-    final payment = MadrassaLocalStorage.getFeePaymentCached(widget.branchId, currentYear, currentMonth, sId);
+    final payment = MadrassaLocalStorage.getFeePaymentCached(_effectiveBranch, currentYear, currentMonth, sId);
     final isPaid = payment != null && payment['status'] == 'paid';
 
-    final bool isFeeEnabled = (fee['enableFees'] != false) && LocalStorageService.isMadrassaFeeEnabled(widget.branchId);
+    final bool isFeeEnabled = (fee['enableFees'] != false) && LocalStorageService.isMadrassaFeeEnabled(_effectiveBranch);
 
     final String feeSection = isFeeEnabled
         ? '\n*Financial Summary / مالیاتی رپورٹ:*\n'

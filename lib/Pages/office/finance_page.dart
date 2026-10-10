@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:collection/collection.dart';
 
 import '../../theme/role_theme_provider.dart';
 import '../../theme/app_theme.dart';
@@ -13,8 +12,6 @@ import '../../services/finance_local_storage.dart';
 import '../../services/finance_loans_storage.dart';
 import '../../services/local_storage_service.dart';
 import '../../services/sync_service.dart';
-import 'attendance_tab.dart';
-import 'employees_tab.dart';
 import 'employee_management_tab.dart';
 import 'payroll_tab.dart';
 import 'audit_trail_tab.dart';
@@ -32,14 +29,12 @@ import 'bank_accounts_sheet.dart';
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const _kAccent     = Color(0xFF0F9A7A);
-const _kAccentMuted = Color(0xFFE8F6F0);
 const _kBg         = Color(0xFFFBFDFF);
 const _kBgCard     = Color(0xFFFFFFFF);
 const _kBorder     = Color(0xFFF1F5F9);
 const _kTextPrimary   = Color(0xFF111827);
 const _kTextSecondary = Color(0xFF6B7280);
 const _kTextTertiary  = Color(0xFF9CA3AF);
-const _kSidebarWidth  = 210.0;
 const _kMobileBreak   = 700.0;
 
 class FinancePage extends StatefulWidget {
@@ -443,6 +438,9 @@ class _FinancePageState extends State<FinancePage> {
               ),
             ),
             const SizedBox(width: 16),
+          ] else if (_isLoadingBranches) ...[
+            const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
+            const SizedBox(width: 8),
           ] else if (_branches.isNotEmpty) ...[
             Text('Branch', style: TextStyle(fontSize: 11, color: t.textSecondary)),
             Builder(
@@ -543,13 +541,14 @@ class _FinancePageState extends State<FinancePage> {
       value: 'all',
       child: Text('All Departments', style: TextStyle(fontSize: 11)),
     );
-    final defaults = ['Administration', 'Office', 'Dasterkhawaan', 'Dispensary', 'Madrassa', 'School'];
+    final defaults = ['Administration', 'Office', 'Dasterkhwaan', 'Dispensary', 'Madrassa', 'School'];
     for (final d in [...defaults, ...FinanceLocalStorage.getCustomDepartments()]) {
-      final key = d.trim().toLowerCase();
+      final norm = FinanceLocalStorage.normalizeDepartment(d);
+      final key = norm.trim().toLowerCase();
       if (key.isNotEmpty && key != 'all' && !dedupMap.containsKey(key)) {
         dedupMap[key] = DropdownMenuItem<String>(
           value: key,
-          child: Text(d.trim(), style: const TextStyle(fontSize: 11)),
+          child: Text(norm, style: const TextStyle(fontSize: 11)),
         );
       }
     }
@@ -581,100 +580,223 @@ class _FinancePageState extends State<FinancePage> {
     return dedupMap.values.toList();
   }
 
-  Widget _buildBranchDropdown() {
-    final userRole = LocalStorageService.getActiveUserRole();
-    final isBranchManager = userRole == 'branch manager' || userRole == 'supervisor';
+  void _showSyncStatusDialog() {
+    final isOnline = _syncBox.get('last_online_state') as bool? ?? true;
+    final isSyncing = _isDownloadingData || SyncService().isUploading;
 
-    if (isBranchManager) {
-      final bName = _branches.firstWhereOrNull((b) => b['id']?.toString().toLowerCase().trim() == _activeBranchId.toLowerCase().trim())?['name'] ?? _activeBranchId;
-      return Container(
-        height: 32,
-        alignment: Alignment.center,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: BoxDecoration(color: _kBg, borderRadius: BorderRadius.circular(8), border: Border.all(color: _kBorder)),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.lock_outline, size: 12, color: _kTextSecondary),
-            const SizedBox(width: 6),
-            Text(bName, style: const TextStyle(color: _kTextPrimary, fontSize: 11, fontWeight: FontWeight.bold)),
-          ],
-        ),
-      );
+    final typeCounts = <String, int>{};
+    for (final v in _syncBox.values) {
+      if (v is Map && v['type'] != null) {
+        final t = v['type'].toString();
+        typeCounts[t] = (typeCounts[t] ?? 0) + 1;
+      }
     }
 
-    final branchItems = _getUniqueBranchDropdownItems(includeDetails: true);
-    final normActive = _activeBranchId.toLowerCase().trim();
-    final safeBranchValue = branchItems.any((it) => it.value == normActive) ? normActive : 'all';
-
-    return Container(
-      height: 32,
-      padding: const EdgeInsets.symmetric(horizontal: 8),
-      decoration: BoxDecoration(color: _kBg, borderRadius: BorderRadius.circular(8), border: Border.all(color: _kBorder)),
-      child: DropdownButtonHideUnderline(
-        child: DropdownButton<String>(
-          value: safeBranchValue,
-          dropdownColor: _kBgCard,
-          style: const TextStyle(color: _kTextPrimary, fontSize: 12, fontWeight: FontWeight.w600),
-          icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: _kTextSecondary),
-          items: branchItems,
-          onChanged: (val) {
-            if (val != null) {
-              setState(() => _activeBranchId = val.toLowerCase().trim());
-              _triggerDownloadForActiveBranch();
-            }
-          },
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: Row(
+          children: [
+            Icon(
+              isSyncing ? Icons.sync_rounded : (isOnline ? Icons.cloud_done_rounded : Icons.cloud_off_rounded),
+              color: isSyncing ? Colors.orange : (isOnline ? _kAccent : Colors.blue),
+            ),
+            const SizedBox(width: 10),
+            const Text('Sync & Cloud Status', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
         ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Text('Connectivity: ', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                Text(
+                  isOnline ? 'Online (Connected)' : 'Offline (Local Only)',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: isOnline ? _kAccent : Colors.blue,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Text('Pipeline State: ', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                Text(
+                  isSyncing ? 'Active (Uploading / Downloading)' : (_pendingSyncCount > 0 ? 'Queued (Awaiting Flush)' : 'Idle (All Synchronized)'),
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    color: isSyncing ? Colors.orange : (_pendingSyncCount > 0 ? Colors.amber[800] : _kAccent),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Text(
+              'Pending Outbox Queue (${_syncBox.length} Total items):',
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 6),
+            if (typeCounts.isEmpty)
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(color: const Color(0xFFD1FAE5), borderRadius: BorderRadius.circular(8)),
+                child: const Row(children: [
+                  Icon(Icons.check_circle_rounded, color: _kAccent, size: 16),
+                  SizedBox(width: 8),
+                  Text('All local changes are fully synced to Cloud Firestore.', style: TextStyle(fontSize: 11, color: _kAccent, fontWeight: FontWeight.w600)),
+                ]),
+              )
+            else
+              Container(
+                constraints: const BoxConstraints(maxHeight: 160),
+                decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(8), border: Border.all(color: const Color(0xFFE2E8F0))),
+                child: ListView(
+                  shrinkWrap: true,
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                  children: typeCounts.entries.map((e) => Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(e.key.replaceAll('save_', '').replaceAll('_', ' '), style: const TextStyle(fontSize: 11.5)),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                          decoration: BoxDecoration(color: Colors.amber.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(10)),
+                          child: Text('${e.value}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.brown)),
+                        ),
+                      ],
+                    ),
+                  )).toList(),
+                ),
+              ),
+          ],
+        ),
+        actions: [
+          if (_syncBox.isNotEmpty)
+            TextButton(
+              onPressed: () async {
+                final confirm = await showDialog<bool>(
+                  context: context,
+                  builder: (c) => AlertDialog(
+                    title: const Text('Clear Stuck Queue?'),
+                    content: const Text('This will dismiss pending local outbox actions that may have failed repeated retries. Live employee records in Hive will remain intact.'),
+                    actions: [
+                      TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+                      ElevatedButton(
+                        onPressed: () => Navigator.pop(c, true),
+                        style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+                        child: const Text('Clear Queue'),
+                      ),
+                    ],
+                  ),
+                );
+                if (confirm == true) {
+                  await _syncBox.clear();
+                  _updateSyncCount();
+                  if (ctx.mounted) Navigator.pop(ctx);
+                }
+              },
+              child: const Text('Clear Stuck Queue', style: TextStyle(color: Colors.red, fontSize: 12)),
+            ),
+          ElevatedButton.icon(
+            icon: const Icon(Icons.sync_rounded, size: 14),
+            label: const Text('Sync Now', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+            style: ElevatedButton.styleFrom(backgroundColor: _kAccent, foregroundColor: Colors.white),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _triggerDownloadForActiveBranch(force: true);
+            },
+          ),
+        ],
       ),
     );
   }
 
   Widget _buildSyncChip() {
+    final isSyncing = _isDownloadingData || SyncService().isUploading;
     if (_hasConflicts) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: Colors.red.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.red.withValues(alpha: 0.4)),
+      return InkWell(
+        onTap: _showSyncStatusDialog,
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.red.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.red.withValues(alpha: 0.4)),
+          ),
+          child: const Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(Icons.warning_amber_rounded, color: Colors.red, size: 12),
+            SizedBox(width: 4),
+            Text('Needs Review', style: TextStyle(color: Colors.red, fontSize: 10, fontWeight: FontWeight.bold)),
+          ]),
         ),
-        child: const Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.warning_amber_rounded, color: Colors.red, size: 12),
-          const SizedBox(width: 4),
-          Text('Needs Review', style: TextStyle(color: Colors.red, fontSize: 10, fontWeight: FontWeight.bold)),
-        ]),
+      );
+    }
+    if (isSyncing) {
+      return InkWell(
+        onTap: _showSyncStatusDialog,
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.orange.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+          ),
+          child: const Row(mainAxisSize: MainAxisSize.min, children: [
+            SizedBox(width: 8, height: 8, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.orange)),
+            SizedBox(width: 6),
+            Text('Syncing...', style: TextStyle(color: Colors.orange, fontSize: 10, fontWeight: FontWeight.bold)),
+          ]),
+        ),
       );
     }
     if (_pendingSyncCount > 0) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-        decoration: BoxDecoration(
-          color: Colors.orange.withValues(alpha: 0.12),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+      return InkWell(
+        onTap: _showSyncStatusDialog,
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: Colors.amber.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: Colors.amber.withValues(alpha: 0.5)),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            const Icon(Icons.cloud_upload_outlined, color: Colors.amber, size: 12),
+            const SizedBox(width: 4),
+            Text('$_pendingSyncCount Queued', style: TextStyle(color: Colors.amber[800], fontSize: 10, fontWeight: FontWeight.bold)),
+          ]),
         ),
-        child: const Row(mainAxisSize: MainAxisSize.min, children: [
-          SizedBox(width: 8, height: 8, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.orange)),
-          SizedBox(width: 6),
-          Text('Syncing', style: TextStyle(color: Colors.orange, fontSize: 10, fontWeight: FontWeight.bold)),
-        ]),
       );
     }
     final isOnline = _syncBox.get('last_online_state') as bool? ?? true;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-      decoration: BoxDecoration(
-        color: isOnline ? const Color(0xFFD1FAE5) : Colors.blue.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: isOnline ? const Color(0xFF6EE7B7) : Colors.blue.withValues(alpha: 0.4)),
+    return InkWell(
+      onTap: _showSyncStatusDialog,
+      borderRadius: BorderRadius.circular(20),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: isOnline ? const Color(0xFFD1FAE5) : Colors.blue.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(color: isOnline ? const Color(0xFF6EE7B7) : Colors.blue.withValues(alpha: 0.4)),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          Icon(isOnline ? Icons.check_circle_outline_rounded : Icons.offline_pin_outlined,
+              color: isOnline ? _kAccent : Colors.blue, size: 12),
+          const SizedBox(width: 4),
+          Text(isOnline ? '✓ Synced' : '● Offline',
+              style: TextStyle(color: isOnline ? _kAccent : Colors.blue, fontSize: 10, fontWeight: FontWeight.bold)),
+        ]),
       ),
-      child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(isOnline ? Icons.check_circle_outline_rounded : Icons.offline_pin_outlined,
-            color: isOnline ? _kAccent : Colors.blue, size: 12),
-        const SizedBox(width: 4),
-        Text(isOnline ? '✓ Synced' : '● Offline',
-            style: TextStyle(color: isOnline ? _kAccent : Colors.blue, fontSize: 10, fontWeight: FontWeight.bold)),
-      ]),
     );
   }
 
@@ -773,13 +895,46 @@ class _FinancePageState extends State<FinancePage> {
   }
 
   Widget _exportView(BuildContext dCtx) {
-    String selType = 'branch', selMonth = _payrollMonthKey, selDept = 'Administration Staff';
-    final depts = FinanceLedgerStorage.sortDepartmentsCanonical(
-      ['Administration Staff', 'Office', 'Dasterkhwaan', 'Dispensary', 'Madrassa', 'School']
-        ..addAll(FinanceLocalStorage.getCustomDepartments())
-    );
+    String selType = 'branch_pdf', selMonth = _payrollMonthKey;
+    String selDept = 'All Departments';
+    String selCamp = 'All Camps';
+    String selScope = 'all'; // 'all' or 'custom'
+    final Set<String> selectedEmpIds = {};
+
+    final isKarachi = _activeBranchId.toLowerCase().contains('karachi') || _activeBranchId.toLowerCase() == 'all';
+    final depts = [
+      'All Departments',
+      ...FinanceLedgerStorage.sortDepartmentsCanonical(
+        [
+          'Dispensary',
+          'School',
+          'Madrassa',
+          'Dasterkhwaan',
+          'Administration',
+          'Security & Maintenance',
+          ...FinanceLocalStorage.getCustomDepartments(),
+        ],
+      ),
+    ];
 
     return StatefulBuilder(builder: (ctx, setS) {
+      final isPayroll = selType == 'branch_pdf' || selType == 'branch';
+
+      // Load filtered staff list (Executives are automatically excluded by FinanceLocalStorage.getEmployees)
+      final allStaff = isPayroll ? FinanceLocalStorage.getEmployees(_activeBranchId) : <Map<String, dynamic>>[];
+      final filteredStaff = allStaff.where((emp) {
+        if (selDept != 'All Departments') {
+          final d1 = FinanceLocalStorage.normalizeDepartment(emp['department']?.toString());
+          final d2 = FinanceLocalStorage.normalizeDepartment(selDept);
+          if (d1.toLowerCase() != d2.toLowerCase()) return false;
+        }
+        if (selCamp != 'All Camps') {
+          final empCamp = FinanceLocalStorage.getEmployeeCamp(emp);
+          if (empCamp.toLowerCase() != selCamp.toLowerCase()) return false;
+        }
+        return true;
+      }).toList();
+
       return SingleChildScrollView(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const SizedBox(height: 8),
@@ -795,29 +950,160 @@ class _FinancePageState extends State<FinancePage> {
               enabledBorder: OutlineInputBorder(borderSide: const BorderSide(color: _kBorder), borderRadius: BorderRadius.circular(8)),
             ),
             items: const [
-              DropdownMenuItem(value: 'branch', child: Text('Branch Payroll Excel')),
-              DropdownMenuItem(value: 'department', child: Text('Department Payroll Excel')),
+              DropdownMenuItem(value: 'branch_pdf', child: Text('Bank Transfer Slip (PDF)')),
+              DropdownMenuItem(value: 'branch', child: Text('Salary Sheet (Excel)')),
               DropdownMenuItem(value: 'consolidated', child: Text('All Branches Consolidated Excel')),
-              DropdownMenuItem(value: 'branch_pdf', child: Text('Branch Payroll PDF')),
-              DropdownMenuItem(value: 'department_pdf', child: Text('Department Payroll PDF')),
               DropdownMenuItem(value: 'expenses_excel', child: Text('Daily Expenses Log Excel')),
             ],
             onChanged: (v) { if (v != null) setS(() => selType = v); },
           ),
-          if (selType == 'department' || selType == 'department_pdf') ...[
+          if (isPayroll) ...[
             const SizedBox(height: 12),
+            const Text('Department:', style: TextStyle(color: _kTextSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
             DropdownButtonFormField<String>(
               dropdownColor: _kBgCard, value: selDept,
               decoration: InputDecoration(
-                labelText: 'Department', labelStyle: const TextStyle(color: _kTextSecondary, fontSize: 12),
                 filled: true, fillColor: _kBg,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 border: OutlineInputBorder(borderSide: const BorderSide(color: _kBorder), borderRadius: BorderRadius.circular(8)),
                 enabledBorder: OutlineInputBorder(borderSide: const BorderSide(color: _kBorder), borderRadius: BorderRadius.circular(8)),
               ),
               style: const TextStyle(color: _kTextPrimary, fontSize: 13),
               items: depts.map((d) => DropdownMenuItem(value: d, child: Text(d))).toList(),
-              onChanged: (v) { if (v != null) setS(() => selDept = v); },
+              onChanged: (v) {
+                if (v != null) {
+                  setS(() {
+                    selDept = v;
+                    selectedEmpIds.clear();
+                  });
+                }
+              },
             ),
+            if (isKarachi) ...[
+              const SizedBox(height: 12),
+              const Text('Camp / Location:', style: TextStyle(color: _kTextSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 6),
+              DropdownButtonFormField<String>(
+                dropdownColor: _kBgCard, value: selCamp,
+                decoration: InputDecoration(
+                  filled: true, fillColor: _kBg,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                  border: OutlineInputBorder(borderSide: const BorderSide(color: _kBorder), borderRadius: BorderRadius.circular(8)),
+                  enabledBorder: OutlineInputBorder(borderSide: const BorderSide(color: _kBorder), borderRadius: BorderRadius.circular(8)),
+                ),
+                style: const TextStyle(color: _kTextPrimary, fontSize: 13),
+                items: const [
+                  DropdownMenuItem(value: 'All Camps', child: Text('All Camps / Main Branch')),
+                  DropdownMenuItem(value: 'Haji Camp', child: Text('Haji Camp Dispensary')),
+                  DropdownMenuItem(value: 'Saddar Camp', child: Text('Saddar Camp Dispensary')),
+                ],
+                onChanged: (v) {
+                  if (v != null) {
+                    setS(() {
+                      selCamp = v;
+                      selectedEmpIds.clear();
+                    });
+                  }
+                },
+              ),
+            ],
+            const SizedBox(height: 12),
+            const Text('Staff Members Scope:', style: TextStyle(color: _kTextSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 6),
+            Row(
+              children: [
+                Expanded(
+                  child: ChoiceChip(
+                    label: Center(child: Text('All Matching Staff (${filteredStaff.length})')),
+                    selected: selScope == 'all',
+                    selectedColor: _kAccent.withOpacity(0.18),
+                    onSelected: (_) => setS(() => selScope = 'all'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: ChoiceChip(
+                    label: Center(child: Text('Specific People (${selectedEmpIds.length})')),
+                    selected: selScope == 'custom',
+                    selectedColor: _kAccent.withOpacity(0.18),
+                    onSelected: (_) => setS(() => selScope = 'custom'),
+                  ),
+                ),
+              ],
+            ),
+            if (selScope == 'custom') ...[
+              const SizedBox(height: 8),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text('Select people to export:', style: TextStyle(fontSize: 11, color: _kTextSecondary, fontWeight: FontWeight.w600)),
+                  Row(
+                    children: [
+                      TextButton(
+                        onPressed: () {
+                          setS(() {
+                            selectedEmpIds.clear();
+                            selectedEmpIds.addAll(filteredStaff.map((e) => e['localId'].toString()));
+                          });
+                        },
+                        child: const Text('Select All', style: TextStyle(fontSize: 11, color: _kAccent)),
+                      ),
+                      TextButton(
+                        onPressed: () => setS(() => selectedEmpIds.clear()),
+                        child: const Text('Clear', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+              Container(
+                constraints: const BoxConstraints(maxHeight: 180),
+                decoration: BoxDecoration(
+                  color: _kBg,
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: _kBorder),
+                ),
+                child: filteredStaff.isEmpty
+                    ? const Padding(
+                        padding: EdgeInsets.all(16),
+                        child: Center(child: Text('No employees found matching filter', style: TextStyle(color: _kTextSecondary, fontSize: 12))),
+                      )
+                    : ListView.builder(
+                        shrinkWrap: true,
+                        itemCount: filteredStaff.length,
+                        itemBuilder: (c, idx) {
+                          final emp = filteredStaff[idx];
+                          final id = emp['localId'].toString();
+                          final name = emp['name']?.toString() ?? 'Staff';
+                          final role = emp['role']?.toString() ?? '';
+                          final dept = emp['department']?.toString() ?? '';
+                          final camp = FinanceLocalStorage.getEmployeeCamp(emp);
+                          final isChecked = selectedEmpIds.contains(id);
+
+                          return CheckboxListTile(
+                            dense: true,
+                            value: isChecked,
+                            activeColor: _kAccent,
+                            title: Text(name, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            subtitle: Text(
+                              '$role • $dept${camp.isNotEmpty ? ' [$camp]' : ''}',
+                              style: const TextStyle(fontSize: 10, color: _kTextSecondary),
+                            ),
+                            onChanged: (chk) {
+                              setS(() {
+                                if (chk == true) {
+                                  selectedEmpIds.add(id);
+                                } else {
+                                  selectedEmpIds.remove(id);
+                                }
+                              });
+                            },
+                          );
+                        },
+                      ),
+              ),
+            ],
           ],
           const SizedBox(height: 12),
           const Text('Month:', style: TextStyle(color: _kTextSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
@@ -856,12 +1142,41 @@ class _FinancePageState extends State<FinancePage> {
               label: const Text('Export Now', style: TextStyle(fontWeight: FontWeight.bold)),
               onPressed: () async {
                 Navigator.pop(dCtx);
-                if (selType == 'branch') await FinanceReportHelper.exportMonthlyExcel(branchId: _activeBranchId, monthKey: selMonth);
-                else if (selType == 'department') await FinanceReportHelper.exportMonthlyExcel(branchId: _activeBranchId, monthKey: selMonth, department: selDept);
-                else if (selType == 'consolidated') await FinanceReportHelper.exportConsolidatedAllBranchesExcel(branches: _branches, monthKey: selMonth);
-                else if (selType == 'branch_pdf') await FinanceReportHelper.exportMonthlyPdf(branchId: _activeBranchId, monthKey: selMonth);
-                else if (selType == 'department_pdf') await FinanceReportHelper.exportMonthlyPdf(branchId: _activeBranchId, monthKey: selMonth, department: selDept);
-                else if (selType == 'expenses_excel') await FinanceReportHelper.exportExpensesExcel(branchId: _activeBranchId, monthKey: selMonth);
+                final dParam = selDept == 'All Departments' ? null : selDept;
+                final cParam = selCamp == 'All Camps' ? null : selCamp;
+                final pParam = selScope == 'custom' ? selectedEmpIds.toList() : null;
+
+                if (selType == 'branch') {
+                  await FinanceReportHelper.exportMonthlyExcel(
+                    branchId: _activeBranchId,
+                    monthKey: selMonth,
+                    department: dParam,
+                    camp: cParam,
+                    employeeIds: pParam,
+                    context: context,
+                  );
+                } else if (selType == 'branch_pdf') {
+                  await FinanceReportHelper.exportMonthlyPdf(
+                    branchId: _activeBranchId,
+                    monthKey: selMonth,
+                    department: dParam,
+                    camp: cParam,
+                    employeeIds: pParam,
+                    context: context,
+                  );
+                } else if (selType == 'consolidated') {
+                  await FinanceReportHelper.exportConsolidatedAllBranchesExcel(
+                    branches: _branches,
+                    monthKey: selMonth,
+                    context: context,
+                  );
+                } else if (selType == 'expenses_excel') {
+                  await FinanceReportHelper.exportExpensesExcel(
+                    branchId: _activeBranchId,
+                    monthKey: selMonth,
+                    context: context,
+                  );
+                }
               },
             ),
           ),
@@ -881,265 +1196,6 @@ class _FinancePageState extends State<FinancePage> {
         shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
         child: HolidayManagerDialog(branchId: _activeBranchId, branches: _branches, userRole: userRole),
       ),
-    );
-  }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Sidebar
-// ─────────────────────────────────────────────────────────────────────────────
-
-class _FinanceSidebar extends StatelessWidget {
-  final int selectedIndex;
-  final ValueChanged<int> onSelect;
-  final bool canViewAudits;
-  final List<Map<String, dynamic>> branches;
-  final String activeBranchId;
-  final ValueChanged<String> onBranchChanged;
-  final int pendingSyncCount;
-  final bool isDownloading;
-  final VoidCallback onRefresh;
-  final VoidCallback onExport;
-  final VoidCallback onHolidays;
-  final bool isMobile;
-
-  const _FinanceSidebar({
-    required this.selectedIndex,
-    required this.onSelect,
-    required this.canViewAudits,
-    required this.branches,
-    required this.activeBranchId,
-    required this.onBranchChanged,
-    required this.pendingSyncCount,
-    required this.isDownloading,
-    required this.onRefresh,
-    required this.onExport,
-    required this.onHolidays,
-    this.isMobile = false,
-  });
-
-  static const _labels = [
-    'Overview', 'Employees', 'Attendance', 'Payroll',
-    'Loans & Advances', 'Expenses', 'Audit Trail', 'Reports & Reconcile'
-  ];
-  static const _icons  = [
-    Icons.dashboard_outlined, Icons.people_outline, Icons.today_outlined,
-    Icons.receipt_long_outlined, Icons.credit_card_outlined, Icons.payments_outlined,
-    Icons.history_edu_outlined, Icons.account_balance_outlined
-  ];
-  static const _iconsA = [
-    Icons.dashboard_rounded, Icons.people_rounded, Icons.today_rounded,
-    Icons.receipt_long_rounded, Icons.credit_card_rounded, Icons.payments_rounded,
-    Icons.history_edu_rounded, Icons.account_balance_rounded
-  ];
-
-
-  @override
-  Widget build(BuildContext context) {
-    final userName = LocalStorageService.getActiveUsername();
-    final userRoleDisplay = LocalStorageService.getActiveUserRole();
-    final isBranchManager = userRoleDisplay == 'branch manager' || userRoleDisplay == 'supervisor';
-
-    return Container(
-      width: _kSidebarWidth,
-      decoration: const BoxDecoration(color: _kBgCard, border: Border(right: BorderSide(color: _kBorder))),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        // Brand
-        Padding(
-          padding: const EdgeInsets.fromLTRB(14, 16, 10, 14),
-          child: Row(children: [
-            Image.asset(
-              'assets/logo/gmwf-1.webp',
-              width: 32,
-              height: 32,
-              fit: BoxFit.contain,
-            ),
-            const SizedBox(width: 10),
-            const Expanded(child: Text('Finance & HR',
-                style: TextStyle(color: _kTextPrimary, fontWeight: FontWeight.w800, fontSize: 14, letterSpacing: -0.3))),
-          ]),
-        ),
-
-        // Branch picker
-        if (branches.isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(10, 0, 10, 12),
-            child: isBranchManager
-                ? Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(color: _kBg, borderRadius: BorderRadius.circular(8), border: Border.all(color: _kBorder)),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.lock_outline, size: 12, color: _kTextSecondary),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            branches.firstWhereOrNull((b) => b['id']?.toString().toLowerCase().trim() == activeBranchId.toLowerCase().trim())?['name'] ?? activeBranchId,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(color: _kTextPrimary, fontSize: 11, fontWeight: FontWeight.bold),
-                          ),
-                        ),
-                      ],
-                    ),
-                  )
-                : Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
-                    decoration: BoxDecoration(color: _kBg, borderRadius: BorderRadius.circular(8), border: Border.all(color: _kBorder)),
-                    child: Builder(
-                      builder: (context) {
-                        final dedupMap = <String, DropdownMenuItem<String>>{};
-                        dedupMap['all'] = const DropdownMenuItem<String>(
-                          value: 'all',
-                          child: Text('All Branches', style: TextStyle(fontSize: 11)),
-                        );
-                        for (final b in branches) {
-                          final rawId = (b['id'] ?? b['branchId'] ?? '').toString().trim();
-                          final normId = rawId.toLowerCase();
-                          if (normId.isEmpty || normId == 'all' || normId == 'global') continue;
-                          if (!dedupMap.containsKey(normId)) {
-                            final name = (b['name'] ?? normId).toString().trim();
-                            dedupMap[normId] = DropdownMenuItem<String>(
-                              value: normId,
-                              child: Text('$name ($normId)', overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 11)),
-                            );
-                          }
-                        }
-                        final branchItems = dedupMap.values.toList();
-                        final normActive = activeBranchId.toLowerCase().trim();
-                        final safeBranchValue = branchItems.any((it) => it.value == normActive) ? normActive : 'all';
-
-                        return DropdownButtonHideUnderline(
-                          child: DropdownButton<String>(
-                            value: safeBranchValue,
-                            dropdownColor: _kBgCard,
-                            isExpanded: true,
-                            style: const TextStyle(color: _kTextPrimary, fontSize: 12, fontWeight: FontWeight.w600),
-                            icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 16, color: _kTextSecondary),
-                            items: branchItems,
-                            onChanged: (v) { if (v != null) onBranchChanged(v.toLowerCase().trim()); },
-                          ),
-                        );
-                      },
-                    ),
-                  ),
-          ),
-
-        const Divider(height: 1, color: _kBorder),
-        const SizedBox(height: 6),
-
-        // Nav items
-        Expanded(
-          child: SingleChildScrollView(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-              for (int i = 0; i < _labels.length; i++) _navItem(i),
-              const SizedBox(height: 10),
-              const Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Divider(height: 1, color: _kBorder)),
-              const SizedBox(height: 6),
-              if (canViewAudits) ...[
-                _actionItem(Icons.calendar_month_outlined, 'Holidays', onHolidays),
-                _actionItem(Icons.download_outlined, 'Export Reports', onExport),
-              ],
-              _actionItem(isDownloading ? Icons.sync_rounded : Icons.refresh_rounded,
-                  isDownloading ? 'Refreshing...' : 'Force Refresh', onRefresh),
-            ]),
-          ),
-        ),
-
-        // Sync chip
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          child: _syncChip(),
-        ),
-
-        const Divider(height: 1, color: _kBorder),
-
-        // User card
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: Row(children: [
-            CircleAvatar(
-              radius: 18,
-              backgroundColor: _kAccentMuted,
-              child: Text(userName.isNotEmpty ? userName[0].toUpperCase() : '?',
-                  style: const TextStyle(color: _kAccent, fontWeight: FontWeight.bold, fontSize: 14)),
-            ),
-            const SizedBox(width: 8),
-            Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(userName, style: const TextStyle(color: _kTextPrimary, fontWeight: FontWeight.w700, fontSize: 12), overflow: TextOverflow.ellipsis),
-              Text(userRoleDisplay, style: const TextStyle(color: _kTextTertiary, fontSize: 10), overflow: TextOverflow.ellipsis),
-            ])),
-          ]),
-        ),
-      ]),
-    );
-  }
-
-  Widget _navItem(int i) {
-    final sel = selectedIndex == i;
-    return GestureDetector(
-      onTap: () => onSelect(i),
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
-        decoration: BoxDecoration(
-          color: sel ? const Color(0xFFECFDF5) : Colors.transparent,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Row(children: [
-          Icon(sel ? _iconsA[i] : _icons[i], size: 18, color: sel ? _kAccent : _kTextSecondary),
-          const SizedBox(width: 10),
-          Expanded(child: Text(_labels[i],
-              style: TextStyle(color: sel ? _kAccent : _kTextSecondary, fontSize: 13,
-                  fontWeight: sel ? FontWeight.w700 : FontWeight.w500))),
-          if (sel) Container(width: 6, height: 6, decoration: const BoxDecoration(color: _kAccent, shape: BoxShape.circle)),
-        ]),
-      ),
-    );
-  }
-
-  Widget _actionItem(IconData icon, String label, VoidCallback onTap) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-        child: Row(children: [
-          Icon(icon, size: 16, color: _kTextTertiary),
-          const SizedBox(width: 10),
-          Text(label, style: const TextStyle(color: _kTextTertiary, fontSize: 12)),
-        ]),
-      ),
-    );
-  }
-
-  Widget _syncChip() {
-    if (pendingSyncCount > 0) {
-      return Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-        decoration: BoxDecoration(
-          color: Colors.orange.withValues(alpha: 0.1),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
-        ),
-        child: Row(children: [
-          const SizedBox(width: 10, height: 10, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.orange)),
-          const SizedBox(width: 8),
-          Expanded(child: Text('Syncing $pendingSyncCount...', style: const TextStyle(color: Colors.orange, fontSize: 10, fontWeight: FontWeight.bold))),
-        ]),
-      );
-    }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
-      decoration: BoxDecoration(
-        color: const Color(0xFFECFDF5),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFF6EE7B7)),
-      ),
-      child: const Row(children: [
-        Icon(Icons.check_circle_outline_rounded, color: _kAccent, size: 12),
-        SizedBox(width: 6),
-        Text('✓ Synced', style: TextStyle(color: _kAccent, fontSize: 10, fontWeight: FontWeight.bold)),
-      ]),
     );
   }
 }

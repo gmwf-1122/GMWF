@@ -2,6 +2,8 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hive/hive.dart';
 import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/services/quota_service.dart';
+import 'package:gmwf/services/sync_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -10,13 +12,19 @@ void main() {
   setUp(() async {
     tempDir = await Directory.systemTemp.createTemp('hive_child_parent_test_');
     Hive.init(tempDir.path);
+    await Hive.openBox('app_settings');
+    await Hive.openBox('app_flags');
+    await Hive.openBox('dead_letter_queue');
   });
 
   tearDown(() async {
+    SyncService().cancelTimers();
     await Hive.close();
-    if (tempDir.existsSync()) {
-      await tempDir.delete(recursive: true);
-    }
+    try {
+      if (tempDir.existsSync()) {
+        await tempDir.delete(recursive: true);
+      }
+    } catch (_) {}
   });
 
   group('Pillar 1: Individual Patient ID Resolution & Disambiguation', () {
@@ -438,6 +446,9 @@ void main() {
       await eBox.clear();
       await syncBox.clear();
 
+      QuotaService.recordQuotaExceeded(reason: 'test_pause');
+      try {
+
       // 1. Initial waiting token in entriesBox
       await eBox.put('khi_01-060926-201', {
         'serial': '060926-201',
@@ -537,6 +548,9 @@ void main() {
       expect(queuedSaves.any((s) => (s as Map)['serial'] == '060926-999'), isTrue);
       expect(queuedPrescDeletes.any((d) => (d as Map)['serial'] == '060926-201'), isTrue);
       expect(queuedDispDeletes.any((d) => (d as Map)['serial'] == '060926-201'), isTrue);
+      } finally {
+        QuotaService.resetState();
+      }
     });
   });
 }

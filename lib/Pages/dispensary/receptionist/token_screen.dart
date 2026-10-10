@@ -1,8 +1,8 @@
 // lib/pages/dispensary/receptionist/token_screen.dart
 
+import 'package:gmwf/utils/perf_trace.dart';
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:another_flushbar/flushbar.dart';
 import 'package:flutter/services.dart';
@@ -28,6 +28,7 @@ class TokenScreen extends StatefulWidget {
   final String? dispensaryId;
   final Function(String cnic)? onPatientNotFound;
   final String? initialCnic;
+  final String? targetPatientId;
 
   const TokenScreen({
     super.key,
@@ -37,6 +38,7 @@ class TokenScreen extends StatefulWidget {
     this.dispensaryId,
     this.onPatientNotFound,
     this.initialCnic,
+    this.targetPatientId,
   });
 
   @override
@@ -66,6 +68,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
   
   // ─── HANG FIX: Debounce setState ──────────────────────────────────────
   Timer? _debounceListenerTimer;
+  Timer? _searchDebounceTimer;
 
   bool get _isVitalsTokenAllowed => LocalStorageService.isVitalsTokenAllowed(widget.branchId);
 
@@ -119,14 +122,19 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    debugPrint("[Lifecycle] TokenScreen initState");
     WidgetsBinding.instance.addObserver(this);
     LocalStorageService.ensureBoxOpen(LocalStorageService.patientsBox);
     LocalStorageService.ensureBoxOpen(LocalStorageService.entriesBox);
-    _capturedDispensaryId = _computeInitialDispensaryId();
+    _capturedDispensaryId = PerfTrace.measure('TokenScreen.initState: _computeInitialDispensaryId', _computeInitialDispensaryId);
     CampSessionService.activeCampNotifier.addListener(_onActiveCampChanged);
-    _estimateNextSerial();
+    PerfTrace.measureAsync('TokenScreen.initState: _estimateNextSerial', _estimateNextSerial);
 
-    if (widget.initialCnic != null && widget.initialCnic!.isNotEmpty) {
+    if (widget.targetPatientId != null && widget.targetPatientId!.isNotEmpty) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        selectPatientDirectly(widget.targetPatientId!, cnicFallback: widget.initialCnic);
+      });
+    } else if (widget.initialCnic != null && widget.initialCnic!.isNotEmpty) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         focusAndFillCnic(widget.initialCnic!);
       });
@@ -331,10 +339,12 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
   void dispose() {
     CampSessionService.activeCampNotifier.removeListener(_onActiveCampChanged);
     _debounceListenerTimer?.cancel();  // ← HANG FIX: Clean up debounce timer
+    _searchDebounceTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _realtimeSub?.cancel();
     cnicController.dispose();
     _cnicFocusNode.dispose();
+    debugPrint("[Lifecycle] TokenScreen dispose");
     super.dispose();
   }
   
@@ -355,7 +365,16 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
   @override
   void didUpdateWidget(TokenScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.initialCnic != null &&
+    // Only react to a NEW target. Re-selecting whenever _patientData is null re-opened the
+    // last registered patient on every parent rebuild (connection/sync status changes).
+    if (widget.targetPatientId != null &&
+        widget.targetPatientId!.isNotEmpty &&
+        (widget.targetPatientId != oldWidget.targetPatientId ||
+         widget.initialCnic != oldWidget.initialCnic)) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        selectPatientDirectly(widget.targetPatientId!, cnicFallback: widget.initialCnic);
+      });
+    } else if (widget.initialCnic != null &&
         widget.initialCnic!.isNotEmpty &&
         widget.initialCnic != oldWidget.initialCnic) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -694,7 +713,143 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
     }
   }
 
-  void focusAndFillCnic(String input) {
+  Future<void> focusAndSelectPatient(String patientId, {String? cnicToFill}) async {
+    _searchDebounceTimer?.cancel();
+    final cnic = (cnicToFill != null && cnicToFill.isNotEmpty)
+        ? cnicToFill
+        : (patientId.contains('_child_') ? patientId.split('_child_').first : patientId);
+    final d = cnic.replaceAll(RegExp(r'[^0-9]'), '');
+    String formatted;
+    if (d.startsWith('03')) {
+      formatted = d.length > 11 ? d.substring(0, 11) : d;
+    } else {
+      final cnicDigits = d.length > 13 ? d.substring(0, 13) : d;
+      formatted = _formatCnic(cnicDigits);
+    }
+    cnicController.text = formatted;
+    cnicController.selection =
+        TextSelection.fromPosition(TextPosition(offset: formatted.length));
+    _cnicFocusNode.requestFocus();
+
+    setState(() {
+      _isLoading = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await LocalStorageService.ensureBoxOpen(LocalStorageService.patientsBox);
+      await LocalStorageService.ensureBoxOpen(LocalStorageService.entriesBox);
+
+      var localResults = LocalStorageService.searchPatientsByCnicOrGuardian(
+          formatted, branchId: widget.branchId);
+      if (localResults.isEmpty && d.isNotEmpty && d != formatted) {
+        localResults = LocalStorageService.searchPatientsByCnicOrGuardian(
+            d, branchId: widget.branchId);
+      }
+      if (localResults.isEmpty) {
+        localResults = LocalStorageService.searchPatientsByCnicOrGuardian(
+            patientId, branchId: widget.branchId);
+      }
+
+      final normPid = patientId.replaceAll('-', '').trim().toLowerCase();
+      final hasTarget = localResults.any((p) {
+        final pid = (p['patientId'] ?? p['id'] ?? '').toString().replaceAll('-', '').trim().toLowerCase();
+        return pid == normPid || pid == patientId.toLowerCase();
+      });
+
+      if (!hasTarget) {
+        final direct = LocalStorageService.getLocalPatient(patientId) ??
+            LocalStorageService.getLocalPatient(normPid) ??
+            LocalStorageService.getLocalPatientByCnic(formatted) ??
+            LocalStorageService.getLocalPatientByCnic(d);
+        if (direct != null) {
+          localResults.insert(0, direct);
+        }
+      }
+
+      if (mounted) {
+        setState(() => _patientsList = localResults);
+      }
+
+      // Auto-open only when the CNIC has a single account; for a family the list is shown
+      // and the receptionist selects the patient.
+      if (localResults.length == 1) {
+        await _selectPatient(localResults.first);
+      }
+    } catch (e) {
+      debugPrint('[TokenScreen] focusAndSelectPatient error: $e');
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  /// Directly selects a newly registered patient (child or adult),
+  /// populates the UI, and automatically opens the vitals/token dialog.
+  Future<void> selectPatientDirectly(String patientIdOrCnic, {String? cnicFallback}) async {
+    _searchDebounceTimer?.cancel();
+    final searchInput = (cnicFallback != null && cnicFallback.isNotEmpty)
+        ? cnicFallback
+        : (patientIdOrCnic.contains('_child_') ? patientIdOrCnic.split('_child_').first : patientIdOrCnic);
+    focusAndFillCnic(searchInput, autoSearch: false);
+    _searchDebounceTimer?.cancel();
+
+    await LocalStorageService.ensureBoxOpen(LocalStorageService.patientsBox);
+    final box = Hive.box(LocalStorageService.patientsBox);
+    dynamic match = box.get(patientIdOrCnic);
+    if (match == null && patientIdOrCnic.contains('-')) {
+      match = box.get(patientIdOrCnic.replaceAll('-', ''));
+    }
+    if (match == null && !patientIdOrCnic.contains('-') && patientIdOrCnic.length == 13) {
+      final formatted = '${patientIdOrCnic.substring(0, 5)}-${patientIdOrCnic.substring(5, 12)}-${patientIdOrCnic.substring(12)}';
+      match = box.get(formatted);
+    }
+    if (match == null) {
+      for (final v in box.values) {
+        if (v is Map) {
+          final pid = (v['patientId'] ?? v['id'])?.toString();
+          final pCnic = (v['cnic'] ?? v['patientCnic'])?.toString();
+          if (pid == patientIdOrCnic || pCnic == patientIdOrCnic ||
+              (pid != null && pid.replaceAll('-', '') == patientIdOrCnic.replaceAll('-', '')) ||
+              (pCnic != null && pCnic.replaceAll('-', '') == patientIdOrCnic.replaceAll('-', ''))) {
+            match = v;
+            break;
+          }
+        }
+      }
+    }
+    // A family (shared CNIC) with more than one account: list them and let the receptionist
+    // pick — never auto-select one of them.
+    final familyResults = LocalStorageService.searchPatientsByCnicOrGuardian(
+        searchInput, branchId: widget.branchId);
+    if (familyResults.length > 1) {
+      if (mounted) {
+        setState(() {
+          _patientsList = familyResults.map(_healPatient).toList();
+          _patientData = null;
+          _errorMessage = null;
+        });
+      }
+      _searchDebounceTimer?.cancel();
+      return;
+    }
+    if (match == null && familyResults.length == 1) {
+      match = familyResults.first;
+    }
+
+    if (match is Map && mounted) {
+      final pMap = Map<String, dynamic>.from(match);
+      setState(() {
+        _patientsList = [pMap];
+      });
+      await _selectPatient(pMap);
+    } else if (mounted) {
+      _searchPatient();
+    }
+    _searchDebounceTimer?.cancel();
+  }
+
+  void focusAndFillCnic(String input, {bool autoSearch = true}) {
+    _searchDebounceTimer?.cancel();
     final d = input.replaceAll(RegExp(r'[^0-9]'), '');
     String formatted;
     if (d.startsWith('03')) {
@@ -707,12 +862,17 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
     cnicController.selection =
         TextSelection.fromPosition(TextPosition(offset: formatted.length));
     _cnicFocusNode.requestFocus();
-    Future.delayed(const Duration(milliseconds: 300), () {
-      if (mounted) triggerSearch();
-    });
+    if (autoSearch) {
+      _searchDebounceTimer = Timer(const Duration(milliseconds: 300), () {
+        if (mounted) triggerSearch();
+      });
+    }
   }
 
-  void triggerSearch() => _searchPatient();
+  void triggerSearch() {
+    _searchDebounceTimer?.cancel();
+    _searchPatient();
+  }
 
   String _formatCnic(String input) {
     final d = input.replaceAll(RegExp(r'[^0-9]'), '');
@@ -726,6 +886,39 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
   }
 
   // ── Search ─────────────────────────────────────────────────────────────────
+  /// Rebuilds a wiped patient record (blank name/CNIC/phone) from the tokens already issued to
+  /// them, which still carry those details, and saves it back so it stays fixed.
+  Map<String, dynamic> _healPatient(Map<String, dynamic> p) {
+    bool blank(dynamic v) {
+      final s = (v ?? '').toString().trim();
+      return s.isEmpty || s == '0' || s.toLowerCase() == 'null';
+    }
+    if (!blank(p['name']) && !blank(p['patientName'])) return p;
+    try {
+      if (!Hive.isBoxOpen(LocalStorageService.entriesBox)) return p;
+      final pid = (p['patientId'] ?? p['id'] ?? '').toString().trim();
+      if (pid.isEmpty) return p;
+      final healed = Map<String, dynamic>.from(p);
+      for (final raw in Hive.box(LocalStorageService.entriesBox).values) {
+        if (raw is! Map) continue;
+        if ((raw['patientId'] ?? '').toString().trim() != pid) continue;
+        final n = raw['patientName'] ?? raw['name'];
+        if (blank(n)) continue;
+        healed['name'] = n.toString().trim();
+        healed['patientName'] = n.toString().trim();
+        for (final k in ['phone', 'cnic', 'guardianCnic', 'gender', 'age', 'dob', 'address']) {
+          if (blank(healed[k]) && !blank(raw[k])) healed[k] = raw[k];
+        }
+        if (blank(healed['cnic']) && !blank(raw['patientCnic'])) healed['cnic'] = raw['patientCnic'];
+        unawaited(LocalStorageService.saveLocalPatient(healed, isFromSync: true));
+        return healed;
+      }
+    } catch (e) {
+      debugPrint('[TokenScreen] heal patient failed: $e');
+    }
+    return p;
+  }
+
   Future<void> _searchPatient() async {
     final input = cnicController.text.trim();
     if (input.isEmpty) return;
@@ -765,27 +958,12 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
       }
 
       if (localResults.isEmpty) {
+        // Fast targeted lookup for the specific patient without downloading entire branch database
         try {
-          await LocalStorageService.downloadAllPatients(widget.branchId).timeout(
-            const Duration(seconds: 3),
-            onTimeout: () => {},
-          );
-          localResults = LocalStorageService.searchPatientsByCnicOrGuardian(
-              input, branchId: widget.branchId);
-          if (localResults.isEmpty && formattedCnic != input) {
-            localResults = LocalStorageService.searchPatientsByCnicOrGuardian(
-                formattedCnic, branchId: widget.branchId);
-          }
-        } catch (e) {
-          debugPrint('[TokenScreen] Firestore fallback patient fetch failed: $e');
-        }
-
-        if (localResults.isEmpty) {
-          try {
-            final branchRef = FirebaseFirestore.instance
-                .collection('branches')
-                .doc(widget.branchId)
-                .collection('patients');
+          final branchRef = FirebaseFirestore.instance
+              .collection('branches')
+              .doc(widget.branchId)
+              .collection('patients');
 
             final cnicQueryFormatted = branchRef.where('cnic', isEqualTo: formattedCnic).limit(10).get().timeout(const Duration(seconds: 3));
             final cnicQueryRaw = (formattedCnic != unformattedCnic)
@@ -803,7 +981,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
             final found = <Map<String, dynamic>>[];
             final seenIds = <String>{};
             for (final snapshot in results) {
-              if (snapshot == null || snapshot is! QuerySnapshot) continue;
+              if (snapshot == null) continue;
               for (final doc in snapshot.docs) {
                 if (!seenIds.add(doc.id)) continue;
                 final data = Map<String, dynamic>.from(doc.data() as Map);
@@ -826,23 +1004,61 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
             debugPrint('[TokenScreen] Direct branch patient query failed: $e');
           }
         }
-      }
-      if (mounted) {
+        localResults = localResults.map(_healPatient).toList();
+        if (mounted) {
         setState(() => _patientsList = localResults);
       }
       if (localResults.isNotEmpty) {
+        // Auto-open only a single match. With several family accounts the receptionist
+        // selects the patient manually (no auto-pick of the last registered patient).
         if (localResults.length == 1) {
           await _selectPatient(localResults.first);
         } else {
-          if (mounted) setState(() => _patientData = null);
+          if (mounted) {
+            setState(() {
+              _patientData = null;
+              _errorMessage = null;
+            });
+          }
         }
       } else {
-        if (looksLikeCnic && widget.onPatientNotFound != null) {
+        Map<String, dynamic>? directHiveMatch;
+        final targetId = widget.targetPatientId?.trim();
+        if (targetId != null && targetId.isNotEmpty && Hive.isBoxOpen(LocalStorageService.patientsBox)) {
+          final box = Hive.box(LocalStorageService.patientsBox);
+          dynamic raw = box.get(targetId);
+          if (raw == null && targetId.contains('-')) {
+            raw = box.get(targetId.replaceAll('-', ''));
+          }
+          if (raw is Map) {
+            // Only fall back to the last registered patient if it IS what was searched.
+            // Otherwise a search for an unknown CNIC opened that unrelated patient.
+            final searched = digitsOnly;
+            String digits(dynamic v) => (v ?? '').toString().replaceAll(RegExp(r'[^0-9]'), '');
+            final pid = digits(raw['patientId'] ?? raw['id']);
+            final matchesSearch = searched.isNotEmpty &&
+                (digits(raw['cnic']) == searched ||
+                    digits(raw['guardianCnic']) == searched ||
+                    digits(raw['phone']) == searched ||
+                    pid == searched ||
+                    pid.startsWith(searched));
+            if (matchesSearch) directHiveMatch = Map<String, dynamic>.from(raw);
+          }
+        }
+
+        if (directHiveMatch != null) {
+          if (mounted) {
+            setState(() => _patientsList = [directHiveMatch!]);
+          }
+          await _selectPatient(directHiveMatch);
+        } else if (looksLikeCnic && widget.onPatientNotFound != null && _patientData == null) {
           widget.onPatientNotFound!(formattedCnic);
         } else {
           if (mounted) {
-            setState(() =>
-                _errorMessage = 'No patient found with this CNIC/phone.');
+            setState(() {
+              _patientData = null;
+              _errorMessage = 'No patient found with CNIC/phone: $formattedCnic';
+            });
           }
         }
       }
@@ -1101,10 +1317,13 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
 
       // ── Instant Local Monotonic Serial Generation (0 ms offline latency) ──
       final normDispTag = dispTag.trim().toUpperCase();
+      final hasCamps = CampSessionService.hasCampsForBranch(widget.branchId);
       final effectiveCampId = (_capturedDispensaryId != null && _capturedDispensaryId!.isNotEmpty)
           ? _capturedDispensaryId!
-          : (activeCamp ?? (normDispTag == 'HAJI' ? 'haji_camp' : 'saddar'));
-      final effectiveCampName = CampSessionService.getCampLabel(effectiveCampId);
+          : (activeCamp ?? (hasCamps ? (normDispTag == 'HAJI' ? 'haji_camp' : 'saddar') : widget.branchId));
+      final effectiveCampName = hasCamps
+          ? CampSessionService.getCampLabel(effectiveCampId)
+          : LocalStorageService.getBranchName(widget.branchId);
 
       final nextSeq = await LocalStorageService.getNextLocalSerialSequence(
         widget.branchId,
@@ -1131,8 +1350,13 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
       };
 
       // STEP 1 — Hive (instant, offline-safe & case-normalized)
-      await LocalStorageService.deleteLocalPrescription(serial);
-      await LocalStorageService.saveEntryLocal(widget.branchId, serial, entryData);
+      // Only clear an orphaned prescription when this serial is free. If another token
+      // already holds it (serial issued on another desk), that prescription is theirs;
+      // saveEntryLocal's collision guard keeps both records.
+      if (LocalStorageService.getLocalEntry(widget.branchId, serial) == null) {
+        await LocalStorageService.deleteLocalPrescription(serial);
+      }
+      final storedAsSerial = await LocalStorageService.saveEntryLocal(widget.branchId, serial, entryData);
 
       if (hasException) {
         await LocalStorageService.consumeTokenException(widget.branchId, patientId, dateKey: dateKey);
@@ -1175,35 +1399,29 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
       _estimateNextSerial();
 
       if (mounted) {
-        final isSinglePatientSearch = _patientsList.length <= 1;
-        if (isSinglePatientSearch) {
-          cnicController.clear();
-          setState(() {
-            _patientData = null;
-            _patientsList.clear();
-            _hasTokenToday = false;
-            _guardianCnic = null;
-            _guardianPatient = null;
-            _errorMessage = null;
-            _isLoading = false;
-          });
-        } else {
-          final currentQuery = cnicController.text.trim();
-          final refreshedFamily = currentQuery.isNotEmpty
-              ? LocalStorageService.searchPatientsByCnicOrGuardian(currentQuery, branchId: widget.branchId)
-              : <Map<String, dynamic>>[];
-          setState(() {
-            _patientData = null;
-            _hasTokenToday = true;
-            _guardianCnic = null;
-            _guardianPatient = null;
-            _errorMessage = null;
-            _isLoading = false;
-            if (refreshedFamily.isNotEmpty) {
-              _patientsList = refreshedFamily;
-            }
-          });
-        }
+        final currentQuery = cnicController.text.trim();
+        final refreshedPatients = currentQuery.isNotEmpty
+            ? LocalStorageService.searchPatientsByCnicOrGuardian(currentQuery, branchId: widget.branchId)
+            : <Map<String, dynamic>>[];
+        setState(() {
+          _hasTokenToday = true;
+          _guardianCnic = null;
+          _guardianPatient = null;
+          _errorMessage = null;
+          _isLoading = false;
+          if (refreshedPatients.isNotEmpty) {
+            _patientsList = refreshedPatients;
+          }
+          if (_patientData != null) {
+            final selPid = LocalStorageService.resolveIndividualPatientId(_patientData);
+            _patientData = _patientsList.firstWhere(
+              (p) => LocalStorageService.resolveIndividualPatientId(p) == selPid ||
+                     p['patientId'] == _patientData!['patientId'] ||
+                     (p['id'] != null && p['id'] == _patientData!['id']),
+              orElse: () => _patientData!,
+            );
+          }
+        });
 
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(
           content: Text(
@@ -1213,8 +1431,20 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
         ));
       }
 
-      // STEP 3 — Firestore in background
-      _syncToFirestoreInBackground(dateKey, queueType, serial, entryData);
+      // STEP 3 — Firestore in background (never for a collided serial: it would merge
+      // this patient into the other patient's cloud record)
+      if (storedAsSerial) {
+        _syncToFirestoreInBackground(dateKey, queueType, serial, entryData);
+      } else if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(
+          content: Text('⚠️ Token $serial was already used by another patient (issued on another desk). '
+              'Both records were kept and flagged for supervisor review.'),
+          backgroundColor: Colors.orange.shade800,
+          duration: const Duration(seconds: 6),
+        ));
+      }
     } catch (e, stack) {
       debugPrint('[TokenScreen] Token generation failed: $e\n$stack');
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -1337,6 +1567,8 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
         DateTime? birthDate;
         if (dobValue is Timestamp) {
           birthDate = dobValue.toDate();
+        } else if (dobValue is DateTime) {
+          birthDate = dobValue;
         } else if (dobValue is String) {
           try {
             birthDate = DateFormat('dd-MM-yyyy').parse(dobValue);
@@ -1894,6 +2126,35 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                           text: f,
                           selection: TextSelection.collapsed(offset: f.length));
                     }
+
+                    _searchDebounceTimer?.cancel();
+                    if (d.isEmpty) {
+                      if (_patientData != null || _patientsList.isNotEmpty || _errorMessage != null) {
+                        setState(() {
+                          _patientData = null;
+                          _patientsList.clear();
+                          _errorMessage = null;
+                          _hasTokenToday = false;
+                        });
+                      }
+                      return;
+                    }
+
+                    final isFullCnic = d.length == 13;
+                    final isFullPhone = d.startsWith('03') && d.length == 11;
+
+                    if (isFullCnic || isFullPhone) {
+                      _searchDebounceTimer = Timer(const Duration(milliseconds: 200), () {
+                        if (mounted) _searchPatient();
+                      });
+                    } else {
+                      if (_patientData != null || _errorMessage != null) {
+                        setState(() {
+                          _patientData = null;
+                          _errorMessage = null;
+                        });
+                      }
+                    }
                   },
                   onSubmitted: (_) => triggerSearch(),
                   style: TextStyle(color: isDark ? Colors.white : Colors.green[900]),
@@ -1919,19 +2180,48 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
 
                 if (_errorMessage != null)
                   Container(
-                    padding: const EdgeInsets.all(10),
+                    margin: const EdgeInsets.symmetric(vertical: 4),
+                    padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                        color: Colors.red[50],
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.red.shade200)),
-                    child: Row(children: [
-                      const Icon(Icons.error_outline,
-                          color: Colors.red, size: 18),
-                      const SizedBox(width: 8),
-                      Expanded(child: Text(_errorMessage!,
-                          style: const TextStyle(
-                              color: Colors.red, fontSize: 13))),
-                    ]),
+                        color: isDark ? const Color(0xFF451A1A) : Colors.red[50],
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: isDark ? Colors.red.shade800 : Colors.red.shade200)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(children: [
+                          const Icon(Icons.error_outline,
+                              color: Colors.red, size: 18),
+                          const SizedBox(width: 8),
+                          Expanded(child: Text(_errorMessage!,
+                              style: TextStyle(
+                                  color: isDark ? Colors.red.shade200 : Colors.red.shade900,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600))),
+                        ]),
+                        if (widget.onPatientNotFound != null && cnicController.text.trim().isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: _teal,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                              icon: const Icon(Icons.person_add, size: 16),
+                              label: const Text('Register Patient Now', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                              onPressed: () {
+                                final d = cnicController.text.replaceAll(RegExp(r'[^0-9]'), '');
+                                final formatted = d.length == 13 ? _formatCnic(d) : cnicController.text.trim();
+                                widget.onPatientNotFound!(formatted);
+                              },
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ),
 
                 if (_patientData == null && _patientsList.isNotEmpty) ...[
@@ -2163,8 +2453,8 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                       alignment: Alignment.centerLeft,
                       child: TextButton.icon(
                         onPressed: () => setState(() => _patientData = null),
-                        icon: Icon(Icons.arrow_back, size: 16, color: _isDark ? const Color(0xFF38BDF8) : Colors.green),
-                        label: Text('Back to Family List',
+                        icon: Icon(Icons.close_rounded, size: 16, color: _isDark ? const Color(0xFF38BDF8) : Colors.green),
+                        label: Text('Deselect Patient',
                             style: TextStyle(
                                 color: _isDark ? const Color(0xFF38BDF8) : Colors.green,
                                 fontWeight: FontWeight.bold,
@@ -2580,6 +2870,7 @@ class _VitalsInputDialogState extends State<_VitalsInputDialog> {
 
   int suggestedDays = 1;
   bool isIssuingInDialog = false;
+  String? _vitalsError; // shown inside the dialog (a SnackBar would appear behind it)
 
   static const Color _teal = Color(0xFF00695C);
 
@@ -2665,18 +2956,14 @@ class _VitalsInputDialogState extends State<_VitalsInputDialog> {
     final weight    = weightCtrl.text.trim();
 
     if (systolic.isEmpty || diastolic.isEmpty || temp.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Please enter BP and Temperature!'),
-          backgroundColor: Colors.red));
+      setState(() => _vitalsError = 'Please enter BP and Temperature.');
       return;
     }
 
     if (temp.isNotEmpty) {
       final tempVal = double.tryParse(temp);
       if (tempVal == null || tempVal < 80.0 || tempVal > 110.0) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-            content: Text('Temperature must be between 80.0 and 110.0'),
-            backgroundColor: Colors.red));
+        setState(() => _vitalsError = 'Temperature must be between 80.0 and 110.0 °F.');
         return;
       }
     }
@@ -2685,7 +2972,10 @@ class _VitalsInputDialogState extends State<_VitalsInputDialog> {
         ? '$systolic/$diastolic'
         : (systolic.isNotEmpty ? systolic : '');
 
-    setState(() => isIssuingInDialog = true);
+    setState(() {
+      _vitalsError = null;
+      isIssuingInDialog = true;
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && Navigator.of(context).canPop()) {
         Navigator.of(context).pop();
@@ -2714,7 +3004,14 @@ class _VitalsInputDialogState extends State<_VitalsInputDialog> {
     final labelColor = isDark ? const Color(0xFFA7F3D0) : Colors.grey.shade700;
     final dialogBorder = isDark ? const Color(0xFF10B981) : Colors.green.shade200;
 
-    final patientName = (widget.patientData?['patientName'] ?? widget.patientData?['name'] ?? widget.patientData?['fullName'] ?? 'Unknown').toString().trim();
+    // Placeholder values like '0' or 'null' (bad records) are not names.
+    String cleanPatientName(dynamic v) {
+      final s = (v ?? '').toString().trim();
+      return (s.isEmpty || s == '0' || s.toLowerCase() == 'null') ? '' : s;
+    }
+    final patientName = [widget.patientData?['patientName'], widget.patientData?['name'], widget.patientData?['fullName']]
+        .map(cleanPatientName)
+        .firstWhere((s) => s.isNotEmpty, orElse: () => 'Name not recorded');
 
     return AlertDialog(
       backgroundColor: dialogBg,
@@ -2945,7 +3242,32 @@ class _VitalsInputDialogState extends State<_VitalsInputDialog> {
               bottomRight: Radius.circular(20),
             ),
           ),
-          child: Row(
+          child: Column(
+           mainAxisSize: MainAxisSize.min,
+           crossAxisAlignment: CrossAxisAlignment.stretch,
+           children: [
+            if (_vitalsError != null)
+              Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF450A0A) : const Color(0xFFFEF2F2),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: isDark ? const Color(0xFF991B1B) : const Color(0xFFFECACA)),
+                ),
+                child: Row(children: [
+                  Icon(Icons.error_outline_rounded, size: 18, color: isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C)),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(_vitalsError!,
+                        style: TextStyle(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C))),
+                  ),
+                ]),
+              ),
+            Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
               TextButton(
@@ -3002,6 +3324,8 @@ class _VitalsInputDialogState extends State<_VitalsInputDialog> {
                 ),
               ),
             ],
+          ),
+          ],
           ),
         ),
       ],

@@ -320,7 +320,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
                       ? cred!.biometricPin.trim() 
                       : (emp['biometricPin'] ?? emp['pin'] ?? '').toString().trim();
                   
-                  final dbRec = dbRecords.firstWhereOrNull((r) {
+                  final matchingDbRecs = dbRecords.where((r) {
                     final rEmpId = r['employeeId']?.toString();
                     if (rEmpId == empId || (altId.isNotEmpty && rEmpId == altId)) return true;
                     if (pin.isNotEmpty && (r['pin']?.toString() == pin || r['biometricPin']?.toString() == pin || r['employeeId']?.toString() == pin)) {
@@ -332,7 +332,12 @@ class _AttendanceTabState extends State<AttendanceTab> {
                       return true;
                     }
                     return false;
-                  });
+                  }).toList();
+
+                  Map<String, dynamic>? mergedDbRec;
+                  for (final m in matchingDbRecs) {
+                    mergedDbRec = FinanceLocalStorage.mergeAttendanceRecordMaps(mergedDbRec, m);
+                  }
 
                   final isHoliday = FinanceLocalStorage.isHoliday(
                     branchId: widget.branchId,
@@ -340,8 +345,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
                     dateStr: dateStr,
                   );
 
-                  // Prioritize draft records over DB records
-                  final record = _draftRecords[empId] ?? Map<String, dynamic>.from(dbRec ?? {
+                  final Map<String, dynamic> defaultRec = {
                     'employeeId': empId,
                     'date': dateStr,
                     'status': isSunday ? 'off' : (isHoliday ? 'holiday' : 'absent'),
@@ -353,7 +357,12 @@ class _AttendanceTabState extends State<AttendanceTab> {
                     'note': isHoliday ? 'Public Holiday' : null,
                     'overtimeDuration': null,
                     'halfDayType': null,
-                  });
+                  };
+
+                  final baseRec = mergedDbRec ?? defaultRec;
+                  final record = _draftRecords.containsKey(empId)
+                      ? (FinanceLocalStorage.mergeAttendanceRecordMaps(baseRec, _draftRecords[empId]) ?? _draftRecords[empId]!)
+                      : Map<String, dynamic>.from(baseRec);
 
                   // Ensure presence is recognized if ANY punch times exist
                   final checkIn = record['checkInTime']?.toString() ?? record['arrivalTime']?.toString();

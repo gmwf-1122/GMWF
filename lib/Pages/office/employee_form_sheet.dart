@@ -6,8 +6,11 @@ import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:collection/collection.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:uuid/uuid.dart';
 import 'dart:async';
 import 'dart:io';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../theme/role_theme_provider.dart';
 import '../../theme/app_theme.dart';
 import '../../services/finance_local_storage.dart';
@@ -17,10 +20,12 @@ import '../../services/image_upload_service.dart';
 import '../../utils/formatters.dart';
 import '../../services/user_theme_service.dart';
 import '../../services/local_storage_service.dart';
+import '../../services/camp_session_service.dart';
 import '../../services/network_health_service.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'shared_widgets.dart';
 import '../../design/design_system.dart';
+
+const _uuid = Uuid();
 
 void openEmployeeFormSheet(
   BuildContext context, {
@@ -87,12 +92,23 @@ void openEmployeeFormSheet(
           chartGrid: tOriginal.chartGrid,
         );
 
-  final isEdit = employeeId != null;
+  final cleanEmpId = (employeeId ?? '').trim();
+  final isEdit = cleanEmpId.isNotEmpty;
   final Map<String, dynamic> existing = isEdit
-      ? (FinanceLocalStorage.getEmployee(employeeId) ??
-          (FinanceLocalStorage.employeesBox.values.firstWhereOrNull(
-                  (v) => v is Map && (v['localId']?.toString() == employeeId || v['id']?.toString() == employeeId))
-              as Map?)
+      ? (FinanceLocalStorage.getEmployee(cleanEmpId) ??
+          (FinanceLocalStorage.employeesBox.values.firstWhereOrNull((v) {
+            if (v is! Map) return false;
+            final loc = v['localId']?.toString().trim();
+            final id = v['id']?.toString().trim();
+            final emp = v['employeeId']?.toString().trim();
+            final pin = (v['pin'] ?? v['biometricPin'])?.toString().trim();
+            final name = v['name']?.toString().trim().toLowerCase();
+            return loc == cleanEmpId ||
+                id == cleanEmpId ||
+                emp == cleanEmpId ||
+                pin == cleanEmpId ||
+                (cleanEmpId.length > 2 && name == cleanEmpId.toLowerCase());
+          }) as Map?)
               ?.cast<String, dynamic>() ??
           {})
       : {};
@@ -130,18 +146,24 @@ void openEmployeeFormSheet(
   final cnicController = TextEditingController(text: existing['cnic'] ?? '');
   final cnicExpiryController = TextEditingController(
       text: existing['cnicExpiry'] != null && existing['cnicExpiry'].toString().isNotEmpty
-          ? DateFormat('yyyy-MM-dd').format(DateTime.parse(existing['cnicExpiry']))
+          ? (DateTime.tryParse(existing['cnicExpiry'].toString()) != null
+              ? DateFormat('yyyy-MM-dd').format(DateTime.parse(existing['cnicExpiry'].toString()))
+              : existing['cnicExpiry'].toString())
           : '');
   final dobController = TextEditingController(
       text: existing['dob'] != null && existing['dob'].toString().isNotEmpty
-          ? DateFormat('yyyy-MM-dd').format(DateTime.parse(existing['dob']))
+          ? (DateTime.tryParse(existing['dob'].toString()) != null
+              ? DateFormat('yyyy-MM-dd').format(DateTime.parse(existing['dob'].toString()))
+              : existing['dob'].toString())
           : '');
   final joiningController = TextEditingController(
       text: existing['joiningDate'] != null && existing['joiningDate'].toString().isNotEmpty
-          ? DateFormat('yyyy-MM-dd').format(DateTime.parse(existing['joiningDate']))
+          ? (DateTime.tryParse(existing['joiningDate'].toString()) != null
+              ? DateFormat('yyyy-MM-dd').format(DateTime.parse(existing['joiningDate'].toString()))
+              : existing['joiningDate'].toString())
           : DateFormat('yyyy-MM-dd').format(DateTime.now()));
 
-  final existingCred = isEdit ? ZkTecoNetworkService.getCredentialByEntityId(employeeId) : null;
+  final existingCred = (isEdit && employeeId != null) ? ZkTecoNetworkService.getCredentialByEntityId(employeeId) : null;
   final initialPin = existingCred?.biometricPin ?? existing['biometricPin']?.toString() ?? '';
   final biometricPinController = TextEditingController(text: initialPin);
 
@@ -149,7 +171,7 @@ void openEmployeeFormSheet(
   String compensationType = existing['compensationType'] ?? 'monthly';
   String maritalStatus = existing['maritalStatus'] ?? 'Single';
   String role = existing['role'] ?? 'Office Boy';
-  String department = existing['department'] ?? 'Office';
+  String department = FinanceLocalStorage.normalizeDepartment(existing['department']?.toString() ?? 'Office');
   String relationshipType = existing['relationshipType'] ?? 'Father';
   String gender = existing['gender'] ?? 'Male';
   String paymentMethod = isEdit
@@ -159,24 +181,42 @@ void openEmployeeFormSheet(
       : 'Bank Transfer';
   String selectedBank = initialBank;
 
-  final List<String> availableCamps = ['Saddar Camp', 'Haji Camp', 'Central Office'];
-  final List<String> selectedCamps = List<String>.from(
-    existing['camps'] is List
-        ? (existing['camps'] as List).map((e) => e.toString())
-        : (existing['camp'] != null ? [existing['camp'].toString()] : ['Saddar Camp', 'Haji Camp']),
-  );
+  bool branchHasCamps(String bId) =>
+      CampSessionService.hasCampsForBranch(bId) || CampSessionService.isKarachiFamily(bId);
 
-  final List<Map<String, String>> employeeSessions = List<Map<String, dynamic>>.from(existing['sessions'] ?? [])
-      .map((s) => {
-            'camp': s['camp']?.toString() ?? 'Saddar Camp',
+  List<String> getAvailableCampsForBranch(String bId) {
+    if (!branchHasCamps(bId)) return <String>[];
+    final configured = CampSessionService.getCampsForBranch(bId, includeClosed: false);
+    if (configured.isNotEmpty) {
+      return configured.map((c) => (c['name'] ?? c['id'] ?? '').toString().trim()).where((s) => s.isNotEmpty).toList();
+    }
+    if (CampSessionService.isKarachiFamily(bId)) {
+      return ['Saddar Camp', 'Haji Camp', 'Central Office'];
+    }
+    return <String>[];
+  }
+
+  final List<String> availableCamps = getAvailableCampsForBranch(selectedBranchId);
+  final List<String> selectedCamps = branchHasCamps(selectedBranchId)
+      ? List<String>.from(
+          existing['camps'] is List
+              ? (existing['camps'] as List).map((e) => e.toString())
+              : (existing['camp'] != null ? [existing['camp'].toString()] : <String>[]),
+        ).where((c) => availableCamps.contains(c)).toList()
+      : <String>[];
+
+  final rawSessions = existing['sessions'];
+  final List<Map<String, String>> employeeSessions = branchHasCamps(selectedBranchId) && (rawSessions is List)
+      ? rawSessions.whereType<Map>().map((s) => <String, String>{
+            'camp': s['camp']?.toString() ?? (availableCamps.isNotEmpty ? availableCamps.first : 'Saddar Camp'),
             'session': s['session']?.toString() ?? 'Morning',
             'startTime': s['startTime']?.toString() ?? '09:00 AM',
             'endTime': s['endTime']?.toString() ?? '01:00 PM',
-          })
-      .toList();
+          }).where((s) => availableCamps.contains(s['camp'])).toList()
+      : <Map<String, String>>[];
 
-  // If no sessions yet and camps selected, pre-populate default camps & sessions
-  if (employeeSessions.isEmpty) {
+  // If branch supports camps, has camps selected, but no sessions configured yet, pre-populate sessions for selected camps
+  if (branchHasCamps(selectedBranchId) && employeeSessions.isEmpty && selectedCamps.isNotEmpty) {
     if (selectedCamps.contains('Saddar Camp')) {
       employeeSessions.add({
         'camp': 'Saddar Camp',
@@ -195,16 +235,18 @@ void openEmployeeFormSheet(
     }
   }
 
-  final winterShiftController = TextEditingController(text: existing['workScheduleOverride']?['winter'] ?? '');
-  final summerShiftController = TextEditingController(text: existing['workScheduleOverride']?['summer'] ?? '');
+  final workSchedule = existing['workScheduleOverride'] is Map ? (existing['workScheduleOverride'] as Map) : null;
+  final winterShiftController = TextEditingController(text: workSchedule?['winter']?.toString() ?? '');
+  final summerShiftController = TextEditingController(text: workSchedule?['summer']?.toString() ?? '');
 
-  List<Map<String, String>> emergencyContacts = List<Map<String, dynamic>>.from(existing['emergencyContacts'] ?? [])
-      .map((e) => {
+  final rawContacts = existing['emergencyContacts'];
+  List<Map<String, String>> emergencyContacts = (rawContacts is List)
+      ? rawContacts.whereType<Map>().map((e) => <String, String>{
             'name': e['name']?.toString() ?? '',
             'relation': e['relation']?.toString() ?? '',
             'phone': e['phone']?.toString() ?? '',
-          })
-      .toList();
+          }).toList()
+      : <Map<String, String>>[];
 
   String? existingProfileUrl = existing['profilePictureUrl']?.toString();
   String? existingIdFrontUrl = existing['identificationUrl']?.toString();
@@ -237,7 +279,7 @@ void openEmployeeFormSheet(
             if (!rolesList.contains('+ Add Custom Role...')) rolesList.add('+ Add Custom Role...');
 
             final List<String> deptsList = FinanceLedgerStorage.sortDepartmentsCanonical(
-              ['Administration Staff', 'Office', 'Dasterkhwaan', 'Dispensary', 'Madrassa', 'School']
+              ['Administration', 'Office', 'Dasterkhwaan', 'Dispensary', 'Madrassa', 'School']
                 ..addAll(FinanceLocalStorage.getCustomDepartments())
             );
             if (!deptsList.contains(department)) deptsList.add(department);
@@ -620,7 +662,7 @@ void openEmployeeFormSheet(
                                   ctx: ctx,
                                   theme: t,
                                   isDark: isDark,
-                                  employeeId: employeeId,
+                                  employeeId: employeeId ?? (existing['id'] ?? existing['employeeId'] ?? '').toString(),
                                   employeeName: nameController.text.trim().isNotEmpty
                                       ? nameController.text.trim()
                                       : (existing['name']?.toString() ?? 'Employee'),
@@ -694,11 +736,33 @@ void openEmployeeFormSheet(
                                 context: ctx,
                                 theme: t,
                                 onAdded: (newId, newName) {
-                                  setState(() => selectedBranchId = newId);
+                                  setState(() {
+                                    selectedBranchId = newId;
+                                    availableCamps.clear();
+                                    availableCamps.addAll(getAvailableCampsForBranch(newId));
+                                    if (!branchHasCamps(newId)) {
+                                      selectedCamps.clear();
+                                      employeeSessions.clear();
+                                    } else {
+                                      selectedCamps.removeWhere((c) => !availableCamps.contains(c));
+                                      employeeSessions.removeWhere((s) => !availableCamps.contains(s['camp']));
+                                    }
+                                  });
                                 },
                               );
                             } else if (val != null) {
-                              setState(() => selectedBranchId = val);
+                              setState(() {
+                                selectedBranchId = val;
+                                availableCamps.clear();
+                                availableCamps.addAll(getAvailableCampsForBranch(val));
+                                if (!branchHasCamps(val)) {
+                                  selectedCamps.clear();
+                                  employeeSessions.clear();
+                                } else {
+                                  selectedCamps.removeWhere((c) => !availableCamps.contains(c));
+                                  employeeSessions.removeWhere((s) => !availableCamps.contains(s['camp']));
+                                }
+                              });
                             }
                           },
                         ),
@@ -1108,117 +1172,96 @@ void openEmployeeFormSheet(
 
                   const SizedBox(height: 12),
 
-                  // Camps & Multi-Session Shift Schedule (Karachi Saddar / Haji Camp / etc.)
-                  Container(
-                    margin: const EdgeInsets.only(top: 4, bottom: 12),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: t.bgCardAlt,
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: t.bgRule),
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Row(
-                              children: [
-                                Icon(Icons.holiday_village_rounded, color: t.accent, size: 16),
-                                const SizedBox(width: 6),
-                                Text(
-                                  'Camps & Shift Sessions (Multi-Camp)',
-                                  style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 12),
-                                ),
-                              ],
-                            ),
-                            TextButton.icon(
-                              onPressed: () {
-                                setState(() {
-                                  employeeSessions.add({
-                                    'camp': selectedCamps.isNotEmpty ? selectedCamps.last : 'Haji Camp',
-                                    'session': 'Evening',
-                                    'startTime': '04:00 PM',
-                                    'endTime': '08:00 PM',
+                  // Camps & Multi-Session Shift Schedule (Only for branches that operate camps)
+                  if (branchHasCamps(selectedBranchId) && availableCamps.isNotEmpty) ...[
+                    Container(
+                      margin: const EdgeInsets.only(top: 4, bottom: 12),
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: t.bgCardAlt,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: t.bgRule),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Row(
+                                children: [
+                                  Icon(Icons.holiday_village_rounded, color: t.accent, size: 16),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Camps & Shift Sessions (Multi-Camp)',
+                                    style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 12),
+                                  ),
+                                ],
+                              ),
+                              TextButton.icon(
+                                onPressed: () {
+                                  setState(() {
+                                    employeeSessions.add({
+                                      'camp': selectedCamps.isNotEmpty ? selectedCamps.last : availableCamps.first,
+                                      'session': 'Evening',
+                                      'startTime': '04:00 PM',
+                                      'endTime': '08:00 PM',
+                                    });
                                   });
-                                });
-                              },
-                              icon: const Icon(Icons.add_rounded, size: 14),
-                              label: const Text('Add Session', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                              style: TextButton.styleFrom(
-                                foregroundColor: t.accent,
-                                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                              ),
-                            ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'Configure which camps this employee works at (e.g. Saddar Morning vs Haji Camp Evening) and joining/shift times.',
-                          style: TextStyle(color: t.textSecondary, fontSize: 10.5),
-                        ),
-                        const SizedBox(height: 10),
-
-                        // Camp Selection Chips
-                        Wrap(
-                          spacing: 6,
-                          runSpacing: 6,
-                          children: availableCamps.map((c) {
-                            final isSel = selectedCamps.contains(c);
-                            return FilterChip(
-                              label: Text(
-                                c,
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  color: isSel ? Colors.white : t.textPrimary,
-                                  fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                                },
+                                icon: const Icon(Icons.add_rounded, size: 14),
+                                label: const Text('Add Session', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: t.accent,
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                 ),
                               ),
-                              selected: isSel,
-                              selectedColor: t.accent,
-                              checkmarkColor: Colors.white,
-                              backgroundColor: t.bgCard,
-                              onSelected: (selected) {
-                                setState(() {
-                                  if (selected) {
-                                    if (!selectedCamps.contains(c)) selectedCamps.add(c);
-                                  } else {
-                                    selectedCamps.remove(c);
-                                  }
-                                });
-                              },
-                            );
-                          }).toList(),
-                        ),
-                        const SizedBox(height: 10),
+                            ],
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Configure which camps this employee works at (e.g. Saddar Morning vs Haji Camp Evening) and joining/shift times.',
+                            style: TextStyle(color: t.textSecondary, fontSize: 10.5),
+                          ),
+                          const SizedBox(height: 10),
 
-                        // Sessions list
-                        if (employeeSessions.isEmpty)
-                          Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: t.bgCard,
-                              borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: t.bgRule),
-                            ),
-                            child: Row(
-                              children: [
-                                Icon(Icons.info_outline_rounded, size: 14, color: t.textTertiary),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                  child: Text('No per-camp sessions configured. Standard working hours will be used.', style: TextStyle(color: t.textTertiary, fontSize: 11)),
+                          // Camp Selection Chips
+                          Wrap(
+                            spacing: 6,
+                            runSpacing: 6,
+                            children: availableCamps.map((c) {
+                              final isSel = selectedCamps.contains(c);
+                              return FilterChip(
+                                label: Text(
+                                  c,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: isSel ? Colors.white : t.textPrimary,
+                                    fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                                  ),
                                 ),
-                              ],
-                            ),
-                          )
-                        else
-                          ...employeeSessions.asMap().entries.map((entry) {
-                            final idx = entry.key;
-                            final s = entry.value;
-                            return Container(
-                              margin: const EdgeInsets.only(bottom: 8),
-                              padding: const EdgeInsets.all(8),
+                                selected: isSel,
+                                selectedColor: t.accent,
+                                checkmarkColor: Colors.white,
+                                backgroundColor: t.bgCard,
+                                onSelected: (selected) {
+                                  setState(() {
+                                    if (selected) {
+                                      if (!selectedCamps.contains(c)) selectedCamps.add(c);
+                                    } else {
+                                      selectedCamps.remove(c);
+                                    }
+                                  });
+                                },
+                              );
+                            }).toList(),
+                          ),
+                          const SizedBox(height: 10),
+
+                          // Sessions list
+                          if (employeeSessions.isEmpty)
+                            Container(
+                              padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
                                 color: t.bgCard,
                                 borderRadius: BorderRadius.circular(8),
@@ -1226,112 +1269,135 @@ void openEmployeeFormSheet(
                               ),
                               child: Row(
                                 children: [
-                                  // Camp selector
+                                  Icon(Icons.info_outline_rounded, size: 14, color: t.textTertiary),
+                                  const SizedBox(width: 8),
                                   Expanded(
-                                    flex: 3,
-                                    child: DropdownButtonFormField<String>(
-                                      value: availableCamps.contains(s['camp']) ? s['camp'] : availableCamps.first,
-                                      dropdownColor: t.bgCard,
-                                      decoration: InputDecoration(
-                                        labelText: 'Camp',
-                                        isDense: true,
-                                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: t.bgRule)),
-                                      ),
-                                      style: TextStyle(color: t.textPrimary, fontSize: 11),
-                                      items: availableCamps.map((c) => DropdownMenuItem(value: c, child: Text(c, style: const TextStyle(fontSize: 11)))).toList(),
-                                      onChanged: (val) {
-                                        if (val != null) setState(() => s['camp'] = val);
-                                      },
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  // Session (Morning, Evening, etc.)
-                                  Expanded(
-                                    flex: 2,
-                                    child: TextFormField(
-                                      initialValue: s['session'],
-                                      decoration: InputDecoration(
-                                        labelText: 'Session',
-                                        isDense: true,
-                                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: t.bgRule)),
-                                      ),
-                                      style: TextStyle(color: t.textPrimary, fontSize: 11),
-                                      onChanged: (val) => s['session'] = val,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  // Joining / Start Time
-                                  InkWell(
-                                    onTap: () async {
-                                      final picked = await showTimePicker(context: ctx, initialTime: TimeOfDay.now());
-                                      if (picked != null) {
-                                        final now = DateTime.now();
-                                        final dt = DateTime(now.year, now.month, now.day, picked.hour, picked.minute);
-                                        setState(() => s['startTime'] = DateFormat('hh:mm a').format(dt));
-                                      }
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-                                      decoration: BoxDecoration(
-                                        border: Border.all(color: t.bgRule),
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(Icons.login_rounded, size: 12, color: t.accent),
-                                          const SizedBox(width: 3),
-                                          Text(s['startTime'] ?? '09:00 AM', style: TextStyle(fontSize: 11, color: t.textPrimary, fontWeight: FontWeight.bold)),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  // Exit / End Time
-                                  InkWell(
-                                    onTap: () async {
-                                      final picked = await showTimePicker(context: ctx, initialTime: TimeOfDay.now());
-                                      if (picked != null) {
-                                        final now = DateTime.now();
-                                        final dt = DateTime(now.year, now.month, now.day, picked.hour, picked.minute);
-                                        setState(() => s['endTime'] = DateFormat('hh:mm a').format(dt));
-                                      }
-                                    },
-                                    child: Container(
-                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
-                                      decoration: BoxDecoration(
-                                        border: Border.all(color: t.bgRule),
-                                        borderRadius: BorderRadius.circular(6),
-                                      ),
-                                      child: Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          Icon(Icons.logout_rounded, size: 12, color: t.danger),
-                                          const SizedBox(width: 3),
-                                          Text(s['endTime'] ?? '01:00 PM', style: TextStyle(fontSize: 11, color: t.textPrimary, fontWeight: FontWeight.bold)),
-                                        ],
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 4),
-                                  // Delete session
-                                  IconButton(
-                                    icon: Icon(Icons.close_rounded, size: 15, color: t.danger),
-                                    padding: EdgeInsets.zero,
-                                    constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
-                                    onPressed: () {
-                                      setState(() => employeeSessions.removeAt(idx));
-                                    },
+                                    child: Text('No per-camp sessions configured. Standard working hours will be used.', style: TextStyle(color: t.textTertiary, fontSize: 11)),
                                   ),
                                 ],
                               ),
-                            );
-                          }),
-                      ],
+                            )
+                          else
+                            ...employeeSessions.asMap().entries.map((entry) {
+                              final idx = entry.key;
+                              final s = entry.value;
+                              return Container(
+                                margin: const EdgeInsets.only(bottom: 8),
+                                padding: const EdgeInsets.all(8),
+                                decoration: BoxDecoration(
+                                  color: t.bgCard,
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(color: t.bgRule),
+                                ),
+                                child: Row(
+                                  children: [
+                                    // Camp selector
+                                    Expanded(
+                                      flex: 3,
+                                      child: DropdownButtonFormField<String>(
+                                        value: availableCamps.contains(s['camp']) ? s['camp'] : availableCamps.first,
+                                        dropdownColor: t.bgCard,
+                                        decoration: InputDecoration(
+                                          labelText: 'Camp',
+                                          isDense: true,
+                                          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: t.bgRule)),
+                                        ),
+                                        style: TextStyle(color: t.textPrimary, fontSize: 11),
+                                        items: availableCamps.map((c) => DropdownMenuItem(value: c, child: Text(c, style: const TextStyle(fontSize: 11)))).toList(),
+                                        onChanged: (val) {
+                                          if (val != null) setState(() => s['camp'] = val);
+                                        },
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    // Session (Morning, Evening, etc.)
+                                    Expanded(
+                                      flex: 2,
+                                      child: TextFormField(
+                                        initialValue: s['session'],
+                                        decoration: InputDecoration(
+                                          labelText: 'Session',
+                                          isDense: true,
+                                          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: t.bgRule)),
+                                        ),
+                                        style: TextStyle(color: t.textPrimary, fontSize: 11),
+                                        onChanged: (val) => s['session'] = val,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    // Joining / Start Time
+                                    InkWell(
+                                      onTap: () async {
+                                        final picked = await showTimePicker(context: ctx, initialTime: TimeOfDay.now());
+                                        if (picked != null) {
+                                          final now = DateTime.now();
+                                          final dt = DateTime(now.year, now.month, now.day, picked.hour, picked.minute);
+                                          setState(() => s['startTime'] = DateFormat('hh:mm a').format(dt));
+                                        }
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                                        decoration: BoxDecoration(
+                                          border: Border.all(color: t.bgRule),
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.login_rounded, size: 12, color: t.accent),
+                                            const SizedBox(width: 3),
+                                            Text(s['startTime'] ?? '09:00 AM', style: TextStyle(fontSize: 11, color: t.textPrimary, fontWeight: FontWeight.bold)),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    // Exit / End Time
+                                    InkWell(
+                                      onTap: () async {
+                                        final picked = await showTimePicker(context: ctx, initialTime: TimeOfDay.now());
+                                        if (picked != null) {
+                                          final now = DateTime.now();
+                                          final dt = DateTime(now.year, now.month, now.day, picked.hour, picked.minute);
+                                          setState(() => s['endTime'] = DateFormat('hh:mm a').format(dt));
+                                        }
+                                      },
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                                        decoration: BoxDecoration(
+                                          border: Border.all(color: t.bgRule),
+                                          borderRadius: BorderRadius.circular(6),
+                                        ),
+                                        child: Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.logout_rounded, size: 12, color: t.danger),
+                                            const SizedBox(width: 3),
+                                            Text(s['endTime'] ?? '01:00 PM', style: TextStyle(fontSize: 11, color: t.textPrimary, fontWeight: FontWeight.bold)),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 4),
+                                    // Delete session
+                                    IconButton(
+                                      icon: Icon(Icons.close_rounded, size: 15, color: t.danger),
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
+                                      onPressed: () {
+                                        setState(() => employeeSessions.removeAt(idx));
+                                      },
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }),
+                        ],
+                      ),
                     ),
-                  ),
+                  ],
 
                   const SizedBox(height: 12),
 
@@ -1532,27 +1598,41 @@ void openEmployeeFormSheet(
                     .where((c) => (c['name']?.isNotEmpty == true) && (c['phone']?.isNotEmpty == true))
                     .toList();
 
-                final List<String> computedCamps = employeeSessions
-                    .map((s) => s['camp'] ?? '')
-                    .where((c) => c.isNotEmpty)
-                    .toSet()
-                    .toList();
-                if (computedCamps.isEmpty && selectedCamps.isNotEmpty) {
-                  computedCamps.addAll(selectedCamps);
+                final targetBranchId = selectedBranchId.isNotEmpty ? selectedBranchId : (existing['branchId']?.toString() ?? activeBranchId);
+                final bool hasBranchCamps = branchHasCamps(targetBranchId);
+
+                final List<String> computedCamps = hasBranchCamps
+                    ? employeeSessions
+                        .map((s) => s['camp'] ?? '')
+                        .where((c) => c.isNotEmpty && availableCamps.contains(c))
+                        .toSet()
+                        .toList()
+                    : <String>[];
+                if (hasBranchCamps && computedCamps.isEmpty && selectedCamps.isNotEmpty) {
+                  computedCamps.addAll(selectedCamps.where((c) => availableCamps.contains(c)));
                 }
 
+                final List<Map<String, String>> finalSessions = hasBranchCamps
+                    ? employeeSessions.where((s) => availableCamps.contains(s['camp'])).toList()
+                    : <Map<String, String>>[];
+
                 String formattedShiftHours = '09:00 AM - 05:00 PM';
-                if (employeeSessions.isNotEmpty) {
-                  formattedShiftHours = employeeSessions
+                if (finalSessions.isNotEmpty) {
+                  formattedShiftHours = finalSessions
                       .map((s) => '${s['camp']}: ${s['startTime']} - ${s['endTime']}')
                       .join(' | ');
                 } else if (winterShiftController.text.trim().isNotEmpty) {
                   formattedShiftHours = winterShiftController.text.trim();
                 }
 
+                final List<String> allowedBranches = hasBranchCamps && CampSessionService.isKarachiFamily(targetBranchId)
+                    ? ['karachi', 'saddar', 'haji_camp', targetBranchId]
+                    : [targetBranchId];
+
+                final resolvedSaveId = (isEdit ? (existing['localId'] ?? existing['id'] ?? cleanEmpId) : _uuid.v4()).toString();
                 final employeeData = <String, dynamic>{
-                  if (isEdit) 'id': employeeId,
-                  if (isEdit) 'localId': employeeId,
+                  'id': resolvedSaveId,
+                  'localId': resolvedSaveId,
                   'name': rawName,
                   'gender': gender,
                   'dob': dobController.text.isNotEmpty ? dobController.text.trim() : null,
@@ -1576,10 +1656,10 @@ void openEmployeeFormSheet(
                   'emergencyContacts': validContacts,
                   'workScheduleOverride': scheduleOverride,
                   'camps': computedCamps,
-                  'sessions': employeeSessions,
+                  'sessions': finalSessions,
                   'shiftHours': formattedShiftHours,
                   'workingHours': formattedShiftHours,
-                  'allowedBranches': ['karachi', 'saddar', 'haji_camp', selectedBranchId],
+                  'allowedBranches': allowedBranches,
                   'isActive': existing['isActive'] ?? true,
                   'biometricPin': enteredPin.isNotEmpty ? enteredPin : null,
                   'monthlyAdvanceInstallment': monthlyInstallmentController.text.trim().isNotEmpty
@@ -1593,8 +1673,6 @@ void openEmployeeFormSheet(
                   'identificationBackUrl': idBackUrl,
                   'identificationBackPath': idBackPath,
                 };
-
-                final targetBranchId = selectedBranchId.isNotEmpty ? selectedBranchId : (existing['branchId']?.toString() ?? activeBranchId);
 
                 // 1. Instant local save (Hive) + Local audit trail + Biometric cred mapping + Server sync enqueue + LAN WebSocket + Background upload
                 final empLocalId = await FinanceLocalStorage.saveEmployee(

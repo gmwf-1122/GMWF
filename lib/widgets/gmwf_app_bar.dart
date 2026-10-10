@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../realtime/connection_manager.dart';
+import '../realtime/realtime_manager.dart';
 import '../services/user_theme_service.dart';
 import '../design/tokens/breakpoints.dart';
 import 'lan_server_config_dialog.dart';
@@ -340,8 +341,23 @@ class GmwfAppBar extends StatelessWidget implements PreferredSizeWidget {
     required ConnectionStatus status,
     required bool isCompact,
   }) {
-    final isConnected = status.isConnected;
-    final isSearching = status.isSearching || status.isConnecting;
+    // Re-evaluate every 2 s so the pill follows the real link state without waiting for a rebuild.
+    return StreamBuilder<int>(
+      stream: Stream<int>.periodic(const Duration(seconds: 2), (i) => i),
+      builder: (_, __) => _buildLanStatusPillNow(context: context, isDark: isDark, status: status, isCompact: isCompact),
+    );
+  }
+
+  Widget _buildLanStatusPillNow({
+    required BuildContext context,
+    required bool isDark,
+    required ConnectionStatus status,
+    required bool isCompact,
+  }) {
+    final rm = RealtimeManager();
+    // Liveness, not a cached snapshot: stays accurate when the server disappears or changes.
+    final isConnected = rm.isLinkAlive;
+    final isSearching = !isConnected && (status.isSearching || status.isConnecting);
 
     Color badgeBg = const Color(0xFFD1FAE5);
     Color dotColor = const Color(0xFF10B981);
@@ -360,6 +376,9 @@ class GmwfAppBar extends StatelessWidget implements PreferredSizeWidget {
       dotColor = const Color(0xFFEF4444);
       statusLabel = 'Disconnected';
     }
+
+    final displayIp = status.ip ?? rm.serverIp;
+    final displayPort = status.port ?? rm.port;
 
     return InkWell(
       onTap: () {
@@ -428,8 +447,8 @@ class GmwfAppBar extends StatelessWidget implements PreferredSizeWidget {
                 ),
                 if (!isCompact) ...[
                   Text(
-                    status.ip != null
-                        ? '${status.ip}:${status.port}'
+                    displayIp != null
+                        ? '$displayIp:$displayPort'
                         : 'LAN Local',
                     style: TextStyle(
                       fontSize: 9.5,

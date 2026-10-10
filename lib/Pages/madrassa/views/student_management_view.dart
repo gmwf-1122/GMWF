@@ -88,19 +88,19 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
   final Map<String, PhotoUploadStatus> _uploadStates = {};
   final Set<String> _expandedStudentIds = {};
   bool _showFilters = false;
-
+  String get _effectiveBranch => MadrassaLocalStorage.normalizeBranch(widget.branchId);
 
   @override
   void initState() {
     super.initState();
-    MadrassaLocalStorage.downloadStudents(widget.branchId);
+    MadrassaLocalStorage.downloadStudents(_effectiveBranch);
   }
 
   @override
   void didUpdateWidget(covariant StudentManagementView oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.branchId != widget.branchId) {
-      MadrassaLocalStorage.downloadStudents(widget.branchId);
+      MadrassaLocalStorage.downloadStudents(_effectiveBranch);
     }
   }
 
@@ -184,7 +184,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
       int skippedCount = 0;
       final now = DateTime.now();
 
-      final cachedStudents = MadrassaLocalStorage.getAllStudentsCached(widget.branchId);
+      final cachedStudents = MadrassaLocalStorage.getAllStudentsCached(_effectiveBranch);
       final existingRollNumbers = cachedStudents
           .map((d) => d['rollNumber']?.toString().trim())
           .whereType<String>()
@@ -247,7 +247,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
           'hasPrevMadrassa': hasPrevMadrassa || prevMadrassaName.isNotEmpty,
           'prevMadrassaName': prevMadrassaName,
           'prevHifzLines': prevHifzLines,
-          'branchId': widget.branchId,
+          'branchId': _effectiveBranch,
           'status': 'active',
           'batch': 'active',
           'auditLog': [
@@ -266,7 +266,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
         };
 
         final savedId = await MadrassaLocalStorage.saveStudentLocalAndSync(
-          branchId: widget.branchId,
+          branchId: _effectiveBranch,
           studentId: (docId != null && docId.isNotEmpty) ? docId : '',
           data: finalData,
           isNew: true,
@@ -504,7 +504,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
       MaterialPageRoute(
         builder: (_) => StudentDetailPage(
           studentData: studentData,
-          branchId: widget.branchId,
+          branchId: _effectiveBranch,
           isAdmin: _effectiveIsAdmin,
           username: widget.username,
           role: widget.role,
@@ -515,7 +515,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
 
   void _showStudentProgressDialog(BuildContext context, Map<String, dynamic> studentData) {
     final studentId = studentData['id']?.toString() ?? '';
-    final branchId = widget.branchId;
+    final branchId = _effectiveBranch;
 
     final totalLines = 8640;
     final currentLines = (studentData['currentLines'] as num?)?.toInt() ?? 0;
@@ -571,7 +571,13 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
       context: context,
       builder: (_) => StudentProgressDialog(
         studentName: studentData['name'] ?? 'Student',
-        photoUrl: studentData['photoUrl'],
+        photoUrl: studentData['photoUrl'] ??
+            studentData['photo_url'] ??
+            studentData['photoBase64'] ??
+            studentData['studentPhotoBase64'] ??
+            studentData['avatarUrl'] ??
+            studentData['imageUrl'] ??
+            studentData['profileImage'],
         className: isNazra ? 'Nazra' : (studentData['class']?.toString() ?? 'Hifz'),
         rollNumber: studentData['rollNumber']?.toString() ?? '?',
         joinDate: joinDate,
@@ -835,7 +841,17 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                         padding: EdgeInsets.all(6.0),
                         child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF008080)),
                       )
-                    : _buildStudentAvatar(d['photoUrl']?.toString(), d['name']?.toString(), size: 40),
+                    : _buildStudentAvatar(
+                        (d['photoUrl'] ??
+                         d['photo_url'] ??
+                         d['photoBase64'] ??
+                         d['studentPhotoBase64'] ??
+                         d['avatarUrl'] ??
+                         d['imageUrl'] ??
+                         d['profileImage'])?.toString(),
+                        d['name']?.toString(),
+                        size: 40,
+                      ),
               ),
             ),
           ),
@@ -1026,7 +1042,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                     children: [
                       StatusActionMenu(
                         student: s,
-                        branchId: widget.branchId,
+                        branchId: _effectiveBranch,
                         isAdmin: _effectiveIsAdmin,
                         t: RoleThemeScope.dataOf(context),
                         username: widget.username,
@@ -1155,7 +1171,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
         final textPrimary = isDark ? Colors.white : const Color(0xFF1A1C1E);
         final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7);
 
-        final studentsAsync = ref.watch(madrassaStudentsProvider(widget.branchId));
+        final studentsAsync = ref.watch(madrassaStudentsProvider(_effectiveBranch));
 
         return Scaffold(
           backgroundColor: scaffoldBg,
@@ -1292,7 +1308,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                 if (isMobile) {
                   return RefreshIndicator(
                     onRefresh: () async {
-                      await MadrassaLocalStorage.downloadStudents(widget.branchId, force: true);
+                      await MadrassaLocalStorage.downloadStudents(_effectiveBranch, force: false);
                       if (mounted) setState(() {});
                     },
                     child: ListView(
@@ -1312,7 +1328,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
 
                 return RefreshIndicator(
                   onRefresh: () async {
-                    await MadrassaLocalStorage.downloadStudents(widget.branchId, force: true);
+                    await MadrassaLocalStorage.downloadStudents(_effectiveBranch, force: false);
                     if (mounted) setState(() {});
                   },
                   child: SingleChildScrollView(
@@ -2170,12 +2186,12 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
         return;
       }
 
-      final studentCache = MadrassaLocalStorage.getStudentCached(widget.branchId, studentId) ?? {'id': studentId, 'branchId': widget.branchId};
+      final studentCache = MadrassaLocalStorage.getStudentCached(_effectiveBranch, studentId) ?? {'id': studentId, 'branchId': _effectiveBranch};
       studentCache['photoUrl'] = b64;
       studentCache['photoBase64'] = b64;
       studentCache['studentPhotoBase64'] = b64;
       studentCache['lastUpdatedAt'] = DateTime.now().toIso8601String();
-      await MadrassaLocalStorage.cacheStudent(widget.branchId, studentId, studentCache);
+      await MadrassaLocalStorage.cacheStudent(_effectiveBranch, studentId, studentCache);
 
       // Broadcast to LAN WebSocket
       try {
@@ -2185,7 +2201,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
             ...studentCache,
             'studentId': studentId,
           },
-          branchId: widget.branchId,
+          branchId: _effectiveBranch,
         );
         RealtimeManager().sendMessage(payload);
       } catch (e) {
@@ -2195,7 +2211,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
       // Always enqueue sync
       await LocalStorageService.enqueueSync({
         'type': 'save_madrassa_student',
-        'branchId': widget.branchId,
+        'branchId': _effectiveBranch,
         'studentId': studentId,
         'data': studentCache,
       });

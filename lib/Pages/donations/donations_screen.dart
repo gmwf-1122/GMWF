@@ -1,6 +1,7 @@
 // lib/pages/donations/donations_screen.dart
 
 import 'package:flutter/material.dart';
+import '../../widgets/lazy_indexed_stack.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -456,7 +457,7 @@ class _DonationsScreenState extends ConsumerState<DonationsScreen> with TickerPr
                         controller: _mobileTabController,
                         children: views,
                       )
-                    : IndexedStack(
+                    : LazyIndexedStack(
                         index: _selectedDesktopTab,
                         children: views,
                       ),

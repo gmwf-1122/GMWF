@@ -169,6 +169,17 @@ class RequestPage extends StatefulWidget {
   State<RequestPage> createState() => _RequestPageState();
 }
 
+/// The Firestore write stream on Windows desktop can hang forever. Local state + LAN broadcast
+/// are the source of truth here and the sync queue pushes to the cloud later, so a cloud write
+/// must never block an approval: wait briefly, then carry on.
+Future<void> _bestEffort(Future<dynamic> f, [String label = 'cloud write']) async {
+  try {
+    await f.timeout(const Duration(seconds: 3));
+  } catch (e) {
+    debugPrint('[RequestPage] $label skipped (queued for sync): $e');
+  }
+}
+
 class _RequestPageState extends State<RequestPage>
     with TickerProviderStateMixin {
   late final TabController _tabCtrl;
@@ -2430,13 +2441,13 @@ class _StableRequestTabState extends State<_StableRequestTab>
             .collection(collection)
             .doc(docId);
 
-        await ref.set({
+        await _bestEffort(ref.set({
           'status':     'approved',
           'reviewedAt': FieldValue.serverTimestamp(),
           'reviewedBy': reviewerUid,
           if (reviewerName != null) 'reviewedByName': reviewerName,
           if (docReason != null) 'doctorReason': docReason,
-        }, SetOptions(merge: true));
+        }, SetOptions(merge: true)));
       } catch (e) {
         debugPrint('[RequestPage] Firestore direct approval failed for $bId: $e');
       }
@@ -2496,7 +2507,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
           .doc(widget.branchId)
           .collection('patients');
 
-      await patientsRef.doc(patientId).update(toApply);
+      await _bestEffort(patientsRef.doc(patientId).update(toApply), 'patient update');
 
       try {
         if (Hive.isBoxOpen(LocalStorageService.patientsBox)) {
@@ -2549,19 +2560,29 @@ class _StableRequestTabState extends State<_StableRequestTab>
           ? (parts.length > 1 ? parts[1] : '')
           : (parts.isNotEmpty ? parts[0] : '');
 
-      await FirebaseFirestore.instance
+      // Local delete + LAN broadcast FIRST so the token reverses instantly everywhere.
+      await LocalStorageService.deleteLocalEntry(widget.branchId, tokenSerial);
+      await LocalStorageService.enqueueSync({
+        'type': 'token_reversal',
+        'branchId': widget.branchId,
+        'serial': tokenSerial,
+        'dateKey': dateKey,
+        'data': {
+          'tokenSerial': tokenSerial,
+          'queueType': queueCollection,
+          'dateKey': dateKey,
+        },
+      });
+      unawaited(_bestEffort(FirebaseFirestore.instance
           .collection('branches')
           .doc(widget.branchId)
           .collection('serials')
           .doc(dateKey)
           .collection(queueCollection)
           .doc(tokenSerial)
-          .delete();
+          .delete(), 'token delete'));
 
-      await LocalStorageService.deleteLocalEntry(
-          widget.branchId, tokenSerial);
-
-            try {
+      try {
         RealtimeManager().sendMessage({
           'event_type': 'token_reversal_approved',
           'data': {
@@ -2575,19 +2596,6 @@ class _StableRequestTabState extends State<_StableRequestTab>
         debugPrint('Failed to broadcast token reversal: $e');
       }
 
-      if (!RealtimeManager().isConnected) {
-        await LocalStorageService.enqueueSync({
-          'type': 'token_reversal',
-          'branchId': widget.branchId,
-          'serial': tokenSerial,
-          'dateKey': dateKey,
-          'data': {
-            'tokenSerial': tokenSerial,
-            'queueType': queueCollection,
-            'dateKey': dateKey,
-          },
-        });
-      }
     }
     else if (requestType == 'add_stock') {
       final itemsToUse = _safeItemList(data['draftItems']).isNotEmpty
@@ -2632,9 +2640,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
             .doc(widget.branchId)
             .collection('medicine_restrictions');
         
-        await restrictionsRef.doc(patientId).delete().catchError((e) {
-          debugPrint('Note: Restriction doc $patientId already gone or error: $e');
-        });
+        unawaited(_bestEffort(restrictionsRef.doc(patientId).delete(), 'restriction delete'));
 
         await LocalStorageService.grantTokenException(
           widget.branchId,
@@ -2693,7 +2699,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
             docData['dispensaryTag'] = CampSessionService.getDispensaryKeyword(reqCampId);
           }
           
-          await inventory.doc(id).set(docData);
+          unawaited(_bestEffort(inventory.doc(id).set(docData), 'register medicine'));
 
           // Save locally to Hive stockBox and broadcast immediately via LAN/WebSocket
           final localStockData = <String, dynamic>{
@@ -2716,7 +2722,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
             ),
           });
           
-          await FirebaseFirestore.instance
+          unawaited(_bestEffort(FirebaseFirestore.instance
               .collection('branches')
               .doc(widget.branchId)
               .collection('inventory_log')
@@ -2734,7 +2740,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
             'docId': id,
             'approvedRequestId': docId,
             if (reqCampId != null) 'dispensaryId': reqCampId,
-          });
+          }), 'inventory log'));
         }
       }
     }
@@ -2849,14 +2855,14 @@ class _StableRequestTabState extends State<_StableRequestTab>
                 .collection(collection)
                 .doc(docId);
 
-            await targetRef.set({
+            await _bestEffort(targetRef.set({
               'status':     newStatus,
               'reviewedAt': FieldValue.serverTimestamp(),
               'reviewedBy': reviewerUid,
               if (reviewerName != null) 'reviewedByName': reviewerName,
               if (docReason != null) 'doctorReason': docReason,
               if (docReason != null && newStatus == 'rejected') 'rejectionReason': docReason,
-            }, SetOptions(merge: true));
+            }, SetOptions(merge: true)));
           } catch (e) {
             debugPrint('[RequestPage] Firestore direct rejection update failed for $bId: $e');
           }
@@ -2973,7 +2979,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
         distilledWater: distilledWater, drops: drops, campId: campId,
       );
 
-      final warehouseSnap = await warehouse.doc(warehouseId).get();
+      final warehouseSnap = await warehouse.doc(warehouseId).get().timeout(const Duration(seconds: 5));
 
       final commonFields = <String, dynamic>{
         'name':           name,
@@ -3024,7 +3030,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
         invQuery = invQuery.where('expiryDate', isEqualTo: expiry);
       }
 
-      final existingQuery = await invQuery.limit(1).get();
+      final existingQuery = await invQuery.limit(1).get().timeout(const Duration(seconds: 5));
 
       final Map<String, dynamic> fullInventoryData = Map.from(commonFields);
       if (type == 'Nebulization') {
@@ -3054,6 +3060,36 @@ class _StableRequestTabState extends State<_StableRequestTab>
         batch.set(inventory.doc(inventoryId), fullInventoryData);
       }
 
+      // Local-first: apply to Hive and tell every device on the LAN right away.
+      final localId = existingQuery.docs.isNotEmpty
+          ? existingQuery.docs.first.id
+          : RequestUtils.generateDocId(
+              name, type, variantForId, expiry,
+              distilledWater: distilledWater, drops: drops, campId: campId,
+            );
+      final localExisting = LocalStorageService.getLocalInventoryItem(localId);
+      final cloudQty = existingQuery.docs.isNotEmpty
+          ? _safeInt((existingQuery.docs.first.data() as Map<String, dynamic>? ?? {})['quantity'])
+          : 0;
+      final baseQty = localExisting != null ? _safeInt(localExisting['quantity']) : cloudQty;
+      final localItem = <String, dynamic>{
+        ...fullInventoryData,
+        if (localExisting != null) ...localExisting,
+        'id': localId,
+        'branchId': widget.branchId,
+        'quantity': baseQty + qty,
+        'price': price,
+        'formula': formula,
+        'classification': classification,
+        'updatedAt': DateTime.now().toIso8601String(),
+      };
+      LocalStorageService.saveLocalInventoryItem(localItem);
+      RealtimeManager().sendMessage({
+        'event_type': RealtimeEvents.saveStockItem,
+        'branchId': widget.branchId,
+        'data': localItem,
+      });
+
       operationCount++;
     }
 
@@ -3063,8 +3099,8 @@ class _StableRequestTabState extends State<_StableRequestTab>
     }
 
     debugPrint('Committing batch with $operationCount operations...');
-    await batch.commit();
-    debugPrint('✅ Batch commit successful for add_stock');
+    unawaited(_bestEffort(batch.commit(), 'add_stock commit'));
+    debugPrint('add_stock applied locally; cloud commit queued');
   }
 
   Future<void> _handleEditMedicine(
@@ -3179,7 +3215,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
         if (campId != null) 'dispensaryId': campId,
       });
     }
-    await batch.commit();
+    unawaited(_bestEffort(batch.commit(), 'edit_medicine commit'));
   }
 
   Future<void> _handleDeleteMedicine(
@@ -3206,8 +3242,14 @@ class _StableRequestTabState extends State<_StableRequestTab>
         distilledWater: distilledWater, drops: drops, campId: campId,
       );
       batch.delete(inventory.doc(id));
+      await LocalStorageService.deleteLocalStockItem(id);
+      RealtimeManager().sendMessage({
+        'event_type': RealtimeEvents.deleteStockItem,
+        'id': id,
+        'branchId': widget.branchId,
+      });
     }
-    await batch.commit();
+    unawaited(_bestEffort(batch.commit(), 'delete_medicine commit'));
   }
 
   Future<void> _handleChangePrescription(Map<String, dynamic> data,

@@ -1110,13 +1110,10 @@ class CampSessionService {
 
     // 2. Facility filter if specified
     if (facilityId != null && facilityId.isNotEmpty) {
-      final fac = facilityId.toLowerCase().trim();
-      if (fac.contains('saddar') || fac.contains('sadd') || fac.contains('kap')) {
-        return ['morning'];
-      }
-      if (fac.contains('haji')) {
-        return ['evening'];
-      }
+      // NOTE: Saddar used to be hard-wired to "morning only" and Haji to "evening only". That made an
+      // evening shift at Saddar show "Morning" no matter the time or the user's assignment. Sessions
+      // now come from the branch/facility configuration below (if it lists `sessions`) and otherwise
+      // follow the clock, like every other facility.
       if (branchId != null) {
         try {
           if (Hive.isBoxOpen('local_branches')) {
@@ -2012,9 +2009,12 @@ class CampSessionService {
       if (empId != null && empId.isNotEmpty) {
         final emp = FinanceLocalStorage.getEmployee(empId);
         if (emp != null) {
-          final empCamp = emp['camp'] ?? emp['camps'] ?? emp['dispensary'] ?? emp['branch'];
-          if (empCamp != null) {
-            addCandidate(empCamp);
+          final empBranch = (emp['branchId'] ?? '').toString().toLowerCase().trim();
+          if (empBranch.isEmpty || hasCampsForBranch(empBranch) || isKarachiFamily(empBranch)) {
+            final empCamp = emp['camp'] ?? emp['camps'] ?? emp['dispensary'] ?? emp['branch'];
+            if (empCamp != null) {
+              addCandidate(empCamp);
+            }
           }
         }
       }

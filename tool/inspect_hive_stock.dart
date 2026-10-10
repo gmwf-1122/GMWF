@@ -1,36 +1,67 @@
 import 'dart:io';
 import 'package:hive/hive.dart';
 
-void main() async {
-  final hiveDir = Directory(r'C:\Users\win\AppData\Roaming\com.example\gmwf\gmwf_hive');
-  Hive.init(hiveDir.path);
-  final box = await Hive.openBox('local_stock');
-  print('Total keys in local_stock Hive: ${box.length}');
-  int hajiCount = 0;
-  int saddarCount = 0;
-  for (final k in box.keys) {
-    if (k.toString().startsWith('stock:')) continue;
-    final id = k.toString().toLowerCase();
-    if (id.startsWith('haji')) hajiCount++;
-    if (id.startsWith('saddar')) saddarCount++;
+class Fallback132Adapter extends TypeAdapter<dynamic> {
+  @override
+  final int typeId = 132;
+  @override
+  dynamic read(BinaryReader reader) {
+    try {
+      final numOfFields = reader.readByte();
+      final map = <dynamic, dynamic>{};
+      for (var i = 0; i < numOfFields; i++) {
+        final key = reader.read();
+        final value = reader.read();
+        map[key] = value;
+      }
+      return map;
+    } catch (_) {
+      return null;
+    }
   }
-  print('Haji items in Hive: $hajiCount');
-  print('Saddar items in Hive: $saddarCount');
+  @override
+  void write(BinaryWriter writer, dynamic obj) {}
+}
 
-  print('\nSample Saddar items in Hive:');
+class TimestampDummy {
+  final int seconds;
+  final int nanoseconds;
+  TimestampDummy(this.seconds, this.nanoseconds);
+}
+
+class TimestampAdapterDummy extends TypeAdapter<TimestampDummy> {
+  @override
+  final int typeId = 100;
+  @override
+  TimestampDummy read(BinaryReader reader) {
+    return TimestampDummy(reader.readInt(), reader.readInt());
+  }
+  @override
+  void write(BinaryWriter writer, TimestampDummy obj) {
+    writer.writeInt(obj.seconds);
+    writer.writeInt(obj.nanoseconds);
+  }
+}
+
+void main() async {
+  final tempDir = Directory.systemTemp.createTempSync('hive_inspect');
+  final srcFile = File(r'C:\Users\win\AppData\Roaming\com.example\gmwf\gmwf_hive\local_stock_items.hive');
+  srcFile.copySync('${tempDir.path}\\local_stock_items.hive');
+  Hive.init(tempDir.path);
+  Hive.registerAdapter(Fallback132Adapter(), override: true);
+  Hive.registerAdapter(TimestampAdapterDummy(), override: true);
+  final box = await Hive.openBox('local_stock_items');
+  print('Total keys in local_stock_items Hive: ${box.length}');
   int count = 0;
   for (final k in box.keys) {
-    if (k.toString().startsWith('stock:')) continue;
-    final id = k.toString().toLowerCase();
-    if (id.startsWith('saddar')) {
-      final v = box.get(k);
-      if (v is Map) {
-        print(' - ${v['name']} (${v['type']} ${v['dose']}) | Qty: ${v['quantity']} | id: $id');
+    final v = box.get(k);
+    if (v is Map) {
+      if (v['branchId'] == 'karachi' || (v['branchId'] == null && (v['campId'] != null || v['dispensaryId'] != null))) {
+        print('KARACHI ITEM: key=$k | map=$v');
         count++;
         if (count >= 10) break;
       }
     }
   }
-
   await box.close();
 }

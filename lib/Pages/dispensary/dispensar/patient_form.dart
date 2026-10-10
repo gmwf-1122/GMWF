@@ -5,7 +5,6 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:printing/printing.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:another_flushbar/flushbar.dart';
@@ -18,6 +17,8 @@ import 'package:gmwf/services/sync_service.dart';
 import 'patient_form_helper.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
+import 'package:gmwf/realtime/connection_manager.dart';
+import 'package:gmwf/services/network_health_service.dart';
 import 'package:gmwf/theme/app_theme.dart';
 import 'package:gmwf/theme/role_theme_provider.dart';
 import 'package:gmwf/widgets/file_action_helper.dart';
@@ -306,26 +307,49 @@ class _PatientFormState extends State<PatientForm> {
           found = presc;
         }
       }
-      if (found.isEmpty) {
+      if (found.isEmpty && Hive.isBoxOpen(LocalStorageService.entriesBox)) {
         final normB = widget.branchId.toLowerCase().trim();
         final normS = serial.toLowerCase();
-        for (final k in Hive.box(LocalStorageService.entriesBox).keys) {
-          final kStr = k.toString().toLowerCase();
-          if (kStr == '$normB-$normS' || kStr.endsWith('-$normS') || kStr == normS) {
-            final entry = Hive.box(LocalStorageService.entriesBox).get(k);
-            final embedded = (entry is Map) ? entry['prescription'] : null;
-            if (embedded is Map && embedded.isNotEmpty) {
-              found = Map<String, dynamic>.from(embedded);
-              break;
+        final eBox = Hive.box(LocalStorageService.entriesBox);
+        final direct = eBox.get('$normB-$normS') ??
+            eBox.get('$normB-${normS.toUpperCase()}') ??
+            eBox.get(normS) ??
+            eBox.get(normS.toUpperCase());
+        if (direct is Map && direct['prescription'] is Map && (direct['prescription'] as Map).isNotEmpty) {
+          found = Map<String, dynamic>.from(direct['prescription'] as Map);
+        } else {
+          for (final k in eBox.keys) {
+            final kStr = k.toString().toLowerCase();
+            if (kStr == '$normB-$normS' || kStr.endsWith('-$normS') || kStr == normS) {
+              final entry = eBox.get(k);
+              final embedded = (entry is Map) ? entry['prescription'] : null;
+              if (embedded is Map && embedded.isNotEmpty) {
+                found = Map<String, dynamic>.from(embedded);
+                break;
+              }
             }
           }
         }
       }
-      if (found.isEmpty && serial.isNotEmpty && cnic.isNotEmpty) {
+      final status = (widget.queueEntry['status'] ?? '').toString().toLowerCase();
+      final isPrescribedOrCompleted = status == 'completed' ||
+          status == 'dispensed' ||
+          (widget.queueEntry['dispenseStatus'] ?? '').toString().toLowerCase() == 'dispensed';
+
+      // Zero-Quota & Offline Guard: Only attempt cloud Firestore fallback if:
+      // 1. Record is supposed to have a prescription (completed/dispensed)
+      // 2. LAN server is NOT connected (server has full local cache)
+      // 3. Device has stable internet
+      final bool canAttemptCloud = isPrescribedOrCompleted &&
+          !RealtimeManager().isConnected &&
+          !ConnectionManager().isConnected &&
+          NetworkHealthService().isStableOnline;
+
+      if (found.isEmpty && serial.isNotEmpty && cnic.isNotEmpty && canAttemptCloud) {
         found = await _fetchFromPrescriptionsByCnic(serial, cnic);
         if (found.isNotEmpty) await LocalStorageService.saveLocalPrescription(found);
       }
-      if (found.isEmpty && serial.isNotEmpty) {
+      if (found.isEmpty && serial.isNotEmpty && canAttemptCloud) {
         found = await _fetchFromSerialsEmbedded(serial);
         if (found.isNotEmpty) await LocalStorageService.saveLocalPrescription(found);
       }
@@ -696,8 +720,19 @@ class _PatientFormState extends State<PatientForm> {
           }
         }
 
+        // Deduplicate batches by ID before sorting (handles stock:$id vs $id dual keys)
+        final Map<String, Map<String, dynamic>> uniqueBatches = {};
+        for (final b in matchingBatches) {
+          final id = (b['id'] ?? b['medicineId'] ?? b['_hiveKey'] ?? '').toString().trim().toLowerCase();
+          final canonId = id.startsWith('stock:') ? id.substring(6) : id;
+          if (!uniqueBatches.containsKey(canonId)) {
+            uniqueBatches[canonId] = b;
+          }
+        }
+        final dedupedBatches = uniqueBatches.values.toList();
+
         // Sort matching batches by expiry date ascending (FEFO: earliest first)
-        matchingBatches.sort((a, b) {
+        dedupedBatches.sort((a, b) {
           final expA = MasterProformaService.parseExpiryDate(a['expiryDate'] ?? a['expiry'], (a['id'] ?? a['medicineId'])?.toString());
           final expB = MasterProformaService.parseExpiryDate(b['expiryDate'] ?? b['expiry'], (b['id'] ?? b['medicineId'])?.toString());
           return expA.compareTo(expB);
@@ -707,7 +742,7 @@ class _PatientFormState extends State<PatientForm> {
         final List<Map<String, dynamic>> medDeductions = [];
 
         // Deduct from earlier expiry batches first
-        for (final batch in matchingBatches) {
+        for (final batch in dedupedBatches) {
           if (remainingToDeduct <= 0) break;
           final q = batch['quantity'];
           final currentQty = q is num ? q.toDouble() : double.tryParse(q?.toString() ?? '') ?? 0.0;
@@ -719,9 +754,18 @@ class _PatientFormState extends State<PatientForm> {
 
           final updated = Map<String, dynamic>.from(batch);
           updated['quantity'] = newQty;
-          final hiveKey = batch['_hiveKey'];
+          final hiveKey = batch['_hiveKey']?.toString() ?? '';
           updated.remove('_hiveKey');
-          stockBox.put(hiveKey, updated);
+          if (hiveKey.isNotEmpty) {
+            stockBox.put(hiveKey, updated);
+            final rawId = (batch['id'] ?? batch['medicineId'] ?? batch['docId'] ?? '').toString().trim();
+            if (rawId.isNotEmpty) {
+              final peerKey = hiveKey.startsWith('stock:') ? rawId : 'stock:$rawId';
+              if (stockBox.containsKey(peerKey)) {
+                stockBox.put(peerKey, updated);
+              }
+            }
+          }
 
           final bId = (batch['id'] ?? batch['medicineId'] ?? batch['docId'] ?? hiveKey).toString();
           final dedInfo = {
@@ -738,16 +782,26 @@ class _PatientFormState extends State<PatientForm> {
 
         // If stock was insufficient across all non-zero batches, deduct any remaining
         // from the first batch (or primary match) so it is accounted for
-        if (remainingToDeduct > 0 && matchingBatches.isNotEmpty) {
-          final primary = matchingBatches.first;
+        if (remainingToDeduct > 0 && dedupedBatches.isNotEmpty) {
+          final primary = dedupedBatches.first;
           final hiveKey = primary['_hiveKey'];
           final existingPrimary = stockBox.get(hiveKey);
           if (existingPrimary is Map) {
             final updated = Map<String, dynamic>.from(existingPrimary);
             final cur = (updated['quantity'] as num?)?.toDouble() ?? 0.0;
             updated['quantity'] = (cur - remainingToDeduct).clamp(0.0, double.infinity);
+            final hKey = hiveKey?.toString() ?? '';
             updated.remove('_hiveKey');
-            stockBox.put(hiveKey, updated);
+            if (hKey.isNotEmpty) {
+              stockBox.put(hKey, updated);
+              final rawId = (primary['id'] ?? primary['medicineId'] ?? primary['docId'] ?? '').toString().trim();
+              if (rawId.isNotEmpty) {
+                final peerKey = hKey.startsWith('stock:') ? rawId : 'stock:$rawId';
+                if (stockBox.containsKey(peerKey)) {
+                  stockBox.put(peerKey, updated);
+                }
+              }
+            }
 
             final bId = (primary['id'] ?? primary['medicineId'] ?? primary['docId'] ?? hiveKey).toString();
             final dedInfo = {
@@ -824,7 +878,11 @@ class _PatientFormState extends State<PatientForm> {
 
         // Branch filter
         final b = (m['branchId'] ?? '').toString().toLowerCase().trim();
-        if (b.isNotEmpty && normBranch.isNotEmpty && b != normBranch && !b.contains(normBranch) && !normBranch.contains(b)) {
+        final matchesBranch = b.isEmpty || normBranch.isEmpty || normBranch == 'all' ||
+            CampSessionService.areBranchesMatching(normBranch, b) ||
+            (CampSessionService.isKarachiFamily(normBranch) && CampSessionService.isKarachiFamily(b)) ||
+            b == normBranch || b.contains(normBranch) || normBranch.contains(b);
+        if (!matchesBranch) {
           continue;
         }
 
@@ -1061,13 +1119,12 @@ class _PatientFormState extends State<PatientForm> {
 
   // ─── Dispense ─────────────────────────────────────────────────────────────
   Future<void> _dispenseOnly() async {
-    if (_isDispensed) return;
+    if (_isDispensed || _isDispensing) return;
     final days = _daysOfMedicine;
 
     final allPrescriptions = _getPrescriptionsList();
     final medicines = allPrescriptions
-        .where((m) => m is Map &&
-            (m['inventoryId'] != null || m['medicineId'] != null || m['id'] != null))
+        .where((m) => m is Map && PatientFormHelper.isInventoryMed(m))
         .toList();
 
     // Check stock levels across all matching batches
@@ -1124,12 +1181,19 @@ class _PatientFormState extends State<PatientForm> {
       }
 
       double totalAvailableStock = 0.0;
+      final seenStockCheckIds = <String>{};
 
       for (final key in stockBox.keys) {
         final val = stockBox.get(key);
         if (val is! Map) continue;
         final vMap = Map<String, dynamic>.from(val);
         final vKey = key.toString();
+
+        final rawId = (vMap['id'] ?? vMap['docId'] ?? (vKey.startsWith('stock:') ? vKey.substring(6) : vKey)).toString().trim();
+        if (rawId.isNotEmpty) {
+          if (seenStockCheckIds.contains(rawId)) continue;
+          seenStockCheckIds.add(rawId);
+        }
 
         // Branch filter
         final b = (vMap['branchId'] ?? '').toString().toLowerCase().trim();
@@ -1503,8 +1567,7 @@ class _PatientFormState extends State<PatientForm> {
           (_data['medicines'] as List?) ??
           _getPrescriptionsList();
       final medicines = allPrescriptions
-          .where((m) => m is Map &&
-              (m['inventoryId'] != null || m['medicineId'] != null || m['id'] != null))
+          .where((m) => m is Map && PatientFormHelper.isInventoryMed(m))
           .toList();
 
       // 3. Mark UI state complete immediately (Instant feedback)
@@ -1540,6 +1603,8 @@ class _PatientFormState extends State<PatientForm> {
                 'branchId': widget.branchId,
                 'serial': normSerial,
                 'dateKey': dateKey,
+                if ((fullEntry['entryUid'] ?? widget.queueEntry['entryUid'] ?? _data['entryUid']) != null)
+                  'entryUid': (fullEntry['entryUid'] ?? widget.queueEntry['entryUid'] ?? _data['entryUid']),
                 ...minimalUpdate,
                 if (doctorName.isNotEmpty && doctorName != 'Unknown') 'doctorName': doctorName,
                 if (doctorId.isNotEmpty) 'doctorId': doctorId,
@@ -1580,6 +1645,23 @@ class _PatientFormState extends State<PatientForm> {
               await branchRef.collection('serials').doc(campDocKey)
                   .collection(queueType).doc(upperSerial)
                   .set(minimalUpdate, SetOptions(merge: true));
+
+              try {
+                if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+                  final eBox = Hive.box(LocalStorageService.entriesBox);
+                  final normB = widget.branchId.toLowerCase().trim();
+                  final targetKey = '$normB-$upperSerial';
+                  final existing = eBox.get(targetKey) ?? eBox.get(upperSerial);
+                  if (existing is Map) {
+                    final upd = Map<String, dynamic>.from(existing);
+                    upd['dispenseSynced'] = true;
+                    upd['pendingSync'] = false;
+                    upd['synced'] = true;
+                    upd['syncStatus'] = 'synced';
+                    await eBox.put(targetKey, upd);
+                  }
+                }
+              } catch (_) {}
             } catch (e) {
               await LocalStorageService.enqueueSync({
                 'type': 'update_serial_status',
@@ -1723,6 +1805,7 @@ class _PatientFormState extends State<PatientForm> {
         final perDayQty = ((item['quantity'] ?? 1) as num).toInt();
         final totalQty = isSyrup ? 1 : (isInj ? perDayQty : perDayQty * days);
         
+        final formula = (item['formula'] ?? '').toString().trim();
         final isDark = _isDark;
         final fullUrdu = [
           if (urduLine.isNotEmpty) urduLine,
@@ -1756,31 +1839,59 @@ class _PatientFormState extends State<PatientForm> {
                         _buildMedTypeIconBadge(item['type']?.toString(), item['name']?.toString(), isDark),
                         const SizedBox(width: 8),
                         Expanded(
-                          child: RichText(
-                            text: TextSpan(
-                              style: TextStyle(
-                                fontFamily: 'Roboto',
-                                color: isDark ? Colors.white : t.textPrimary,
-                              ),
-                              children: [
-                                TextSpan(
-                                  text: '$displayName ',
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              RichText(
+                                text: TextSpan(
                                   style: TextStyle(
-                                    fontWeight: FontWeight.w800,
-                                    fontSize: isMobile ? 13.5 : 15,
+                                    fontFamily: 'Roboto',
+                                    color: isDark ? Colors.white : t.textPrimary,
                                   ),
-                                ),
-                                if (dose.isNotEmpty)
-                                  TextSpan(
-                                    text: dose,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w500,
-                                      fontSize: isMobile ? 12 : 13.5,
-                                      color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                  children: [
+                                    TextSpan(
+                                      text: '$displayName ',
+                                      style: TextStyle(
+                                        fontWeight: FontWeight.w800,
+                                        fontSize: isMobile ? 13.5 : 15,
+                                      ),
                                     ),
-                                  ),
+                                    if (dose.isNotEmpty)
+                                      TextSpan(
+                                        text: dose,
+                                        style: TextStyle(
+                                          fontWeight: FontWeight.w500,
+                                          fontSize: isMobile ? 12 : 13.5,
+                                          color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ),
+                              if (formula.isNotEmpty && formula.toLowerCase() != rawName.toLowerCase()) ...[
+                                const SizedBox(height: 2),
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(Icons.biotech_rounded, size: 12, color: isDark ? const Color(0xFF2DD4BF) : t.accent),
+                                    const SizedBox(width: 3),
+                                    Flexible(
+                                      child: Text(
+                                        formula,
+                                        style: TextStyle(
+                                          fontSize: isMobile ? 11 : 12,
+                                          fontStyle: FontStyle.italic,
+                                          color: isDark ? const Color(0xFF2DD4BF) : t.accent,
+                                          fontWeight: FontWeight.w500,
+                                        ),
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
                               ],
-                            ),
+                            ],
                           ),
                         ),
                       ],
@@ -3049,10 +3160,10 @@ class _PatientFormState extends State<PatientForm> {
         (weight.isNotEmpty && weight != 'N/A') ||
         (sugar.isNotEmpty && sugar != 'N/A');
 
-    final inventoryMeds = prescriptions.where((m) => m['inventoryId'] != null && !PatientFormHelper.isInjectable(m)).toList();
-    final inventoryInjectables = prescriptions.where((m) => m['inventoryId'] != null && PatientFormHelper.isInjectable(m)).toList();
-    final customMeds = prescriptions.where((m) => m['inventoryId'] == null && !PatientFormHelper.isInjectable(m)).toList();
-    final customInjectables = prescriptions.where((m) => m['inventoryId'] == null && PatientFormHelper.isInjectable(m)).toList();
+    final inventoryMeds = prescriptions.where((m) => PatientFormHelper.isInventoryMed(m) && !PatientFormHelper.isInjectable(m)).toList();
+    final inventoryInjectables = prescriptions.where((m) => PatientFormHelper.isInventoryMed(m) && PatientFormHelper.isInjectable(m)).toList();
+    final customMeds = prescriptions.where((m) => !PatientFormHelper.isInventoryMed(m) && !PatientFormHelper.isInjectable(m)).toList();
+    final customInjectables = prescriptions.where((m) => !PatientFormHelper.isInventoryMed(m) && PatientFormHelper.isInjectable(m)).toList();
     
     final basePadding = isMobile ? 16.0 : 32.0;
 

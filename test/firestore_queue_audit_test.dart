@@ -1,10 +1,17 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:gmwf/firebase_options.dart';
 
 void main() {
-  test('Audit Firestore Queue Types and Document Counts', () async {
+  // Talks to the live Firestore project, so it is opt-in: set GMWF_LIVE_FIREBASE=1 to run it.
+  final skipLive = Platform.environment['GMWF_LIVE_FIREBASE'] == null
+      ? 'Needs live Firebase. Set GMWF_LIVE_FIREBASE=1 to run manually.'
+      : false;
+
+  test('Audit Firestore Queue Types and Document Counts', skip: skipLive, () async {
     TestWidgetsFlutterBinding.ensureInitialized();
     await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
     print("=== 🔥 FIRESTORE AUDIT STARTED ===");

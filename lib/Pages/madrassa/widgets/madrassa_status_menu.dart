@@ -635,6 +635,185 @@ class StatusActionMenu extends StatelessWidget {
     }
   }
 
+  Future<void> _showRevertQaidaDialog(BuildContext context) async {
+    final sData = _getStudentData();
+    final studentId = student is DocumentSnapshot ? (student as DocumentSnapshot).id : (student as Map)['id'].toString();
+    final studentName = sData['name'] ?? 'Student';
+    String selectedLesson = '21';
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (dialogCtx, setDialogState) {
+            final isUrdu = ctx.isUrdu;
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(Icons.undo_rounded, color: Colors.amber.shade800, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      isUrdu ? 'قاعدہ تکمیل منسوخ کریں' : 'Revert Qaida Completion',
+                      style: ctx.urduStyle(style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    isUrdu
+                        ? 'کیا آپ $studentName کے لیے قاعدہ کی تکمیل منسوخ کرنا چاہتے ہیں؟ موجودہ تختی / سبق منتخب کریں:'
+                        : 'Revert accidental Qaida completion for $studentName. Select current lesson to resume from:',
+                    style: ctx.urduStyle(style: const TextStyle(fontSize: 13, color: Colors.black87)),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    isUrdu ? 'سبق / تختی:' : 'Qaida Lesson (1–21):',
+                    style: ctx.urduStyle(style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: selectedLesson,
+                        isExpanded: true,
+                        items: [
+                          for (int i = 21; i >= 1; i--)
+                            DropdownMenuItem<String>(
+                              value: '$i',
+                              child: Text(
+                                isUrdu ? 'سبق $i (تختی $i)' : 'Lesson $i',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                              ),
+                            ),
+                        ],
+                        onChanged: (val) {
+                          if (val != null) {
+                            setDialogState(() {
+                              selectedLesson = val;
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: Text(isUrdu ? 'منسوخ' : 'Cancel'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.amber.shade800,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: Text(isUrdu ? 'منسوخ اور محفوظ کریں' : 'Revert & Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (confirm == true) {
+      final studentCache = MadrassaLocalStorage.getStudentCached(branchId, studentId) ?? Map<String, dynamic>.from(sData);
+      studentCache['qaidaCompleted'] = false;
+      studentCache['qaidaSabak'] = selectedLesson;
+      studentCache['lastUpdatedAt'] = DateTime.now().toIso8601String();
+
+      final auditList = List<Map<String, dynamic>>.from(
+        (studentCache['auditLog'] as List? ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)),
+      );
+      auditList.add({
+        'status': studentCache['status'] ?? 'active',
+        'type': 'qaida_reverted',
+        'date': DateTime.now().toIso8601String(),
+        'reason': 'Reverted Qaida completion to Lesson $selectedLesson',
+      });
+      studentCache['auditLog'] = auditList;
+
+      await MadrassaLocalStorage.cacheStudent(branchId, studentId, studentCache);
+
+      if (student is Map) {
+        (student as Map)['qaidaCompleted'] = false;
+        (student as Map)['qaidaSabak'] = selectedLesson;
+      }
+
+      // Broadcast LAN
+      try {
+        final payload = RealtimeEvents.payload(
+          type: RealtimeEvents.saveMadrassaStudent,
+          data: {
+            ...studentCache,
+            'studentId': studentId,
+          },
+          branchId: branchId,
+        );
+        RealtimeManager().sendMessage(payload);
+      } catch (e) {
+        debugPrint('[MadrassaStatusMenu] LAN broadcast error: $e');
+      }
+
+      // Enqueue sync & upload
+      try {
+        await LocalStorageService.enqueueSync({
+          'type': 'save_madrassa_student',
+          'branchId': branchId,
+          'studentId': studentId,
+          'data': studentCache,
+        });
+        unawaited(SyncService().triggerUpload());
+      } catch (e) {
+        debugPrint('[MadrassaStatusMenu] enqueueSync error: $e');
+      }
+
+      await MadrassaAuditService.logAction(
+        branchId: branchId,
+        editor: username,
+        role: role,
+        type: 'qaida_reverted',
+        message: 'Reverted Qaida completion for $studentName to Lesson $selectedLesson by $username ($role).',
+        studentId: studentId,
+        studentName: studentName,
+      );
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              context.isUrdu
+                  ? '$studentName کے لیے قاعدہ تکمیل منسوخ ہو گئی (سبق $selectedLesson)'
+                  : 'Qaida completion reverted for $studentName to Lesson $selectedLesson',
+            ),
+            backgroundColor: Colors.amber.shade800,
+          ),
+        );
+      }
+    }
+  }
+
   bool _isNazraStudent(Map<String, dynamic> sData) {
     return (sData['isNazra'] == true) ||
         (sData['program']?.toString().toLowerCase() == 'nazra') ||
@@ -649,6 +828,7 @@ class StatusActionMenu extends StatelessWidget {
     final sData = _getStudentData();
     final status = sData['status'] ?? 'active';
     final isNazra = _isNazraStudent(sData);
+    final isQaidaCompleted = sData['qaidaCompleted'] == true || sData['qaidaSabak'] == 'completed';
 
     return PopupMenuButton<String>(
       icon: Icon(Icons.more_vert, color: t.textTertiary),
@@ -662,6 +842,8 @@ class StatusActionMenu extends StatelessWidget {
             username: username,
             role: role,
           );
+        } else if (val == 'revert_qaida') {
+          _showRevertQaidaDialog(context);
         } else if (val == 'history') {
           _showHistoryDialog(context);
         } else if (val == 'delete_student') {
@@ -729,7 +911,7 @@ class StatusActionMenu extends StatelessWidget {
                 ],
               ),
             ),
-          if (isNazra)
+          if (isNazra) ...[
             PopupMenuItem(
               value: 'nazra_completed',
               child: Row(
@@ -747,6 +929,28 @@ class StatusActionMenu extends StatelessWidget {
                 ],
               ),
             ),
+            if (isQaidaCompleted)
+              PopupMenuItem(
+                value: 'revert_qaida',
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: Colors.amber.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(Icons.undo_rounded, size: 16, color: Colors.amber.shade800),
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      context.isUrdu ? 'قاعدہ تکمیل منسوخ کریں' : 'Revert Qaida Completion',
+                      style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.w600, color: Colors.amber.shade900, fontSize: 13)),
+                    ),
+                  ],
+                ),
+              ),
+          ],
           PopupMenuItem(
             value: 'left',
             child: Row(

@@ -75,3 +75,12 @@ build_output.txt
 debug_branches.txt
 .agents/
 tool/temp_emp_audit/
+
+# Local data dumps — real patient/user data, NEVER commit (repo is public)
+tool/temp_*/
+tool/out.txt
+*.hive
+# Stress / pressure test artefacts
+GMWF_Network_Pressure_Report_*.txt
+GMWF_Stress_Test_Cumulative_History.txt
+stress_test_state.json

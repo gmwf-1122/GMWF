@@ -57,21 +57,31 @@ class MadrassaLocalStorage {
     return null;
   }
 
+  // ── Branch Normalization Helper ───────────────────────────────────────────
+  static String normalizeBranch(String branchId) {
+    final clean = branchId.toLowerCase().trim();
+    if (clean.isEmpty || clean == 'unknown') return 'all';
+    if (clean.contains('karachi') || clean.contains('saddar') || clean.contains('haji') || clean.contains('kapaya')) {
+      return 'karachi';
+    }
+    return clean;
+  }
+
   // ── Cache keys ─────────────────────────────────────────────────────────────
 
   static String _studentKey(String branchId, String studentId) {
     final cleanId = studentId.contains('__std__') ? studentId.split('__std__').last : studentId;
-    return '${branchId.toLowerCase().trim()}__std__$cleanId';
+    return '${normalizeBranch(branchId)}__std__$cleanId';
   }
 
   static String _logKey(String branchId, String dateKey) =>
-      '${branchId.toLowerCase().trim()}__log__$dateKey';
+      '${normalizeBranch(branchId)}__log__$dateKey';
 
   static String _holidayKey(String branchId, String dateKey) =>
-      '${branchId.toLowerCase().trim()}__hol__$dateKey';
+      '${normalizeBranch(branchId)}__hol__$dateKey';
 
   static String _feeKey(String branchId, int year, int month, String studentId) =>
-      '${branchId.toLowerCase().trim()}__fee__${year}_${month}__$studentId';
+      '${normalizeBranch(branchId)}__fee__${year}_${month}__$studentId';
 
   // ── Students Cache ─────────────────────────────────────────────────────────
 
@@ -98,7 +108,7 @@ class MadrassaLocalStorage {
     final effectiveStudentId = studentId.isNotEmpty 
         ? studentId 
         : 'madrassa_std_${DateTime.now().millisecondsSinceEpoch}';
-    final effectiveBranchId = branchId.toLowerCase().trim();
+    final effectiveBranchId = normalizeBranch(branchId);
 
     final cleanData = Map<String, dynamic>.from(data);
     cleanData['id'] = effectiveStudentId;
@@ -307,7 +317,7 @@ class MadrassaLocalStorage {
     required String branchId,
     required String studentId,
   }) async {
-    final effectiveBranchId = branchId.toLowerCase().trim();
+    final effectiveBranchId = normalizeBranch(branchId);
     final box = await LocalStorageService.ensureBoxOpen(studentsBox);
     final key = _studentKey(effectiveBranchId, studentId);
     await box.delete(key);
@@ -403,7 +413,20 @@ class MadrassaLocalStorage {
         })
         .toList();
 
-    list.sort((a, b) {
+    // Deduplicate by student id, merging any newer properties
+    final Map<String, Map<String, dynamic>> dedup = {};
+    for (final s in list) {
+      final id = s['id']?.toString() ?? '';
+      if (id.isEmpty) continue;
+      if (!dedup.containsKey(id)) {
+        dedup[id] = s;
+      } else {
+        dedup[id] = {...dedup[id]!, ...s};
+      }
+    }
+    final dedupList = dedup.values.toList();
+
+    dedupList.sort((a, b) {
       final rollA = int.tryParse(a['rollNumber']?.toString() ?? '');
       final rollB = int.tryParse(b['rollNumber']?.toString() ?? '');
       if (rollA != null && rollB != null) return rollA.compareTo(rollB);
@@ -412,7 +435,7 @@ class MadrassaLocalStorage {
       return (a['name']?.toString() ?? '').compareTo(b['name']?.toString() ?? '');
     });
 
-    return list;
+    return dedupList;
   }
 
   static int _studentRepairVersion = 0;
@@ -956,7 +979,7 @@ class MadrassaLocalStorage {
   static Stream<List<Map<String, dynamic>>> streamStudentsCached(String branchId) {
     Stream<List<Map<String, dynamic>>> source() async* {
       final box = await LocalStorageService.ensureBoxOpen(studentsBox);
-      await repairMissingStudentsFromLocalData(force: true);
+      await repairMissingStudentsFromLocalData();
       yield getAllStudentsCached(branchId);
       await for (final _ in box.watch()) {
         yield getAllStudentsCached(branchId);
@@ -972,7 +995,7 @@ class MadrassaLocalStorage {
   /// for this branch so all teachers on peer devices see newly added or edited
   /// students immediately without requiring a manual refresh.
   static void listenToStudentsRealtime(String branchId) {
-    final normBranch = branchId.toLowerCase().trim();
+    final normBranch = normalizeBranch(branchId);
     if (normBranch.isEmpty || normBranch == 'all' || normBranch == 'unknown') return;
     if (_listeningBranch == normBranch && _studentsSubscription != null) return;
 
@@ -1009,6 +1032,49 @@ class MadrassaLocalStorage {
     });
   }
 
+  static StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _logsSubscription;
+  static String? _listeningLogBranch;
+  static String? _listeningLogDate;
+
+  /// Subscribes to real-time changes in Firestore madrassa_daily_logs document
+  /// for this branch and date so that when one teacher saves attendance or sabq,
+  /// all other teachers on peer computers receive it immediately without a page reload.
+  static void listenToLogsRealtime(String branchId, String dateKey) {
+    final normBranch = normalizeBranch(branchId);
+    if (normBranch.isEmpty || normBranch == 'all' || normBranch == 'unknown') return;
+    if (_listeningLogBranch == normBranch && _listeningLogDate == dateKey && _logsSubscription != null) return;
+
+    _logsSubscription?.cancel();
+    _listeningLogBranch = normBranch;
+    _listeningLogDate = dateKey;
+
+    _logsSubscription = FirebaseFirestore.instance
+        .collection('branches')
+        .doc(normBranch)
+        .collection('madrassa_daily_logs')
+        .doc(dateKey)
+        .snapshots()
+        .listen((snap) async {
+      try {
+        if (!snap.exists || snap.data() == null) return;
+        final cloudData = snap.data()!;
+        final box = await LocalStorageService.ensureBoxOpen(logsBox);
+        final key = _logKey(normBranch, dateKey);
+        final local = box.get(key);
+        final merged = <String, dynamic>{
+          if (local is Map) ...Map<String, dynamic>.from(local),
+          ...cloudData,
+        };
+        await box.put(key, _sanitize(merged));
+        await box.flush();
+      } catch (e) {
+        debugPrint('[MadrassaLocalStorage] Error in realtime daily logs sync: $e');
+      }
+    }, onError: (e) {
+      debugPrint('[MadrassaLocalStorage] Error on daily logs snapshot listener: $e');
+    });
+  }
+
   static List<String> _getAllBranchIds() {
     final list = LocalStorageService.getLocalBranchesList();
     final ids = list
@@ -1023,11 +1089,13 @@ class MadrassaLocalStorage {
 
   static Future<void> downloadStudents(String branchId, {bool force = false}) async {
     try {
-      final normBranch = branchId.toLowerCase().trim();
+      final normBranch = normalizeBranch(branchId);
       if (normBranch.isEmpty || normBranch == 'unknown') return;
 
-      // Ensure local records are healed and restored
-      await repairMissingStudentsFromLocalData(force: force);
+      // Ensure local records are healed and restored for Gujrat if applicable
+      if (normBranch == 'gujrat' || normBranch == 'all') {
+        await repairMissingStudentsFromLocalData(force: force);
+      }
 
       if (normBranch == 'all' || normBranch == 'global') {
         final branches = _getAllBranchIds();
@@ -1042,7 +1110,10 @@ class MadrassaLocalStorage {
 
       QuerySnapshot<Map<String, dynamic>> snap;
       try {
-        snap = await colRef.get();
+        snap = await colRef.get().timeout(
+          const Duration(seconds: 4),
+          onTimeout: () => throw TimeoutException('downloadStudents timeout'),
+        );
       } catch (e) {
         debugPrint('[MadrassaLocalStorage] Error fetching students from cloud: $e');
         return;
@@ -1066,8 +1137,6 @@ class MadrassaLocalStorage {
         await box.putAll(studentUpdates);
         await box.flush();
       }
-      // Re-apply teacher-enrolled students repair in case cloud snapshot had obsolete guardian placeholder names
-      await repairMissingStudentsFromLocalData(force: true);
       debugPrint('[MadrassaLocalStorage] Downloaded ${snap.docs.length} madrassa students for $normBranch');
     } catch (e) {
       debugPrint('[MadrassaLocalStorage] Error in downloadStudents: $e');
@@ -1120,12 +1189,13 @@ class MadrassaLocalStorage {
   static Map<String, dynamic>? getLogCached(String branchId, String dateKey) {
     if (!Hive.isBoxOpen(logsBox)) return null;
     final box = _getLogsBox();
-    final cleanBranch = branchId.toLowerCase().trim();
-    final isGlobal = cleanBranch.isEmpty || cleanBranch == 'all' || cleanBranch == 'global' || cleanBranch == 'main';
+    final normBranch = normalizeBranch(branchId);
+    final isGlobal = normBranch == 'all' || normBranch == 'global' || normBranch == 'main';
+
+    final merged = <String, dynamic>{};
+    bool foundAny = false;
 
     if (isGlobal) {
-      final merged = <String, dynamic>{};
-      bool foundAny = false;
       for (final k in box.keys) {
         final keyStr = k.toString();
         if (keyStr.endsWith('__log__$dateKey') || keyStr.endsWith('_$dateKey') || keyStr == dateKey) {
@@ -1139,21 +1209,35 @@ class MadrassaLocalStorage {
       return foundAny ? merged : null;
     }
 
-    final key = _logKey(branchId, dateKey);
-    final raw = box.get(key);
-    if (raw != null && raw is Map) {
-      return Map<String, dynamic>.from(raw);
+    // 1. Primary normalized key (e.g. karachi__log__2026-10-07)
+    final primaryKey = _logKey(normBranch, dateKey);
+    final primaryRaw = box.get(primaryKey);
+    if (primaryRaw is Map) {
+      foundAny = true;
+      merged.addAll(Map<String, dynamic>.from(primaryRaw));
     }
 
-    // Fallback: check other matching keys for this branch and date
+    // 2. Also merge matching family aliases & 'all' keys for this date so all teachers share logs
     for (final k in box.keys) {
       final keyStr = k.toString();
-      if (keyStr.endsWith('__log__$dateKey') && keyStr.startsWith(cleanBranch)) {
+      if (!keyStr.endsWith('__log__$dateKey')) continue;
+      if (keyStr == primaryKey) continue;
+      final kPrefix = keyStr.split('__log__').first;
+      final isFamily = normalizeBranch(kPrefix) == normBranch || kPrefix == 'all';
+      if (isFamily) {
         final raw = box.get(k);
-        if (raw is Map) return Map<String, dynamic>.from(raw);
+        if (raw is Map) {
+          foundAny = true;
+          // Primary takes precedence, only fill in missing keys
+          for (final entry in (raw as Map).entries) {
+            if (!merged.containsKey(entry.key.toString())) {
+              merged[entry.key.toString()] = entry.value;
+            }
+          }
+        }
       }
     }
-    return null;
+    return foundAny ? merged : null;
   }
 
   static int getPresentStudentsCount(String branchId, String dateKey) {
@@ -1175,27 +1259,30 @@ class MadrassaLocalStorage {
       getLogCached(branchId, dateKey);
 
   static Future<void> cacheDailyLog(String branchId, String dateKey, Map<String, dynamic> data) async {
-    final key = _logKey(branchId, dateKey);
+    final normBranch = normalizeBranch(branchId);
+    final key = _logKey(normBranch, dateKey);
     final box = await LocalStorageService.ensureBoxOpen(logsBox);
-    await box.put(key, _sanitize(data));
+    final existing = box.get(key);
+    final merged = <String, dynamic>{
+      if (existing is Map) ...Map<String, dynamic>.from(existing),
+      ...data,
+    };
+    await box.put(key, _sanitize(merged));
     await box.flush();
   }
 
-  // This one watches Hive for changes. When viewing all branches, it watches the whole box.
+  // This one watches Hive for changes. Emits whenever this date's logs change.
   static Stream<Map<String, dynamic>> streamLogCached(String branchId, String dateKey) {
-    final cleanBranch = branchId.toLowerCase().trim();
-    final isGlobal = cleanBranch.isEmpty || cleanBranch == 'all' || cleanBranch == 'global' || cleanBranch == 'main';
+    final normBranch = normalizeBranch(branchId);
+    final isGlobal = normBranch == 'all' || normBranch == 'global' || normBranch == 'main';
 
     Stream<Map<String, dynamic>> source() async* {
       final box = await LocalStorageService.ensureBoxOpen(logsBox);
-      yield getLogCached(branchId, dateKey) ?? {};
-      if (isGlobal) {
-        await for (final _ in box.watch()) {
-          yield getLogCached(branchId, dateKey) ?? {};
-        }
-      } else {
-        await for (final event in box.watch(key: _logKey(branchId, dateKey))) {
-          yield (event.value != null) ? Map<String, dynamic>.from(event.value as Map) : (getLogCached(branchId, dateKey) ?? {});
+      yield getLogCached(normBranch, dateKey) ?? {};
+      await for (final event in box.watch()) {
+        final keyStr = event.key?.toString() ?? '';
+        if (isGlobal || keyStr.endsWith('__log__$dateKey') || keyStr == dateKey) {
+          yield getLogCached(normBranch, dateKey) ?? {};
         }
       }
     }
@@ -1209,11 +1296,16 @@ class MadrassaLocalStorage {
     required String editorName,
     required String editorRole,
   }) async {
-    final key = _logKey(branchId, dateKey);
+    final normBranch = normalizeBranch(branchId);
+    final effectiveBranch = (normBranch == 'all' || normBranch == 'global')
+        ? ((branchId.toLowerCase().contains('karachi') || branchId.toLowerCase().contains('saddar')) ? 'karachi' : 'gujrat')
+        : normBranch;
+
+    final key = _logKey(effectiveBranch, dateKey);
     final box = await LocalStorageService.ensureBoxOpen(logsBox);
 
     // Get current cache log or start empty
-    final existing = getLogCached(branchId, dateKey) ?? {};
+    final existing = box.get(key) ?? getLogCached(effectiveBranch, dateKey) ?? {};
     final updated = Map<String, dynamic>.from(existing);
 
     // Merge changes
@@ -1229,10 +1321,10 @@ class MadrassaLocalStorage {
 
         // Also update local cached student's currentLines if updated
         if (data.containsKey('currentLines')) {
-          final studentCache = getStudentCached(branchId, sId);
+          final studentCache = getStudentCached(effectiveBranch, sId);
           if (studentCache != null) {
             studentCache['currentLines'] = data['currentLines'];
-            cacheStudent(branchId, sId, studentCache);
+            cacheStudent(effectiveBranch, sId, studentCache);
           }
         }
       }
@@ -1247,13 +1339,13 @@ class MadrassaLocalStorage {
       final payload = RealtimeEvents.payload(
         type: RealtimeEvents.saveMadrassaDailyLog,
         data: {
-          'branchId': branchId,
+          'branchId': effectiveBranch,
           'dateKey': dateKey,
           'logData': sanitized,
           'editorName': editorName,
           'editorRole': editorRole,
         },
-        branchId: branchId,
+        branchId: effectiveBranch,
       );
       RealtimeManager().sendMessage(payload);
     } catch (e) {
@@ -1264,7 +1356,7 @@ class MadrassaLocalStorage {
     try {
       await LocalStorageService.enqueueSync({
         'type': 'save_madrassa_log',
-        'branchId': branchId,
+        'branchId': effectiveBranch,
         'dateKey': dateKey,
         'data': sanitized,
       });
@@ -1274,7 +1366,7 @@ class MadrassaLocalStorage {
         if (data is Map && data.containsKey('currentLines')) {
           LocalStorageService.enqueueSync({
             'type': 'update_madrassa_student',
-            'branchId': branchId,
+            'branchId': effectiveBranch,
             'studentId': sId,
             'currentLines': data['currentLines'],
           });
@@ -1286,7 +1378,7 @@ class MadrassaLocalStorage {
         if (NetworkHealthService().isStableOnline) {
           unawaited(FirebaseFirestore.instance
               .collection('branches')
-              .doc(branchId)
+              .doc(effectiveBranch)
               .collection('madrassa_daily_logs')
               .doc(dateKey)
               .set(sanitized, SetOptions(merge: true))
@@ -1302,21 +1394,31 @@ class MadrassaLocalStorage {
 
   static Future<void> downloadLogsForMonth(String branchId, int year, int month) async {
     try {
+      final normBranch = normalizeBranch(branchId);
+      if (normBranch.isEmpty || normBranch == 'unknown') return;
+
+      if (normBranch == 'all' || normBranch == 'global') {
+        final branches = _getAllBranchIds();
+        await Future.wait(branches.map((b) => downloadLogsForMonth(b, year, month)));
+        return;
+      }
+
       final startStr = DateFormat('yyyy-MM-01').format(DateTime(year, month, 1));
       final endStr = DateFormat('yyyy-MM-dd').format(DateTime(year, month + 1, 0));
 
       final snap = await FirebaseFirestore.instance
           .collection('branches')
-          .doc(branchId)
+          .doc(normBranch)
           .collection('madrassa_daily_logs')
           .where(FieldPath.documentId, isGreaterThanOrEqualTo: startStr)
           .where(FieldPath.documentId, isLessThanOrEqualTo: endStr)
-          .get();
+          .get()
+          .timeout(const Duration(seconds: 4), onTimeout: () => throw TimeoutException('downloadLogsForMonth timeout'));
 
       final box = await LocalStorageService.ensureBoxOpen(logsBox);
       final Map<String, dynamic> logUpdates = {};
       for (final doc in snap.docs) {
-        final key = _logKey(branchId, doc.id);
+        final key = _logKey(normBranch, doc.id);
         
         // Merge cloud fields preserving local updates if local is newer (LWW conflict resolution)
         final existing = box.get(key) ?? logUpdates[key];
@@ -1324,8 +1426,6 @@ class MadrassaLocalStorage {
           logUpdates[key] = _sanitize(doc.data());
         } else {
           final exMap = Map<String, dynamic>.from(existing as Map);
-          
-          // Simple conflict resolution: if Firestore document has updates, we can merge them
           final Map<String, dynamic> merged = {...exMap, ...doc.data()};
           logUpdates[key] = _sanitize(merged);
         }
@@ -1334,7 +1434,7 @@ class MadrassaLocalStorage {
         await box.putAll(logUpdates);
       }
       await box.flush();
-      debugPrint('[MadrassaLocalStorage] Downloaded ${snap.docs.length} daily log documents for $year-$month.');
+      debugPrint('[MadrassaLocalStorage] Downloaded ${snap.docs.length} daily log documents for $normBranch ($year-$month).');
     } catch (e) {
       debugPrint('[MadrassaLocalStorage] Error downloading daily logs: $e');
     }
@@ -1343,79 +1443,52 @@ class MadrassaLocalStorage {
   static List<Map<String, dynamic>> getLogsForMonthCached(String branchId, int year, int month) {
     if (!Hive.isBoxOpen(logsBox)) return const [];
     final monthStr = '$year-${month.toString().padLeft(2, '0')}';
-    final cleanBranch = branchId.toLowerCase().trim();
-    final isGlobal = cleanBranch.isEmpty || cleanBranch == 'all' || cleanBranch == 'global' || cleanBranch == 'main';
+    final normBranch = normalizeBranch(branchId);
+    final isGlobal = normBranch == 'all' || normBranch == 'global' || normBranch == 'main';
     final box = _getLogsBox();
 
-    if (isGlobal) {
-      final mapByDate = <String, Map<String, dynamic>>{};
-      for (final k in box.keys) {
-        final keyStr = k.toString();
-        if (keyStr.contains('__log__$monthStr-')) {
-          final dateKey = keyStr.split('__log__').last;
-          final raw = box.get(k);
-          if (raw is Map) {
-            final entry = mapByDate.putIfAbsent(dateKey, () => {'id': dateKey, 'dateKey': dateKey});
-            entry.addAll(Map<String, dynamic>.from(raw));
-          }
+    final mapByDate = <String, Map<String, dynamic>>{};
+    for (final k in box.keys) {
+      final keyStr = k.toString();
+      if (!keyStr.contains('__log__$monthStr-')) continue;
+      final kBranch = keyStr.split('__log__').first;
+      final isMatch = isGlobal || normalizeBranch(kBranch) == normBranch || kBranch == 'all';
+      if (isMatch) {
+        final dateKey = keyStr.split('__log__').last;
+        final raw = box.get(k);
+        if (raw is Map) {
+          final entry = mapByDate.putIfAbsent(dateKey, () => {'id': dateKey, 'dateKey': dateKey});
+          entry.addAll(Map<String, dynamic>.from(raw));
         }
       }
-      final list = mapByDate.values.toList();
-      list.sort((a, b) => a['dateKey'].toString().compareTo(b['dateKey'].toString()));
-      return list;
     }
-
-    final prefix = '${cleanBranch}__log__$monthStr-';
-    return box.keys
-        .where((k) => k.toString().startsWith(prefix))
-        .map((k) {
-          final raw = box.get(k);
-          if (raw == null) return null;
-          final m = Map<String, dynamic>.from(raw as Map);
-          m['id'] = k.toString().split('__log__').last;
-          return m;
-        })
-        .whereType<Map<String, dynamic>>()
-        .toList();
+    final list = mapByDate.values.toList();
+    list.sort((a, b) => a['dateKey'].toString().compareTo(b['dateKey'].toString()));
+    return list;
   }
 
   static List<Map<String, dynamic>> getAllLogsCached(String branchId) {
     if (!Hive.isBoxOpen(logsBox)) return const [];
-    final cleanBranch = branchId.toLowerCase().trim();
-    final isGlobal = cleanBranch.isEmpty || cleanBranch == 'all' || cleanBranch == 'global' || cleanBranch == 'main';
+    final normBranch = normalizeBranch(branchId);
+    final isGlobal = normBranch == 'all' || normBranch == 'global' || normBranch == 'main';
     final box = _getLogsBox();
 
-    if (isGlobal) {
-      final mapByDate = <String, Map<String, dynamic>>{};
-      for (final k in box.keys) {
-        final keyStr = k.toString();
-        if (keyStr.contains('__log__')) {
-          final dateKey = keyStr.split('__log__').last;
-          final raw = box.get(k);
-          if (raw is Map) {
-            final entry = mapByDate.putIfAbsent(dateKey, () => {'id': dateKey, 'dateKey': dateKey});
-            entry.addAll(Map<String, dynamic>.from(raw));
-          }
+    final mapByDate = <String, Map<String, dynamic>>{};
+    for (final k in box.keys) {
+      final keyStr = k.toString();
+      if (!keyStr.contains('__log__')) continue;
+      final kBranch = keyStr.split('__log__').first;
+      final isMatch = isGlobal || normalizeBranch(kBranch) == normBranch || kBranch == 'all';
+      if (isMatch) {
+        final dateKey = keyStr.split('__log__').last;
+        final raw = box.get(k);
+        if (raw is Map) {
+          final entry = mapByDate.putIfAbsent(dateKey, () => {'id': dateKey, 'dateKey': dateKey});
+          entry.addAll(Map<String, dynamic>.from(raw));
         }
       }
-      final list = mapByDate.values.toList();
-      list.sort((a, b) => a['dateKey'].toString().compareTo(b['dateKey'].toString()));
-      return list;
     }
-
-    final prefix = '${cleanBranch}__log__';
-    final list = box.keys
-        .where((k) => k.toString().startsWith(prefix))
-        .map((k) {
-          final raw = box.get(k);
-          if (raw == null) return null;
-          final m = Map<String, dynamic>.from(raw as Map);
-          m['id'] = k.toString().split('__log__').last;
-          m['dateKey'] = k.toString().split('__log__').last;
-          return m;
-        })
-        .whereType<Map<String, dynamic>>()
-        .toList();
+    final list = mapByDate.values.toList();
     list.sort((a, b) => a['dateKey'].toString().compareTo(b['dateKey'].toString()));
     return list;
   }

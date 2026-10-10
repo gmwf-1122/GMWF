@@ -10,6 +10,11 @@ import '../../../services/local_storage_service.dart';
 import '../utils/madrassa_local_storage.dart';
 import '../dialogs/enrollment_dialog.dart';
 import '../widgets/madrassa_status_menu.dart';
+import 'dart:async';
+import '../../../services/sync_service.dart';
+import '../../../realtime/realtime_manager.dart';
+import '../../../realtime/realtime_events.dart';
+import '../madrassa_strings.dart';
 
 class StudentDetailPage extends StatefulWidget {
   final Map<String, dynamic> studentData;
@@ -51,10 +56,189 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
         r.contains('global');
   }
 
+  String get _effectiveBranch => MadrassaLocalStorage.normalizeBranch(widget.branchId);
+
   @override
   void initState() {
     super.initState();
     _data = Map<String, dynamic>.from(widget.studentData);
+  }
+
+  Future<void> _showRevertQaidaDialog(BuildContext context, String studentId) async {
+    final studentName = _data['name'] ?? 'Student';
+    String selectedLesson = '21';
+
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (dialogCtx, setDialogState) {
+            final isUrdu = ctx.isUrdu;
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(Icons.undo_rounded, color: Colors.amber.shade800, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      isUrdu ? 'قاعدہ تکمیل منسوخ کریں' : 'Revert Qaida Completion',
+                      style: ctx.urduStyle(style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    isUrdu
+                        ? 'کیا آپ $studentName کے لیے قاعدہ کی تکمیل منسوخ کرنا چاہتے ہیں؟ موجودہ تختی / سبق منتخب کریں:'
+                        : 'Revert accidental Qaida completion for $studentName. Select current lesson to resume from:',
+                    style: ctx.urduStyle(style: const TextStyle(fontSize: 13, color: Colors.black87)),
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    isUrdu ? 'سبق / تختی:' : 'Qaida Lesson (1–21):',
+                    style: ctx.urduStyle(style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+                  ),
+                  const SizedBox(height: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade300),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: selectedLesson,
+                        isExpanded: true,
+                        items: [
+                          for (int i = 21; i >= 1; i--)
+                            DropdownMenuItem<String>(
+                              value: '$i',
+                              child: Text(
+                                isUrdu ? 'سبق $i (تختی $i)' : 'Lesson $i',
+                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                              ),
+                            ),
+                        ],
+                        onChanged: (val) {
+                          if (val != null) {
+                            setDialogState(() {
+                              selectedLesson = val;
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: Text(isUrdu ? 'منسوخ' : 'Cancel'),
+                ),
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.amber.shade800,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  ),
+                  onPressed: () => Navigator.pop(ctx, true),
+                  child: Text(isUrdu ? 'منسوخ اور محفوظ کریں' : 'Revert & Save'),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+
+    if (confirm == true) {
+      final studentCache = MadrassaLocalStorage.getStudentCached(_effectiveBranch, studentId) ?? Map<String, dynamic>.from(_data);
+      studentCache['qaidaCompleted'] = false;
+      studentCache['qaidaSabak'] = selectedLesson;
+      studentCache['lastUpdatedAt'] = DateTime.now().toIso8601String();
+
+      final auditList = List<Map<String, dynamic>>.from(
+        (studentCache['auditLog'] as List? ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)),
+      );
+      auditList.add({
+        'status': studentCache['status'] ?? 'active',
+        'type': 'qaida_reverted',
+        'date': DateTime.now().toIso8601String(),
+        'reason': 'Reverted Qaida completion to Lesson $selectedLesson',
+      });
+      studentCache['auditLog'] = auditList;
+
+      await MadrassaLocalStorage.cacheStudent(_effectiveBranch, studentId, studentCache);
+
+      setState(() {
+        _data['qaidaCompleted'] = false;
+        _data['qaidaSabak'] = selectedLesson;
+      });
+
+      // Broadcast LAN
+      try {
+        final payload = RealtimeEvents.payload(
+          type: RealtimeEvents.saveMadrassaStudent,
+          data: {
+            ...studentCache,
+            'studentId': studentId,
+          },
+          branchId: _effectiveBranch,
+        );
+        RealtimeManager().sendMessage(payload);
+      } catch (e) {
+        debugPrint('[StudentDetailPage] LAN broadcast error: $e');
+      }
+
+      // Enqueue sync & upload
+      try {
+        await LocalStorageService.enqueueSync({
+          'type': 'save_madrassa_student',
+          'branchId': _effectiveBranch,
+          'studentId': studentId,
+          'data': studentCache,
+        });
+        unawaited(SyncService().triggerUpload());
+      } catch (e) {
+        debugPrint('[StudentDetailPage] enqueueSync error: $e');
+      }
+
+      await MadrassaAuditService.logAction(
+        branchId: _effectiveBranch,
+        editor: widget.username,
+        role: widget.role,
+        type: 'qaida_reverted',
+        message: 'Reverted Qaida completion for $studentName to Lesson $selectedLesson by ${widget.username} (${widget.role}).',
+        studentId: studentId,
+        studentName: studentName,
+      );
+
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              context.isUrdu
+                  ? '$studentName کے لیے قاعدہ تکمیل منسوخ ہو گئی (سبق $selectedLesson)'
+                  : 'Qaida completion reverted for $studentName to Lesson $selectedLesson',
+            ),
+            backgroundColor: Colors.amber.shade800,
+          ),
+        );
+      }
+    }
   }
 
   DateTime _parseDate(dynamic val) {
@@ -131,7 +315,7 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
     return ValueListenableBuilder(
       valueListenable: studentsBox.listenable(),
       builder: (context, Box box, _) {
-        final cached = MadrassaLocalStorage.getStudentCached(widget.branchId, studentId);
+        final cached = MadrassaLocalStorage.getStudentCached(_effectiveBranch, studentId);
         if (cached != null) {
           _data = {'id': studentId, ...cached};
         }
@@ -139,14 +323,20 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
         final name = _data['name'] ?? 'Student';
         final rollNumber = _data['rollNumber'] ?? '?';
         final className = _data['class'] ?? 'Hifz';
-        final photoUrl = _data['photoUrl']?.toString();
+        final photoUrl = (_data['photoUrl'] ??
+            _data['photo_url'] ??
+            _data['photoBase64'] ??
+            _data['studentPhotoBase64'] ??
+            _data['avatarUrl'] ??
+            _data['imageUrl'] ??
+            _data['profileImage'])?.toString();
         final status = _data['status'] ?? 'active';
 
         final currentLines = int.tryParse(_data['currentLines']?.toString() ?? '0') ?? 0;
         final isNazra = (_data['isNazra'] == true) ||
             (_data['program']?.toString().toLowerCase() == 'nazra') ||
             (_data['class']?.toString().toLowerCase() == 'nazra') ||
-            LocalStorageService.isMadrassaNazraOnly(widget.branchId);
+            LocalStorageService.isMadrassaNazraOnly(_effectiveBranch);
         final prevLines = isNazra ? 0 : (int.tryParse(_data['prevHifzLines']?.toString() ?? '0') ?? 0);
         final totalLines = currentLines + prevLines;
         const maxLines = 8640;
@@ -186,7 +376,7 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
             actions: [
               StatusActionMenu(
                 student: _data,
-                branchId: widget.branchId,
+                branchId: _effectiveBranch,
                 isAdmin: _effectiveIsAdmin,
                 t: RoleThemeScope.dataOf(context),
                 username: widget.username,
@@ -197,7 +387,7 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                 tooltip: 'Edit Student Details',
                 onPressed: () => showAddStudentDialog(
                   context,
-                  widget.branchId,
+                  _effectiveBranch,
                   student: _data,
                   username: widget.username,
                   role: widget.role,
@@ -386,9 +576,39 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                             Row(
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
-                                Text(
-                                  'Qaida Status: ${isQaidaComp ? "Completed / مکمل ✅" : "Lesson $qaidaLesson of 21"}',
-                                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                Row(
+                                  children: [
+                                    Text(
+                                      'Qaida Status: ${isQaidaComp ? "Completed / مکمل ✅" : "Lesson $qaidaLesson of 21"}',
+                                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                    ),
+                                    if (isQaidaComp) ...[
+                                      const SizedBox(width: 8),
+                                      InkWell(
+                                        onTap: () => _showRevertQaidaDialog(context, studentId),
+                                        borderRadius: BorderRadius.circular(4),
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: Colors.amber.withValues(alpha: 0.15),
+                                            borderRadius: BorderRadius.circular(4),
+                                            border: Border.all(color: Colors.amber.shade700.withValues(alpha: 0.5)),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(Icons.undo_rounded, size: 11, color: Colors.amber.shade900),
+                                              const SizedBox(width: 3),
+                                              Text(
+                                                'Revert',
+                                                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.amber.shade900),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
                                 ),
                                 Text(
                                   'Nazra Sabak: $currentLines lines',

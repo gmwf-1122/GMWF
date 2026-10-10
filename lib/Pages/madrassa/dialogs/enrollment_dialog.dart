@@ -77,18 +77,19 @@ void showAddStudentDialog(
     } catch (_) {}
   }
 
-  if (effectiveBranch.isEmpty || effectiveBranch == 'all' || effectiveBranch == 'global') {
+  effectiveBranch = MadrassaLocalStorage.normalizeBranch(effectiveBranch);
+  if (effectiveBranch == 'all' || effectiveBranch.isEmpty) {
     if (teacherBranch != null && teacherBranch.isNotEmpty) {
-      effectiveBranch = teacherBranch;
+      effectiveBranch = MadrassaLocalStorage.normalizeBranch(teacherBranch);
     } else if (studentData != null) {
       final b = (studentData['branchId'] ?? studentData['branch'] ?? '').toString().trim().toLowerCase();
-      if (b.isNotEmpty && b != 'all' && b != 'global') {
-        effectiveBranch = b;
+      if (b.isNotEmpty) {
+        effectiveBranch = MadrassaLocalStorage.normalizeBranch(b);
       }
     }
   }
 
-  if (effectiveBranch.isEmpty || effectiveBranch == 'all' || effectiveBranch == 'global') {
+  if (effectiveBranch.isEmpty || effectiveBranch == 'all') {
     effectiveBranch = 'gujrat';
   }
 
@@ -120,6 +121,12 @@ void showAddStudentDialog(
     }
   }
   bool qaidaCompleted = studentData?['qaidaCompleted'] == true;
+  final existingQaidaSabak = studentData?['qaidaSabak'];
+  String selectedQaidaLesson = (existingQaidaSabak != null &&
+          existingQaidaSabak != 'completed' &&
+          existingQaidaSabak != '-')
+      ? existingQaidaSabak.toString()
+      : '21';
 
   final nameCtrl = TextEditingController(text: studentData?['name']);
   final rollCtrl = TextEditingController(text: studentData?['rollNumber']);
@@ -906,22 +913,82 @@ void showAddStudentDialog(
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: qaidaCompleted ? const Color(0xFF10B981).withValues(alpha: 0.3) : Colors.grey.shade300),
                     ),
-                    child: SwitchListTile(
-                      activeColor: const Color(0xFF10B981),
-                      secondary: Icon(
-                        qaidaCompleted ? Icons.check_circle_rounded : Icons.menu_book_rounded,
-                        color: qaidaCompleted ? const Color(0xFF10B981) : Colors.grey,
-                      ),
-                      title: Text(
-                        context.isUrdu ? 'قاعدہ مکمل ہو چکا ہے؟' : 'Qaida Completed?',
-                        style: context.urduStyle(style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold)),
-                      ),
-                      subtitle: Text(
-                        context.isUrdu ? 'اگر طالب علم نے نورانی قاعدہ مکمل کر لیا ہے تو اسے آن کریں۔' : 'Enable if student has already completed Noorani Qaida.',
-                        style: const TextStyle(fontSize: 11, color: Colors.grey),
-                      ),
-                      value: qaidaCompleted,
-                      onChanged: (v) => setDs(() => qaidaCompleted = v),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SwitchListTile(
+                          activeColor: const Color(0xFF10B981),
+                          secondary: Icon(
+                            qaidaCompleted ? Icons.check_circle_rounded : Icons.menu_book_rounded,
+                            color: qaidaCompleted ? const Color(0xFF10B981) : Colors.grey,
+                          ),
+                          title: Text(
+                            context.isUrdu ? 'قاعدہ مکمل ہو چکا ہے؟' : 'Qaida Completed?',
+                            style: context.urduStyle(style: const TextStyle(fontSize: 13.5, fontWeight: FontWeight.bold)),
+                          ),
+                          subtitle: Text(
+                            context.isUrdu ? 'اگر طالب علم نے نورانی قاعدہ مکمل کر لیا ہے تو اسے آن کریں۔' : 'Enable if student has already completed Noorani Qaida.',
+                            style: const TextStyle(fontSize: 11, color: Colors.grey),
+                          ),
+                          value: qaidaCompleted,
+                          onChanged: (v) => setDs(() => qaidaCompleted = v),
+                        ),
+                        if (!qaidaCompleted) ...[
+                          const Divider(height: 1),
+                          Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            child: Row(
+                              children: [
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        context.isUrdu ? 'موجودہ قاعدہ سبق / تختی:' : 'Current Qaida Lesson:',
+                                        style: context.urduStyle(style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0F766E))),
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        context.isUrdu ? 'تختی نمبر ۱ تا ۲۱ منتخب کریں' : 'Lesson 1 to 21',
+                                        style: const TextStyle(fontSize: 11, color: Colors.grey),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                                  decoration: BoxDecoration(
+                                    border: Border.all(color: const Color(0xFF0D9488).withValues(alpha: 0.4)),
+                                    borderRadius: BorderRadius.circular(8),
+                                    color: Colors.white,
+                                  ),
+                                  child: DropdownButtonHideUnderline(
+                                    child: DropdownButton<String>(
+                                      value: selectedQaidaLesson,
+                                      isDense: true,
+                                      items: [
+                                        for (int i = 1; i <= 21; i++)
+                                          DropdownMenuItem<String>(
+                                            value: '$i',
+                                            child: Text(
+                                              context.isUrdu ? 'سبق $i (تختی $i)' : 'Lesson $i',
+                                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                                            ),
+                                          ),
+                                      ],
+                                      onChanged: (val) {
+                                        if (val != null) {
+                                          setDs(() => selectedQaidaLesson = val);
+                                        }
+                                      },
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ],
@@ -1615,8 +1682,8 @@ void showAddStudentDialog(
                     'isNazra': selectedProgram == 'nazra',
                     'class': selectedProgram == 'nazra' ? 'Nazra' : 'Hifz',
                     'qaidaCompleted': selectedProgram == 'nazra' ? qaidaCompleted : false,
-                    if (selectedProgram == 'nazra' && qaidaCompleted) ...{
-                      'qaidaSabak': 'completed',
+                    if (selectedProgram == 'nazra') ...{
+                      'qaidaSabak': qaidaCompleted ? 'completed' : selectedQaidaLesson,
                     },
                     'biometricPin': enteredPin,
                     'guardianName': guardianNameCtrl.text.trim(),

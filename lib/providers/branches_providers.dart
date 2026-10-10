@@ -729,14 +729,22 @@ class DispensaryNotifier
               if (raw is Map) foundPatient = Map<String, dynamic>.from(raw);
             }
             if (foundPatient != null) {
-              entry['patientName'] ??= foundPatient['name'] ?? foundPatient['patientName'];
-              entry['name'] ??= foundPatient['name'] ?? foundPatient['patientName'];
-              entry['patientCnic'] ??= foundPatient['cnic'] ?? foundPatient['patientCnic'];
-              entry['cnic'] ??= foundPatient['cnic'] ?? foundPatient['patientCnic'];
-              entry['patientPhone'] ??= foundPatient['phone'] ?? foundPatient['contactPhone'];
-              entry['phone'] ??= foundPatient['phone'] ?? foundPatient['contactPhone'];
-              entry['age'] ??= foundPatient['age'] ?? foundPatient['patientAge'];
-              entry['gender'] ??= foundPatient['gender'] ?? foundPatient['patientGender'];
+              bool blank(dynamic v) {
+                final s = v?.toString().trim().toLowerCase() ?? '';
+                return s.isEmpty || s == 'unknown' || s == 'unknown patient' || s == 'n/a' || s == '-';
+              }
+              void fill(String key, dynamic v) {
+                if (v != null && !blank(v) && blank(entry[key])) entry[key] = v;
+              }
+              final fName = foundPatient['name'] ?? foundPatient['patientName'];
+              fill('patientName', fName);
+              fill('name', fName);
+              fill('patientCnic', foundPatient['cnic'] ?? foundPatient['patientCnic']);
+              fill('cnic', foundPatient['cnic'] ?? foundPatient['patientCnic']);
+              fill('patientPhone', foundPatient['phone'] ?? foundPatient['contactPhone']);
+              fill('phone', foundPatient['phone'] ?? foundPatient['contactPhone']);
+              fill('age', foundPatient['age'] ?? foundPatient['patientAge']);
+              fill('gender', foundPatient['gender'] ?? foundPatient['patientGender']);
             }
           }
         }

@@ -70,6 +70,13 @@ class PatientFormHelper {
         name.contains('infusion');
   }
 
+  static bool isInventoryMed(Map m) {
+    final invId = m['inventoryId'] ?? m['medicineId'];
+    if (invId == null) return false;
+    final s = invId.toString().trim().toLowerCase();
+    return s.isNotEmpty && s != 'null' && s != 'undefined' && s != '0';
+  }
+
   static String getUnitUrdu(Map med) {
     final type = (med['type'] ?? '').toString().toLowerCase().trim();
     final name = (med['name'] ?? '').toString().toLowerCase();
@@ -229,10 +236,10 @@ class PatientFormHelper {
 
     // Only custom items on the slip
     final customMeds = prescriptions
-        .where((m) => m['inventoryId'] == null && !isInjectable(m))
+        .where((m) => !isInventoryMed(m) && !isInjectable(m))
         .toList();
     final customInjectables = prescriptions
-        .where((m) => m['inventoryId'] == null && isInjectable(m))
+        .where((m) => !isInventoryMed(m) && isInjectable(m))
         .toList();
 
     final teal = PdfColor.fromHex('#00695C');
@@ -776,7 +783,7 @@ class PatientFormHelper {
                         crossAxisAlignment: pw.CrossAxisAlignment.start,
                         children: [
                           pw.Text(
-                            'GULZAR-E-MADINA WELFARE FOUNDATION',
+                            'GULZAR MADINA WELFARE FOUNDATION',
                             style: pw.TextStyle(
                               font: english,
                               fontSize: 13,
@@ -1155,7 +1162,7 @@ class PatientFormHelper {
                 mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
                 children: [
                   pw.Text(
-                    'Gulzar-e-Madina Free Dispensary ($branchName)',
+                    'Gulzar Madina Free Dispensary ($branchName)',
                     style: pw.TextStyle(font: english, fontSize: 8, fontWeight: pw.FontWeight.bold, color: textDark),
                   ),
                   pw.Text(

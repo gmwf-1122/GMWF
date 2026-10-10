@@ -386,9 +386,10 @@ Serial: ${data['serial'] ?? 'N/A'}
         break;
 
       // ── EXECUTIVE GLOBAL CLOUD SYNC ────────────────────────────────────────
+      case RealtimeEvents.forceSyncUpload:
       case 'force_all_users_cloud_sync':
-        debugPrint('[RealtimeRouter] ☁️ Received force_all_users_cloud_sync command! Uploading local queues to Firestore...');
-        SyncService().triggerUpload();
+        debugPrint('[RealtimeRouter] ☁️ Received force_sync_upload command! Sweeping & uploading local queues to Firestore...');
+        SyncService().sweepAllPendingLocalData(force: true);
         break;
 
       // ── DASTERKHWAAN EVENTS ───────────────────────────────────────────────
@@ -822,15 +823,19 @@ Serial: ${data['serial'] ?? 'N/A'}
       if (!Hive.isBoxOpen(LocalStorageService.stockBox)) {
         await LocalStorageService.ensureBoxOpen(LocalStorageService.stockBox);
       }
-      final box = Hive.box(LocalStorageService.stockBox);
-
+      final batchMap = <dynamic, dynamic>{};
       for (final raw in items) {
         if (raw is! Map) continue;
         final item = Map<String, dynamic>.from(raw);
         final medId = (item['id'] ?? item['medicineId'] ?? item['docId'])?.toString().trim();
         if (medId == null || medId.isEmpty) continue;
-        await box.put('stock:$medId', item);
-        await box.put(medId, item);
+        batchMap['stock:$medId'] = item;
+        batchMap[medId] = item;
+      }
+
+      if (batchMap.isNotEmpty) {
+        final box = Hive.box(LocalStorageService.stockBox);
+        await box.putAll(batchMap);
       }
 
       if (kDebugMode) {

@@ -55,7 +55,7 @@
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb, ValueNotifier, VoidCallback;
+import 'package:flutter/foundation.dart' show kDebugMode, kIsWeb, ValueNotifier, VoidCallback, debugPrint;
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
@@ -80,6 +80,7 @@ class RealtimeManager {
       StreamController<Map<String, dynamic>>.broadcast();
 
   bool _isConnected      = false;
+  bool _gotFirstFrame    = false; // true once the server has actually sent us a frame on this socket
   bool _serverIdentified = false;
   bool _flushedOnConnect = false; // [BUG-4] guard against double outbox flush
 
@@ -134,11 +135,17 @@ class RealtimeManager {
   };
 
   // ── Back-off schedule (seconds). After the last value, stays at 5 s. ──────
-  static const _backoffDelays = [2, 4, 8, 16, 32];
+  static const _backoffDelays = [2, 3, 5, 5, 5];
 
   Stream<Map<String, dynamic>> get messageStream => _messageController.stream;
   bool    get isConnected          => _isConnected;
   bool    get isServerIdentified   => _serverIdentified;
+
+  /// True only while the link is demonstrably alive: socket open, server handshake done, and a
+  /// frame (pong or data) received in the last 15 s. Use this for status displays instead of
+  /// cached connection-manager snapshots, which can stay "connected" after the server is gone.
+  bool get isLinkAlive =>
+      _isConnected && _serverIdentified && _lastPong != null && DateTime.now().difference(_lastPong!).inSeconds < 15;
   bool    get isLanHealthy         => isLanHealthyNotifier.value;
   bool    get isReconnecting       => _reconnectTimer != null && _reconnectTimer!.isActive;
   int     get reconnectAttempts    => _reconnectAttempts;
@@ -146,6 +153,18 @@ class RealtimeManager {
   String? get branchId             => _branchId;
   String? get username             => _username;
   String? get clientId             => _clientId;
+
+  /// True when a messageStream event is the local echo of something THIS desk sent
+  /// (e.g. a token issued from the Receptionist tab of a Hybrid Desk). Use it to skip
+  /// "new token"/"prescription" popups about the user's own actions.
+  bool isOwnEvent(Map<String, dynamic>? event) {
+    if (event == null || _clientId == null || _clientId!.isEmpty) return false;
+    final decoded = event['decoded'];
+    final sender = event['_clientId'] ?? (decoded is Map ? decoded['_clientId'] : null);
+    return sender != null && sender.toString() == _clientId;
+  }
+  String? get serverIp             => _serverIp;
+  int     get port                 => _port;
   DateTime get effectiveNow => DateTime.now().add(Duration(milliseconds: _serverClockSkewMs));
   int _serverClockSkewMs = 0;
 
@@ -199,6 +218,31 @@ class RealtimeManager {
     }
   }
 
+  // ── Coalesced catch-up request ─────────────────────────────────────────────
+  // Doctor, Dispenser and Receptionist screens (and the auto request sent on
+  // server identification) may all ask for catch-up within the same second —
+  // e.g. in the hybrid dispensary view. Sending N requests makes the server
+  // push the whole day N times, which is exactly the kind of burst that made
+  // 1.6.0 drop the socket. Collapse them into one request per window.
+  DateTime? _lastCatchUpRequestAt;
+  static const Duration _catchUpCoalesceWindow = Duration(seconds: 3);
+
+  /// Returns true if a request was actually sent.
+  bool requestCatchUp({String? branchId}) {
+    if (!_isConnected || !_serverIdentified) return false;
+    final now = DateTime.now();
+    if (_lastCatchUpRequestAt != null &&
+        now.difference(_lastCatchUpRequestAt!) < _catchUpCoalesceWindow) {
+      return false;
+    }
+    _lastCatchUpRequestAt = now;
+    sendMessage({
+      'event_type': 'request_catch_up',
+      'branchId': branchId ?? _branchId,
+    });
+    return true;
+  }
+
   // ── Initialize ─────────────────────────────────────────────────────────────
   Future<void> initialize({
     required String role,
@@ -211,10 +255,26 @@ class RealtimeManager {
     final normBranch = branchId.trim().toLowerCase();
     final normIp = serverIp.trim();
 
-    if (_isConnected && _serverIp == normIp && _role == normRole && _branchId == normBranch) {
+    if (_isConnected && _serverIp == normIp && _branchId == normBranch) {
+      _role = normRole;
       if (username != null && username.trim().isNotEmpty) {
         _username = username.trim();
       }
+      // Reuse existing live connection smoothly: send updated identify without tearing down the socket!
+      try {
+        final identifyMsg = {
+          'event_type':      'identify',
+          'role':            _role,
+          'branchId':        _branchId,
+          'username':        _username ?? _role,
+          'platform':        kIsWeb ? 'web' : 'native',
+          'protocolVersion': AutoUpdateService.protocolVersion,
+          'appVersion':      AutoUpdateService.currentVersion,
+          '_clientId':       _clientId,
+          '_timestamp':      DateTime.now().millisecondsSinceEpoch,
+        };
+        _channel?.sink.add(jsonEncode(identifyMsg));
+      } catch (_) {}
       return;
     }
 
@@ -252,17 +312,38 @@ class RealtimeManager {
   }
 
   // ── WebSocket connect ──────────────────────────────────────────────────────
+  int _connectGen = 0;
+
   Future<void> _connectClient() async {
     if (_serverIp == null || _serverIp!.isEmpty) return;
 
     final wsUrl = 'ws://$_serverIp:$_port';
-    if (kDebugMode) print('[RealtimeManager] Connecting → $wsUrl');
+    debugPrint('[RealtimeManager] Connecting → $wsUrl');
 
     _serverIdentified = false;
+    _gotFirstFrame    = false;
     _flushedOnConnect = false;
+
+    // Make sure any previous half-open channel/subscription is released
+    // without awaiting (closing a SYN_SENT socket can block for ~20s).
+    try { _channelSub?.cancel(); } catch (_) {}
+    _channelSub = null;
+    try { _channel?.sink.close(ws_status.goingAway).timeout(const Duration(seconds: 1), onTimeout: () {}); } catch (_) {}
+
+    final gen = ++_connectGen;
 
     try {
       _channel = WebSocketChannel.connect(Uri.parse(wsUrl));
+
+      // Handshake watchdog: if the server never identifies us (stale IP, wrong
+      // device on that IP, firewall dropping SYN) give up quickly so the
+      // reconnect/rediscovery logic can run instead of sitting in SYN_SENT.
+      Timer(const Duration(seconds: 6), () {
+        if (gen != _connectGen) return;
+        if (_serverIdentified) return;
+        debugPrint('[RealtimeManager] ⏱️ Handshake watchdog: no identify from $wsUrl in 6s → reconnect');
+        _handleDisconnect();
+      });
 
       if (kIsWeb) {
         try {
@@ -277,8 +358,14 @@ class RealtimeManager {
       // Attach listener FIRST before sending identify payload so no responses are lost
       _channelSub = _channel!.stream.listen(
         _onMessage,
-        onError: (_) => _handleDisconnect(),
-        onDone:  ()  => _handleDisconnect(),
+        onError: (err) {
+          debugPrint('[RealtimeManager] 🔴 Socket error: $err');
+          _handleDisconnect();
+        },
+        onDone: () {
+          debugPrint('[RealtimeManager] 🔴 Socket onDone: closeCode=${_channel?.closeCode} closeReason=${_channel?.closeReason}');
+          _handleDisconnect();
+        },
       );
 
       final identifyMsg = {
@@ -296,7 +383,9 @@ class RealtimeManager {
 
       _isConnected = true;
       _lastPong = DateTime.now();
-      _reconnectAttempts = 0;
+      // NOTE: _reconnectAttempts is intentionally NOT reset here. It is reset
+      // once the server confirms identification, otherwise a dead IP would
+      // keep the counter at 0 forever and rediscovery would never trigger.
       _startPingTimer();
       _startAckFlushTimer();
       _schedulePendingFallback();
@@ -311,8 +400,92 @@ class RealtimeManager {
   }
 
   // ── Incoming message ───────────────────────────────────────────────────────
+
+  // ══ Stress-test support (server-initiated, see StressTestEngine) ══════════════
+  // Replies are written straight to the socket (no outbox, no retry) so measured timings are
+  // real. Test tokens are written to the local entries box only: they never enter the sync
+  // queue, the serial counter or Firestore, and are removed again by `stress_cleanup` (and by
+  // the safety purge that runs on every connect).
+
+  void _sendRaw(Map<String, dynamic> m) {
+    try {
+      _channel?.sink.add(jsonEncode({...m, '_clientId': _clientId}));
+    } catch (_) {}
+  }
+
+  bool _handleStressMessage(Map<String, dynamic> m) {
+    final type = (m['event_type'] ?? m['type'] ?? '').toString();
+    if (!type.startsWith('stress_')) return false;
+    switch (type) {
+      case 'stress_probe':
+        _sendRaw({
+          'event_type': 'stress_probe_ack',
+          'testId': m['testId'],
+          'seq': m['seq'],
+        });
+        return true;
+      case 'stress_token':
+        try {
+          final serial = (m['serial'] ?? '').toString();
+          final data = Map<String, dynamic>.from((m['data'] as Map?) ?? {});
+          if (serial.isNotEmpty && Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+            final branch = (data['branchId'] ?? _branchId ?? '').toString().toLowerCase();
+            final box = Hive.box(LocalStorageService.entriesBox);
+            data['isStressTest'] = true;
+            data['serial'] = serial;
+            data['id'] = serial;
+            box.put('$branch-${serial.toLowerCase()}', data);
+          }
+        } catch (_) {}
+        _sendRaw({'event_type': 'stress_token_ack', 'testId': m['testId'], 'i': m['i']});
+        return true;
+      case 'stress_request':
+        _sendRaw({'event_type': 'stress_request_ack', 'testId': m['testId'], 'i': m['i']});
+        return true;
+      case 'stress_cleanup':
+        final res = purgeStressTestEntries();
+        _sendRaw({
+          'event_type': 'stress_cleanup_ack',
+          'testId': m['testId'],
+          'removed': res.$1,
+          'remaining': res.$2,
+        });
+        return true;
+    }
+    return true; // unknown stress_* frame: ignore, never route as real data
+  }
+
+  /// Deletes every stress-test token from this device. Returns (removed, remainingAfter).
+  (int, int) purgeStressTestEntries() {
+    var removed = 0;
+    var remaining = 0;
+    try {
+      if (!Hive.isBoxOpen(LocalStorageService.entriesBox)) return (0, 0);
+      final box = Hive.box(LocalStorageService.entriesBox);
+      final doomed = <dynamic>[];
+      for (final k in box.keys) {
+        final v = box.get(k);
+        if (v is Map && (v['isStressTest'] == true || (v['serial'] ?? '').toString().startsWith('STRESS-'))) {
+          doomed.add(k);
+        }
+      }
+      for (final k in doomed) {
+        box.delete(k);
+        removed++;
+      }
+      for (final k in box.keys) {
+        final v = box.get(k);
+        if (v is Map && v['isStressTest'] == true) remaining++;
+      }
+    } catch (e) {
+      debugPrint('[RealtimeManager] purgeStressTestEntries error: $e');
+    }
+    return (removed, remaining);
+  }
+
   void _onMessage(dynamic raw) {
     if (raw == null) return;
+    _gotFirstFrame = true;
     _lastPong = DateTime.now();
     _recordHealthSuccess();
     final msg = raw.toString();
@@ -353,8 +526,13 @@ class RealtimeManager {
         return;
       }
 
+      if (_handleStressMessage(decoded)) return;
+
       if (decoded['event_type'] == 'identified' && !_serverIdentified) {
         _serverIdentified = true;
+        // Safety net: remove any stress-test tokens left by a test this device missed.
+        purgeStressTestEntries();
+        _reconnectAttempts = 0;
         if (kDebugMode) {
           print('[RealtimeManager] Identified — flushing ${_pendingMessages.length} pending');
         }
@@ -379,11 +557,10 @@ class RealtimeManager {
 
         // Request today's local records immediately. This fills a doctor or
         // dispensary queue that missed a live broadcast without waiting for
-        // the periodic server catch-up timer.
-        sendMessage({
-          'event_type': 'request_catch_up',
-          'branchId': _branchId,
-        });
+        // the periodic server catch-up timer. A fresh identification always
+        // sends (window reset); screens mounting right after are coalesced.
+        _lastCatchUpRequestAt = null;
+        requestCatchUp();
       }
 
       // [IMM-ACK] Handle ACK from server (server confirmed our message).
@@ -401,10 +578,36 @@ class RealtimeManager {
     }
   }
 
+  // ── Outbox de-duplication ────────────────────────────────────────────────────
+  // The same token / patient / prescription used to be queued again every time it was re-sent
+  // (startup backfill, reconnects, repeated saves) under a NEW message id. Thousands of
+  // duplicates piled up while offline; on reconnect they were all flushed at once and every
+  // server ACK then scanned the whole outbox (O(n²)), freezing the UI thread ("Not Responding").
+  final Map<String, String> _outboxLogical = {};
+
+  /// Identity of the business record a message carries, e.g. "save_entry|091026-SADD-074".
+  String? _logicalKey(Map<dynamic, dynamic> m) {
+    final type = (m['event_type'] ?? m['type'])?.toString() ?? '';
+    if (type.isEmpty) return null;
+    final data = m['data'] is Map ? m['data'] as Map : const {};
+    final id = (m['serial'] ?? data['serial'] ?? data['id'] ?? data['patientId'] ?? m['entityId'] ?? data['localId'] ?? '')
+        .toString()
+        .trim();
+    return id.isEmpty ? null : '$type|$id';
+  }
+
   // ── Remove outbox entry by messageId (called on server ACK) ──────────────
   void _removeFromOutboxByMessageId(String messageId) {
     try {
       final box = Hive.box(_outboxBox);
+      // The outbox key IS the message id (see sendMessage), so this is O(1). The old code scanned
+      // and decoded every entry for every ACK, which froze the app when thousands were queued.
+      if (box.containsKey(messageId)) {
+        box.delete(messageId);
+        return;
+      }
+      // Entries written without a message id use generated keys: only scan when the box is small.
+      if (box.length > 300) return;
       for (final key in box.keys.toList()) {
         final entry = box.get(key);
         if (entry is Map) {
@@ -412,7 +615,6 @@ class RealtimeManager {
           if (entryMsgId == messageId) {
             box.delete(key);
             if (kDebugMode) {
-              print('[RealtimeManager] ACK: removed outbox entry for msgId=$messageId');
             }
             return;
           }
@@ -454,7 +656,7 @@ class RealtimeManager {
   // ── Fallback flush ─────────────────────────────────────────────────────────
   void _schedulePendingFallback() {
     Future.delayed(const Duration(seconds: 3), () {
-      if (!_serverIdentified && _isConnected && _pendingMessages.isNotEmpty) {
+      if (!_serverIdentified && _isConnected && _gotFirstFrame && _pendingMessages.isNotEmpty) {
         _serverIdentified = true;
         _sendPendingMessages();
       }
@@ -468,12 +670,12 @@ class RealtimeManager {
   // ── Ping / pong ────────────────────────────────────────────────────────────
   void _startPingTimer() {
     _pingTimer?.cancel();
-    _pingTimer = Timer.periodic(const Duration(seconds: 12), (_) {
+    _pingTimer = Timer.periodic(const Duration(seconds: 5), (_) {
       if (!_isConnected || _channel == null) return;
       final now = DateTime.now();
-      // If no pong has been received within 25 seconds (2 missed pings), tear down dead socket
-      if (_lastPong != null && now.difference(_lastPong!).inSeconds > 25) {
-        if (kDebugMode) print('[RealtimeManager] ⚠️ Pong timeout (>25s) → tearing down half-dead socket');
+      // If no pong has been received within 14 seconds (less than 3 missed pings), tear down dead socket immediately
+      if (_lastPong != null && now.difference(_lastPong!).inSeconds > 14) {
+        debugPrint('[RealtimeManager] ⚠️ Pong timeout (>14s) → tearing down half-dead socket');
         _recordHealthFailure();
         _handleDisconnect();
         return;
@@ -552,6 +754,8 @@ class RealtimeManager {
   // This prevents the >60-second dead window that occurred when the old cap
   // of 5 was hit and ConnectionManager had to re-run full LAN discovery.
   void _handleDisconnect() {
+    _connectGen++; // invalidate any pending handshake watchdog for the old socket
+    _gotFirstFrame = false;
     _recordHealthFailure();
     _isConnected      = false;
     _serverIdentified = false;
@@ -574,10 +778,10 @@ class RealtimeManager {
           '(attempt $_reconnectAttempts)');
     }
 
-    // If we've failed to reconnect to this specific server IP 3 times,
+    // If we've failed to reconnect to this specific server IP twice,
     // notify ConnectionManager to run full LAN discovery (UDP/subnet/Firestore probe)
     // in case the server IP changed or machine restarted with a new DHCP address.
-    if (_reconnectAttempts >= 3 && onNeedRediscovery != null) {
+    if (_reconnectAttempts >= 2 && onNeedRediscovery != null) {
       if (kDebugMode) {
         print('[RealtimeManager] Reconnect attempts reached $_reconnectAttempts → notifying ConnectionManager to trigger rediscovery');
       }
@@ -663,6 +867,18 @@ class RealtimeManager {
         outboxEntry['_outboxTimestamp']  = DateTime.now().toIso8601String();
         outboxEntry['_outboxRetryCount'] = 0; // [FAIL-BOX]
         if (Hive.isBoxOpen(_outboxBox)) {
+          // Same business record queued again? Replace the older copy instead of piling up.
+          final logical = _logicalKey(normalized);
+          if (logical != null) {
+            final old = _outboxLogical[logical];
+            if (old != null && old != outboxKey) {
+              try {
+                Hive.box(_outboxBox).delete(old);
+              } catch (_) {}
+            }
+            _outboxLogical[logical] = outboxKey;
+            _pendingMessages.removeWhere((m) => _logicalKey(m) == logical);
+          }
           Hive.box(_outboxBox).put(outboxKey, outboxEntry);
         }
       } catch (e) {
@@ -694,8 +910,9 @@ class RealtimeManager {
       _channel!.sink.add(encoded);
       if (kDebugMode) print('[RealtimeManager] → ${normalized['event_type']} (msgId=${normalized['_messageId']})');
     } catch (e) {
-      if (kDebugMode) print('[RealtimeManager] Socket transmission exception: $e → queuing to pending');
+      if (kDebugMode) print('[RealtimeManager] Socket transmission exception: $e → queuing to pending and reconnecting');
       _pendingMessages.add(normalized);
+      _handleDisconnect();
     }
   }
 
@@ -734,19 +951,61 @@ class RealtimeManager {
 
       if (kDebugMode) print('[RealtimeManager] Flushing outbox: ${box.length} items');
 
+      // Pre-pass: for each business record keep only its NEWEST queued copy; older duplicates
+      // (left over from earlier versions or sessions) are dropped without being sent.
+      final latestByLogical = <String, ({dynamic key, String ts})>{};
+      for (final key in box.keys.toList()) {
+        final raw = box.get(key);
+        if (raw is! Map) continue;
+        final lk = _logicalKey(raw);
+        if (lk == null) continue;
+        final ts = (raw['_outboxTimestamp'] ?? raw['createdAt'] ?? '').toString();
+        final cur = latestByLogical[lk];
+        if (cur == null || ts.compareTo(cur.ts) >= 0) latestByLogical[lk] = (key: key, ts: ts);
+      }
+
+      var sentThisPass = 0;
+      const maxPerPass = 250; // never push thousands of frames at once; the rest follows shortly
+
       for (final key in box.keys.toList()) {
         final raw = box.get(key);
         if (raw is! Map) { toDelete.add(key); continue; }
 
+        final lk = _logicalKey(raw);
+        if (lk != null && latestByLogical[lk]?.key != key) {
+          toDelete.add(key); // superseded by a newer copy of the same record
+          continue;
+        }
+        if (sentThisPass >= maxPerPass) {
+          Future.delayed(const Duration(seconds: 2), _flushOutbox);
+          break;
+        }
+
         final item = Map<String, dynamic>.from(raw);
 
-        // Expire items from previous days or older than 12 hours.
+        // Expire non-critical items from previous days or older than 12 hours.
+        // Critical business entities (tokens, prescriptions, dispenses, patients, donations) MUST NOT be discarded.
+        final eventType = (item['event_type'] ?? item['type'])?.toString() ?? '';
+        final isCriticalEvent = eventType == RealtimeEvents.saveEntry ||
+            eventType == RealtimeEvents.savePrescription ||
+            eventType == RealtimeEvents.dispenseCompleted ||
+            eventType == RealtimeEvents.savePatient ||
+            eventType == 'save_donation' ||
+            eventType == RealtimeEvents.saveEmployee ||
+            eventType == 'save_dispensary_charge' ||
+            eventType == 'save_dispensary_record' ||
+            eventType == 'update_serial_status' ||
+            eventType == 'token_created' ||
+            eventType == 'prescription_created';
+
         final itemDateKey = (item['dateKey'] ?? item['data']?['dateKey'])?.toString().trim();
         final tsStr    = (item['_outboxTimestamp'] ?? item['createdAt'])?.toString();
         final itemTime = tsStr != null ? DateTime.tryParse(tsStr) : null;
 
-        final isStale = (itemDateKey != null && itemDateKey.isNotEmpty && itemDateKey != todayDateKey) ||
-            (itemTime != null && (itemTime.isBefore(cutoff) || itemTime.day != DateTime.now().day));
+        final isStale = !isCriticalEvent && (
+            (itemDateKey != null && itemDateKey.isNotEmpty && itemDateKey != todayDateKey) ||
+            (itemTime != null && (itemTime.isBefore(cutoff) || itemTime.day != DateTime.now().day))
+        );
 
         if (isStale) {
           if (kDebugMode) print('[RealtimeManager] 🗑️ Discarding stale/yesterday outbox item: key=$key dateKey=$itemDateKey');
@@ -763,13 +1022,13 @@ class RealtimeManager {
         msg['_timestamp'] = DateTime.now().millisecondsSinceEpoch;
 
         if (kDebugMode) {
-          print('[RealtimeManager] Outbox resend: ${msg['event_type']} serial=${msg['serial'] ?? msg['data']?['serial'] ?? '?'}');
         }
 
         try {
           _channel!.sink.add(jsonEncode(msg));
           toDelete.add(key);
-          await Future.delayed(const Duration(milliseconds: 50));
+          sentThisPass++;
+          await Future.delayed(const Duration(milliseconds: 20));
         } catch (e) {
           if (kDebugMode) print('[RealtimeManager] Outbox resend failed: $e');
 
@@ -966,25 +1225,24 @@ class RealtimeManager {
       if (kDebugMode) print('[RealtimeManager] RealtimeRouter error: $e\n$st');
     });
 
-    // [IMM-ACK] Send immediate ACK for data-bearing events (tokens, prescriptions).
     if (type == 'save_stock_item') {
-      // [INV-CATCHUP] Stock items ack by medicineId+version (not serial),
-      // matching the server's seen-tracking key so catch-up/periodic sweeps
-      // know this exact version already reached this client.
-      final medicineId = (data['id'] ?? data['medicineId'] ?? data['docId'])?.toString().trim() ?? '';
-      final version = (data['updatedAt'] ?? data['lastUpdated'] ?? data['createdAt'] ?? '').toString();
-      if (medicineId.isNotEmpty) {
-        try {
-          final ackMsg = {
-            'event_type': 'ack_stock_items',
-            'items':      [{'medicineId': medicineId, 'version': version}],
-            '_clientId':  _clientId,
-            '_timestamp': DateTime.now().millisecondsSinceEpoch,
-            '_immediate': true,
-          };
-          _channel?.sink.add(jsonEncode(ackMsg));
-          if (kDebugMode) print('[RealtimeManager] ⚡ Immediate stock ACK: $medicineId v=$version');
-        } catch (_) {}
+      final isCatchUp = decoded['isCatchUp'] == true || decoded['_isReplay'] == true;
+      if (!isCatchUp) {
+        final medicineId = (data['id'] ?? data['medicineId'] ?? data['docId'])?.toString().trim() ?? '';
+        final version = (data['updatedAt'] ?? data['lastUpdated'] ?? data['createdAt'] ?? '').toString();
+        if (medicineId.isNotEmpty) {
+          try {
+            final ackMsg = {
+              'event_type': 'ack_stock_items',
+              'items':      [{'medicineId': medicineId, 'version': version}],
+              '_clientId':  _clientId,
+              '_timestamp': DateTime.now().millisecondsSinceEpoch,
+              '_immediate': true,
+            };
+            _channel?.sink.add(jsonEncode(ackMsg));
+            if (kDebugMode) print('[RealtimeManager] ⚡ Immediate stock ACK: $medicineId v=$version');
+          } catch (_) {}
+        }
       }
     } else if (type != null && _immAckEvents.contains(type)) {
       final serial = data['serial']?.toString().trim() ?? '';
@@ -1025,12 +1283,16 @@ class RealtimeManager {
 
   // ── Dispose ────────────────────────────────────────────────────────────────
   Future<void> dispose() async {
+    _connectGen++; // invalidate any pending handshake watchdog
     _reconnectTimer?.cancel();
     _pingTimer?.cancel();
     _ackFlushTimer?.cancel();
     _outboxSweepTimer?.cancel();
     _channelSub?.cancel();
-    await _channel?.sink.close(ws_status.normalClosure);
+    try {
+      // Never block on closing: a half-open (SYN_SENT) socket can hang ~20s.
+      await _channel?.sink.close(ws_status.normalClosure).timeout(const Duration(seconds: 1), onTimeout: () {});
+    } catch (_) {}
 
     _channel          = null;
     _channelSub       = null;

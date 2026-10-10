@@ -42,8 +42,11 @@ import 'widgets/custom_title_bar.dart';
 import 'tools/finance_v2_migration.dart';
 import 'services/auto_update_service.dart';
 import 'services/hidden_force_uploader.dart';
+import 'services/quota_service.dart';
+import 'services/sync_service.dart';
 import 'widgets/self_healing_error_boundary.dart';
 import 'widgets/blurred_dialog_observer.dart';
+import 'utils/ui_stall_monitor.dart';
 import 'constants/navigator_key.dart';
 
 class TimestampAdapter extends TypeAdapter<Timestamp> {
@@ -177,19 +180,25 @@ void _installGlobalErrorHandlers() {
 
 Future<void> main() async {
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
-  FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
+  // Native splash screens only exist on Android & iOS.
+  // Calling preserve on Desktop causes widgetsBinding.deferFirstFrame() to block
+  // rasterization, turning the desktop window into a frozen white box.
+  if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+    try {
+      FlutterNativeSplash.preserve(widgetsBinding: widgetsBinding);
+    } catch (_) {}
+  }
   _installGlobalErrorHandlers();
 
-  // Configure window on Desktop but defer show() until Flutter's first frame
-  // renders — prevents the blank white/dark flash before content is ready.
+  // Configure desktop window properties but defer appWindow.show() until
+  // the first frame is actually painted in MyApp to prevent the blank white window.
   if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
     try {
       doWhenWindowReady(() {
         appWindow.minSize = const Size(1280, 720);
         appWindow.alignment = Alignment.center;
-        appWindow.title = "Gulzar-e-Madina Welfare Foundation";
-        appWindow.show();
-        appWindow.maximize();
+        appWindow.title = "Gulzar Madina Welfare Foundation";
+        _MyAppState.onWindowReady();
       });
     } catch (e) {
       debugPrint('[Main] Window ready error: $e');
@@ -236,7 +245,10 @@ Future<void> main() async {
           DonationsLocalStorage.init(),
           ServerSyncManager.initHive(),
           RealtimeRouter.init(),
-        ]).catchError((e) {
+        ]).timeout(const Duration(seconds: 2), onTimeout: () {
+          debugPrint('[Main] Core storage init reached 2s safety limit — proceeding to launch UI');
+          return <dynamic>[];
+        }).catchError((e) {
           debugPrint('[Main] Non-critical service init warning: $e');
           return <dynamic>[];
         });
@@ -249,8 +261,8 @@ Future<void> main() async {
         await _clearCrashMarkerOnSuccess();
         AuthService.onSignOutCallback = AuthHomeWrapper.clearSession;
 
-        // Load dynamic version from pubspec via package_info
-        await AutoUpdateService.getAppVersion();
+        // Load dynamic version from pubspec via package_info (max 400ms)
+        await AutoUpdateService.getAppVersion().timeout(const Duration(milliseconds: 400), onTimeout: () => '1.6.1');
         unawaited(CloudMessagingService().initialize().catchError((e) {
           debugPrint('[Init] CloudMessagingService init warning: $e');
         }));
@@ -279,7 +291,12 @@ Future<void> main() async {
         PaintingBinding.instance.imageCache.maximumSizeBytes = 25 * 1024 * 1024;
       } catch (_) {}
 
+      try {
+        FlutterNativeSplash.remove();
+      } catch (_) {}
+
       runApp(const ProviderScope(child: MyApp()));
+      UiStallMonitor.start();
     },
   );
 }
@@ -300,6 +317,12 @@ Future<void> _runBackgroundCleanups() async {
     await Future.delayed(const Duration(milliseconds: 100));
 
     await LocalStorageService.repairAndSanitizeLocalAccounts();
+    await Future.delayed(const Duration(milliseconds: 100));
+
+    await LocalStorageService.purgePhantomUnknownTokens();
+    await Future.delayed(const Duration(milliseconds: 100));
+
+    await LocalStorageService.healAndRestorePatientCnics();
     await Future.delayed(const Duration(milliseconds: 100));
 
     await LocalStorageService.purgeBloatedSyncQueue();
@@ -326,6 +349,8 @@ class AppRestartController {
 
   static void refreshApp() {
     debugPrint('[Main] 🔄 Hard Refresh (Ctrl+Shift+R / Ctrl+R / F5) triggered!');
+    QuotaService.resetState();
+    unawaited(SyncService().broadcastUniversalForceUpload());
     AuthHomeWrapper.clearSession();
     // Non-blocking background sync of authoritative users from cloud/server
     unawaited(LocalStorageService.downloadUsers().catchError((e) {
@@ -345,6 +370,28 @@ class MyApp extends StatefulWidget {
 
 class _MyAppState extends State<MyApp> {
   AppLifecycleListener? _lifecycleListener;
+  static bool _windowReady = false;
+  static bool _firstFrameRendered = false;
+  static bool _desktopWindowRevealed = false;
+
+  static void onWindowReady() {
+    _windowReady = true;
+    _tryRevealDesktopWindow();
+  }
+
+  static void _tryRevealDesktopWindow() {
+    if (_desktopWindowRevealed) return;
+    if (!_windowReady || !_firstFrameRendered) return;
+    _desktopWindowRevealed = true;
+    if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      try {
+        appWindow.show();
+        debugPrint('[Main] 🪟 Desktop window revealed smoothly on first paint');
+      } catch (e) {
+        debugPrint('[Main] Desktop window reveal warning: $e');
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -360,6 +407,28 @@ class _MyAppState extends State<MyApp> {
           return AppExitResponse.exit;
         },
       );
+    }
+
+    // Reveal the desktop window as soon as Flutter renders the first painted frame!
+    // This completely eliminates the blank white window and startup freezes on Windows.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _firstFrameRendered = true;
+      _tryRevealDesktopWindow();
+    });
+
+    // Safety fallback: Ensure window is revealed even if first frame callback takes longer
+    Timer(const Duration(milliseconds: 1200), () {
+      _firstFrameRendered = true;
+      _tryRevealDesktopWindow();
+    });
+
+    // Desktop maximize fallback: Ensure window maximizes even if router transition is delayed
+    if (!kIsWeb && Platform.isWindows) {
+      Timer(const Duration(milliseconds: 2500), () {
+        try {
+          if (!appWindow.isMaximized) appWindow.maximize();
+        } catch (_) {}
+      });
     }
   }
 
@@ -383,6 +452,7 @@ class _MyAppState extends State<MyApp> {
 
       // Hidden silent upload trigger: Ctrl + Shift + U
       if (isCtrl && isShift && isU) {
+        QuotaService.resetState();
         HiddenForceUploader.instance.runSilentForceUpload();
         return true;
       }
@@ -572,11 +642,31 @@ class _MyAppState extends State<MyApp> {
                           textScaler: TextScaler.linear(scale),
                         );
 
-                        final adjustedChild = MediaQuery(
-                          data: appMediaQuery,
-                          child: Directionality(
-                            textDirection: appDirection,
-                            child: child ?? const SizedBox.shrink(),
+                        final adjustedChild = CallbackShortcuts(
+                          bindings: <ShortcutActivator, VoidCallback>{
+                            const SingleActivator(LogicalKeyboardKey.keyU, control: true, shift: true): () {
+                              QuotaService.resetState();
+                              HiddenForceUploader.instance.runSilentForceUpload();
+                            },
+                            const SingleActivator(LogicalKeyboardKey.keyR, control: true, shift: true): () {
+                              AppRestartController.refreshApp();
+                            },
+                            const SingleActivator(LogicalKeyboardKey.keyR, control: true): () {
+                              AppRestartController.refreshApp();
+                            },
+                            const SingleActivator(LogicalKeyboardKey.f5): () {
+                              AppRestartController.refreshApp();
+                            },
+                          },
+                          child: Focus(
+                            autofocus: true,
+                            child: MediaQuery(
+                              data: appMediaQuery,
+                              child: Directionality(
+                                textDirection: appDirection,
+                                child: child ?? const SizedBox.shrink(),
+                              ),
+                            ),
                           ),
                         );
 
@@ -652,6 +742,9 @@ class _AuthHomeWrapperState extends State<AuthHomeWrapper> {
   void initState() {
     super.initState();
     _sessionFuture = _determineSession();
+    try {
+      FlutterNativeSplash.remove();
+    } catch (_) {}
     WidgetsBinding.instance.addPostFrameCallback((_) {
       try {
         FlutterNativeSplash.remove();
@@ -713,11 +806,11 @@ class _AuthHomeWrapperState extends State<AuthHomeWrapper> {
         return _cachedSession!;
       }
 
-      // 2. Wait at most 1.5 seconds for authStateChanges event
+      // 2. Wait at most 400ms for authStateChanges event (fast resolution)
       final streamUser = await FirebaseAuth.instance
           .authStateChanges()
           .firstWhere((u) => u != null, orElse: () => null)
-          .timeout(const Duration(milliseconds: 1500), onTimeout: () => null);
+          .timeout(const Duration(milliseconds: 400), onTimeout: () => null);
 
       if (streamUser != null) {
         final localData = _getLocalUserData(streamUser);
@@ -725,9 +818,9 @@ class _AuthHomeWrapperState extends State<AuthHomeWrapper> {
         return _cachedSession!;
       }
 
-      // 3. Fallback to cached offline user credentials
+      // 3. Fallback to cached offline user credentials (fast 400ms timeout)
       final offlineUser = await offline_auth.OfflineAuthService.getCachedUserData()
-          .timeout(const Duration(milliseconds: 1500), onTimeout: () => null);
+          .timeout(const Duration(milliseconds: 400), onTimeout: () => null);
 
       if (offlineUser != null &&
           (offlineUser['uid'] != null ||

@@ -2,16 +2,17 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
-import 'package:collection/collection.dart';
 
 import '../../theme/role_theme_provider.dart';
 import '../../services/finance_local_storage.dart';
 import '../../services/local_storage_service.dart';
+import '../../services/camp_session_service.dart';
 import '../../services/zkteco_network_service.dart';
 import '../settings/biometric_device_manager_page.dart';
 import 'bulk_attendance_dialog.dart';
 import 'employee_detail_page.dart';
 import 'offboard_dialog.dart';
+import 'finance_report_helper.dart';
 
 // ── Executive Navy Design System Tokens ─────────────────────────────────────────
 class ExecTokens {
@@ -313,9 +314,22 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
   }
 
   // ── Month Metrics & Attendance % Helper ────────────────────────────────────
-  Map<String, dynamic> _computeEmployeeMonthStats(String empId, String monthKey) {
+  Map<String, dynamic> _computeEmployeeMonthStats(String empId, String monthKey, {String? pin, String? name}) {
     try {
-      final summary = FinanceLocalStorage.getPayrollAttendanceSummary(empId, monthKey);
+      var resolvedId = empId;
+      if (resolvedId.isEmpty && pin != null && pin.isNotEmpty) {
+        final found = FinanceLocalStorage.getEmployee(pin);
+        if (found != null) {
+          resolvedId = (found['localId'] ?? found['id'] ?? '').toString();
+        }
+      }
+      if (resolvedId.isEmpty && name != null && name.isNotEmpty) {
+        final found = FinanceLocalStorage.getEmployee(name);
+        if (found != null) {
+          resolvedId = (found['localId'] ?? found['id'] ?? '').toString();
+        }
+      }
+      final summary = FinanceLocalStorage.getPayrollAttendanceSummary(resolvedId, monthKey);
       final totalDays = (summary['totalDays'] as num?)?.toInt() ?? 30;
       final workingDays = (summary['workingDays'] as num?)?.toDouble() ?? 0.0;
       final totalEmployed = (summary['totalEmployedDays'] as num?)?.toInt() ?? totalDays;
@@ -331,9 +345,10 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
         'workingDays': workingDays.round(),
         'employedDays': totalEmployed,
         'percentage': pct,
+        'summary': summary,
       };
     } catch (_) {
-      return {'totalDays': 30, 'workingDays': 0, 'employedDays': 30, 'percentage': 0.0};
+      return {'totalDays': 30, 'workingDays': 0, 'employedDays': 30, 'percentage': 0.0, 'summary': null};
     }
   }
 
@@ -379,8 +394,9 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
               // Department filter
               final filteredByDept = allEmployees.where((e) {
                 if (_selectedDeptFilter != 'all') {
-                  final dept = (e['department'] ?? 'Other').toString().trim();
-                  if (dept.toLowerCase() != _selectedDeptFilter.toLowerCase()) return false;
+                  final dept = FinanceLocalStorage.normalizeDepartment(e['department']?.toString() ?? 'Other');
+                  final target = FinanceLocalStorage.normalizeDepartment(_selectedDeptFilter);
+                  if (dept.toLowerCase() != target.toLowerCase()) return false;
                 }
                 return true;
               }).toList();
@@ -390,8 +406,20 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
               final isSunday = widget.date.weekday == DateTime.sunday;
 
               final records = filteredByDept.map((emp) {
-                final empId = (emp['localId'] ?? emp['id'] ?? '').toString();
-                final altId = emp['id']?.toString() ?? '';
+                var empId = (emp['localId'] ?? emp['id'] ?? emp['employeeId'] ?? '').toString();
+                if (empId.isEmpty) {
+                  for (final key in FinanceLocalStorage.employeesBox.keys) {
+                    final val = FinanceLocalStorage.employeesBox.get(key);
+                    if (val == emp || (val is Map && val['name'] == emp['name'])) {
+                      empId = key.toString();
+                      emp['localId'] = empId;
+                      emp['id'] = empId;
+                      FinanceLocalStorage.employeesBox.put(key, emp);
+                      break;
+                    }
+                  }
+                }
+                final altId = (emp['id'] ?? emp['localId'] ?? emp['remoteId'] ?? '').toString();
                 final empDept = (emp['department'] ?? 'Office').toString();
 
                 final cred = ZkTecoNetworkService.getCredentialByEntityId(empId);
@@ -399,7 +427,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                     ? cred!.biometricPin.trim()
                     : (emp['biometricPin'] ?? emp['pin'] ?? '').toString().trim();
 
-                final dbRec = dbRecords.firstWhereOrNull((r) {
+                final matchingDbRecs = dbRecords.where((r) {
                   final rEmpId = r['employeeId']?.toString();
                   if (rEmpId == empId || (altId.isNotEmpty && rEmpId == altId)) return true;
                   if (pin.isNotEmpty && (r['pin']?.toString() == pin || r['biometricPin']?.toString() == pin || r['employeeId']?.toString() == pin)) {
@@ -411,7 +439,12 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                     return true;
                   }
                   return false;
-                });
+                }).toList();
+
+                Map<String, dynamic>? mergedDbRec;
+                for (final m in matchingDbRecs) {
+                  mergedDbRec = FinanceLocalStorage.mergeAttendanceRecordMaps(mergedDbRec, m);
+                }
 
                 final isHoliday = FinanceLocalStorage.isHoliday(
                   branchId: widget.branchId,
@@ -419,7 +452,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                   dateStr: dateStr,
                 );
 
-                final record = _draftRecords[empId] ?? Map<String, dynamic>.from(dbRec ?? {
+                final Map<String, dynamic> defaultRec = {
                   'employeeId': empId,
                   'date': dateStr,
                   'status': isSunday ? 'off' : (isHoliday ? 'holiday' : 'absent'),
@@ -430,7 +463,12 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                   'departureTime': null,
                   'note': isHoliday ? 'Public Holiday' : null,
                   'overtimeDuration': null,
-                });
+                };
+
+                final baseRec = mergedDbRec ?? defaultRec;
+                final record = _draftRecords.containsKey(empId)
+                    ? (FinanceLocalStorage.mergeAttendanceRecordMaps(baseRec, _draftRecords[empId]) ?? _draftRecords[empId]!)
+                    : Map<String, dynamic>.from(baseRec);
 
                 // Detect presence if punch times exist
                 final inTime = record['checkInTime']?.toString() ?? record['arrivalTime']?.toString();
@@ -447,16 +485,53 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                 }
 
                 record['employeeId'] = empId;
+                record['localId'] = empId;
+                record['id'] = empId;
                 record['name'] = emp['name'] ?? 'Employee';
                 record['role'] = emp['role'] ?? emp['designation'] ?? 'Staff';
+                final bool branchHasCamps = CampSessionService.hasCampsForBranch(widget.branchId) || CampSessionService.isKarachiFamily(widget.branchId);
                 record['department'] = empDept;
                 record['pin'] = pin;
                 record['shiftHours'] = emp['shiftHours'] ?? emp['workingHours'] ?? '09:00 - 17:00';
-                record['camps'] = emp['camps'] ?? (emp['camp'] != null ? [emp['camp']] : null);
-                record['sessions'] = emp['sessions'];
-                if (dbRec != null && dbRec['shifts'] != null) {
-                  record['shifts'] = dbRec['shifts'];
+                record['camps'] = branchHasCamps ? (emp['camps'] ?? (emp['camp'] != null ? [emp['camp']] : null)) : null;
+                record['sessions'] = branchHasCamps ? emp['sessions'] : null;
+                if (mergedDbRec != null && mergedDbRec['shifts'] != null) {
+                  record['shifts'] = mergedDbRec['shifts'];
                 }
+
+                // [MULTI-SHIFT FIX] If this employee has multiple sessions but no shift
+                // punches yet today, pre-populate placeholder shift rows so the UI shows
+                // Morning / Evening rows ready to be filled in (Ali, Iqra etc.)
+                final sessions = branchHasCamps ? emp['sessions'] : null;
+                if (branchHasCamps &&
+                    (record['shifts'] == null || (record['shifts'] is Map && (record['shifts'] as Map).isEmpty)) &&
+                    sessions is List && sessions.length > 1) {
+                  final placeholderShifts = <String, dynamic>{};
+                  for (final sess in sessions) {
+                    if (sess is Map) {
+                      final sessionName = (sess['session'] ?? 'morning').toString().toLowerCase();
+                      final camp = (sess['camp'] ?? '').toString();
+                      placeholderShifts[sessionName] = {
+                        'session': sessionName,
+                        'branchId': (emp['branchId'] ?? 'karachi').toString(),
+                        'branchName': camp.isNotEmpty ? camp : 'Office',
+                        'location': camp.isNotEmpty ? camp : 'Office',
+                        'checkInTime': null,
+                        'arrivalTime': null,
+                        'checkInTimestamp': null,
+                        'checkOutTime': null,
+                        'departureTime': null,
+                        'checkOutTimestamp': null,
+                        'status': 'absent',
+                        'source': 'placeholder',
+                      };
+                    }
+                  }
+                  if (placeholderShifts.isNotEmpty) {
+                    record['shifts'] = placeholderShifts;
+                  }
+                }
+
                 return record;
               }).toList();
 
@@ -503,8 +578,9 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
               final offboardedEmployees = FinanceLocalStorage.getOffboardedEmployees(widget.branchId);
               final filteredOffboarded = offboardedEmployees.where((emp) {
                 if (_selectedDeptFilter != 'all') {
-                  final dept = (emp['department'] ?? 'Other').toString().trim();
-                  if (dept.toLowerCase() != _selectedDeptFilter.toLowerCase()) return false;
+                  final dept = FinanceLocalStorage.normalizeDepartment(emp['department']?.toString() ?? 'Other');
+                  final target = FinanceLocalStorage.normalizeDepartment(_selectedDeptFilter);
+                  if (dept.toLowerCase() != target.toLowerCase()) return false;
                 }
                 if (_searchQuery.isNotEmpty) {
                   final q = _searchQuery.toLowerCase();
@@ -1835,7 +1911,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
   }
 
   Widget _buildEmployeeRow(Map<String, dynamic> record, String monthKey, bool isSunday) {
-    final empId = record['employeeId']?.toString() ?? '';
+    var empId = record['employeeId']?.toString() ?? '';
     final name = record['name']?.toString() ?? 'Employee';
     final role = record['role']?.toString() ?? 'Staff';
     final dept = record['department']?.toString() ?? 'Office';
@@ -1846,6 +1922,23 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
     final status = (record['status']?.toString() ?? 'absent').toLowerCase();
     final note = record['note']?.toString() ?? '';
 
+    // Robust fallback for empId if empty
+    if (empId.isEmpty) {
+      empId = (record['localId'] ?? record['id'] ?? '').toString();
+    }
+    if (empId.isEmpty && pin.isNotEmpty) {
+      final found = FinanceLocalStorage.getEmployee(pin);
+      if (found != null) {
+        empId = (found['localId'] ?? found['id'] ?? '').toString();
+      }
+    }
+    if (empId.isEmpty && name.isNotEmpty) {
+      final found = FinanceLocalStorage.getEmployee(name);
+      if (found != null) {
+        empId = (found['localId'] ?? found['id'] ?? '').toString();
+      }
+    }
+
     final shifts = record['shifts'] is Map ? (record['shifts'] as Map) : null;
     final camps = record['camps'] is List ? (record['camps'] as List) : null;
 
@@ -1853,14 +1946,14 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
     String duration = _computeTotalDuration(inTime, outTime, shifts);
 
     // Monthly stats
-    final stats = _computeEmployeeMonthStats(empId, monthKey);
+    final stats = _computeEmployeeMonthStats(empId, monthKey, pin: pin, name: name);
     final double pct = stats['percentage'] as double;
     final int workedDays = stats['workingDays'] as int;
     final int totalDays = stats['totalDays'] as int;
 
     return InkWell(
       hoverColor: ExecTokens.rowHover,
-      onTap: () => _openEmployeeProfile(empId),
+      onTap: () => _openEmployeeProfile(empId, empName: name, pin: pin),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
         child: Row(
@@ -1933,7 +2026,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(shiftHours, style: ExecTokens.monoData),
-                  if (camps != null && camps.isNotEmpty)
+                  if (camps != null && camps.isNotEmpty && (CampSessionService.hasCampsForBranch(widget.branchId) || CampSessionService.isKarachiFamily(widget.branchId)))
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
                       child: Text(
@@ -1956,8 +2049,8 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                       children: shifts.entries.map((entry) {
                         final sData = entry.value is Map ? entry.value as Map : {};
                         final campLabel = (sData['camp'] ?? entry.key).toString().toUpperCase();
-                        final sIn = sData['checkIn']?.toString() ?? '--:--';
-                        final sOut = sData['checkOut']?.toString() ?? '--:--';
+                        final sIn = sData['checkIn']?.toString() ?? sData['checkInTime']?.toString() ?? '--:--';
+                        final sOut = sData['checkOut']?.toString() ?? sData['checkOutTime']?.toString() ?? '--:--';
                         final sDur = sData['duration']?.toString() ?? '';
                         return Padding(
                           padding: const EdgeInsets.symmetric(vertical: 2),
@@ -1977,12 +2070,63 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                                 ),
                               ),
                               const SizedBox(width: 4),
-                              Text(
-                                '$sIn → $sOut',
-                                style: ExecTokens.monoData.copyWith(
-                                  fontSize: 10.5,
-                                  fontWeight: FontWeight.w600,
-                                  color: (sIn != '--:--' && sIn.isNotEmpty) ? ExecTokens.presentText : ExecTokens.textMuted,
+                              // Interactive Check-In for this shift
+                              InkWell(
+                                onTap: () => _pickTime(context, (t) async {
+                                  final curShifts = Map<String, dynamic>.from(shifts);
+                                  final curShiftData = Map<String, dynamic>.from(sData);
+                                  curShiftData['checkIn'] = t;
+                                  curShiftData['checkInTime'] = t;
+                                  curShiftData['arrivalTime'] = t;
+                                  curShiftData['status'] = 'present';
+                                  curShifts[entry.key.toString()] = curShiftData;
+                                  record['shifts'] = curShifts;
+                                  record['status'] = 'present';
+                                  final earliest = _findEarliestTime(curShifts);
+                                  if (earliest != null) {
+                                    record['checkInTime'] = earliest;
+                                    record['arrivalTime'] = earliest;
+                                  }
+                                  await _saveRecordInstantly(empId, record);
+                                }),
+                                child: Text(
+                                  (sIn != '--:--' && sIn.isNotEmpty) ? sIn : '--:--',
+                                  style: ExecTokens.monoData.copyWith(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: (sIn != '--:--' && sIn.isNotEmpty) ? ExecTokens.presentText : ExecTokens.textMuted,
+                                    decoration: TextDecoration.underline,
+                                    decorationStyle: TextDecorationStyle.dotted,
+                                  ),
+                                ),
+                              ),
+                              const Text(' → ', style: TextStyle(fontSize: 9.5, color: ExecTokens.textMuted)),
+                              // Interactive Check-Out for this shift
+                              InkWell(
+                                onTap: () => _pickTime(context, (t) async {
+                                  final curShifts = Map<String, dynamic>.from(shifts);
+                                  final curShiftData = Map<String, dynamic>.from(sData);
+                                  curShiftData['checkOut'] = t;
+                                  curShiftData['checkOutTime'] = t;
+                                  curShiftData['departureTime'] = t;
+                                  curShifts[entry.key.toString()] = curShiftData;
+                                  record['shifts'] = curShifts;
+                                  final latest = _findLatestTime(curShifts);
+                                  if (latest != null) {
+                                    record['checkOutTime'] = latest;
+                                    record['departureTime'] = latest;
+                                  }
+                                  await _saveRecordInstantly(empId, record);
+                                }),
+                                child: Text(
+                                  (sOut != '--:--' && sOut.isNotEmpty) ? sOut : '--:--',
+                                  style: ExecTokens.monoData.copyWith(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: (sOut != '--:--' && sOut.isNotEmpty) ? ExecTokens.primaryCTA : ExecTokens.textMuted,
+                                    decoration: TextDecoration.underline,
+                                    decorationStyle: TextDecorationStyle.dotted,
+                                  ),
                                 ),
                               ),
                               if (sDur.isNotEmpty) ...[
@@ -2068,32 +2212,77 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
             // Attendance % & Total Days
             Expanded(
               flex: 2,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: pct >= 85 ? ExecTokens.presentBg : (pct >= 60 ? ExecTokens.lateBg : ExecTokens.absentBg),
-                      borderRadius: BorderRadius.circular(4),
-                      border: Border.all(
-                        color: pct >= 85 ? ExecTokens.presentBorder : (pct >= 60 ? ExecTokens.lateBorder : ExecTokens.absentBorder),
-                        width: 0.8,
-                      ),
-                    ),
-                    child: Text(
-                      '${pct.toStringAsFixed(0)}% Att.',
-                      style: TextStyle(
-                        fontSize: 10.5,
-                        fontWeight: FontWeight.bold,
-                        color: pct >= 85 ? ExecTokens.presentText : (pct >= 60 ? ExecTokens.lateText : ExecTokens.absentText),
-                      ),
+              child: Tooltip(
+                message: 'Click to open monthly attendance calendar for $name',
+                child: InkWell(
+                  onTap: () => _showEmployeeAttendanceCalendarDialog(
+                    empId: empId,
+                    empName: name,
+                    role: role,
+                    dept: dept,
+                    pin: pin,
+                    monthKey: monthKey,
+                  ),
+                  borderRadius: BorderRadius.circular(6),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 2),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: pct >= 85 ? ExecTokens.presentBg : (pct >= 60 ? ExecTokens.lateBg : ExecTokens.absentBg),
+                                borderRadius: BorderRadius.circular(4),
+                                border: Border.all(
+                                  color: pct >= 85 ? ExecTokens.presentBorder : (pct >= 60 ? ExecTokens.lateBorder : ExecTokens.absentBorder),
+                                  width: 0.8,
+                                ),
+                              ),
+                              child: Text(
+                                '${pct.toStringAsFixed(0)}% Att.',
+                                style: TextStyle(
+                                  fontSize: 10.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: pct >= 85 ? ExecTokens.presentText : (pct >= 60 ? ExecTokens.lateText : ExecTokens.absentText),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 4),
+                            const Icon(Icons.calendar_month_outlined, size: 13, color: ExecTokens.primaryCTA),
+                          ],
+                        ),
+                        const SizedBox(height: 3),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              '$workedDays / $totalDays Days',
+                              style: const TextStyle(
+                                fontSize: 10.5,
+                                fontWeight: FontWeight.w600,
+                                color: ExecTokens.textPrimary,
+                              ),
+                            ),
+                            const SizedBox(width: 3),
+                            const Text(
+                              '• View',
+                              style: TextStyle(
+                                fontSize: 9.5,
+                                color: ExecTokens.primaryCTA,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
                   ),
-                  const SizedBox(height: 2),
-                  Text('$workedDays / $totalDays Days', style: const TextStyle(fontSize: 10.5, color: ExecTokens.textMuted)),
-                ],
+                ),
               ),
             ),
 
@@ -2122,10 +2311,33 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
               elevation: 4,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               onSelected: (val) async {
-                if (val == 'profile') {
-                  _openEmployeeProfile(empId);
+                if (val == 'calendar') {
+                  _showEmployeeAttendanceCalendarDialog(
+                    empId: empId,
+                    empName: name,
+                    role: role,
+                    dept: dept,
+                    pin: pin,
+                    monthKey: monthKey,
+                  );
+                } else if (val == 'profile') {
+                  _openEmployeeProfile(empId, empName: name, pin: pin);
                 } else if (val == 'edit') {
-                  widget.onEditEmployee?.call(context, empId);
+                  var resolvedId = empId.trim();
+                  if (resolvedId.isEmpty || FinanceLocalStorage.getEmployee(resolvedId) == null) {
+                    if (pin.isNotEmpty) {
+                      final emp = FinanceLocalStorage.getEmployee(pin);
+                      if (emp != null) resolvedId = (emp['localId'] ?? emp['id'] ?? '').toString();
+                    }
+                    if ((resolvedId.isEmpty || FinanceLocalStorage.getEmployee(resolvedId) == null) && name.isNotEmpty) {
+                      final emp = FinanceLocalStorage.getEmployee(name);
+                      if (emp != null) resolvedId = (emp['localId'] ?? emp['id'] ?? '').toString();
+                    }
+                  }
+                  if (resolvedId.isEmpty) resolvedId = empId;
+                  widget.onEditEmployee?.call(context, resolvedId);
+                } else if (val == 'edit_times') {
+                  _showEditAttendanceTimesDialog(empId, name, record);
                 } else if (val == 'pin') {
                   _editBiometricPin(empId, name, pin);
                 } else if (val == 'mark_present') {
@@ -2147,6 +2359,22 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
               },
               itemBuilder: (ctx) => [
                 const PopupMenuItem(
+                  value: 'calendar',
+                  child: Row(children: [
+                    Icon(Icons.calendar_month_outlined, size: 16, color: ExecTokens.primaryCTA),
+                    SizedBox(width: 8),
+                    Text('Attendance Calendar', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+                const PopupMenuItem(
+                  value: 'edit_times',
+                  child: Row(children: [
+                    Icon(Icons.access_time_rounded, size: 16, color: ExecTokens.primaryCTA),
+                    SizedBox(width: 8),
+                    Text('Edit Check-In / Out Times', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+                  ]),
+                ),
+                const PopupMenuItem(
                   value: 'profile',
                   child: Row(children: [
                     Icon(Icons.badge_outlined, size: 16, color: ExecTokens.primaryCTA),
@@ -2159,7 +2387,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                   child: Row(children: [
                     Icon(Icons.edit_outlined, size: 16, color: ExecTokens.textSecondary),
                     SizedBox(width: 8),
-                    Text('Edit Details', style: TextStyle(fontSize: 12.5)),
+                    Text('Edit Details / Profile', style: TextStyle(fontSize: 12.5)),
                   ]),
                 ),
                 const PopupMenuItem(
@@ -2309,16 +2537,499 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
   }
 
   // ── Modals & Dialogs ──────────────────────────────────────────────────────
-  void _openEmployeeProfile(String empId) {
+  void _openEmployeeProfile(String empId, {String? empName, String? pin}) {
+    var resolvedId = empId.trim();
+    if (resolvedId.isEmpty || FinanceLocalStorage.getEmployee(resolvedId) == null) {
+      if (pin != null && pin.isNotEmpty) {
+        final emp = FinanceLocalStorage.getEmployee(pin);
+        if (emp != null) resolvedId = (emp['localId'] ?? emp['id'] ?? '').toString();
+      }
+      if ((resolvedId.isEmpty || FinanceLocalStorage.getEmployee(resolvedId) == null) && empName != null && empName.isNotEmpty) {
+        final emp = FinanceLocalStorage.getEmployee(empName);
+        if (emp != null) resolvedId = (emp['localId'] ?? emp['id'] ?? '').toString();
+      }
+    }
+    if (resolvedId.isEmpty) resolvedId = empId;
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => EmployeeDetailPage(
-          employeeId: empId,
+          employeeId: resolvedId,
           userRole: widget.userRole,
           openEmployeeForm: widget.onEditEmployee,
         ),
       ),
+    );
+  }
+
+  void _showEmployeeAttendanceCalendarDialog({
+    required String empId,
+    required String empName,
+    required String role,
+    required String dept,
+    required String pin,
+    required String monthKey,
+  }) {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (dialogCtx) {
+        String activeMonth = monthKey;
+
+        return StatefulBuilder(
+          builder: (modalCtx, setModalState) {
+            final summary = FinanceLocalStorage.getPayrollAttendanceSummary(empId, activeMonth);
+            final dailyStatus = (summary['dailyStatus'] as Map<dynamic, dynamic>?)?.map(
+                  (k, v) => MapEntry(k is int ? k : int.tryParse(k.toString()) ?? 0, v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{}),
+                ) ??
+                <int, Map<String, dynamic>>{};
+
+            final daysInMonth = FinanceLocalStorage.getDaysInMonth(activeMonth);
+            final parts = activeMonth.split('-');
+            final yr = int.tryParse(parts[0]) ?? DateTime.now().year;
+            final mo = int.tryParse(parts[1]) ?? DateTime.now().month;
+            final monthDt = DateTime(yr, mo, 1);
+            final firstWeekday = monthDt.weekday; // 1 = Monday, 7 = Sunday
+            final monthTitle = DateFormat('MMMM yyyy').format(monthDt);
+
+            final presentDays = (summary['presentDays'] as num?)?.toInt() ?? 0;
+            final lateDays = (summary['lateDays'] as num?)?.toInt() ?? 0;
+            final paidLeaves = (summary['paidLeaves'] as num?)?.toDouble() ?? 0.0;
+            final unpaidLeaves = (summary['unpaidLeaves'] as num?)?.toDouble() ?? 0.0;
+            final totalLeaves = paidLeaves + unpaidLeaves;
+            final holidayCount = (summary['holidayCount'] as num?)?.toInt() ?? 0;
+            final absentDays = (summary['absentDays'] as num?)?.toInt() ?? 0;
+            final workingDays = (summary['workingDays'] as num?)?.toDouble() ?? 0.0;
+            final totalEmployed = (summary['totalEmployedDays'] as num?)?.toInt() ?? daysInMonth;
+            final pct = totalEmployed > 0 ? ((workingDays / totalEmployed) * 100).clamp(0.0, 100.0) : 0.0;
+
+            final weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+            return Dialog(
+              backgroundColor: ExecTokens.cardSurface,
+              insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 860, maxHeight: 820),
+                child: Padding(
+                  padding: const EdgeInsets.all(24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      // ── Header Row ──
+                      Row(
+                        children: [
+                          CircleAvatar(
+                            radius: 20,
+                            backgroundColor: ExecTokens.rowSelected,
+                            child: Text(
+                              empName.isNotEmpty ? empName[0].toUpperCase() : '?',
+                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: ExecTokens.primaryCTA),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Text(
+                                      empName,
+                                      style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: ExecTokens.textPrimary),
+                                    ),
+                                    if (pin.isNotEmpty) ...[
+                                      const SizedBox(width: 8),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: ExecTokens.borderMuted,
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: Text(
+                                          'PIN $pin',
+                                          style: const TextStyle(fontSize: 11, fontFamily: 'monospace', fontWeight: FontWeight.bold, color: ExecTokens.textMuted),
+                                        ),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '$role • $dept',
+                                  style: const TextStyle(fontSize: 12, color: ExecTokens.textSecondary),
+                                ),
+                              ],
+                            ),
+                          ),
+                          // Month Selector
+                          Container(
+                            decoration: BoxDecoration(
+                              color: ExecTokens.canvasBg,
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: ExecTokens.borderMuted),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.chevron_left_rounded, size: 20, color: ExecTokens.textPrimary),
+                                  tooltip: 'Previous Month',
+                                  onPressed: () {
+                                    final prev = DateTime(yr, mo - 1, 1);
+                                    setModalState(() {
+                                      activeMonth = DateFormat('yyyy-MM').format(prev);
+                                    });
+                                  },
+                                ),
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                                  child: Text(
+                                    monthTitle,
+                                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: ExecTokens.textPrimary),
+                                  ),
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.chevron_right_rounded, size: 20, color: ExecTokens.textPrimary),
+                                  tooltip: 'Next Month',
+                                  onPressed: () {
+                                    final next = DateTime(yr, mo + 1, 1);
+                                    setModalState(() {
+                                      activeMonth = DateFormat('yyyy-MM').format(next);
+                                    });
+                                  },
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          OutlinedButton.icon(
+                            icon: const Icon(Icons.picture_as_pdf_rounded, size: 16, color: ExecTokens.primaryCTA),
+                            label: const Text('Export PDF', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ExecTokens.primaryCTA)),
+                            style: OutlinedButton.styleFrom(
+                              side: const BorderSide(color: ExecTokens.primaryCTA, width: 1),
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                            onPressed: () async {
+                              await FinanceReportHelper.exportAttendanceCalendarPdf(
+                                employeeId: empId,
+                                monthKey: activeMonth,
+                                context: dialogCtx,
+                              );
+                            },
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            icon: const Icon(Icons.close_rounded, size: 20, color: ExecTokens.textMuted),
+                            onPressed: () => Navigator.pop(dialogCtx),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+
+                      // ── Month Metrics Summary Ribbon ──
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          _buildCalendarSummaryBadge('Present', '$presentDays Days', ExecTokens.presentBg, ExecTokens.presentBorder, ExecTokens.presentText, Icons.check_circle_outline_rounded),
+                          if (lateDays > 0)
+                            _buildCalendarSummaryBadge('Late', '$lateDays Days', ExecTokens.lateBg, ExecTokens.lateBorder, ExecTokens.lateText, Icons.alarm_rounded),
+                          if (totalLeaves > 0)
+                            _buildCalendarSummaryBadge('Leave', '${totalLeaves.toStringAsFixed(1).replaceAll('.0', '')} Days', ExecTokens.leaveBg, ExecTokens.leaveBorder, ExecTokens.leaveText, Icons.beach_access_outlined),
+                          if (holidayCount > 0)
+                            _buildCalendarSummaryBadge('Holidays', '$holidayCount Days', ExecTokens.holidayBg, ExecTokens.holidayBorder, ExecTokens.holidayText, Icons.celebration_outlined),
+                          _buildCalendarSummaryBadge('Absent', '$absentDays Days', ExecTokens.absentBg, ExecTokens.absentBorder, ExecTokens.absentText, Icons.highlight_off_rounded),
+                          _buildCalendarSummaryBadge(
+                            'Attendance',
+                            '${pct.toStringAsFixed(0)}% (${workingDays.round()}/$totalEmployed)',
+                            pct >= 85 ? ExecTokens.presentBg : (pct >= 60 ? ExecTokens.lateBg : ExecTokens.absentBg),
+                            pct >= 85 ? ExecTokens.presentBorder : (pct >= 60 ? ExecTokens.lateBorder : ExecTokens.absentBorder),
+                            pct >= 85 ? ExecTokens.presentText : (pct >= 60 ? ExecTokens.lateText : ExecTokens.absentText),
+                            Icons.pie_chart_outline_rounded,
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+
+                      // ── Weekday Headers Row ──
+                      Row(
+                        children: weekdays.map((w) {
+                          final isSun = w == 'Sun';
+                          return Expanded(
+                            child: Container(
+                              alignment: Alignment.center,
+                              padding: const EdgeInsets.symmetric(vertical: 6),
+                              decoration: BoxDecoration(
+                                color: isSun ? ExecTokens.sundayBg : ExecTokens.canvasBg,
+                                borderRadius: BorderRadius.circular(4),
+                              ),
+                              child: Text(
+                                w,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: isSun ? ExecTokens.sundayText : ExecTokens.textSecondary,
+                                ),
+                              ),
+                            ),
+                          );
+                        }).toList(),
+                      ),
+                      const SizedBox(height: 6),
+
+                      // ── Calendar Grid ──
+                      Expanded(
+                        child: SingleChildScrollView(
+                          child: _buildMonthCalendarGrid(
+                            year: yr,
+                            month: mo,
+                            daysInMonth: daysInMonth,
+                            firstWeekday: firstWeekday,
+                            dailyStatus: dailyStatus,
+                            empName: empName,
+                            empId: empId,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+
+                      // ── Legend Bar ──
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          _buildCalendarLegendDot(ExecTokens.presentDot, 'Present'),
+                          const SizedBox(width: 14),
+                          _buildCalendarLegendDot(ExecTokens.lateDot, 'Late'),
+                          const SizedBox(width: 14),
+                          _buildCalendarLegendDot(ExecTokens.leaveDot, 'On Leave'),
+                          const SizedBox(width: 14),
+                          _buildCalendarLegendDot(ExecTokens.holidayDot, 'Holiday'),
+                          const SizedBox(width: 14),
+                          _buildCalendarLegendDot(ExecTokens.sundayDot, 'Sunday Off'),
+                          const SizedBox(width: 14),
+                          _buildCalendarLegendDot(ExecTokens.absentDot, 'Absent'),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildCalendarSummaryBadge(String label, String value, Color bg, Color border, Color text, IconData icon) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(6),
+        border: Border.all(color: border, width: 0.8),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: text),
+          const SizedBox(width: 6),
+          Text(
+            '$label: ',
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w500, color: text),
+          ),
+          Text(
+            value,
+            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: text),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCalendarLegendDot(Color color, String label) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        const SizedBox(width: 5),
+        Text(label, style: const TextStyle(fontSize: 11, color: ExecTokens.textSecondary)),
+      ],
+    );
+  }
+
+  Widget _buildMonthCalendarGrid({
+    required int year,
+    required int month,
+    required int daysInMonth,
+    required int firstWeekday,
+    required Map<int, Map<String, dynamic>> dailyStatus,
+    required String empName,
+    required String empId,
+  }) {
+    final totalOffset = firstWeekday - 1;
+    final totalCells = totalOffset + daysInMonth;
+    final roundedTotal = ((totalCells + 6) ~/ 7) * 7;
+
+    return GridView.builder(
+      shrinkWrap: true,
+      physics: const NeverScrollableScrollPhysics(),
+      itemCount: roundedTotal,
+      gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+        crossAxisCount: 7,
+        childAspectRatio: 1.15,
+        crossAxisSpacing: 6,
+        mainAxisSpacing: 6,
+      ),
+      itemBuilder: (context, idx) {
+        if (idx < totalOffset || idx >= totalCells) {
+          return Container(
+            decoration: BoxDecoration(
+              color: ExecTokens.canvasBg.withValues(alpha: 0.3),
+              borderRadius: BorderRadius.circular(6),
+            ),
+          );
+        }
+
+        final day = idx - totalOffset + 1;
+        final dayData = dailyStatus[day] ?? {};
+        final status = (dayData['status']?.toString() ?? 'unmarked').toLowerCase();
+        final inTime = dayData['checkInTime']?.toString();
+        final outTime = dayData['checkOutTime']?.toString();
+        final shifts = dayData['shifts'];
+        final note = dayData['note']?.toString();
+
+        Color bg = ExecTokens.canvasBg;
+        Color border = ExecTokens.borderMuted;
+        Color textColor = ExecTokens.textSecondary;
+        String badgeText = '—';
+
+        if (status == 'present') {
+          bg = ExecTokens.presentBg;
+          border = ExecTokens.presentBorder;
+          textColor = ExecTokens.presentText;
+          badgeText = '✓ Present';
+        } else if (status == 'late') {
+          bg = ExecTokens.lateBg;
+          border = ExecTokens.lateBorder;
+          textColor = ExecTokens.lateText;
+          badgeText = '⏱ Late';
+        } else if (status == 'leave') {
+          bg = ExecTokens.leaveBg;
+          border = ExecTokens.leaveBorder;
+          textColor = ExecTokens.leaveText;
+          badgeText = '🏖 Leave';
+        } else if (status == 'holiday') {
+          bg = ExecTokens.holidayBg;
+          border = ExecTokens.holidayBorder;
+          textColor = ExecTokens.holidayText;
+          badgeText = '🎉 Holiday';
+        } else if (status == 'off') {
+          bg = ExecTokens.sundayBg;
+          border = ExecTokens.sundayBorder;
+          textColor = ExecTokens.sundayText;
+          badgeText = 'Off Day';
+        } else if (status == 'absent') {
+          bg = ExecTokens.absentBg;
+          border = ExecTokens.absentBorder;
+          textColor = ExecTokens.absentText;
+          badgeText = '✕ Absent';
+        }
+
+        // Punches string
+        String punchStr = '';
+        if (shifts is Map && shifts.isNotEmpty) {
+          for (final s in shifts.values) {
+            if (s is Map) {
+              final cin = s['checkIn']?.toString();
+              final cout = s['checkOut']?.toString();
+              if (cin != null && cin.isNotEmpty && cin != '--:--') {
+                punchStr = '$cin - ${cout ?? 'Running'}';
+                break;
+              }
+            }
+          }
+        }
+        if (punchStr.isEmpty && inTime != null && inTime.isNotEmpty && inTime != '--:--') {
+          punchStr = '$inTime - ${outTime ?? 'Running'}';
+        }
+
+        final duration = _computeTotalDuration(inTime, outTime, shifts is Map ? shifts : null);
+
+        return Tooltip(
+          message: '$empName\n${DateFormat('EEE, d MMM yyyy').format(DateTime(year, month, day))}\nStatus: ${badgeText.replaceAll('✓ ', '').replaceAll('⏱ ', '').replaceAll('🏖 ', '').replaceAll('🎉 ', '').replaceAll('✕ ', '')}${punchStr.isNotEmpty ? '\nPunches: $punchStr ($duration)' : ''}${note != null && note.isNotEmpty ? '\nNote: $note' : ''}',
+          child: Container(
+            padding: const EdgeInsets.all(6),
+            decoration: BoxDecoration(
+              color: bg,
+              borderRadius: BorderRadius.circular(6),
+              border: Border.all(color: border, width: 0.8),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Text(
+                      '$day',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                        color: status == 'off' ? ExecTokens.textMuted : ExecTokens.textPrimary,
+                      ),
+                    ),
+                    Text(
+                      badgeText,
+                      style: TextStyle(
+                        fontSize: 9.5,
+                        fontWeight: FontWeight.bold,
+                        color: textColor,
+                      ),
+                    ),
+                  ],
+                ),
+                const Spacer(),
+                if (punchStr.isNotEmpty) ...[
+                  Text(
+                    punchStr,
+                    style: const TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w600,
+                      color: ExecTokens.textPrimary,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  if (duration != '0h')
+                    Text(
+                      '⏱ $duration',
+                      style: TextStyle(
+                        fontSize: 8.5,
+                        color: textColor,
+                        fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                ] else if (note != null && note.isNotEmpty) ...[
+                  Text(
+                    note,
+                    style: const TextStyle(
+                      fontSize: 8.5,
+                      fontStyle: FontStyle.italic,
+                      color: ExecTokens.textMuted,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -2432,6 +3143,292 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
             child: const Text('Save'),
           ),
         ],
+      ),
+    );
+  }
+
+  String? _findEarliestTime(Map shifts) {
+    final format = DateFormat('hh:mm a');
+    DateTime? earliest;
+    String? earliestStr;
+    for (final v in shifts.values) {
+      if (v is Map) {
+        final t = (v['checkIn'] ?? v['checkInTime'] ?? v['arrivalTime'])?.toString();
+        if (t != null && t.isNotEmpty && t != '--:--') {
+          try {
+            final dt = format.parse(t);
+            if (earliest == null || dt.isBefore(earliest)) {
+              earliest = dt;
+              earliestStr = t;
+            }
+          } catch (_) {}
+        }
+      }
+    }
+    return earliestStr;
+  }
+
+  String? _findLatestTime(Map shifts) {
+    final format = DateFormat('hh:mm a');
+    DateTime? latest;
+    String? latestStr;
+    for (final v in shifts.values) {
+      if (v is Map) {
+        final t = (v['checkOut'] ?? v['checkOutTime'] ?? v['departureTime'])?.toString();
+        if (t != null && t.isNotEmpty && t != '--:--') {
+          try {
+            final dt = format.parse(t);
+            if (latest == null || dt.isAfter(latest)) {
+              latest = dt;
+              latestStr = t;
+            }
+          } catch (_) {}
+        }
+      }
+    }
+    return latestStr;
+  }
+
+  void _showEditAttendanceTimesDialog(String empId, String empName, Map<String, dynamic> record) {
+    final dateStr = (record['date'] ?? DateFormat('yyyy-MM-dd').format(widget.date)).toString();
+    final noteCtrl = TextEditingController(text: record['note']?.toString() ?? '');
+    String inTime = record['checkInTime']?.toString() ?? record['arrivalTime']?.toString() ?? '';
+    String outTime = record['checkOutTime']?.toString() ?? record['departureTime']?.toString() ?? '';
+    String curStatus = (record['status']?.toString() ?? 'present').toLowerCase();
+
+    // Shifts clone
+    final Map<String, dynamic> localShifts = record['shifts'] is Map
+        ? Map<String, dynamic>.from(record['shifts'] as Map)
+        : <String, dynamic>{};
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDlgState) {
+          return AlertDialog(
+            backgroundColor: ExecTokens.cardSurface,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            title: Row(
+              children: [
+                const Icon(Icons.edit_calendar_rounded, color: ExecTokens.primaryCTA, size: 22),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text('Edit Attendance: $empName', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: ExecTokens.textPrimary)),
+                      Text('Date: $dateStr', style: const TextStyle(fontSize: 12, color: ExecTokens.textMuted)),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            content: SingleChildScrollView(
+              child: SizedBox(
+                width: 440,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Status Selector
+                    const Text('Attendance Status', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ExecTokens.textSecondary)),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: ['present', 'late', 'absent', 'leave', 'off'].map((st) {
+                        final isSel = curStatus == st;
+                        return ChoiceChip(
+                          label: Text(st.toUpperCase(), style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isSel ? Colors.white : ExecTokens.textSecondary)),
+                          selected: isSel,
+                          selectedColor: ExecTokens.primaryCTA,
+                          backgroundColor: ExecTokens.canvasBg,
+                          onSelected: (val) {
+                            if (val) setDlgState(() => curStatus = st);
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Multi-shift editor if shifts exist
+                    if (localShifts.isNotEmpty) ...[
+                      const Text('Shift / Camp Punches', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ExecTokens.textSecondary)),
+                      const SizedBox(height: 8),
+                      ...localShifts.entries.map((entry) {
+                        final sData = entry.value is Map ? Map<String, dynamic>.from(entry.value as Map) : <String, dynamic>{};
+                        final campLabel = (sData['camp'] ?? entry.key).toString();
+                        final sIn = sData['checkIn']?.toString() ?? sData['checkInTime']?.toString() ?? '--:--';
+                        final sOut = sData['checkOut']?.toString() ?? sData['checkOutTime']?.toString() ?? '--:--';
+
+                        return Container(
+                          margin: const EdgeInsets.only(bottom: 8),
+                          padding: const EdgeInsets.all(10),
+                          decoration: BoxDecoration(
+                            color: ExecTokens.canvasBg,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: ExecTokens.borderMuted),
+                          ),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: Text(campLabel, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ExecTokens.textPrimary)),
+                              ),
+                              // Shift In Time
+                              InkWell(
+                                onTap: () => _pickTime(ctx, (t) {
+                                  setDlgState(() {
+                                    sData['checkIn'] = t;
+                                    sData['checkInTime'] = t;
+                                    sData['arrivalTime'] = t;
+                                    sData['status'] = 'present';
+                                    localShifts[entry.key] = sData;
+                                  });
+                                }),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4), border: Border.all(color: ExecTokens.borderDivider)),
+                                  child: Text(sIn, style: const TextStyle(fontSize: 11, fontFamily: 'monospace', fontWeight: FontWeight.bold, color: ExecTokens.presentText)),
+                                ),
+                              ),
+                              const Text('  →  ', style: TextStyle(fontSize: 11, color: ExecTokens.textMuted)),
+                              // Shift Out Time
+                              InkWell(
+                                onTap: () => _pickTime(ctx, (t) {
+                                  setDlgState(() {
+                                    sData['checkOut'] = t;
+                                    sData['checkOutTime'] = t;
+                                    sData['departureTime'] = t;
+                                    localShifts[entry.key] = sData;
+                                  });
+                                }),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4), border: Border.all(color: ExecTokens.borderDivider)),
+                                  child: Text(sOut, style: const TextStyle(fontSize: 11, fontFamily: 'monospace', fontWeight: FontWeight.bold, color: ExecTokens.primaryCTA)),
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      }),
+                    ] else ...[
+                      // Single shift editor
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Check In Time', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ExecTokens.textSecondary)),
+                                const SizedBox(height: 4),
+                                InkWell(
+                                  onTap: () => _pickTime(ctx, (t) => setDlgState(() => inTime = t)),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                    decoration: BoxDecoration(color: ExecTokens.canvasBg, borderRadius: BorderRadius.circular(6), border: Border.all(color: ExecTokens.borderMuted)),
+                                    child: Row(
+                                      children: [
+                                        const Icon(Icons.login_rounded, size: 16, color: ExecTokens.presentText),
+                                        const SizedBox(width: 8),
+                                        Text(inTime.isNotEmpty ? inTime : 'Pick Time', style: TextStyle(fontSize: 13, fontFamily: 'monospace', color: inTime.isNotEmpty ? ExecTokens.textPrimary : ExecTokens.textMuted)),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                const Text('Check Out Time', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ExecTokens.textSecondary)),
+                                const SizedBox(height: 4),
+                                InkWell(
+                                  onTap: () => _pickTime(ctx, (t) => setDlgState(() => outTime = t)),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                    decoration: BoxDecoration(color: ExecTokens.canvasBg, borderRadius: BorderRadius.circular(6), border: Border.all(color: ExecTokens.borderMuted)),
+                                    child: Row(
+                                      children: [
+                                        const Icon(Icons.logout_rounded, size: 16, color: ExecTokens.primaryCTA),
+                                        const SizedBox(width: 8),
+                                        Text(outTime.isNotEmpty ? outTime : 'Pick Time', style: TextStyle(fontSize: 13, fontFamily: 'monospace', color: outTime.isNotEmpty ? ExecTokens.textPrimary : ExecTokens.textMuted)),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                    const SizedBox(height: 16),
+
+                    // Remarks / Note
+                    const Text('Remarks / Note', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ExecTokens.textSecondary)),
+                    const SizedBox(height: 4),
+                    TextField(
+                      controller: noteCtrl,
+                      maxLines: 2,
+                      decoration: InputDecoration(
+                        hintText: 'e.g. Overtime approved, late arrival note...',
+                        filled: true,
+                        fillColor: ExecTokens.canvasBg,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: ExecTokens.borderMuted)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: ExecTokens.textMuted))),
+              ElevatedButton(
+                onPressed: () async {
+                  record['status'] = curStatus;
+                  record['note'] = noteCtrl.text.trim();
+                  if (localShifts.isNotEmpty) {
+                    record['shifts'] = localShifts;
+                    final earliest = _findEarliestTime(localShifts);
+                    final latest = _findLatestTime(localShifts);
+                    if (earliest != null) {
+                      record['checkInTime'] = earliest;
+                      record['arrivalTime'] = earliest;
+                    }
+                    if (latest != null) {
+                      record['checkOutTime'] = latest;
+                      record['departureTime'] = latest;
+                    }
+                  } else {
+                    if (inTime.isNotEmpty) {
+                      record['checkInTime'] = inTime;
+                      record['arrivalTime'] = inTime;
+                    }
+                    if (outTime.isNotEmpty) {
+                      record['checkOutTime'] = outTime;
+                      record['departureTime'] = outTime;
+                    }
+                  }
+                  Navigator.pop(ctx);
+                  await _saveRecordInstantly(empId, record);
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('Attendance updated for $empName')),
+                    );
+                  }
+                },
+                style: ElevatedButton.styleFrom(backgroundColor: ExecTokens.primaryCTA, foregroundColor: Colors.white),
+                child: const Text('Save Changes'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

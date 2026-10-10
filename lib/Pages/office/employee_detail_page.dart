@@ -271,9 +271,14 @@ class _EmployeeDetailPageState extends State<EmployeeDetailPage> with SingleTick
             empRole == 'hq manager' ||
             empRole == 'hq_manager' ||
             empRole == 'admin' ||
-            empRole == 'chairman' ||
-            empDept == 'administration';
-        final canEditEmp = curRole == 'chairman' || (!isExecOrAdmin);
+            empRole == 'chairman';
+        final isSuperAdmin = curRole == 'chairman' ||
+            curRole == 'admin' ||
+            curRole == 'hq manager' ||
+            curRole == 'hq_manager' ||
+            curRole == 'finance' ||
+            curRole == 'hr';
+        final canEditEmp = isSuperAdmin || (!isExecOrAdmin);
 
         return Scaffold(
           backgroundColor: t.bg,
@@ -514,18 +519,40 @@ class _EmployeeDetailPageState extends State<EmployeeDetailPage> with SingleTick
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text('Attendance Breakdown', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: t.textPrimary)),
-              DropdownButton<String>(
-                value: _selectedMonthKey,
-                dropdownColor: t.bgCard,
-                style: TextStyle(color: t.textPrimary, fontSize: 13),
-                onChanged: (val) {
-                  if (val != null) setState(() => _selectedMonthKey = val);
-                },
-                items: List.generate(12, (index) {
-                  final dt = DateTime(DateTime.now().year, DateTime.now().month - index, 1);
-                  final key = DateFormat('yyyy-MM').format(dt);
-                  return DropdownMenuItem(value: key, child: Text(DateFormat('MMMM yyyy').format(dt)));
-                }),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  OutlinedButton.icon(
+                    icon: Icon(Icons.picture_as_pdf_rounded, size: 16, color: t.accent),
+                    label: Text('Export PDF', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: t.accent)),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: t.accent, width: 1),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                    ),
+                    onPressed: () async {
+                      await FinanceReportHelper.exportAttendanceCalendarPdf(
+                        employeeId: widget.employeeId,
+                        monthKey: _selectedMonthKey,
+                        context: context,
+                      );
+                    },
+                  ),
+                  const SizedBox(width: 8),
+                  DropdownButton<String>(
+                    value: _selectedMonthKey,
+                    dropdownColor: t.bgCard,
+                    style: TextStyle(color: t.textPrimary, fontSize: 13),
+                    onChanged: (val) {
+                      if (val != null) setState(() => _selectedMonthKey = val);
+                    },
+                    items: List.generate(12, (index) {
+                      final dt = DateTime(DateTime.now().year, DateTime.now().month - index, 1);
+                      final key = DateFormat('yyyy-MM').format(dt);
+                      return DropdownMenuItem(value: key, child: Text(DateFormat('MMMM yyyy').format(dt)));
+                    }),
+                  ),
+                ],
               ),
             ],
           ),
@@ -546,8 +573,221 @@ class _EmployeeDetailPageState extends State<EmployeeDetailPage> with SingleTick
               _buildAttendanceMetric('Unpaid Leaves', unpaidLeaves.toStringAsFixed(1).replaceAll('.0', ''), Colors.purple, t),
             ],
           ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Icon(Icons.calendar_month_outlined, size: 16, color: t.accent),
+              const SizedBox(width: 8),
+              Text('Monthly Attendance Calendar', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: t.textPrimary)),
+            ],
+          ),
+          const SizedBox(height: 10),
+          _buildDetailCalendar(summary, daysInMonth, t),
         ],
       ),
+    );
+  }
+
+  Widget _buildDetailCalendar(Map<String, dynamic> summary, int daysInMonth, RoleThemeData t) {
+    final dailyStatus = (summary['dailyStatus'] as Map<dynamic, dynamic>?)?.map(
+          (k, v) => MapEntry(k is int ? k : int.tryParse(k.toString()) ?? 0, v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{}),
+        ) ??
+        <int, Map<String, dynamic>>{};
+
+    final parts = _selectedMonthKey.split('-');
+    final yr = int.tryParse(parts[0]) ?? DateTime.now().year;
+    final mo = int.tryParse(parts[1]) ?? DateTime.now().month;
+    final firstWeekday = DateTime(yr, mo, 1).weekday; // 1 = Mon, 7 = Sun
+    final totalOffset = firstWeekday - 1;
+    final totalCells = totalOffset + daysInMonth;
+    final roundedTotal = ((totalCells + 6) ~/ 7) * 7;
+    final weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+    return Container(
+      decoration: BoxDecoration(
+        color: t.bgCard,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: t.bgRule),
+      ),
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        children: [
+          Row(
+            children: weekdays.map((w) {
+              final isSun = w == 'Sun';
+              return Expanded(
+                child: Container(
+                  alignment: Alignment.center,
+                  padding: const EdgeInsets.symmetric(vertical: 6),
+                  decoration: BoxDecoration(
+                    color: isSun ? Colors.grey.withValues(alpha: 0.08) : Colors.transparent,
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    w,
+                    style: TextStyle(
+                      fontSize: 11,
+                      fontWeight: FontWeight.bold,
+                      color: isSun ? Colors.grey[700] : t.textSecondary,
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 6),
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: roundedTotal,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 7,
+              childAspectRatio: 1.1,
+              crossAxisSpacing: 6,
+              mainAxisSpacing: 6,
+            ),
+            itemBuilder: (context, idx) {
+              if (idx < totalOffset || idx >= totalCells) {
+                return Container(
+                  decoration: BoxDecoration(
+                    color: t.bg.withValues(alpha: 0.3),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                );
+              }
+
+              final day = idx - totalOffset + 1;
+              final dayData = dailyStatus[day] ?? {};
+              final status = (dayData['status']?.toString() ?? 'unmarked').toLowerCase();
+              final inTime = dayData['checkInTime']?.toString();
+              final outTime = dayData['checkOutTime']?.toString();
+              final shifts = dayData['shifts'];
+              final note = dayData['note']?.toString();
+
+              Color cellBg = t.bg;
+              Color borderColor = t.bgRule;
+              Color textColor = t.textSecondary;
+              String badge = '—';
+
+              if (status == 'present') {
+                cellBg = const Color(0xFFECFDF5);
+                borderColor = const Color(0xFFA7F3D0);
+                textColor = const Color(0xFF065F46);
+                badge = '✓ Present';
+              } else if (status == 'late') {
+                cellBg = const Color(0xFFFFFBEB);
+                borderColor = const Color(0xFFFDE68A);
+                textColor = const Color(0xFF92400E);
+                badge = '⏱ Late';
+              } else if (status == 'leave') {
+                cellBg = const Color(0xFFEFF6FF);
+                borderColor = const Color(0xFFBFDBFE);
+                textColor = const Color(0xFF1E40AF);
+                badge = '🏖 Leave';
+              } else if (status == 'holiday') {
+                cellBg = const Color(0xFFFAF5FF);
+                borderColor = const Color(0xFFE9D5FF);
+                textColor = const Color(0xFF6B21A8);
+                badge = '🎉 Holiday';
+              } else if (status == 'off') {
+                cellBg = const Color(0xFFF1F5F9);
+                borderColor = const Color(0xFFE2E8F0);
+                textColor = const Color(0xFF475569);
+                badge = 'Off Day';
+              } else if (status == 'absent') {
+                cellBg = const Color(0xFFFEF2F2);
+                borderColor = const Color(0xFFFECACA);
+                textColor = const Color(0xFF991B1B);
+                badge = '✕ Absent';
+              }
+
+              String punchStr = '';
+              if (shifts is Map && shifts.isNotEmpty) {
+                for (final s in shifts.values) {
+                  if (s is Map) {
+                    final cin = s['checkIn']?.toString();
+                    final cout = s['checkOut']?.toString();
+                    if (cin != null && cin.isNotEmpty && cin != '--:--') {
+                      punchStr = '$cin - ${cout ?? 'Running'}';
+                      break;
+                    }
+                  }
+                }
+              }
+              if (punchStr.isEmpty && inTime != null && inTime.isNotEmpty && inTime != '--:--') {
+                punchStr = '$inTime - ${outTime ?? 'Running'}';
+              }
+
+              return Tooltip(
+                message: '${DateFormat('EEE, d MMM yyyy').format(DateTime(yr, mo, day))}\nStatus: ${badge.replaceAll('✓ ', '').replaceAll('⏱ ', '').replaceAll('🏖 ', '').replaceAll('🎉 ', '').replaceAll('✕ ', '')}${punchStr.isNotEmpty ? '\nPunches: $punchStr' : ''}${note != null && note.isNotEmpty ? '\nNote: $note' : ''}',
+                child: Container(
+                  padding: const EdgeInsets.all(5),
+                  decoration: BoxDecoration(
+                    color: cellBg,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: borderColor, width: 0.8),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('$day', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: status == 'off' ? Colors.grey : t.textPrimary)),
+                          Text(badge, style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: textColor)),
+                        ],
+                      ),
+                      const Spacer(),
+                      if (punchStr.isNotEmpty)
+                        Text(
+                          punchStr,
+                          style: TextStyle(fontSize: 8, fontWeight: FontWeight.w600, color: t.textPrimary),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        )
+                      else if (note != null && note.isNotEmpty)
+                        Text(
+                          note,
+                          style: const TextStyle(fontSize: 7.5, fontStyle: FontStyle.italic, color: Colors.grey),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+          const SizedBox(height: 10),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              _buildLegend(const Color(0xFF10B981), 'Present', t),
+              const SizedBox(width: 12),
+              _buildLegend(const Color(0xFFF59E0B), 'Late', t),
+              const SizedBox(width: 12),
+              _buildLegend(const Color(0xFF3B82F6), 'Leave', t),
+              const SizedBox(width: 12),
+              _buildLegend(const Color(0xFFA855F7), 'Holiday', t),
+              const SizedBox(width: 12),
+              _buildLegend(const Color(0xFF64748B), 'Off Day', t),
+              const SizedBox(width: 12),
+              _buildLegend(const Color(0xFFEF4444), 'Absent', t),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLegend(Color color, String label, RoleThemeData t) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(width: 7, height: 7, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
+        const SizedBox(width: 4),
+        Text(label, style: TextStyle(fontSize: 10, color: t.textSecondary)),
+      ],
     );
   }
 

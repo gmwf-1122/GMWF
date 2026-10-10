@@ -73,7 +73,8 @@ class LanDiscovery {
         InternetAddress.anyIPv4,
         AppNetwork.udpBroadcastPort,
         reuseAddress: true,
-        reusePort: true,
+        // reusePort is unsupported on Windows and makes bind() throw.
+        reusePort: !(Platform.isWindows),
       );
       sock.listen((ev) {
         if (c.isCompleted) { try { sock.close(); } catch (_) {} return; }

@@ -46,11 +46,19 @@ class FileActionHelper {
     String? shareText,
   }) async {
     String? resolvedPath = filePath;
-    if ((resolvedPath == null || resolvedPath.isEmpty) && bytes != null && bytes.isNotEmpty && !kIsWeb) {
+    if (bytes != null && bytes.isNotEmpty && !kIsWeb) {
       try {
-        resolvedPath = await getTempFilePath(fileName, bytes);
+        if (resolvedPath != null && resolvedPath.isNotEmpty) {
+          final file = File(resolvedPath);
+          await file.writeAsBytes(bytes, flush: true);
+        } else {
+          resolvedPath = await getTempFilePath(fileName, bytes);
+        }
       } catch (e) {
-        debugPrint('[FileActionHelper] Save failed: $e');
+        debugPrint('[FileActionHelper] Save to $resolvedPath failed: $e, using temp file path');
+        try {
+          resolvedPath = await getTempFilePath(fileName, bytes);
+        } catch (_) {}
       }
     }
 

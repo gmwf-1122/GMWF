@@ -1,166 +1,97 @@
 import 'dart:io';
-import 'package:path/path.dart' as p;
 import 'package:hive/hive.dart';
 
 void main() async {
-  final hiveDir = r'C:\Users\win\AppData\Roaming\com.example\gmwf\gmwf_hive';
-  final tempDir = Directory.systemTemp.createTempSync('hive_inspect_');
+  final hiveSourceDir = Directory(r'C:\Users\win\AppData\Roaming\com.example\gmwf\gmwf_hive');
+  final tempDir = Directory(r'e:\GMWF\gmwf\tool\temp_attendance_audit');
+  if (!tempDir.existsSync()) tempDir.createSync(recursive: true);
 
-  // Copy .hive files to tempDir
-  for (final file in Directory(hiveDir).listSync()) {
-    if (file is File && file.path.endsWith('.hive')) {
-      final dest = p.join(tempDir.path, p.basename(file.path));
-      try {
-        file.copySync(dest);
-      } catch (e) {
-        // ignore locked if any
-      }
-    }
+  for (final name in ['local_employee_attendance.hive', 'local_employee_attendance.lock', 'sync_queue.hive', 'sync_queue.lock']) {
+    final src = File('${hiveSourceDir.path}\\$name');
+    if (src.existsSync()) src.copySync('${tempDir.path}\\$name');
   }
 
   Hive.init(tempDir.path);
-  try {
-    final boxesToScan = [
-      'local_employees',
-      'local_madrassa_students',
-      'local_school_students',
-      'local_madrassa_logs',
-      'local_school_logs',
-      'local_biometric_credentials',
-      'local_users',
-    ];
-    for (final bName in boxesToScan) {
-      try {
-        final b = await Hive.openBox(bName);
-        print('\n--- SCANNING $bName (${b.length}) ---');
-        for (final k in b.keys) {
-          try {
-            final v = b.get(k);
-            if (v != null) {
-              final str = v.toString().toLowerCase();
-              if (str.contains('haroon')) {
-                print('FOUND in $bName: key=$k');
-                print('data: $v');
-              }
-            }
-          } catch (_) {}
-        }
-      } catch (e) {
-        print('Error scanning $bName: $e');
+  final box = await Hive.openBox('local_employee_attendance');
+  print('Total attendance in Hive: ${box.length}');
+  
+  int syncedTrueCount = 0;
+  int syncedFalseCount = 0;
+  int nullSyncCount = 0;
+  final dates = <String, int>{};
+  final sampleRecords = <Map>[];
+
+  for (var key in box.keys) {
+    final rec = box.get(key);
+    if (rec is Map) {
+      final date = rec['date']?.toString() ?? 'no_date';
+      dates[date] = (dates[date] ?? 0) + 1;
+
+      if (rec['synced'] == true) {
+        syncedTrueCount++;
+      } else if (rec['synced'] == false) {
+        syncedFalseCount++;
+      } else {
+        nullSyncCount++;
+      }
+
+      if (sampleRecords.length < 15) {
+        sampleRecords.add({
+          'key': key,
+          'empId': rec['employeeId'],
+          'name': rec['employeeName'] ?? rec['name'],
+          'date': rec['date'],
+          'in': rec['checkInTime'],
+          'out': rec['checkOutTime'],
+          'synced': rec['synced'],
+          'syncStatus': rec['syncStatus'],
+          'lastSyncedAt': rec['lastSyncedAt'],
+          'shifts': rec['shifts'],
+        });
       }
     }
-    return;
-
-
-  } catch (e) {
-    print('Error opening devBox: $e');
   }
 
+  print('\n--- Sync Status Counts ---');
+  print('synced == true: $syncedTrueCount');
+  print('synced == false: $syncedFalseCount');
+  print('synced == null: $nullSyncCount');
 
-  try {
-    final attBox = await Hive.openBox('local_employee_attendance');
-
-    print('\n--- ALL ATTENDANCE FOR 163 and 136 ---');
-    for (final key in attBox.keys) {
-      final v = attBox.get(key);
-      if (v is Map) {
-        final pin = (v['pin'] ?? v['biometricPin'] ?? '').toString();
-        final shifts = v['shifts'];
-        if (pin == '163' || pin == '136') {
-          print('ATT: key=$key | date=${v['date']} | empId=${v['employeeId']} | name=${v['employeeName'] ?? v['name']} | pin=$pin | in=${v['checkInTime']} | out=${v['checkOutTime']} | shifts=$shifts');
-        }
-      }
-    }
-  } catch (e) {
-    print('Error opening local_employee_attendance: $e');
+  print('\n--- Date Distribution ---');
+  final sortedDates = dates.keys.toList()..sort();
+  for (final d in sortedDates) {
+    print('$d: ${dates[d]} records');
   }
 
-  try {
-    final crossBox = await Hive.openBox('local_cross_branch_punches');
-    print('\n--- ALL CROSS BRANCH PUNCHES FOR 163 and 136 ---');
-    for (final key in crossBox.keys) {
-      final v = crossBox.get(key);
-      if (v is Map) {
-        final pin = (v['pin'] ?? '').toString();
-        if (pin == '163' || pin == '136') {
-          print('CROSS: pin=$pin | time=${v['timestamp']} | branch=${v['punchBranchName'] ?? v['punchBranchId']} | dev=${v['deviceName']} | loc=${v['buildingLocation']}');
-        }
-      }
-    }
-  } catch (e) {
-    print('Error opening crossBox: $e');
+  print('\n--- Sample Records ---');
+  for (final s in sampleRecords) {
+    print('Key: ${s['key']}');
+    print('  Emp: ${s['name']} (${s['empId']}) | Date: ${s['date']}');
+    print('  Times: In=${s['in']}, Out=${s['out']}');
+    print('  Sync: synced=${s['synced']}, status=${s['syncStatus']}, lastSyncedAt=${s['lastSyncedAt']}');
+    print('  Shifts: ${s['shifts']}');
+    print('----------------------------------------------------');
   }
 
+  // Also check sync_queue box if available
   try {
-    final unmappedBox = await Hive.openBox('local_unmapped_punches');
-    print('\n--- ALL UNMAPPED PUNCHES FOR 163 and 136 ---');
-    for (final key in unmappedBox.keys) {
-      final v = unmappedBox.get(key);
-      if (v is Map) {
-        final pin = (v['pin'] ?? '').toString();
-        if (pin == '163' || pin == '136') {
-          print('UNMAPPED: pin=$pin | time=${v['timestamp']} | ip=${v['deviceIp']} | dev=${v['deviceName']}');
+    final sBox = await Hive.openBox('sync_queue');
+    print('\nTotal items in sync_queue: ${sBox.length}');
+    int attInQueue = 0;
+    for (var key in sBox.keys) {
+      final item = sBox.get(key);
+      if (item is Map && (item['type'] == 'save_attendance_record' || item['type'] == 'save_attendance')) {
+        attInQueue++;
+        if (attInQueue <= 5) {
+          print('Queue Item $key: date=${item['date']}, emp=${item['employeeId']}, type=${item['type']}');
         }
       }
     }
+    print('Attendance items currently in sync_queue: $attInQueue');
+    await sBox.close();
   } catch (e) {
-    print('Error: $e');
+    print('Could not read sync_queue: $e');
   }
 
-
-
-  try {
-    final attBox = await Hive.openBox('local_employee_attendance');
-    print('\nTotal attendance records in box: ${attBox.length}');
-    for (final key in attBox.keys) {
-      final v = attBox.get(key);
-      if (v is Map) {
-        final empId = (v['employeeId'] ?? v['localId'] ?? '').toString();
-        final name = (v['employeeName'] ?? v['name'] ?? '').toString().toLowerCase();
-        final pin = (v['pin'] ?? v['biometricPin'] ?? '').toString();
-        if (name.contains('farrukh') || name.contains('kashif') || pin == '163' || pin == '136' || name.contains('ans')) {
-          print('--- ATTENDANCE: key=$key ---');
-          print('date: ${v['date']}, name: ${v['employeeName'] ?? v['name']}, pin: $pin, in: ${v['checkInTime']}, out: ${v['checkOutTime']}, shifts: ${v['shifts']}');
-        }
-      }
-    }
-  } catch (e) {
-    print('Error opening local_employee_attendance: $e');
-  }
-
-  try {
-    final unmappedBox = await Hive.openBox('local_unmapped_punches');
-    print('\nTotal unmapped punches in box: ${unmappedBox.length}');
-    for (final key in unmappedBox.keys) {
-      final v = unmappedBox.get(key);
-      if (v is Map) {
-        final pin = (v['pin'] ?? '').toString();
-        if (pin == '163' || pin == '136') {
-          print('UNMAPPED PUNCH: key=$key -> $v');
-        }
-      }
-    }
-  } catch (e) {
-    print('Error opening unmappedBox: $e');
-  }
-
-  try {
-    final crossBox = await Hive.openBox('local_cross_branch_punches');
-    print('\nTotal cross branch punches in box: ${crossBox.length}');
-    for (final key in crossBox.keys) {
-      final v = crossBox.get(key);
-      if (v is Map) {
-        final pin = (v['pin'] ?? '').toString();
-        if (pin == '163' || pin == '136') {
-          print('CROSS BRANCH PUNCH: key=$key -> $v');
-        }
-      }
-    }
-  } catch (e) {
-    print('Error opening crossBox: $e');
-  }
-
-  try {
-    tempDir.deleteSync(recursive: true);
-  } catch (_) {}
+  await box.close();
 }

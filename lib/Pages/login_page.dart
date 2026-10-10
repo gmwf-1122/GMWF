@@ -1,4 +1,5 @@
 // lib/pages/login_page.dart
+import '../utils/ui_stall_monitor.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -222,6 +223,7 @@ class _LoginPageState extends State<LoginPage> {
 
   // ── Main login entry point ────────────────────────────────────────────────
   Future<void> _login() async {
+    UiStallMonitor.mark('login: _login started');
     RoleSimulatorService.reset();
 
     final input    = _usernameOrEmailController.text.trim();

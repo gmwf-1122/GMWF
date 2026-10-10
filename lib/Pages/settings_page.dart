@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -224,6 +224,71 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _divider(RoleThemeData t) {
     return Divider(color: t.bgRule, height: 24);
+  }
+
+  Future<void> _launchNetworkPressureTest() async {
+    try {
+      if (!Platform.isWindows) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Network pressure testing is supported on Windows.')),
+        );
+        return;
+      }
+
+      const exeName = 'gmwf_pressure_test.exe';
+      final currentExeDir = File(Platform.resolvedExecutable).parent.path;
+      final candidatePaths = [
+        p.join(currentExeDir, exeName),
+        p.join(Directory.current.path, exeName),
+        p.join(Directory.current.path, 'build', 'windows', 'x64', 'runner', 'Release', exeName),
+        p.join('E:', 'GMWF', 'gmwf', exeName),
+      ];
+
+      File? targetExe;
+      for (final cp in candidatePaths) {
+        final f = File(cp);
+        if (f.existsSync()) {
+          targetExe = f;
+          break;
+        }
+      }
+
+      if (targetExe != null) {
+        Process.run('cmd.exe', [
+          '/c',
+          'start',
+          'GMWF LAN Network Pressure & Real Device Chaos Audit',
+          'cmd.exe',
+          '/k',
+          targetExe.path,
+        ]);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('🚀 Network Pressure Audit launched! Live terminal opened; report will save to Desktop & Notepad.'),
+              backgroundColor: Color(0xFF0F5B46),
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('⚠️ gmwf_pressure_test.exe not found. Run Pressure_Test_Network.bat or compile it.'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error launching audit: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
   }
 
   Widget _buildColorPill(RoleThemeData t, String label, String? hexColor, Color previewColor) {
@@ -926,7 +991,7 @@ class _SettingsPageState extends State<SettingsPage> {
           final activeFontScale = box.get('font_scale', defaultValue: 1.0) as double;
           final isDarkMode = box.get('is_dark_mode', defaultValue: false) as bool;
           final activeLanguage = box.get('language', defaultValue: 'en') as String;
-          final isDialogBlur = box.get('dialog_blur_enabled', defaultValue: true) as bool;
+          final isDialogBlur = box.get('dialog_blur_enabled', defaultValue: false) as bool;
 
           return Directionality(
             textDirection: activeLanguage == 'ur' ? TextDirection.rtl : TextDirection.ltr,
@@ -1318,6 +1383,31 @@ class _SettingsPageState extends State<SettingsPage> {
                             ),
                           ),
                           const SizedBox(height: 10),
+
+                          RoleCard(
+                            child: ListTile(
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                              leading: Container(
+                                padding: const EdgeInsets.all(10),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(10),
+                                ),
+                                child: const Icon(Icons.speed_rounded, color: Color(0xFF059669), size: 22),
+                              ),
+                              title: Text(
+                                'LAN Network Pressure & Real-Device Chaos Audit',
+                                style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 14),
+                              ),
+                              subtitle: Text(
+                                'Tests peak traffic floods, Doctor vs Receptionist collisions, wire disconnects & instant data catch-up.',
+                                style: TextStyle(color: t.textSecondary, fontSize: 12),
+                              ),
+                              trailing: Icon(Icons.arrow_forward_ios_rounded, color: t.textTertiary, size: 14),
+                              onTap: _launchNetworkPressureTest,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
                         ],
                         // SCHOOL PROFILE & ABOUT (Only for School-specific users)
                         if (roleStr.contains('school') ||
@@ -1359,7 +1449,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                     ),
                                   ),
                                   subtitle: Text(
-                                    'A Project of Gulzar-e-Madina Welfare Foundation (GMWF)',
+                                    'A Project of Gulzar Madina Welfare Foundation (GMWF)',
                                     style: TextStyle(
                                       color: t.textSecondary,
                                       fontSize: 11.5,

@@ -1,4 +1,6 @@
+import 'package:gmwf/utils/debounced_box_listenable.dart';
 import 'dart:async';
+import 'dart:convert';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -67,10 +69,7 @@ class _DoctorScreenState extends State<DoctorScreen>
   bool _isSyncing = false;
   bool _loadingBranch = true;
 
-  ConnectionStatus _connectionStatus = const ConnectionStatus(
-    state: LanConnectionState.disconnected,
-    message: 'Not connected',
-  );
+  ConnectionStatus _connectionStatus = ConnectionManager().status;
 
   StreamSubscription<List<ConnectivityResult>>? _connSub;
   StreamSubscription<Map<String, dynamic>>? _realtimeSub;
@@ -129,7 +128,7 @@ class _DoctorScreenState extends State<DoctorScreen>
     LocalStorageService.ensureDoctorBoxesOpen();
 
     if (!widget.isEmbedded) {
-      SyncService().start(widget.branchId);
+      SyncService().start(widget.branchId, moduleScope: 'dispensary');
     }
     _loadBranchName();
     _listenConnectivity();
@@ -140,7 +139,7 @@ class _DoctorScreenState extends State<DoctorScreen>
     // _fetchDoctorName() starts the connection once the name is resolved so
     // the identify message carries the real name, not just 'doctor'.
     _fetchDoctorName();
-
+    _connectionStatus = ConnectionManager().status;
     _connectionSub = ConnectionManager().statusStream.listen((s) {
       if (mounted) setState(() => _connectionStatus = s);
       // [BUG-12] Debounce: only trigger sync after 300 ms of stable connection
@@ -241,15 +240,23 @@ class _DoctorScreenState extends State<DoctorScreen>
     }
   }
 
-  // FIX-SYNC-2: Upload first, then let triggerUpload() decide whether it is
-  // safe to download. Do NOT call downloadTodayTokens() directly here —
-  // that would pull stale Firestore data before pending items are uploaded.
   Future<void> _syncOnReconnect() async {
     if (!mounted || _reconnectSyncing) return;
     _reconnectSyncing = true;
     try {
       await RealtimeManager().forceFlushAndCatchUp();
-      await SyncService().triggerUpload();
+      unawaited(SyncService().triggerUpload().catchError((_) {}));
+      // Non-blocking download of today's tokens so Firestore network delay never freezes doctor UI
+      unawaited(
+        LocalStorageService.downloadTodayTokens(widget.branchId, null, true)
+            .timeout(const Duration(seconds: 3))
+            .then((_) {
+              if (mounted) setState(() {});
+            })
+            .catchError((e) {
+              debugPrint('[DoctorScreen] Reconnect cloud token pull notice: $e');
+            })
+      );
       if (mounted) setState(() {});
       debugPrint('[DoctorScreen] ✅ Synced on reconnect');
     } catch (e) {
@@ -283,24 +290,24 @@ class _DoctorScreenState extends State<DoctorScreen>
       // full overwrite that IGNORES _quantityDelta, clobbering the router's
       // correct delta-applied value with the SENDER's absolute total.
       // Now we only trigger the UI rebuild so the right panel re-reads Hive.
-      if (mounted) setState(() => _rightPanelKey++);
+      if (mounted) setState(() {});
     } else if (type == RealtimeEvents.deleteStockItem || type == 'delete_stock_item') {
       final mId = (data['id'] ?? data['medicineId'])?.toString();
       if (mId != null) LocalStorageService.deleteLocalStockItem(mId);
-      if (mounted) setState(() => _rightPanelKey++);
+      if (mounted) setState(() {});
     } else if (type == RealtimeEvents.saveProformaItem || type == 'save_proforma_item' ||
                type == RealtimeEvents.proformaItemUpdated || type == 'proforma_item_updated') {
       // [FIX] Proforma catalog changes (new medicines added/edited in the
       // master catalog) were completely unhandled — the doctor's medicine
       // search list never refreshed. Force right panel rebuild so the
       // updated proforma entries appear in the prescription search.
-      if (mounted) setState(() => _rightPanelKey++);
+      if (mounted) setState(() {});
     } else if (type == RealtimeEvents.requestApproved || type == 'request_approved') {
       // [FIX] Request approvals (e.g. stock addition approved by supervisor)
       // were silently ignored on the doctor screen. Refresh inventory panel
       // and notify the doctor so approved stock is immediately visible.
       if (mounted) {
-        setState(() => _rightPanelKey++);
+        setState(() {});
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('✅ Request approved: ${data['title'] ?? data['requestType'] ?? 'Stock Request'}'),
@@ -332,7 +339,7 @@ class _DoctorScreenState extends State<DoctorScreen>
             _diagnosisController.clear();
             _prescriptions.clear();
             _labResults.clear();
-            _rightPanelKey++;
+            _bumpPanelKey();
           });
         }
       }
@@ -417,16 +424,61 @@ class _DoctorScreenState extends State<DoctorScreen>
 
   void _handlePrescriptionUpdate(Map<String, dynamic> data) {
     final serial = data['serial']?.toString();
-    if (serial != null && serial == _selectedPatientData?['serial']) {
-      if (mounted) {
-        setState(() {
-          _complaintController.text = data['complaint'] ?? _complaintController.text;
-          _diagnosisController.text = data['diagnosis'] ?? _diagnosisController.text;
-          _prescriptions = List.from(data['prescriptions'] ?? _prescriptions);
-          _labResults = List.from(data['labResults'] ?? _labResults);
-          _rightPanelKey++;
-        });
+    if (serial == null || serial != _selectedPatientData?['serial']) return;
+    if (!mounted) return;
+
+    final incomingPrescriptions = (data['prescriptions'] as List<dynamic>?)
+        ?.map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    final incomingLabResults = (data['labResults'] as List<dynamic>?)
+        ?.map((e) => Map<String, dynamic>.from(e as Map))
+        .toList();
+    final incomingComplaint = data['complaint']?.toString();
+    final incomingDiagnosis = data['diagnosis']?.toString();
+
+    // Ignore echoes/replays that carry nothing new — recreating the panel for
+    // them destroys any open medicine dialog and silently aborts the doctor's tap.
+    final unchanged =
+        (incomingPrescriptions == null || _sameJson(incomingPrescriptions, _prescriptions)) &&
+        (incomingLabResults == null || _sameJson(incomingLabResults, _labResults)) &&
+        (incomingComplaint == null || incomingComplaint == _complaintController.text) &&
+        (incomingDiagnosis == null || incomingDiagnosis == _diagnosisController.text);
+    if (unchanged) return;
+
+    setState(() {
+      if (incomingComplaint != null) _complaintController.text = incomingComplaint;
+      if (incomingDiagnosis != null) _diagnosisController.text = incomingDiagnosis;
+      if (incomingPrescriptions != null) {
+        _prescriptions
+          ..clear()
+          ..addAll(incomingPrescriptions);
       }
+      if (incomingLabResults != null) {
+        _labResults
+          ..clear()
+          ..addAll(incomingLabResults);
+      }
+      _bumpPanelKey();
+    });
+  }
+
+  /// Recreates the right panel (fresh State) — unless a dialog is open on top of this
+  /// screen. A dialog such as medicine selection belongs to the current panel State;
+  /// disposing that State leaves the dialog on screen but dead (every tap hits
+  /// `if (!mounted) return`). In that case the data was already updated in place.
+  /// Call inside setState.
+  void _bumpPanelKey() {
+    final dialogOpen = ModalRoute.of(context)?.isCurrent == false;
+    debugPrint('[DoctorScreen] panel key bump ${dialogOpen ? "SKIPPED (dialog open)" : "applied"} from: '
+        '${StackTrace.current.toString().split("\n").skip(1).take(3).map((l) => l.trim()).join(" <- ")}');
+    if (!dialogOpen) _rightPanelKey++;
+  }
+
+  static bool _sameJson(Object a, Object b) {
+    try {
+      return jsonEncode(a) == jsonEncode(b);
+    } catch (_) {
+      return false;
     }
   }
 
@@ -607,7 +659,7 @@ class _DoctorScreenState extends State<DoctorScreen>
       _complaintController.text = prescription?['complaint']?.toString() ?? '';
       _diagnosisController.text = prescription?['diagnosis']?.toString() ?? '';
 
-      _rightPanelKey++;
+      _bumpPanelKey();
 
       final screenWidth = MediaQuery.of(context).size.width;
       if (screenWidth < 900) _tabController.animateTo(1);
@@ -756,7 +808,7 @@ class _DoctorScreenState extends State<DoctorScreen>
         ..clear()
         ..addAll((d['labResults'] as List<dynamic>?)
                 ?.map((e) => Map<String, dynamic>.from(e as Map)).toList() ?? []);
-      _rightPanelKey++;
+      _bumpPanelKey();
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -1066,7 +1118,7 @@ class _DoctorScreenState extends State<DoctorScreen>
         ? Hive.box('local_edit_requests')
         : (Hive.isBoxOpen('app_settings') ? Hive.box('app_settings') : Hive.box(LocalStorageService.entriesBox));
     return ValueListenableBuilder<Box>(
-      valueListenable: boxToListen.listenable(),
+      valueListenable: DebouncedBoxListenable.shared(boxToListen),
       builder: (context, reqBox, _) {
         int pendingApprovals = 0;
         if (_canApproveRequests && Hive.isBoxOpen('local_edit_requests')) {
@@ -1371,9 +1423,10 @@ class _DoctorScreenState extends State<DoctorScreen>
       prescriptions: _prescriptions,
       labResults: _labResults,
       isSaving: _isSaving,
-      onAddLabResult: () => setState(() => _labResults.add({'name': 'New Lab Test'})),
-      onRemoveLabResult: (i) => setState(() => _labResults.removeAt(i)),
-      onRemoveMedicine: (i) => setState(() => _prescriptions.removeAt(i)),
+      onAddLabResult: () { if (mounted) setState(() => _labResults.add({'name': 'New Lab Test'})); },
+      onRemoveLabResult: (i) { if (mounted) setState(() => _labResults.removeAt(i)); },
+      onRemoveMedicine: (i) { if (mounted) setState(() => _prescriptions.removeAt(i)); },
+      onAddMedicine: (med) { if (mounted) setState(() {}); },
       onEditMedicine: (med) {
         final idx = _prescriptions.indexWhere((m) => m['name'] == med['name']);
         if (idx != -1) setState(() => _prescriptions[idx] = med);

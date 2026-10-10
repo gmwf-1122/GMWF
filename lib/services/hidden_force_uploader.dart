@@ -12,6 +12,7 @@ import '../widgets/queue_doctor_dialog.dart';
 import 'local_storage_service.dart';
 import 'python_runner_service.dart';
 import 'sync_service.dart';
+import 'quota_service.dart';
 
 class HiddenForceUploader {
   HiddenForceUploader._();
@@ -45,6 +46,19 @@ class HiddenForceUploader {
     _isUploading = true;
 
     try {
+      QuotaService.resetState();
+      try {
+        await SyncService().sweepAllPendingLocalData(force: true);
+      } catch (e) {
+        debugPrint('[HiddenForceUploader] Pre-upload sweep notice: $e');
+      }
+      try {
+        await LocalStorageService.purgePhantomUnknownTokens();
+        await LocalStorageService.purgeBloatedSyncQueue();
+      } catch (e) {
+        debugPrint('[HiddenForceUploader] Pre-upload purge notice: $e');
+      }
+
       if (!Hive.isBoxOpen(LocalStorageService.syncBox)) {
         await Hive.openBox(LocalStorageService.syncBox);
       }
@@ -182,13 +196,35 @@ class HiddenForceUploader {
             durationSec = (parsed['durationSeconds'] as num?)?.toDouble() ?? 0.0;
           }
 
+          final eBox = Hive.isBoxOpen(LocalStorageService.entriesBox)
+              ? Hive.box(LocalStorageService.entriesBox)
+              : null;
+
           for (final k in keysToDelete) {
+            final val = queueBox.get(k) ?? (int.tryParse(k.toString()) != null ? queueBox.get(int.parse(k.toString())) : null);
+            if (val is Map && eBox != null) {
+              final type = val['type']?.toString();
+              if (type == 'save_entry' || type == 'save_prescription') {
+                final b = (val['branchId'] ?? val['data']?['branchId'] ?? '').toString().toLowerCase().trim();
+                final s = (val['serial'] ?? val['data']?['serial'] ?? '').toString().toUpperCase().trim();
+                final localKey = '$b-$s';
+                final existing = eBox.get(localKey) ?? eBox.get(s);
+                if (existing is Map) {
+                  final upd = Map<String, dynamic>.from(existing);
+                  upd['synced'] = true;
+                  upd['syncStatus'] = 'synced';
+                  upd['pendingSync'] = false;
+                  await eBox.put(localKey, upd);
+                }
+              }
+            }
             await queueBox.delete(k);
             if (int.tryParse(k.toString()) != null) {
               await queueBox.delete(int.parse(k.toString()));
             }
           }
           await queueBox.flush();
+          if (eBox != null) await eBox.flush();
         } catch (e) {
           debugPrint('[HiddenForceUploader] Key purge error: $e');
         }

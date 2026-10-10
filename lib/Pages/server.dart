@@ -24,6 +24,8 @@
 //   [FIX-0.3] Standardized attendance event mapping and Firestore ingestion
 //           to branches/{branchId}/employee_attendance/{dateKey}/records/{employeeId}.
 
+import '../utils/ui_stall_monitor.dart';
+import '../widgets/lazy_indexed_stack.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io' as io;
@@ -35,6 +37,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:intl/intl.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 
 import 'server_data_viewer.dart';
@@ -49,6 +52,9 @@ import '../services/auth_service.dart';
 import '../services/local_storage_service.dart';
 import '../services/camp_session_service.dart';
 import '../widgets/department_activity_widget.dart';
+import '../widgets/server_overview_panel.dart';
+import '../widgets/stress_test_dialog.dart';
+import '../realtime/stress_test_engine.dart';
 import '../widgets/multi_server_control_widget.dart';
 import '../widgets/lan_hardware_status_widget.dart';
 import '../services/multi_server_service.dart';
@@ -64,6 +70,11 @@ import '../services/donations_local_storage.dart';
 import 'madrassa/utils/madrassa_local_storage.dart';
 import 'package:uuid/uuid.dart';
 import '../services/sync_service.dart';
+import '../realtime/server_sync_coordinator.dart';
+import '../main.dart' show AuthHomeWrapper;
+import 'login_page.dart';
+import '../constants/navigator_key.dart';
+import '../services/offline_auth_service.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Connected client model
@@ -171,9 +182,12 @@ class ServerDashboardWithSync extends StatefulWidget {
 
 class _ServerDashboardWithSyncState
     extends State<ServerDashboardWithSync> {
-  bool _isAuthenticated = false;
+  bool _isAuthenticated = true;
   bool _isRunning       = false;
   bool _isStarting      = false;
+  bool _isAutoStarting  = false;
+  bool _userStoppedServer = false;
+  bool _isLoggingOut    = false;
   int  _selectedTab     = 0;
   String? _serverIp;
   DateTime? _startTime;
@@ -189,6 +203,12 @@ class _ServerDashboardWithSyncState
   DateTime? _lastSyncTime;
 
   final Map<String, ConnectedClient> _connectedClients = {};
+  io.RawDatagramSocket? _beaconSocket;
+  final Map<String, DateTime> _otherServerSeen = {};
+  Set<String> _localIps = {};
+  Timer? _overviewTicker;
+  // [epoch ms, total LAN messages (in + out), total LAN bytes (in + out)] sampled every 5 s.
+  final List<List<num>> _lanSamples = [];
   bool _isFirewallBannerDismissed = false;
   bool _isFirewallBannerExpanded = false;
 
@@ -206,23 +226,33 @@ class _ServerDashboardWithSyncState
   void initState() {
     super.initState();
 
-    if (widget.autoAuthenticate) {
-      setState(() => _isAuthenticated = true);
-      _initializeSync();
-      _detectIp();
-      _checkConnectivity();
-      _autoStartServer();
-    } else {
-      final box = Hive.box('app_settings');
-      final savedAuth = box.get('server_authenticated', defaultValue: false);
-      if (savedAuth == true) {
-        setState(() => _isAuthenticated = true);
-        _initializeSync();
-        _detectIp();
-        _checkConnectivity();
+    _isAuthenticated = true;
+    _userStoppedServer = false;
+    _isLoggingOut = false;
+    try {
+      if (Hive.isBoxOpen('app_settings')) {
+        Hive.box('app_settings').put('server_authenticated', true);
+      }
+    } catch (_) {}
+    _initializeSync();
+    _checkConnectivity();
+    _startBeaconWatch();
+    _overviewTicker = Timer.periodic(const Duration(seconds: 5), (_) {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      _lanSamples.add([
+        now,
+        LanServer.trafficMsgsIn + LanServer.trafficMsgsOut,
+        LanServer.trafficBytesIn + LanServer.trafficBytesOut,
+      ]);
+      _lanSamples.removeWhere((s) => now - s[0] > 65000);
+      if (mounted) setState(() {});
+    });
+    _detectIp().then((_) {
+      if (mounted && !_isRunning && !_userStoppedServer && !_isLoggingOut) {
         _autoStartServer();
       }
-    }
+    });
+    _autoStartServer();
 
     _connectivitySub =
         Connectivity().onConnectivityChanged.listen((results) {
@@ -248,10 +278,6 @@ class _ServerDashboardWithSyncState
 
     _updateTimer = Timer.periodic(const Duration(seconds: 2), (_) {
       if (mounted) {
-        // Automatically optimize queue in background without requiring manual button press
-        if (_syncQueueSize > 25) {
-          _syncManager?.purgeInvalidQueue();
-        }
         final newQueue = _syncManager?.queueSize ??
             (Hive.isBoxOpen(LocalStorageService.syncBox) ? Hive.box(LocalStorageService.syncBox).length : 0);
         if (newQueue != _syncQueueSize) {
@@ -378,8 +404,25 @@ class _ServerDashboardWithSyncState
   }
 
   Future<void> _autoStartServer() async {
-    await Future.delayed(const Duration(seconds: 1));
-    if (mounted && !_isRunning) await _startServer();
+    if (_isAutoStarting || _isRunning || _isStarting || _userStoppedServer || _isLoggingOut) return;
+    _isAutoStarting = true;
+    try {
+      for (int attempt = 0; attempt < 8; attempt++) {
+        if (!mounted || _isRunning || _userStoppedServer || _isLoggingOut) break;
+        if (_isStarting) {
+          await Future.delayed(const Duration(milliseconds: 500));
+          if (!mounted || _isRunning || _userStoppedServer || _isLoggingOut) break;
+        }
+        if (attempt > 0) {
+          await Future.delayed(const Duration(milliseconds: 600));
+        }
+        if (!mounted || _isRunning || _userStoppedServer || _isLoggingOut) break;
+        await _startServer();
+        if (_isRunning || _userStoppedServer || _isLoggingOut) break;
+      }
+    } finally {
+      _isAutoStarting = false;
+    }
   }
 
   Future<void> _initializeSync() async {
@@ -387,6 +430,8 @@ class _ServerDashboardWithSyncState
       if (!Hive.isBoxOpen(LocalStorageService.syncBox)) {
         await Hive.openBox(LocalStorageService.syncBox);
       }
+      LocalStorageService.purgePhantomUnknownTokens(widget.branchId);
+      LocalStorageService.healAndRestorePatientCnics(widget.branchId);
       LocalStorageService.purgeBloatedSyncQueue();
     } catch (e) {
       debugPrint('Hive init error: $e');
@@ -418,11 +463,13 @@ class _ServerDashboardWithSyncState
 
   Future<void> _detectIp() async {
     final ip = await getPrimaryLanIp();
-    setState(() => _serverIp = ip);
+    setState(() => _serverIp = ip ?? _serverIp ?? '127.0.0.1');
   }
 
   Future<void> _startServer() async {
-    if (_isRunning || _isStarting) return;
+    UiStallMonitor.mark('server: _startServer');
+    if (_isRunning || _isStarting || _isLoggingOut) return;
+    _userStoppedServer = false;
     _isStarting = true;
 
     if (kIsWeb) {
@@ -432,17 +479,16 @@ class _ServerDashboardWithSyncState
     }
     // IP discovery runs in parallel during initState. Wait for it here so
     // auto-start cannot permanently fail just because discovery is slow.
-    if (_serverIp == null) {
-      final detectedIp = await getPrimaryLanIp();
-      if (detectedIp != null && detectedIp.isNotEmpty && mounted) {
-        setState(() => _serverIp = detectedIp);
-      }
-    }
-
     if (_serverIp == null || _serverIp!.isEmpty) {
-      _showError('Could not detect IP address');
-      _isStarting = false;
-      return;
+      final detectedIp = await getPrimaryLanIp();
+      if (detectedIp != null && detectedIp.isNotEmpty) {
+        _serverIp = detectedIp;
+      } else {
+        _serverIp = '127.0.0.1';
+      }
+      if (mounted) {
+        setState(() {});
+      }
     }
 
     await _openFirewallPort();
@@ -454,6 +500,7 @@ class _ServerDashboardWithSyncState
         final cId = info['clientId']?.toString();
         final cIp = info['ipAddress']?.toString() ?? info['deviceIp']?.toString();
         final uName = info['username']?.toString();
+        if (!mounted) return;
 
         setState(() {
           _connectedClients.removeWhere((key, existing) {
@@ -483,6 +530,10 @@ class _ServerDashboardWithSyncState
 
       _server!.onClientDisconnected = (socketId) {
         final client = _connectedClients[socketId];
+        if (!mounted) {
+          _connectedClients.remove(socketId);
+          return;
+        }
         setState(() => _connectedClients.remove(socketId));
         if (client != null) {
           _addLog('🔴 Disconnected: ${client.displayName}');
@@ -673,33 +724,60 @@ class _ServerDashboardWithSyncState
   }
 
   Future<void> _stopServer() async {
+    _userStoppedServer = true;
     try {
       _udpBroadcastTimer?.cancel();
       try {
         _serverUdpSocket?.close();
       } catch (_) {}
       _serverUdpSocket = null;
-      await MultiServerService().stopHeartbeat(widget.branchId);
-      await _syncManager?.stop();
-      await _server?.stop();
-      await ZkTecoNetworkService.stopServer();
-      // Stop Python daemon when LAN server stops
-      if (!kIsWeb && PythonRunnerService.instance.isRunning) {
-        await PythonRunnerService.instance.stopProcess();
-        _addLog('🛑 Python ZKTeco Sync Daemon stopped');
-      }
-      // [FIX-1.2] Disable attendance server role when server stops
-      await LocalStorageService.setAttendanceServerRole(false);
-      setState(() {
-        _isRunning  = false;
-        _syncManager = null;
-        _server      = null;
-        _connectedClients.clear();
+
+      await Future.wait([
+        Future(() async {
+          try { await MultiServerService().stopHeartbeat(widget.branchId); } catch (_) {}
+        }),
+        Future(() async {
+          try { await _syncManager?.stop(); } catch (_) {}
+        }),
+        Future(() async {
+          try { await _server?.stop(); } catch (_) {}
+        }),
+        Future(() async {
+          try { await ZkTecoNetworkService.stopServer(); } catch (_) {}
+        }),
+        if (!kIsWeb && PythonRunnerService.instance.isRunning)
+          Future(() async {
+            try { await PythonRunnerService.instance.stopProcess(); } catch (_) {}
+          }),
+      ]).timeout(const Duration(seconds: 4), onTimeout: () {
+        debugPrint('[Server] Component shutdown timed out, proceeding');
+        return [];
       });
-      _addLog('🛑 Server stopped');
-      _showSuccess('Server stopped');
+
+      // [FIX-1.2] Disable attendance server role when server stops
+      try {
+        await LocalStorageService.setAttendanceServerRole(false);
+      } catch (_) {}
+
+      if (mounted) {
+        setState(() {
+          _isRunning  = false;
+          _syncManager = null;
+          _server      = null;
+          _connectedClients.clear();
+        });
+        _addLog('🛑 Server stopped');
+        _showSuccess('Server stopped');
+      } else {
+        _isRunning = false;
+        _syncManager = null;
+        _server = null;
+        _connectedClients.clear();
+      }
     } catch (e) {
-      _showError('Failed to stop: $e');
+      if (mounted) _showError('Failed to stop: $e');
+    } finally {
+      _isStarting = false;
     }
   }
 
@@ -975,6 +1053,50 @@ class _ServerDashboardWithSyncState
                     _showSuccess('Queue optimized. Clean queue size: ${_syncManager!.queueSize}');
                   },
                 ),
+                TextButton.icon(
+                  icon: const Icon(Icons.local_fire_department_rounded, size: 16, color: Color(0xFFEF4444)),
+                  label: const Text('Clear Flooded Queue', style: TextStyle(color: Color(0xFFEF4444))),
+                  onPressed: () async {
+                    final confirm = await showDialog<bool>(
+                      context: ctx,
+                      builder: (c) => AlertDialog(
+                        backgroundColor: isDark ? const Color(0xFF1E1B2E) : Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                        title: Row(children: [
+                          const Icon(Icons.warning_amber_rounded, color: Color(0xFFF59E0B), size: 22),
+                          const SizedBox(width: 10),
+                          Text('Clear Flooded Queue?', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? Colors.white : const Color(0xFF0F172A))),
+                        ]),
+                        content: Text(
+                          'This will remove:\n'
+                          '  • Items with ≥5 failed attempts (→ dead letter)\n'
+                          '  • Attendance records older than 24h\n'
+                          '  • All heartbeat/ping entries\n'
+                          '  • Failed items with ≥3 retries older than 12h\n'
+                          '  • Phantom items with no data\n\n'
+                          'Legitimate unsynced records are kept safe.',
+                          style: GoogleFonts.inter(fontSize: 13, color: isDark ? Colors.white70 : Colors.black87),
+                        ),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
+                            onPressed: () => Navigator.pop(c, true),
+                            child: const Text('Clear Flooded', style: TextStyle(color: Colors.white)),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (confirm != true || !mounted) return;
+                    final removed = await _syncManager!.clearFloodedQueueEntries();
+                    _addLog('🔥 Flood-cleared $removed stale/redundant items. Queue: ${_syncManager!.queueSize} remaining');
+                    if (mounted) {
+                      setDialogState(() {});
+                      setState(() => _syncQueueSize = _syncManager!.queueSize);
+                      _showSuccess('Flood cleared: $removed items removed. Remaining: ${_syncManager!.queueSize}');
+                    }
+                  },
+                ),
                 ElevatedButton.icon(
                   icon: const Icon(Icons.bolt_rounded, size: 16, color: Colors.white),
                   label: const Text('Catch-Up LAN Devices', style: TextStyle(color: Colors.white)),
@@ -1182,14 +1304,25 @@ class _ServerDashboardWithSyncState
   }
 
   Future<void> _logout() async {
-    if (_isRunning) {
+    _isLoggingOut = true;
+    _userStoppedServer = true;
+
+    _updateTimer?.cancel();
+    _syncTimer?.cancel();
+    _udpBroadcastTimer?.cancel();
+    _clientUiThrottleTimer?.cancel();
+
+    if (_isRunning || _server != null) {
       try {
-        await _stopServer().timeout(const Duration(seconds: 2));
+        await _stopServer().timeout(const Duration(seconds: 5), onTimeout: () {
+          debugPrint('[Server] Stop server timeout during logout');
+        });
       } catch (e) {
-        debugPrint('[Server] Stop server timeout during logout: $e');
+        debugPrint('[Server] Stop server error during logout: $e');
       }
     }
     try {
+      AuthHomeWrapper.clearSession();
       if (Hive.isBoxOpen('app_settings')) {
         final box = Hive.box('app_settings');
         await box.delete('server_authenticated');
@@ -1197,38 +1330,67 @@ class _ServerDashboardWithSyncState
         await box.delete('currentUser');
         await box.delete('user');
         await box.delete('role');
+        await box.delete('user_role');
         await box.delete('auth_token');
         await box.flush();
       }
+      await OfflineAuthService.clearCachedUserData();
       await AuthService().signOut();
     } catch (e) {
       debugPrint('[Server] Logout error: $e');
     } finally {
-      if (mounted) {
-        Navigator.of(context, rootNavigator: true)
-            .pushNamedAndRemoveUntil('/login', (route) => false);
+      final nav = navigatorKey.currentState;
+      if (nav != null) {
+        nav.pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const LoginPage()),
+          (route) => false,
+        );
+      } else if (mounted) {
+        Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+          MaterialPageRoute(builder: (_) => const LoginPage()),
+          (route) => false,
+        );
       }
     }
   }
 
   @override
   void dispose() {
+    _isLoggingOut = true;
+    _userStoppedServer = true;
     _punchSubscription?.cancel();
     _metricsSubscription?.cancel();
     SystemMetricsService().stopMonitoring();
+    HardwareKeyboard.instance.removeHandler(_stressTestKeyHandler);
+    _overviewTicker?.cancel();
+    try {
+      _beaconSocket?.close();
+    } catch (_) {}
     _updateTimer?.cancel();
     _syncTimer?.cancel();
     _udpBroadcastTimer?.cancel();
     _clientUiThrottleTimer?.cancel();
     _connectivitySub?.cancel();
+    try {
+      _serverUdpSocket?.close();
+    } catch (_) {}
     _syncManager?.stop();
     _server?.stop();
+    if (!kIsWeb && PythonRunnerService.instance.isRunning) {
+      PythonRunnerService.instance.stopProcess().catchError((_) {});
+    }
+    ZkTecoNetworkService.stopServer().catchError((_) {});
     super.dispose();
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────
   @override
   Widget build(BuildContext context) {
+    // Registered here (once) rather than only in initState so a hot reload also activates it.
+    if (!_stressKeyRegistered) {
+      _stressKeyRegistered = true;
+      HardwareKeyboard.instance.addHandler(_stressTestKeyHandler);
+    }
     if (kIsWeb) return _buildWebUnsupportedMessage();
     if (!_isAuthenticated) return _buildNotAuthenticatedMessage();
 
@@ -1276,7 +1438,7 @@ class _ServerDashboardWithSyncState
                       Expanded(
                         child: Container(
                           decoration: BoxDecoration(color: scaffoldBg),
-                          child: IndexedStack(
+                          child: LazyIndexedStack(
                             index: _selectedTab,
                             children: [
                               !_isRunning ? _buildStoppedView(isDark) : _buildRunningView(isDark),
@@ -1492,12 +1654,10 @@ class _ServerDashboardWithSyncState
               children: [
                 _sidebarSectionLabel('CORE GATEWAY', isDark),
                 _sidebarItem(0, 'Command Matrix', 'Overview & telemetry', Icons.dashboard_rounded, isDark),
-                _sidebarItem(1, 'Multi-Server Cluster', 'Mesh replication', Icons.hub_rounded, isDark),
                 _sidebarItem(2, 'Department Activity', 'Queues & dispensing', Icons.domain_rounded, isDark),
 
                 const SizedBox(height: 12),
                 _sidebarSectionLabel('HARDWARE & ENGINES', isDark),
-                _sidebarItem(3, 'LAN Hardware', 'Network & client PCs', Icons.devices_other_rounded, isDark),
                 _sidebarItem(4, 'Biometric Devices', 'ZKTeco attendance', Icons.fingerprint_rounded, isDark),
                 _sidebarItem(5, 'Python Sync Engine', 'Terminal & daemon', Icons.terminal_rounded, isDark),
 
@@ -2044,68 +2204,165 @@ class _ServerDashboardWithSyncState
     );
   }
 
-  // ── Main Dashboard Running View (Pixel Perfect Match with Design) ────────────
+  /// How many connected devices per role group (devices with several roles count in each).
+  Map<String, int> _roleCounts() {
+    final counts = <String, int>{
+      'Hybrid': 0, 'Admin': 0, 'Reception': 0, 'Doctor': 0, 'Dispenser': 0,
+      'Finance': 0, 'Madrassa': 0, 'Library': 0, 'Dastarkhwaan': 0, 'Attendance': 0,
+    };
+    void bump(String k) => counts[k] = (counts[k] ?? 0) + 1;
+    for (final c in _connectedClients.values) {
+      final r = c.role.toLowerCase();
+      if (r.contains('hybrid') || r.contains('+') || r.contains('rec_dis')) bump('Hybrid');
+      if (r.contains('supervisor') || r.contains('admin')) bump('Admin');
+      if (r.contains('receptionist') || r == 'rec' || r.contains('rec+dis')) bump('Reception');
+      if (r.contains('doctor') || r == 'doc' || r.contains('doc+dis')) bump('Doctor');
+      if (r.contains('dispenser') || r.contains('pharmacist') || r == 'dis' || r.contains('rec+dis') || r.contains('doc+dis')) bump('Dispenser');
+      if (r.contains('finance') || r.contains('donations')) bump('Finance');
+      if (r.contains('teacher') || r.contains('school') || r.contains('madrassa')) bump('Madrassa');
+      if (r.contains('library')) bump('Library');
+      if (r.contains('dasterkhwaan')) bump('Dastarkhwaan');
+      if (r.contains('attendance')) bump('Attendance');
+    }
+    return counts;
+  }
+
+  // ── Other servers on this LAN ─────────────────────────────────────────────────
+  // Every GMWF server broadcasts "GMWF_TOKEN_SERVER_I_AM:<ip>:<port>" on UDP. Hearing one that
+  // is not this PC means two servers share the network (devices may pick the wrong one).
+  Future<void> _startBeaconWatch() async {
+    if (kIsWeb) return;
+    try {
+      final ifaces = await io.NetworkInterface.list(type: io.InternetAddressType.IPv4);
+      _localIps = {for (final i in ifaces) for (final a in i.addresses) a.address};
+      final socket = await io.RawDatagramSocket.bind(
+        io.InternetAddress.anyIPv4,
+        AppNetwork.udpBroadcastPort,
+        reuseAddress: true,
+      );
+      _beaconSocket = socket;
+      socket.listen((event) {
+        if (event != io.RawSocketEvent.read) return;
+        final dg = socket.receive();
+        if (dg == null) return;
+        final msg = utf8.decode(dg.data, allowMalformed: true);
+        if (!msg.startsWith(AppNetwork.udpMessagePrefix)) return;
+        final ip = msg.substring(AppNetwork.udpMessagePrefix.length).split(':').first.trim();
+        if (ip.isEmpty || _localIps.contains(ip) || ip == _serverIp) return;
+        _otherServerSeen[ip] = DateTime.now();
+      });
+    } catch (e) {
+      debugPrint('[Server] Beacon watch unavailable: $e');
+    }
+  }
+
+  // ── Hidden stress test: Ctrl+Shift+Alt+T ───────────────────────────────────────
+  bool _stressTestOpen = false;
+  bool _stressKeyRegistered = false;
+
+  bool _stressTestKeyHandler(KeyEvent event) {
+    if (event is! KeyDownEvent || event.logicalKey != LogicalKeyboardKey.keyT) return false;
+    final kb = HardwareKeyboard.instance;
+    if (!(kb.isControlPressed && kb.isShiftPressed && kb.isAltPressed)) return false;
+    if (!mounted || _stressTestOpen) return true;
+    final server = _server;
+    if (!_isRunning || server == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Start the LAN server first, then press the shortcut again.')),
+      );
+      return true;
+    }
+    _stressTestOpen = true;
+    debugPrint('[StressTest] Shortcut pressed by ${FirebaseAuth.instance.currentUser?.email ?? "unknown user"}');
+    final engine = StressTestEngine(server: server, cloudQueueSize: () => _syncQueueSize);
+    StressTestDialog.show(context, engine, deviceCount: server.stressClientSnapshot().length)
+        .whenComplete(() => _stressTestOpen = false);
+    return true;
+  }
+
+  /// Ring colour by how full the resource is: green normally, amber above 70%, red above 90%.
+  Color _levelColor(double? p) {
+    if (p == null) return const Color(0xFF94A3B8);
+    if (p >= 0.9) return const Color(0xFFDC2626);
+    if (p >= 0.7) return const Color(0xFFD97706);
+    return const Color(0xFF10B981);
+  }
+
+  /// Real LAN traffic over the last ~minute: ring value (0..1 of 50 msg/s) and a readable summary.
+  ({double load, String text}) _lanStats() {
+    if (_lanSamples.length < 2) return (load: 0, text: 'Measuring…');
+    final first = _lanSamples.first;
+    final last = _lanSamples.last;
+    final secs = ((last[0] - first[0]) / 1000).clamp(1, 3600);
+    final msgsPerSec = (last[1] - first[1]) / secs;
+    final kbPerSec = (last[2] - first[2]) / secs / 1024;
+    return (
+      load: (msgsPerSec / 50).clamp(0.0, 1.0).toDouble(),
+      text: '${(msgsPerSec * 60).round()} msg/min · ${kbPerSec.toStringAsFixed(1)} KB/s',
+    );
+  }
+
+  List<String> get _otherServers {
+    final now = DateTime.now();
+    return _otherServerSeen.entries
+        .where((e) => now.difference(e.value).inSeconds < 20)
+        .map((e) => e.key)
+        .toList()
+      ..sort();
+  }
+
+  // ── Main dashboard (running) ───────────────────────────────────────────────────
   Widget _buildRunningView([bool isDark = false]) {
+    final showFirewall = !kIsWeb && io.Platform.isWindows && !_isFirewallBannerDismissed;
+    final rows = _connectedClients.values
+        .map((c) => ServerClientRow(
+              name: c.username?.isNotEmpty == true ? c.username! : c.displayName,
+              role: c.role,
+              ip: c.ipAddress,
+              lastActive: c.lastActiveAt,
+              messages: c.messagesCount,
+            ))
+        .toList();
+
     return SingleChildScrollView(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (!kIsWeb && io.Platform.isWindows && !_isFirewallBannerDismissed) _buildFirewallBanner(isDark),
-
-          // 1. Hero Feature Card ("GMWF Hybrid Command Center")
-          _buildHeroCommandCenterCard(isDark),
-          const SizedBox(height: 16),
-
-          // 2. 4 Metric KPI Cards (Endpoint, Uptime, Nodes, Sync Telemetry)
-          _buildKpiMetricsGrid(isDark),
-          const SizedBox(height: 16),
-
-          // 3. Balanced Dual-Column Command Matrix (Left: Health & Logs | Right: Devices & Roles)
-          LayoutBuilder(builder: (context, constraints) {
-            final isNarrow = constraints.maxWidth < 960;
-            if (isNarrow) {
-              return Column(
-                children: [
-                  _buildSystemHealthOverview(isDark),
-                  const SizedBox(height: 16),
-                  _buildLiveLogsCard(isDark),
-                  const SizedBox(height: 16),
-                  _buildLanHardwareDevicesCard(isDark),
-                  const SizedBox(height: 16),
-                  _buildActiveBranchNodesCard(isDark),
-                ],
+          ServerOverviewPanel(
+            isDark: isDark,
+            isRunning: _isRunning,
+            hasInternet: _isOnline,
+            branchName: LocalStorageService.getBranchName(widget.branchId),
+            address: '${_serverIp ?? "—"}:${AppNetwork.websocketPort}',
+            startedAt: _startTime,
+            lastCloudSync: _lastSyncTime,
+            queueSize: _syncQueueSize,
+            clients: rows,
+            lanNote: 'LAN traffic: ${_lanStats().text}',
+            roleCounts: _roleCounts(),
+            onViewAll: _showAllNodesDialog,
+            otherServers: _otherServers,
+            firewallMissing: showFirewall,
+            isSyncing: _isManualSyncing,
+            onRetrySync: () {
+              if (!_isManualSyncing) _manualSync();
+            },
+            onCopyAddress: () {
+              Clipboard.setData(ClipboardData(text: '${_serverIp ?? ""}:${AppNetwork.websocketPort}'));
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(content: Text('Server address copied'), duration: Duration(seconds: 2)),
               );
-            }
-            return Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Left Column: System Telemetry & Terminal Stream (~450px)
-                Expanded(
-                  flex: 5,
-                  child: Column(
-                    children: [
-                      _buildSystemHealthOverview(isDark),
-                      const SizedBox(height: 16),
-                      _buildLiveLogsCard(isDark),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 16),
-                // Right Column: LAN Hardware Devices & Active Workstations (~450px)
-                Expanded(
-                  flex: 6,
-                  child: Column(
-                    children: [
-                      _buildLanHardwareDevicesCard(isDark),
-                      const SizedBox(height: 16),
-                      _buildActiveBranchNodesCard(isDark),
-                    ],
-                  ),
-                ),
-              ],
-            );
-          }),
+            },
+            onFixFirewall: _openFirewallPort,
+            onOpenQueue: _showQueueManagementDialog,
+          ),
+          const SizedBox(height: 16),
+
+          // System health, then the live log, each full width.
+          _buildSystemHealthOverview(isDark),
+          const SizedBox(height: 16),
+          _buildLiveLogsCard(isDark),
           const SizedBox(height: 24),
         ],
       ),
@@ -3000,19 +3257,15 @@ class _ServerDashboardWithSyncState
   // ── 4. Bottom Left: System Health Overview (Live Genuine Telemetry) ──────────
   Widget _buildSystemHealthOverview(bool isDark) {
     final snap = SystemMetricsService().currentSnapshot;
-    final activeClients = _connectedClients.length;
-    final double netLoad;
-    final String netSubtext;
-    if (activeClients > 0) {
-      netLoad = (0.15 + (activeClients * 0.12)).clamp(0.08, 0.92);
-      netSubtext = '$activeClients Node${activeClients > 1 ? 's' : ''} Active';
-    } else if (_syncQueueSize > 0) {
-      netLoad = (0.10 + (_syncQueueSize * 0.005)).clamp(0.08, 0.65);
-      netSubtext = '$_syncQueueSize In Queue';
-    } else {
-      netLoad = 0.05;
-      netSubtext = '0 Nodes (Idle)';
-    }
+
+    // LAN load: real traffic through this server over the last ~minute (messages received
+    // from devices plus messages delivered to them). The ring shows it against a comfortable
+    // capacity of 50 messages per second; a clinic normally sits at a tiny fraction of that.
+    final lan = _lanStats();
+    final double lanLoad = lan.load;
+    final String lanSubtext = lan.text;
+    final cloudWaiting = _syncQueueSize;
+    final cloudLoad = (cloudWaiting / 500).clamp(0.0, 1.0);
 
     return Container(
       decoration: BoxDecoration(
@@ -3051,10 +3304,16 @@ class _ServerDashboardWithSyncState
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _buildRadialGauge('CPU Usage', snap.cpuPercent, snap.cpuStatus, const Color(0xFF10B981), isDark),
-              _buildRadialGauge('Memory Usage', snap.ramPercent, '${snap.usedRamGb} GB / ${snap.totalRamGb} GB', const Color(0xFF0284C7), isDark),
-              _buildRadialGauge('Disk Usage', snap.diskPercent, '${snap.usedDiskGb} GB / ${snap.totalDiskGb} GB', const Color(0xFFF59E0B), isDark),
-              _buildRadialGauge('Network Load', netLoad, netSubtext, const Color(0xFF10B981), isDark),
+              _buildRadialGauge('CPU', snap.cpuKnown ? snap.cpuPercent : null, snap.cpuStatus, _levelColor(snap.cpuKnown ? snap.cpuPercent : null), isDark),
+              _buildRadialGauge('Memory', snap.ramKnown ? snap.ramPercent : null,
+                  snap.ramKnown ? '${snap.usedRamGb} / ${snap.totalRamGb} GB' : 'Not available', _levelColor(snap.ramKnown ? snap.ramPercent : null), isDark),
+              _buildRadialGauge('Disk ${snap.diskDrive}'.trim(), snap.diskKnown ? snap.diskPercent : null,
+                  snap.diskKnown ? '${snap.usedDiskGb} / ${snap.totalDiskGb} GB' : 'Not available', _levelColor(snap.diskKnown ? snap.diskPercent : null), isDark),
+              _buildRadialGauge('LAN load', lanLoad, lanSubtext, const Color(0xFF0D9488), isDark),
+              _buildRadialGauge('Cloud queue', cloudLoad,
+                  cloudWaiting == 0 ? 'All uploaded' : '$cloudWaiting waiting',
+                  cloudWaiting == 0 ? const Color(0xFF10B981) : const Color(0xFFB45309), isDark,
+                  '$cloudWaiting'),
             ],
           ),
         ],
@@ -3062,7 +3321,7 @@ class _ServerDashboardWithSyncState
     );
   }
 
-  Widget _buildRadialGauge(String title, double percentage, String subtext, Color color, [bool isDark = false]) {
+  Widget _buildRadialGauge(String title, double? percentage, String subtext, Color color, [bool isDark = false, String? centerText]) {
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -3078,13 +3337,13 @@ class _ServerDashboardWithSyncState
             alignment: Alignment.center,
             children: [
               CircularProgressIndicator(
-                value: percentage,
+                value: percentage ?? 0,
                 strokeWidth: 6,
                 backgroundColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
                 valueColor: AlwaysStoppedAnimation<Color>(color),
               ),
               Text(
-                '${(percentage * 100).toInt()}%',
+                centerText ?? (percentage == null ? 'n/a' : '${(percentage * 100).round()}%'),
                 style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 15, color: isDark ? Colors.white : const Color(0xFF0F172A)),
               ),
             ],
@@ -4240,6 +4499,7 @@ class ServerSyncManager {
   /// collapsed to one pending write per device.
   int purgeInvalidQueue() {
     try {
+      LocalStorageService.purgePhantomUnknownTokens(branchId);
       LocalStorageService.purgeBloatedSyncQueue();
       if (!Hive.isBoxOpen(LocalStorageService.syncBox)) return 0;
       final box = Hive.box(LocalStorageService.syncBox);
@@ -4252,7 +4512,17 @@ class ServerSyncManager {
           continue;
         }
         final rawType = (val['type'] ?? val['event_type'] ?? '').toString().toLowerCase().trim();
-        if (_ignoredEventTypes.contains(rawType) || (val['data'] == null && !rawType.startsWith('delete_'))) {
+        final bool hasPayload = val['data'] != null ||
+            val['serial'] != null ||
+            val['collection'] != null ||
+            val['delta'] != null ||
+            val['entityId'] != null ||
+            val['id'] != null ||
+            val['localId'] != null ||
+            val['patientId'] != null ||
+            val['employeeId'] != null ||
+            val['deviceId'] != null;
+        if (_ignoredEventTypes.contains(rawType) || (!hasPayload && !rawType.startsWith('delete_'))) {
           keysToDelete.add(key);
         }
       }
@@ -4336,8 +4606,138 @@ class ServerSyncManager {
     }
   }
 
+  /// Targeted flood cleaner: removes high-retry, stale, and redundant entries
+  /// without destroying legitimate pending records.
+  ///
+  /// Strategy:
+  ///   • Items with ≥5 failed attempts → moved to dead letter queue
+  ///   • Attendance/heartbeat items created >24h ago → deleted (stale)
+  ///   • Items with null/empty data and no meaningful payload → deleted (phantom)
+  ///   • Items with 'status' == 'failed' or 'error' and attempts > 3 → pruned
+  ///   • All other records with 0–2 attempts are kept (legitimate pending)
+  /// Returns count of items removed.
+  Future<int> clearFloodedQueueEntries() async {
+    int removed = 0;
+    try {
+      // First run the standard dedup pass
+      purgeInvalidQueue();
+      await LocalStorageService.purgeBloatedSyncQueue();
+
+      if (!Hive.isBoxOpen(LocalStorageService.syncBox)) return 0;
+      final box = Hive.box(LocalStorageService.syncBox);
+
+      final keysToDelete = <dynamic>[];
+      final now = DateTime.now();
+
+      const attendanceLike = {
+        'save_attendance_record', 'save_employee_attendance',
+        'save_biometric_log', 'zkteco',
+      };
+      const heartbeatLike = {
+        'heartbeat', 'ping', 'status_update', 'device_heartbeat',
+        'biometric_heartbeat', 'sync_heartbeat',
+      };
+
+      for (final key in box.keys) {
+        final val = box.get(key);
+        if (val == null || val is! Map) {
+          keysToDelete.add(key);
+          continue;
+        }
+        final item = Map<String, dynamic>.from(val);
+        final type = (item['type'] ?? item['event_type'] ?? '').toString().toLowerCase().trim();
+        final attempts = (item['attempts'] as num?)?.toInt() ?? 0;
+        final status = (item['status'] ?? '').toString().toLowerCase();
+        final createdAtStr = (item['createdAt'] ?? '').toString();
+        final createdAt = DateTime.tryParse(createdAtStr);
+        final ageHours = createdAt != null ? now.difference(createdAt).inHours : 0;
+
+        // ── Rule 1: High retry items (≥5 attempts) go to dead letter ──────────
+        if (attempts >= 5) {
+          await LocalStorageService.moveToDeadLetterQueue(
+            LocalStorageService.syncBox,
+            key,
+            item,
+            reason: 'flood_purge: $attempts failed attempts',
+          );
+          removed++;
+          continue;
+        }
+
+        // ── Rule 2: Stale attendance older than 24h ───────────────────────────
+        if (attendanceLike.contains(type) && ageHours > 24) {
+          keysToDelete.add(key);
+          removed++;
+          continue;
+        }
+
+        // ── Rule 3: All heartbeat/ping types ─────────────────────────────────
+        if (heartbeatLike.contains(type)) {
+          keysToDelete.add(key);
+          removed++;
+          continue;
+        }
+
+        // ── Rule 4: Failed/error items with ≥3 attempts older than 12h ───────
+        if ((status == 'failed' || status == 'error') && attempts >= 3 && ageHours > 12) {
+          await LocalStorageService.moveToDeadLetterQueue(
+            LocalStorageService.syncBox,
+            key,
+            item,
+            reason: 'flood_purge: status=$status after $attempts attempts',
+          );
+          removed++;
+          continue;
+        }
+
+        // ── Rule 5: Phantom items (no meaningful payload, >1h old) ────────────
+        final hasPayload = item['data'] != null ||
+            item['serial'] != null ||
+            item['entityId'] != null ||
+            item['id'] != null ||
+            item['localId'] != null ||
+            item['patientId'] != null ||
+            item['employeeId'] != null;
+        if (!hasPayload && ageHours > 1) {
+          keysToDelete.add(key);
+          removed++;
+          continue;
+        }
+      }
+
+      if (keysToDelete.isNotEmpty) {
+        await box.deleteAll(keysToDelete);
+      }
+
+      if (removed > 0) {
+        debugPrint('[SSM] 🔥 Flood-cleared $removed stale/redundant items. Remaining: ${box.length}');
+      }
+    } catch (e) {
+      debugPrint('[SSM] clearFloodedQueueEntries error: $e');
+    }
+    return removed;
+  }
+
+  // ── Backfill cooldown: prevents _enqueueMissing* from flooding on rapid calls
+  final Map<String, DateTime> _lastBackfillTime = {};
+  static const Duration _backfillCooldown = Duration(minutes: 5);
+
+  bool _backfillCooledDown(String key) {
+    final last = _lastBackfillTime[key];
+    if (last == null || DateTime.now().difference(last) >= _backfillCooldown) {
+      _lastBackfillTime[key] = DateTime.now();
+      return true; // OK to run
+    }
+    return false; // Still in cooldown, skip
+  }
+
   DateTime? _lastTokenDownloadTime;
   DateTime? _lastSweepTime;
+
+  // Per-socket catch-up cooldown: multiple screens / sync buttons on one
+  // station must not trigger repeated full-day pushes on the same socket.
+  final Map<String, DateTime> _lastCatchUpPerSocket = {};
+  static const Duration _catchUpCooldown = Duration(seconds: 3);
 
   Future<void> _downloadTodayTokens({bool force = false}) async {
     final now = DateTime.now();
@@ -4387,6 +4787,7 @@ class ServerSyncManager {
     server.onClientDisconnected = (socketId) {
       _clientSeenSerials.remove(socketId);
       _clientSeenStock.remove(socketId);
+      _lastCatchUpPerSocket.remove(socketId);
       _prevOnClientDisconnected?.call(socketId);
     };
 
@@ -4430,6 +4831,13 @@ class ServerSyncManager {
     if (eventType == 'request_catch_up' || eventType == 'request_full_lan_sync') {
       final socketId = message['_socketId']?.toString();
       if (socketId != null) {
+        final now = DateTime.now();
+        final last = _lastCatchUpPerSocket[socketId];
+        if (last != null && now.difference(last) < _catchUpCooldown) {
+          debugPrint('[SSM] Catch-up from $socketId coalesced (cooldown)');
+          return;
+        }
+        _lastCatchUpPerSocket[socketId] = now;
         _clientSeenSerials.remove(socketId); // Clear seen set so forced catchup works
         final clients = server.getConnectedClients();
         Map<String, dynamic>? info;
@@ -4446,9 +4854,9 @@ class ServerSyncManager {
           'username': message['_senderUsername'] ?? message['username'] ?? '',
         };
         debugPrint('[SSM] Catch-up requested by $socketId');
-        // 1. Immediately push local tokens and inventory over LAN (0ms delay)
+        // 1. Immediately push local tokens and unseen inventory over LAN (0ms delay)
         _pushCatchUpToSocket(socketId, clientInfo, forceAll: true);
-        _pushInventoryCatchUpToSocket(socketId, clientInfo, forceAll: true);
+        _pushInventoryCatchUpToSocket(socketId, clientInfo);
 
         // 2. Fetch today tokens from cloud in background without blocking LAN response
         _downloadTodayTokens().then((_) {
@@ -4557,6 +4965,10 @@ class ServerSyncManager {
                   if (entryUid != null && entryUid.isNotEmpty) {
                     updated['entryUid'] = entryUid;
                   }
+                  // Ensure backfill sweeper uploads this prescription to Firestore
+                  updated['pendingSync'] = true;
+                  updated['synced'] = false;
+                  updated['syncStatus'] = 'pending';
                   await eBox.put(targetKey, updated);
                 }
               }
@@ -4626,6 +5038,10 @@ class ServerSyncManager {
                   if (entryUid != null && entryUid.isNotEmpty) {
                     updated['entryUid'] = entryUid;
                   }
+                  // Ensure backfill sweeper uploads this dispense status to Firestore
+                  updated['pendingSync'] = true;
+                  updated['synced'] = false;
+                  updated['syncStatus'] = 'pending';
                   await eBox.put(targetKey, updated);
                   if (targetKey != canonicalKey && !targetKey.toString().contains('-COLLISION-')) {
                     await eBox.put(canonicalKey, updated);
@@ -4760,7 +5176,7 @@ class ServerSyncManager {
             final sanitized = LocalStorageService.sanitize(data);
             sanitized['branchId'] = bId;
             sanitized['localId'] = id;
-            sanitized['syncStatus'] = 'synced';
+            sanitized['syncStatus'] = 'pending';
             await dBox.put(hKey, sanitized);
             debugPrint('[SSM] ✅ Donation saved locally on server: $hKey');
           } catch (e) {
@@ -4772,7 +5188,7 @@ class ServerSyncManager {
         case 'token_reversal':
         case 'delete_entry':
           try {
-            final serial = (data['tokenSerial'] ?? data['serial'] ?? data['tokenId'])?.toString().trim();
+            final serial = (data['tokenSerial'] ?? data['serial'] ?? data['tokenId'] ?? message['serial'] ?? message['tokenSerial'] ?? message['tokenId'])?.toString().trim();
             if (serial != null && serial.isNotEmpty) {
               LocalStorageService.deleteLocalEntry(msgBranch, serial);
               LocalStorageService.deleteLocalPrescription(serial);
@@ -4997,6 +5413,12 @@ class ServerSyncManager {
     final clientSeen = _clientSeenSerials[socketId] ?? <String>{};
     final candidates = entries.where((e) {
       final serial = e['serial']?.toString().trim() ?? '';
+      // Filter out phantom unknown tokens with synthetic CNIC
+      final cnic = (e['patientCnic'] ?? e['cnic'] ?? '').toString().trim();
+      final name = (e['patientName'] ?? e['name'] ?? '').toString().trim().toLowerCase();
+      if ((cnic.startsWith('unknown_cnic_') || cnic.isEmpty) && (name.isEmpty || name == 'unknown patient' || name == 'unknown')) {
+        return false;
+      }
       return serial.isNotEmpty && (forceAll || !clientSeen.contains(serial));
     }).toList();
 
@@ -5117,6 +5539,8 @@ class ServerSyncManager {
       int skipped = 0;
 
       for (final k in stockBox.keys) {
+        final kStr = k.toString();
+        if (kStr.startsWith('stock:')) continue; // Skip dual prefix key in Hive to avoid duplicate pushes
         final val = stockBox.get(k);
         if (val is! Map) continue;
         final item = Map<String, dynamic>.from(val);
@@ -5605,9 +6029,6 @@ class ServerSyncManager {
         'status':    'pending',
       });
       debugPrint('[SSM] Queued for sync: $mappedType | key: $targetKey | serial: $rawSerial (queue: ${box.length})');
-      if (box.length > 25) {
-        purgeInvalidQueue();
-      }
       _scheduleSyncDebounced();
     } catch (e) {
       debugPrint('[SSM] Error queuing message: $e');
@@ -5657,6 +6078,7 @@ class ServerSyncManager {
 
   /// Sweeps local_entries on the server for unsynced tokens and queues them for Firestore
   Future<void> _enqueueMissingEntries() async {
+    if (!_backfillCooledDown('entries')) return;
     try {
       if (!Hive.isBoxOpen(LocalStorageService.entriesBox)) {
         await LocalStorageService.ensureBoxOpen(LocalStorageService.entriesBox);
@@ -5669,7 +6091,12 @@ class ServerSyncManager {
 
       final alreadyQueued = syncBox.values
           .where((v) => v is Map && (v['type'] == 'save_entry' || v['type'] == 'save_prescription'))
-          .map((v) => (v['serial'] ?? v['data']?['serial'])?.toString().trim().toUpperCase())
+          .map((v) {
+            final b = (v['branchId'] ?? v['data']?['branchId'] ?? '').toString().toLowerCase().trim();
+            final s = (v['serial'] ?? v['data']?['serial'])?.toString().trim().toUpperCase();
+            final c = (v['campId'] ?? v['data']?['campId'] ?? v['data']?['dispensaryTag'] ?? '').toString().toLowerCase().trim();
+            return '$b-$c-$s';
+          })
           .whereType<String>()
           .toSet();
 
@@ -5679,33 +6106,49 @@ class ServerSyncManager {
         if (raw == null || raw is! Map) continue;
 
         final data = Map<String, dynamic>.from(raw);
-        final isPending = data['pendingSync'] == true ||
-            data['synced'] == false ||
-            data['syncStatus'] == 'pending';
-        if (!isPending) continue;
+        final isSynced = (data['synced'] == true || data['syncStatus'] == 'synced') && data['pendingSync'] != true;
+        if (isSynced) continue;
+
+        // Skip phantom entries fabricated by old migrations
+        final pCnic = (data['patientCnic'] ?? data['cnic'] ?? '').toString().trim();
+        final pName = (data['patientName'] ?? data['name'] ?? '').toString().trim().toLowerCase();
+        final isPhantomCnic = pCnic.startsWith('unknown_cnic_') || pCnic.isEmpty;
+        final isPhantomName = pName.isEmpty || pName == 'unknown' || pName == 'unknown patient';
+        if (isPhantomCnic && isPhantomName) continue;
 
         final serial = (data['serial'] ?? key.toString().split('-').last).toString().trim().toUpperCase();
-        if (serial.isEmpty || alreadyQueued.contains(serial)) continue;
+        if (serial.isEmpty) continue;
 
         final dateKey = (data['dateKey'] ?? _todayKey()).toString();
         final effectiveBranch = (data['branchId']?.toString().isNotEmpty == true)
             ? data['branchId'].toString()
             : branchId;
+        final campId = (data['campId'] ?? data['dispensaryId'] ?? data['dispensaryTag'] ?? '').toString().toLowerCase().trim();
+        final uniqueKey = '${effectiveBranch.toLowerCase().trim()}-$campId-$serial';
+        if (alreadyQueued.contains(uniqueKey)) continue;
+
         final queueType = _resolveQueueType(data['queueType']?.toString());
 
-        final targetKey = 'sync_${effectiveBranch}_${serial}_save_entry';
+        final canonicalBranch = effectiveBranch.toLowerCase().trim();
+        final targetKey = 'sync_serial_${canonicalBranch}_$serial';
+        if (syncBox.containsKey(targetKey)) {
+          alreadyQueued.add(uniqueKey);
+          continue;
+        }
         await syncBox.put(targetKey, {
           'type':      'save_entry',
+          'entityId':  '$canonicalBranch-$serial',
           'branchId':  effectiveBranch,
           'dateKey':   dateKey,
           'queueType': queueType,
           'serial':    serial,
+          'campId':    campId,
           'data':      data,
           'createdAt': DateTime.now().toIso8601String(),
           'attempts':  0,
           'status':    'pending',
         });
-        alreadyQueued.add(serial);
+        alreadyQueued.add(uniqueKey);
         queued++;
       }
 
@@ -5719,6 +6162,7 @@ class ServerSyncManager {
 
   /// Sweeps donations on the server for pending receipts and queues them for Firestore
   Future<void> _enqueueMissingDonations() async {
+    if (!_backfillCooledDown('donations')) return;
     try {
       if (!Hive.isBoxOpen(DonationsLocalStorage.donationsBox)) {
         await Hive.openBox(DonationsLocalStorage.donationsBox);
@@ -5739,9 +6183,10 @@ class ServerSyncManager {
       for (final key in donationsBox.keys) {
         final raw = donationsBox.get(key);
         if (raw == null || raw is! Map) continue;
-
         final data = Map<String, dynamic>.from(raw);
-        if (data['syncStatus'] != 'pending') continue;
+
+        final isSynced = (data['synced'] == true || data['syncStatus'] == 'synced') && data['pendingSync'] != true;
+        if (isSynced) continue;
 
         final localId = (data['localId'] ?? data['id'] ?? data['receiptNumber'])?.toString();
         if (localId == null || localId.isEmpty || alreadyQueued.contains(localId)) continue;
@@ -5770,6 +6215,7 @@ class ServerSyncManager {
   }
 
   Future<void> _enqueueMissingEmployees() async {
+    if (!_backfillCooledDown('employees')) return;
     try {
       if (!Hive.isBoxOpen(LocalStorageService.employeesBox)) {
         await LocalStorageService.openBoxSafe(LocalStorageService.employeesBox);
@@ -5824,6 +6270,7 @@ class ServerSyncManager {
   }
 
   Future<void> _enqueueMissingAttendance() async {
+    if (!_backfillCooledDown('attendance')) return;
     try {
       if (!Hive.isBoxOpen(LocalStorageService.attendanceBox)) {
         await LocalStorageService.openBoxSafe(LocalStorageService.attendanceBox);
@@ -5881,6 +6328,7 @@ class ServerSyncManager {
   }
 
   Future<void> _enqueueMissingPatients() async {
+    if (!_backfillCooledDown('patients')) return;
     try {
       if (!Hive.isBoxOpen(LocalStorageService.patientsBox)) {
         await LocalStorageService.openBoxSafe(LocalStorageService.patientsBox);
@@ -5905,6 +6353,12 @@ class ServerSyncManager {
         final data = Map<String, dynamic>.from(raw);
         final pid = (data['patientId'] ?? data['id'] ?? key).toString().trim();
         if (pid.isEmpty || alreadyQueued.contains(pid)) continue;
+
+        final pCnic = (data['cnic'] ?? pid).toString().trim();
+        final pName = (data['name'] ?? '').toString().trim().toLowerCase();
+        if ((pCnic.startsWith('unknown_cnic_') || pCnic.isEmpty) && (pName.isEmpty || pName == 'unknown patient' || pName == 'unknown')) {
+          continue;
+        }
 
         final flagSynced = flagsBox?.get('patient_synced_$pid') == true;
         final isPending = data['pendingSync'] == true ||
@@ -5934,6 +6388,7 @@ class ServerSyncManager {
   }
 
   Future<void> _enqueueMissingMadrassaStudents() async {
+    if (!_backfillCooledDown('madrassa')) return;
     try {
       if (!Hive.isBoxOpen(LocalStorageService.madrassaStudentsBox)) {
         await LocalStorageService.openBoxSafe(LocalStorageService.madrassaStudentsBox);
@@ -5986,6 +6441,10 @@ class ServerSyncManager {
   /// Fast parallelized sync processor with auto-purging
   Future<void> triggerSync({bool force = false}) async {
     if (_isSyncing && !force) return;
+    if (!ServerSyncCoordinator.canStartSync(isServer: true, force: force)) {
+      debugPrint('[SSM] ⏸️ Yielding sync pass — SyncService is currently uploading');
+      return;
+    }
 
     // Periodic sweep for missing offline tokens and donations:
     // Run on force OR every 3 minutes so offline entries are automatically backfilled
@@ -6011,6 +6470,7 @@ class ServerSyncManager {
 
     _isSyncing = true;
     _syncedThisRun = 0;
+    ServerSyncCoordinator.markStarted(isServer: true);
 
     try {
       // First, purge invalid noise
@@ -6048,10 +6508,11 @@ class ServerSyncManager {
           final chunk = keys.sublist(i, math.min(i + chunkSize, keys.length));
           final batch = FirebaseFirestore.instance.batch();
           final List<dynamic> stagedKeys = [];
+          final List<Future<void> Function()> postCommitCallbacks = [];
 
           for (final key in chunk) {
             try {
-              final ok = await _processSyncItem(box, key, batch: batch);
+              final ok = await _processSyncItem(box, key, batch: batch, postCommitCallbacks: postCommitCallbacks);
               if (ok) stagedKeys.add(key);
             } catch (_) {}
           }
@@ -6059,6 +6520,9 @@ class ServerSyncManager {
           if (stagedKeys.isNotEmpty) {
             try {
               await batch.commit();
+              for (final cb in postCommitCallbacks) {
+                try { await cb(); } catch (_) {}
+              }
               for (final k in stagedKeys) {
                 await box.delete(k);
                 _syncedThisRun++;
@@ -6085,10 +6549,11 @@ class ServerSyncManager {
       onSyncError(e.toString());
     } finally {
       _isSyncing = false;
+      ServerSyncCoordinator.markFinished(isServer: true);
     }
   }
 
-  Future<bool> _processSyncItem(Box box, dynamic key, {WriteBatch? batch}) async {
+  Future<bool> _processSyncItem(Box box, dynamic key, {WriteBatch? batch, List<Future<void> Function()>? postCommitCallbacks}) async {
     try {
       final item = box.get(key);
       if (item == null || item is! Map) {
@@ -6150,6 +6615,7 @@ class ServerSyncManager {
             ? (syncItem['delta'] as num).toDouble()
             : double.tryParse(syncItem['delta']?.toString() ?? '') ?? 0.0,
         batch:      batch,
+        postCommitCallbacks: postCommitCallbacks,
       );
 
       if (batch == null) {
@@ -6200,6 +6666,7 @@ class ServerSyncManager {
     String medicineId = '',
     double delta      = 0.0,
     WriteBatch? batch,
+    List<Future<void> Function()>? postCommitCallbacks,
   }) async {
     final db        = FirebaseFirestore.instance;
     final cleanData = _removeFieldValues(data);
@@ -6265,49 +6732,57 @@ class ServerSyncManager {
         debugPrint('✅ save_entry → serials/$campDocKey/$qt/$docId');
 
         // Update local entry so pendingSync is cleared and marked synced on the server
-        try {
-          if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
-            final eBox = Hive.box(LocalStorageService.entriesBox);
-            final normB = effectiveBranchId.toLowerCase().trim();
-            final normS = s.toUpperCase().trim();
-            final localKey = '$normB-$normS';
-            dynamic targetKey = localKey;
-            dynamic existing;
+        Future<void> applyEntrySync() async {
+          try {
+            if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+              final eBox = Hive.box(LocalStorageService.entriesBox);
+              final normB = effectiveBranchId.toLowerCase().trim();
+              final normS = s.toUpperCase().trim();
+              final localKey = '$normB-$normS';
+              dynamic targetKey = localKey;
+              dynamic existing;
 
-            if (entryUid != null && entryUid.isNotEmpty) {
-              for (final k in eBox.keys) {
-                final val = eBox.get(k);
-                if (val is Map && (val['entryUid']?.toString().trim() == entryUid)) {
-                  targetKey = k;
-                  existing = val;
-                  break;
-                }
-              }
-            }
-
-            if (existing == null) {
-              existing = eBox.get(localKey);
-              if (existing == null) {
+              if (entryUid != null && entryUid.isNotEmpty) {
                 for (final k in eBox.keys) {
-                  final kStr = k.toString().toUpperCase().trim();
-                  if (kStr == localKey.toUpperCase() || kStr == normS || kStr.endsWith('-$normS')) {
+                  final val = eBox.get(k);
+                  if (val is Map && (val['entryUid']?.toString().trim() == entryUid)) {
                     targetKey = k;
-                    existing = eBox.get(k);
+                    existing = val;
                     break;
                   }
                 }
               }
+
+              if (existing == null) {
+                existing = eBox.get(localKey);
+                if (existing == null) {
+                  for (final k in eBox.keys) {
+                    final kStr = k.toString().toUpperCase().trim();
+                    if (kStr == localKey.toUpperCase() || kStr == normS || kStr.endsWith('-$normS')) {
+                      targetKey = k;
+                      existing = eBox.get(k);
+                      break;
+                    }
+                  }
+                }
+              }
+              if (existing is Map) {
+                final updated = Map<String, dynamic>.from(existing);
+                updated['synced'] = true;
+                updated['pendingSync'] = false;
+                updated['syncStatus'] = 'synced';
+                updated['syncedAt'] = DateTime.now().toIso8601String();
+                await eBox.put(targetKey, updated);
+              }
             }
-            if (existing is Map) {
-              final updated = Map<String, dynamic>.from(existing);
-              updated['synced'] = true;
-              updated['pendingSync'] = false;
-              updated['syncStatus'] = 'synced';
-              updated['syncedAt'] = DateTime.now().toIso8601String();
-              await eBox.put(targetKey, updated);
-            }
-          }
-        } catch (_) {}
+          } catch (_) {}
+        }
+
+        if (batch != null && postCommitCallbacks != null) {
+          postCommitCallbacks.add(applyEntrySync);
+        } else {
+          await applyEntrySync();
+        }
         break;
 
       // ── Prescription (Single Canonical Serials Write) ─────────────────────
@@ -6350,34 +6825,42 @@ class ServerSyncManager {
         debugPrint('✅ save_prescription → serials/$campDocKey/$effectiveQueueType/$s');
 
         // Update local entry so prescription status is synced on the server
-        try {
-          if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
-            final eBox = Hive.box(LocalStorageService.entriesBox);
-            final normB = effectiveBranchId.toLowerCase().trim();
-            final normS = s.toUpperCase().trim();
-            final localKey = '$normB-$normS';
-            dynamic targetKey = localKey;
-            dynamic existing = eBox.get(localKey);
-            if (existing == null) {
-              for (final k in eBox.keys) {
-                final kStr = k.toString().toUpperCase().trim();
-                if (kStr == localKey.toUpperCase() || kStr == normS || kStr.endsWith('-$normS')) {
-                  targetKey = k;
-                  existing = eBox.get(k);
-                  break;
+        Future<void> applyPrescriptionSync() async {
+          try {
+            if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+              final eBox = Hive.box(LocalStorageService.entriesBox);
+              final normB = effectiveBranchId.toLowerCase().trim();
+              final normS = s.toUpperCase().trim();
+              final localKey = '$normB-$normS';
+              dynamic targetKey = localKey;
+              dynamic existing = eBox.get(localKey);
+              if (existing == null) {
+                for (final k in eBox.keys) {
+                  final kStr = k.toString().toUpperCase().trim();
+                  if (kStr == localKey.toUpperCase() || kStr == normS || kStr.endsWith('-$normS')) {
+                    targetKey = k;
+                    existing = eBox.get(k);
+                    break;
+                  }
                 }
               }
+              if (existing is Map) {
+                final updated = Map<String, dynamic>.from(existing);
+                updated['synced'] = true;
+                updated['pendingSync'] = false;
+                updated['prescriptionSynced'] = true;
+                updated['syncedAt'] = DateTime.now().toIso8601String();
+                await eBox.put(targetKey, updated);
+              }
             }
-            if (existing is Map) {
-              final updated = Map<String, dynamic>.from(existing);
-              updated['synced'] = true;
-              updated['pendingSync'] = false;
-              updated['prescriptionSynced'] = true;
-              updated['syncedAt'] = DateTime.now().toIso8601String();
-              await eBox.put(targetKey, updated);
-            }
-          }
-        } catch (_) {}
+          } catch (_) {}
+        }
+
+        if (batch != null && postCommitCallbacks != null) {
+          postCommitCallbacks.add(applyPrescriptionSync);
+        } else {
+          await applyPrescriptionSync();
+        }
         break;
 
       // ── Patient ──────────────────────────────────────────────────────────
@@ -6450,37 +6933,45 @@ class ServerSyncManager {
         debugPrint('✅ update_serial_status → serials/$campDocKey/$qt/$s');
 
         // Update local entry so dispenseStatus is synced on the server
-        try {
-          if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
-            final eBox = Hive.box(LocalStorageService.entriesBox);
-            final normB = effectiveBranchId.toLowerCase().trim();
-            final normS = s.toUpperCase().trim();
-            final localKey = '$normB-$normS';
-            dynamic targetKey = localKey;
-            dynamic existing = eBox.get(localKey);
-            if (existing == null) {
-              for (final k in eBox.keys) {
-                final kStr = k.toString().toUpperCase().trim();
-                if (kStr == localKey.toUpperCase() || kStr == normS || kStr.endsWith('-$normS')) {
-                  targetKey = k;
-                  existing = eBox.get(k);
-                  break;
+        Future<void> applyDispenseSync() async {
+          try {
+            if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+              final eBox = Hive.box(LocalStorageService.entriesBox);
+              final normB = effectiveBranchId.toLowerCase().trim();
+              final normS = s.toUpperCase().trim();
+              final localKey = '$normB-$normS';
+              dynamic targetKey = localKey;
+              dynamic existing = eBox.get(localKey);
+              if (existing == null) {
+                for (final k in eBox.keys) {
+                  final kStr = k.toString().toUpperCase().trim();
+                  if (kStr == localKey.toUpperCase() || kStr == normS || kStr.endsWith('-$normS')) {
+                    targetKey = k;
+                    existing = eBox.get(k);
+                    break;
+                  }
                 }
               }
+              if (existing is Map) {
+                final updated = Map<String, dynamic>.from(existing);
+                updated['dispenseStatus'] = cleanData['dispenseStatus'] ?? 'dispensed';
+                updated['status'] = 'completed';
+                if (cleanData['dispensedAt'] != null) updated['dispensedAt'] = cleanData['dispensedAt'];
+                if (cleanData['dispensedBy'] != null) updated['dispensedBy'] = cleanData['dispensedBy'];
+                updated['synced'] = true;
+                updated['pendingSync'] = false;
+                updated['syncStatus'] = 'synced';
+                await eBox.put(targetKey, updated);
+              }
             }
-            if (existing is Map) {
-              final updated = Map<String, dynamic>.from(existing);
-              updated['dispenseStatus'] = cleanData['dispenseStatus'] ?? 'dispensed';
-              updated['status'] = 'completed';
-              if (cleanData['dispensedAt'] != null) updated['dispensedAt'] = cleanData['dispensedAt'];
-              if (cleanData['dispensedBy'] != null) updated['dispensedBy'] = cleanData['dispensedBy'];
-              updated['synced'] = true;
-              updated['pendingSync'] = false;
-              updated['syncStatus'] = 'synced';
-              await eBox.put(targetKey, updated);
-            }
-          }
-        } catch (_) {}
+          } catch (_) {}
+        }
+
+        if (batch != null && postCommitCallbacks != null) {
+          postCommitCallbacks.add(applyDispenseSync);
+        } else {
+          await applyDispenseSync();
+        }
         break;
       // ── Delete patient ───────────────────────────────────────────────────
       case 'delete_patient':

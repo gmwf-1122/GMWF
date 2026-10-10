@@ -130,8 +130,21 @@ class OfflineAuthService {
     wOptions: const WindowsOptions(useBackwardCompatibility: true),
   );
 
+  // ── Circuit breaker for the Windows secure-storage plugin ────────────────
+  // Its native calls run on the app's platform (window) thread, so a corrupt or locked
+  // flutter_secure_storage.dat makes every call stall that thread and Windows marks the
+  // window "(Not Responding)". After the first failure we stop touching it for this session
+  // and rely on the Hive fallback that already mirrors the credentials.
+  static bool _secureBroken = false;
+  static void _tripSecureBreaker(String why) {
+    if (_secureBroken) return;
+    _secureBroken = true;
+    debugPrint('[OfflineAuth] Secure storage disabled for this session ($why). Using Hive fallback.');
+  }
+
   // ── Safe timeout wrapper with error/not-found distinction ───────────────
   static Future<StorageReadResult> _secureReadDetailed(String key) async {
+    if (_secureBroken) return StorageReadResult.error('secure storage disabled for this session');
     try {
       final value = await _secure.read(key: key).timeout(
         const Duration(seconds: 5),
@@ -145,9 +158,11 @@ class OfflineAuthService {
       return StorageReadResult.success(value);
     } on TimeoutException catch (tex) {
       debugPrint('[OfflineAuth] ⚠️ Secure storage read timeout for key $key: $tex');
+      _tripSecureBreaker('read timed out');
       return StorageReadResult.error(tex.toString(), isTimeout: true);
     } catch (e) {
       debugPrint('[OfflineAuth] ⚠️ Secure storage read error for key $key: $e');
+      _tripSecureBreaker('read failed');
       return StorageReadResult.error(e.toString());
     }
   }
@@ -159,13 +174,16 @@ class OfflineAuthService {
   }
 
   static Future<void> _secureWrite(String key, String value) async {
+    if (_secureBroken) return;
     try {
       await _secure.write(key: key, value: value)
           .timeout(const Duration(seconds: 5), onTimeout: () {
         debugPrint('[OfflineAuth] ⚠️ Secure storage write timed out for key: $key');
+        _tripSecureBreaker('write timed out');
       });
     } catch (e) {
       debugPrint('[OfflineAuth] ⚠️ Secure storage write error for key $key: $e');
+      _tripSecureBreaker('write failed');
     }
   }
 

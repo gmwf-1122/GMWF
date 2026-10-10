@@ -77,8 +77,9 @@ class FirestoreService {
       return;
     }
 
+    final cleanBranch = LocalStorageService.sanitizeBranchId(branchId);
     final data = Map<String, dynamic>.from(patientData);
-    data['branchId']  = branchId;
+    data['branchId']  = cleanBranch;
     data['patientId'] = patientId;
     data.remove('id');
 
@@ -116,7 +117,7 @@ class FirestoreService {
         RealtimeEvents.payload(
           type: RealtimeEvents.savePatient,
           data: {
-            'branchId':  branchId,
+            'branchId':  cleanBranch,
             'patientId': patientId,
             'data':      data,
           },
@@ -130,7 +131,7 @@ class FirestoreService {
     final sanitized = LocalStorageService.sanitize(data);
     await LocalStorageService.enqueueSync({
       'type':      'save_patient',
-      'branchId':  branchId,
+      'branchId':  cleanBranch,
       'patientId': patientId,
       'data':      sanitized,
     });
@@ -150,14 +151,14 @@ class FirestoreService {
 
         await _db
             .collection('branches')
-            .doc(branchId)
+            .doc(cleanBranch)
             .collection('patients')
             .doc(patientId)
             .set(fsData, SetOptions(merge: true))
-            .timeout(const Duration(seconds: 4));
+            .timeout(const Duration(seconds: 8));
 
         await Hive.box('app_flags').put('patient_synced_$patientId', true);
-        print('[FirestoreService] ✅ Direct Firestore write complete: $patientId');
+        Logger().d('[FirestoreService] ✅ Direct Firestore write complete: $patientId');
       } catch (e) {
         Logger().d('[FirestoreService] Direct write deferred to queue ($e)');
       }
@@ -205,7 +206,7 @@ class FirestoreService {
         }
       }
     } catch (e) {
-      print('Could not fetch patient from Hive for $patientId: $e');
+      Logger().d('Could not fetch patient from Hive for $patientId: $e');
     }
 
     if (patientCnic.isEmpty &&
@@ -226,7 +227,7 @@ class FirestoreService {
           guardianCnic = d['guardianCnic']?.toString().trim() ?? '';
         }
       } catch (e) {
-        print('Firestore fallback for patient $patientId failed: $e');
+        Logger().d('Firestore fallback for patient $patientId failed: $e');
       }
     }
 

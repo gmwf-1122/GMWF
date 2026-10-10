@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../services/local_storage_service.dart';
 import '../../services/finance_local_storage.dart';
+import '../../services/finance_ledger_storage.dart';
 import '../../services/permission_service.dart';
 import '../../widgets/file_action_helper.dart';
 import 'finance_report_helper.dart';
@@ -254,15 +255,48 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
 
   Widget _buildExportsTab() {
     final locked = _isMonthLocked();
-    String selType = 'branch';
-    String selDept = 'Dispensary';
-    final depts = ['Administration', 'Office', 'Dasterkhawaan', 'Dispensary', 'Madrassa', 'School']
-      ..addAll(FinanceLocalStorage.getCustomDepartments());
+    String selType = 'branch_pdf';
+    String selDept = 'All Departments';
+    String selCamp = 'All Camps';
+    String selScope = 'all'; // 'all' or 'custom'
+    final Set<String> selectedEmpIds = {};
+    bool isExporting = false;
+
+    final isKarachi = widget.branchId.toLowerCase().contains('karachi') || widget.branchId.toLowerCase() == 'all';
+    final depts = [
+      'All Departments',
+      ...FinanceLedgerStorage.sortDepartmentsCanonical([
+        'Dispensary',
+        'School',
+        'Madrassa',
+        'Dasterkhwaan',
+        'Administration',
+        'Security & Maintenance',
+        ...FinanceLocalStorage.getCustomDepartments(),
+      ]),
+    ];
 
     return StatefulBuilder(builder: (ctx, setS) {
+      final isPayroll = selType == 'branch_pdf' || selType == 'branch';
+
+      // Load filtered staff list (Executives are automatically excluded by FinanceLocalStorage.getEmployees)
+      final allStaff = isPayroll ? FinanceLocalStorage.getEmployees(widget.branchId) : <Map<String, dynamic>>[];
+      final filteredStaff = allStaff.where((emp) {
+        if (selDept != 'All Departments') {
+          final d1 = FinanceLocalStorage.normalizeDepartment(emp['department']?.toString());
+          final d2 = FinanceLocalStorage.normalizeDepartment(selDept);
+          if (d1.toLowerCase() != d2.toLowerCase()) return false;
+        }
+        if (selCamp != 'All Camps') {
+          final empCamp = FinanceLocalStorage.getEmployeeCamp(emp);
+          if (empCamp.toLowerCase() != selCamp.toLowerCase()) return false;
+        }
+        return true;
+      }).toList();
+
       return Center(
         child: Container(
-          constraints: const BoxConstraints(maxWidth: 600),
+          constraints: const BoxConstraints(maxWidth: 620),
           margin: const EdgeInsets.all(24),
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
@@ -309,28 +343,152 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
               DropdownButtonFormField<String>(
                 value: selType,
                 dropdownColor: _kBgCard,
-                decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12)),
+                decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
                 items: const [
-                  DropdownMenuItem(value: 'branch', child: Text('Salary Sheet (Excel)')),
-                  DropdownMenuItem(value: 'department', child: Text('Departmental Salary Sheet (Excel)')),
-                  DropdownMenuItem(value: 'consolidated', child: Text('Consolidated All Branches (Excel)')),
                   DropdownMenuItem(value: 'branch_pdf', child: Text('Bank Transfer Slip (PDF)')),
-                  DropdownMenuItem(value: 'department_pdf', child: Text('Departmental Bank Transfer Slip (PDF)')),
+                  DropdownMenuItem(value: 'branch', child: Text('Salary Sheet (Excel)')),
+                  DropdownMenuItem(value: 'consolidated', child: Text('Consolidated All Branches (Excel)')),
                   DropdownMenuItem(value: 'expenses_excel', child: Text('Expenses Report (Excel)')),
                 ],
                 onChanged: (v) { if (v != null) setS(() => selType = v); },
               ),
-              if (selType == 'department' || selType == 'department_pdf') ...[
-                const SizedBox(height: 16),
+              if (isPayroll) ...[
+                const SizedBox(height: 14),
                 const Text('Select Department:', style: TextStyle(color: _kTextSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 6),
                 DropdownButtonFormField<String>(
                   value: selDept,
                   dropdownColor: _kBgCard,
-                  decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12)),
+                  decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
                   items: depts.map((d) => DropdownMenuItem(value: d, child: Text(d))).toList(),
-                  onChanged: (v) { if (v != null) setS(() => selDept = v); },
+                  onChanged: (v) {
+                    if (v != null) {
+                      setS(() {
+                        selDept = v;
+                        selectedEmpIds.clear();
+                      });
+                    }
+                  },
                 ),
+                if (isKarachi) ...[
+                  const SizedBox(height: 14),
+                  const Text('Select Camp / Location:', style: TextStyle(color: _kTextSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 6),
+                  DropdownButtonFormField<String>(
+                    value: selCamp,
+                    dropdownColor: _kBgCard,
+                    decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
+                    items: const [
+                      DropdownMenuItem(value: 'All Camps', child: Text('All Camps / Main Branch')),
+                      DropdownMenuItem(value: 'Haji Camp', child: Text('Haji Camp Dispensary')),
+                      DropdownMenuItem(value: 'Saddar Camp', child: Text('Saddar Camp Dispensary')),
+                    ],
+                    onChanged: (v) {
+                      if (v != null) {
+                        setS(() {
+                          selCamp = v;
+                          selectedEmpIds.clear();
+                        });
+                      }
+                    },
+                  ),
+                ],
+                const SizedBox(height: 14),
+                const Text('Staff Members Selection:', style: TextStyle(color: _kTextSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 6),
+                Row(
+                  children: [
+                    Expanded(
+                      child: ChoiceChip(
+                        label: Center(child: Text('All Matching Staff (${filteredStaff.length})')),
+                        selected: selScope == 'all',
+                        selectedColor: _kAccent.withOpacity(0.18),
+                        onSelected: (_) => setS(() => selScope = 'all'),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: ChoiceChip(
+                        label: Center(child: Text('Specific People (${selectedEmpIds.length})')),
+                        selected: selScope == 'custom',
+                        selectedColor: _kAccent.withOpacity(0.18),
+                        onSelected: (_) => setS(() => selScope = 'custom'),
+                      ),
+                    ),
+                  ],
+                ),
+                if (selScope == 'custom') ...[
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text('Check individuals to export:', style: TextStyle(fontSize: 11, color: _kTextSecondary, fontWeight: FontWeight.w600)),
+                      Row(
+                        children: [
+                          TextButton(
+                            onPressed: () {
+                              setS(() {
+                                selectedEmpIds.clear();
+                                selectedEmpIds.addAll(filteredStaff.map((e) => e['localId'].toString()));
+                              });
+                            },
+                            child: const Text('Select All', style: TextStyle(fontSize: 11, color: _kAccent)),
+                          ),
+                          TextButton(
+                            onPressed: () => setS(() => selectedEmpIds.clear()),
+                            child: const Text('Clear', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  Container(
+                    constraints: const BoxConstraints(maxHeight: 180),
+                    decoration: BoxDecoration(
+                      color: _kBg,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: _kBorder),
+                    ),
+                    child: filteredStaff.isEmpty
+                        ? const Padding(
+                            padding: EdgeInsets.all(16),
+                            child: Center(child: Text('No staff members found matching selection', style: TextStyle(color: _kTextSecondary, fontSize: 12))),
+                          )
+                        : ListView.builder(
+                            shrinkWrap: true,
+                            itemCount: filteredStaff.length,
+                            itemBuilder: (c, idx) {
+                              final emp = filteredStaff[idx];
+                              final id = emp['localId'].toString();
+                              final name = emp['name']?.toString() ?? 'Staff';
+                              final role = emp['role']?.toString() ?? '';
+                              final dept = emp['department']?.toString() ?? '';
+                              final camp = FinanceLocalStorage.getEmployeeCamp(emp);
+                              final isChecked = selectedEmpIds.contains(id);
+
+                              return CheckboxListTile(
+                                dense: true,
+                                value: isChecked,
+                                activeColor: _kAccent,
+                                title: Text(name, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                                subtitle: Text(
+                                  '$role • $dept${camp.isNotEmpty ? ' [$camp]' : ''}',
+                                  style: const TextStyle(fontSize: 10, color: _kTextSecondary),
+                                ),
+                                onChanged: (chk) {
+                                  setS(() {
+                                    if (chk == true) {
+                                      selectedEmpIds.add(id);
+                                    } else {
+                                      selectedEmpIds.remove(id);
+                                    }
+                                  });
+                                },
+                              );
+                            },
+                          ),
+                  ),
+                ],
               ],
               const SizedBox(height: 24),
               SizedBox(
@@ -338,27 +496,70 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
                 height: 48,
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(backgroundColor: _kAccent, foregroundColor: Colors.white),
-                  icon: const Icon(Icons.download, size: 18),
-                  label: const Text('Export Document', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                  onPressed: () async {
-                    Map<String, dynamic>? result;
-                    if (selType == 'branch') result = await FinanceReportHelper.exportMonthlyExcel(branchId: widget.branchId, monthKey: _selectedMonth);
-                    else if (selType == 'department') result = await FinanceReportHelper.exportMonthlyExcel(branchId: widget.branchId, monthKey: _selectedMonth, department: selDept);
-                    else if (selType == 'consolidated') result = await FinanceReportHelper.exportConsolidatedAllBranchesExcel(branches: widget.branches, monthKey: _selectedMonth);
-                    else if (selType == 'branch_pdf') result = await FinanceReportHelper.exportMonthlyPdf(branchId: widget.branchId, monthKey: _selectedMonth, context: context);
-                    else if (selType == 'department_pdf') result = await FinanceReportHelper.exportMonthlyPdf(branchId: widget.branchId, monthKey: _selectedMonth, department: selDept, context: context);
-                    else if (selType == 'expenses_excel') result = await FinanceReportHelper.exportExpensesExcel(branchId: widget.branchId, monthKey: _selectedMonth);
+                  icon: isExporting
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        )
+                      : const Icon(Icons.download, size: 18),
+                  label: Text(
+                    isExporting ? 'Generating Report...' : 'Export Document',
+                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  ),
+                  onPressed: isExporting
+                      ? null
+                      : () async {
+                          setS(() => isExporting = true);
+                          try {
+                            Map<String, dynamic>? result;
+                            final dParam = selDept == 'All Departments' ? null : selDept;
+                            final cParam = selCamp == 'All Camps' ? null : selCamp;
+                            final pParam = selScope == 'custom' ? selectedEmpIds.toList() : null;
 
-                    if (result != null && mounted) {
-                      FileActionHelper.showFileOptions(
-                        context,
-                        filePath: result['path'] as String?,
-                        bytes: result['bytes'] as Uint8List?,
-                        fileName: result['name'] as String? ?? 'report.pdf',
-                        title: 'Monthly Report Generated',
-                      );
-                    }
-                  },
+                            if (selType == 'branch') {
+                              result = await FinanceReportHelper.exportMonthlyExcel(
+                                branchId: widget.branchId,
+                                monthKey: _selectedMonth,
+                                department: dParam,
+                                camp: cParam,
+                                employeeIds: pParam,
+                              );
+                            } else if (selType == 'branch_pdf') {
+                              result = await FinanceReportHelper.exportMonthlyPdf(
+                                branchId: widget.branchId,
+                                monthKey: _selectedMonth,
+                                department: dParam,
+                                camp: cParam,
+                                employeeIds: pParam,
+                              );
+                            } else if (selType == 'consolidated') {
+                              result = await FinanceReportHelper.exportConsolidatedAllBranchesExcel(
+                                branches: widget.branches,
+                                monthKey: _selectedMonth,
+                              );
+                            } else if (selType == 'expenses_excel') {
+                              result = await FinanceReportHelper.exportExpensesExcel(
+                                branchId: widget.branchId,
+                                monthKey: _selectedMonth,
+                              );
+                            }
+
+                            if (result != null && mounted) {
+                              FileActionHelper.showFileOptions(
+                                context,
+                                filePath: result['path'] as String?,
+                                bytes: result['bytes'] as Uint8List?,
+                                fileName: result['name'] as String? ?? 'report.pdf',
+                                title: 'Monthly Report Generated',
+                              );
+                            }
+                          } finally {
+                            if (mounted) {
+                              setS(() => isExporting = false);
+                            }
+                          }
+                        },
                 ),
               ),
             ],
@@ -426,7 +627,7 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
                 ? const Center(child: Text('No active transactions found for this month.', style: TextStyle(color: _kTextTertiary)))
                 : ListView.separated(
                     itemCount: _reconcileItems.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1, color: _kBorder),
+                    separatorBuilder: (context, index) => const Divider(height: 1, color: _kBorder),
                     itemBuilder: (context, idx) {
                       final item = _reconcileItems[idx];
                       final isRec = item['isReconciled'] == true;

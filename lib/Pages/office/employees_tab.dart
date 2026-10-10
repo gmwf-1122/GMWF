@@ -11,6 +11,7 @@ import '../../services/finance_local_storage.dart';
 import '../../services/finance_ledger_storage.dart';
 import '../../services/local_storage_service.dart';
 import '../../services/permission_service.dart';
+import '../../services/camp_session_service.dart';
 import 'shared_widgets.dart';
 import 'employee_form_sheet.dart';
 import 'employee_detail_page.dart';
@@ -129,12 +130,14 @@ class _EmployeesTabState extends State<EmployeesTab> {
     if (raw.isEmpty || raw.toLowerCase() == 'unknown' || raw.toLowerCase() == 'null' || raw.toLowerCase() == 'unassigned') {
       final role = (emp['role'] ?? '').toString().toLowerCase();
       if (role.contains('doc') || role.contains('dispens') || role.contains('nurse')) return 'Dispensary';
-      if (role.contains('teach') || role.contains('school') || role.contains('madrassa')) return 'Education';
-      if (role.contains('account') || role.contains('cashier') || role.contains('finance')) return 'Finance';
+      if (role.contains('teach') || role.contains('school')) return 'School';
+      if (role.contains('madras') || role.contains('hifz') || role.contains('nazra')) return 'Madrassa';
+      if (role.contains('daster') || role.contains('cook') || role.contains('kitchen')) return 'Dasterkhwaan';
+      if (role.contains('account') || role.contains('cashier') || role.contains('finance')) return 'Administration';
       if (role.contains('manager') || role.contains('admin') || role.contains('coord')) return 'Administration';
-      return 'General Staff';
+      return 'Office';
     }
-    return raw;
+    return FinanceLocalStorage.normalizeDepartment(raw);
   }
 
   String _displayBranchName(String branchKey) {
@@ -269,7 +272,11 @@ class _EmployeesTabState extends State<EmployeesTab> {
                 // Apply role
                 if (_roleFilter != 'All' && emp['role'] != _roleFilter) return false;
                 // Apply dept
-                if (_deptFilter != 'All' && emp['department'] != _deptFilter) return false;
+                if (_deptFilter != 'All') {
+                  final empDept = FinanceLocalStorage.normalizeDepartment(emp['department']?.toString());
+                  final filterDept = FinanceLocalStorage.normalizeDepartment(_deptFilter);
+                  if (empDept.toLowerCase() != filterDept.toLowerCase()) return false;
+                }
                 // Apply branch
                 if (_branchFilter != 'All') {
                   final String empBranch = (emp['branchId']?.toString() ?? '').toLowerCase();
@@ -1166,12 +1173,17 @@ class _EmployeesTabState extends State<EmployeesTab> {
     final rawPhone = emp['phone']?.toString().trim() ?? '';
     final hasPhone = rawPhone.isNotEmpty && rawPhone != '-' && rawPhone != 'N/A';
 
-    final rawCamps = emp['camps'] is List
-        ? (emp['camps'] as List)
-        : (emp['camp'] != null ? [emp['camp']] : []);
+    final empBranchId = (emp['branchId'] ?? '').toString().toLowerCase().trim();
+    final branchHasCamps = CampSessionService.hasCampsForBranch(empBranchId) || CampSessionService.isKarachiFamily(empBranchId);
+
+    final rawCamps = branchHasCamps
+        ? (emp['camps'] is List
+            ? (emp['camps'] as List)
+            : (emp['camp'] != null ? [emp['camp']] : []))
+        : [];
     final camps = rawCamps.map((c) => c.toString().trim()).where((c) => c.isNotEmpty).toList();
 
-    final sessions = emp['sessions'] is List
+    final sessions = branchHasCamps && (emp['sessions'] is List)
         ? (emp['sessions'] as List).whereType<Map>().toList()
         : <Map>[];
 

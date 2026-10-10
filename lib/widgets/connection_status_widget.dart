@@ -4,6 +4,7 @@
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../realtime/connection_manager.dart';
+import '../realtime/realtime_manager.dart';
 import 'lan_server_config_dialog.dart';
 
 class ConnectionStatusBadge extends StatelessWidget {
@@ -18,8 +19,9 @@ class ConnectionStatusBadge extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isConnected = status.isConnected;
-    final isSearching = status.isSearching || status.isConnecting;
+    final rm = RealtimeManager();
+    final isConnected = rm.isLinkAlive;
+    final isSearching = !isConnected && (status.isSearching || status.isConnecting);
 
     return ValueListenableBuilder<Box>(
       valueListenable:
@@ -121,8 +123,8 @@ class ConnectionStatusBadge extends StatelessWidget {
                     ),
                     const SizedBox(height: 1),
                     Text(
-                      status.ip != null
-                          ? '${status.ip}:${status.port}'
+                      (status.ip ?? rm.serverIp) != null
+                          ? '${status.ip ?? rm.serverIp}:${status.port ?? rm.port}'
                           : 'LAN Local',
                       style: TextStyle(
                         fontSize: 10,

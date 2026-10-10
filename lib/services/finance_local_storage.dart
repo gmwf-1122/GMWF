@@ -12,6 +12,7 @@ import 'finance_loans_storage.dart';
 import 'finance_ledger_storage.dart';
 import 'finance_expenses_storage.dart';
 import 'zkteco_network_service.dart';
+import 'camp_session_service.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
 import 'package:gmwf/services/sync_service.dart';
@@ -436,7 +437,10 @@ class FinanceLocalStorage {
               final userId = key.toString();
               uMap['linkedEmployeeId'] = employeeId;
               uMap['linkedEmployeeName'] = employeeName;
-              if (department != null) uMap['linkedDepartment'] = department;
+              if (department != null) {
+                uMap['linkedDepartment'] = department;
+                uMap['department'] = department;
+              }
               await uBox.put(userId, uMap);
 
               final empRaw = employeesBox.get(employeeId);
@@ -445,6 +449,10 @@ class FinanceLocalStorage {
                 empMap['linkedUserId'] = userId;
                 empMap['linkedUserRole'] = uMap['role'];
                 empMap['linkedUserName'] = uMap['username'] ?? uMap['name'];
+                if (department != null) {
+                  empMap['department'] = department;
+                  empMap['linkedDepartment'] = department;
+                }
                 await employeesBox.put(employeeId, empMap);
               }
 
@@ -453,6 +461,7 @@ class FinanceLocalStorage {
                   'linkedEmployeeId': employeeId,
                   'linkedEmployeeName': employeeName,
                   if (department != null) 'linkedDepartment': department,
+                  if (department != null) 'department': department,
                 }, SetOptions(merge: true));
               } catch (_) {}
               break;
@@ -526,15 +535,507 @@ class FinanceLocalStorage {
     return '1030';
   }
 
+  /// Identifies executive-level personnel (CEO, Chairman, Directors, Global Admins, Superadmins, etc.)
+  /// who should never be displayed in branch staff payroll or departmental salary sheets.
+  static bool isExecutiveEmployee(Map<String, dynamic> record) {
+    final role = (record['role'] ?? record['linkedUserRole'] ?? record['designation'] ?? record['jobTitle'] ?? record['title'] ?? '').toString().toLowerCase().trim();
+    final dept = (record['department'] ?? record['linkedDepartment'] ?? '').toString().toLowerCase().trim();
+
+    bool matches(String text) {
+      if (text.isEmpty) return false;
+      if (text == 'ceo' || text.contains('chief executive') || text.startsWith('ceo ') || text.endsWith(' ceo')) return true;
+      if (text.contains('chairman') || text.contains('chairperson') || text.contains('vice chairman')) return true;
+      if (text.contains('director') || text.contains('managing director') || text.contains('board of director')) return true;
+      if (text == 'admin' || text == 'global admin' || text == 'global_admin' || text == 'superadmin' || text == 'super_admin' || text == 'hq manager' || text == 'hq_manager') return true;
+      if (text.contains('trustee') || text.contains('patron') || text.contains('president')) return true;
+      if (text == 'executive' || text.contains('executive level') || text.contains('executive leadership') || text.contains('c-level')) return true;
+      return false;
+    }
+
+    return matches(role) || matches(dept);
+  }
+
+  /// Extracts the specific camp affiliation for Karachi employees:
+  /// returns 'Haji Camp' or 'Saddar Camp' (or empty string if not camp-affiliated).
+  static String getEmployeeCamp(Map<String, dynamic> emp) {
+    final branch = (emp['branchId'] ?? '').toString().toLowerCase().trim();
+    if (branch.isNotEmpty && !CampSessionService.hasCampsForBranch(branch) && !CampSessionService.isKarachiFamily(branch)) {
+      return '';
+    }
+
+    final raw = (emp['camp'] ?? 
+                 emp['subCamp'] ?? 
+                 emp['subDispensary'] ?? 
+                 emp['campId'] ?? 
+                 emp['location'] ?? 
+                 emp['campName'] ?? 
+                 emp['subBranch'] ?? '').toString().toLowerCase().trim();
+
+    if (raw.contains('haji') || raw == 'hc' || raw.contains('hajicamp')) {
+      return 'Haji Camp';
+    }
+    if (raw.contains('saddar') || raw.contains('kapaya') || raw.contains('kapayya')) {
+      return 'Saddar Camp';
+    }
+
+    if (branch.contains('haji')) return 'Haji Camp';
+    if (branch.contains('saddar') || branch.contains('kapaya')) return 'Saddar Camp';
+
+    final notes = (emp['notes'] ?? emp['address'] ?? emp['department'] ?? emp['role'] ?? '').toString().toLowerCase();
+    if (notes.contains('haji camp') || notes.contains('haji')) return 'Haji Camp';
+    if (notes.contains('saddar') || notes.contains('kapaya')) return 'Saddar Camp';
+
+    return '';
+  }
+
+  /// Canonicalizes department names to prevent fractured duplicates in UI and exports.
+  static String normalizeDepartment(String? rawDept) {
+    if (rawDept == null) return 'Administration';
+    final s = rawDept.trim().toLowerCase();
+    if (s.isEmpty) return 'Administration';
+
+    // 1. Check custom departments first so user-defined departments are never mangled
+    final customDepts = getCustomDepartments();
+    for (final cd in customDepts) {
+      if (s == cd.toLowerCase().trim()) return cd.trim();
+    }
+
+    // 2. Standard canonical departments
+    if (s.contains('admin')) return 'Administration';
+    if (s.contains('account') || s.contains('finance') || s.contains('hr') || s.contains('management')) return 'Administration';
+    if (s == 'office' || s.contains('office boy') || s.contains('front office') || s.startsWith('office')) return 'Office';
+    if (s.contains('dispensar') || s.contains('clinic') || s.contains('medic') || s.contains('health') || s.contains('doctor')) return 'Dispensary';
+    if (s.contains('madras') || s.contains('hifz') || s.contains('nazra')) return 'Madrassa';
+    if (s.contains('school') || s.contains('twt') || s.contains('teacher')) return 'School';
+    if (s.contains('daster') || s.contains('dastar') || s.contains('kitchen') || s.contains('food') || s == 'ration' || s.startsWith('ration') || s.contains(' ration')) return 'Dasterkhwaan';
+    if (s.contains('security') || s.contains('guard') || s.contains('maintenance') || s.contains('cleaning') || s.contains('janitor')) return 'Security & Maintenance';
+    return rawDept.trim();
+  }
+
+  // ── Punch & Attendance Merging Helpers ────────────────────────────────────
+  static int? _parseTimeToMinutes(dynamic val) {
+    if (val == null) return null;
+    final str = val.toString().trim();
+    if (str.isEmpty || str == '--:--' || str == 'null') return null;
+
+    if (str.contains('T')) {
+      final dt = DateTime.tryParse(str);
+      if (dt != null) return dt.hour * 60 + dt.minute;
+    }
+
+    final match = RegExp(r'^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)?$', caseSensitive: false).firstMatch(str);
+    if (match != null) {
+      int h = int.parse(match.group(1)!);
+      final m = int.parse(match.group(2)!);
+      final ampm = match.group(3)?.toUpperCase();
+      if (ampm != null) {
+        if (ampm == 'PM' && h < 12) h += 12;
+        if (ampm == 'AM' && h == 12) h = 0;
+      }
+      return h * 60 + m;
+    }
+    return null;
+  }
+
+  static String? _pickEarlierTime(String? timeA, String? timeB) {
+    if (timeA == null || timeA.isEmpty || timeA == '--:--') return (timeB == null || timeB.isEmpty || timeB == '--:--') ? null : timeB;
+    if (timeB == null || timeB.isEmpty || timeB == '--:--') return timeA;
+    final minA = _parseTimeToMinutes(timeA);
+    final minB = _parseTimeToMinutes(timeB);
+    if (minA == null) return timeB;
+    if (minB == null) return timeA;
+    return minA <= minB ? timeA : timeB;
+  }
+
+  static String? _pickLaterTime(String? timeA, String? timeB) {
+    if (timeA == null || timeA.isEmpty || timeA == '--:--') return (timeB == null || timeB.isEmpty || timeB == '--:--') ? null : timeB;
+    if (timeB == null || timeB.isEmpty || timeB == '--:--') return timeA;
+    final minA = _parseTimeToMinutes(timeA);
+    final minB = _parseTimeToMinutes(timeB);
+    if (minA == null) return timeB;
+    if (minB == null) return timeA;
+    return minA >= minB ? timeA : timeB;
+  }
+
+  static String? _pickEarlierTimestamp(String? tsA, String? tsB) {
+    if (tsA == null || tsA.isEmpty) return tsB;
+    if (tsB == null || tsB.isEmpty) return tsA;
+    final dtA = DateTime.tryParse(tsA);
+    final dtB = DateTime.tryParse(tsB);
+    if (dtA == null) return tsB;
+    if (dtB == null) return tsA;
+    return dtA.isBefore(dtB) ? tsA : tsB;
+  }
+
+  static String? _pickLaterTimestamp(String? tsA, String? tsB) {
+    if (tsA == null || tsA.isEmpty) return tsB;
+    if (tsB == null || tsB.isEmpty) return tsA;
+    final dtA = DateTime.tryParse(tsA);
+    final dtB = DateTime.tryParse(tsB);
+    if (dtA == null) return tsB;
+    if (dtB == null) return tsA;
+    return dtA.isAfter(dtB) ? tsA : tsB;
+  }
+
+  static bool _hasAnyPunch(Map<String, dynamic> record) {
+    final inTime = (record['checkInTime'] ?? record['arrivalTime'] ?? record['checkIn'])?.toString();
+    final outTime = (record['checkOutTime'] ?? record['departureTime'] ?? record['checkOut'])?.toString();
+    final lastPunch = record['lastPunchTime']?.toString();
+    final shifts = record['shifts'] is Map ? (record['shifts'] as Map) : null;
+    final shiftSessions = record['shiftSessions'] is List ? (record['shiftSessions'] as List) : null;
+    return (inTime != null && inTime.isNotEmpty && inTime != '--:--') ||
+        (outTime != null && outTime.isNotEmpty && outTime != '--:--') ||
+        (lastPunch != null && lastPunch.isNotEmpty) ||
+        (shifts != null && shifts.isNotEmpty) ||
+        (shiftSessions != null && shiftSessions.isNotEmpty);
+  }
+
+  static bool hasAnyPunch(Map<String, dynamic> record) => _hasAnyPunch(record);
+
+  /// Comprehensively merges two attendance records, picking earliest check-in, latest check-out,
+  /// merging shifts across multiple sessions/facilities, combining notes, and ensuring presence is preserved.
+  static Map<String, dynamic>? mergeAttendanceRecordMaps(Map<String, dynamic>? recA, Map<String, dynamic>? recB) {
+    if (recA == null && recB == null) return null;
+    if (recA == null) return Map<String, dynamic>.from(recB!);
+    if (recB == null) return Map<String, dynamic>.from(recA);
+
+    final merged = Map<String, dynamic>.from(recA);
+
+    for (final field in ['employeeId', 'employeeName', 'branchId', 'date', 'department']) {
+      final vA = (merged[field] ?? '').toString().trim();
+      final vB = (recB[field] ?? '').toString().trim();
+      if (vA.isEmpty && vB.isNotEmpty) {
+        merged[field] = recB[field];
+      }
+    }
+
+    final pinA = (merged['pin'] ?? merged['biometricPin'] ?? '').toString().trim();
+    final pinB = (recB['pin'] ?? recB['biometricPin'] ?? '').toString().trim();
+    if (pinA.isEmpty && pinB.isNotEmpty) {
+      merged['pin'] = pinB;
+      merged['biometricPin'] = pinB;
+    }
+
+    final inA = (merged['checkInTime'] ?? merged['arrivalTime'] ?? merged['checkIn'])?.toString();
+    final inB = (recB['checkInTime'] ?? recB['arrivalTime'] ?? recB['checkIn'])?.toString();
+    final earliestIn = _pickEarlierTime(inA, inB);
+    if (earliestIn != null) {
+      merged['checkInTime'] = earliestIn;
+      merged['arrivalTime'] = earliestIn;
+      merged['checkIn'] = earliestIn;
+    }
+
+    final outA = (merged['checkOutTime'] ?? merged['departureTime'] ?? merged['checkOut'])?.toString();
+    final outB = (recB['checkOutTime'] ?? recB['departureTime'] ?? recB['checkOut'])?.toString();
+    final latestOut = _pickLaterTime(outA, outB);
+    if (latestOut != null) {
+      merged['checkOutTime'] = latestOut;
+      merged['departureTime'] = latestOut;
+      merged['checkOut'] = latestOut;
+    }
+
+    final inTsA = merged['checkInTimestamp']?.toString();
+    final inTsB = recB['checkInTimestamp']?.toString();
+    final earliestInTs = _pickEarlierTimestamp(inTsA, inTsB);
+    if (earliestInTs != null) merged['checkInTimestamp'] = earliestInTs;
+
+    final outTsA = merged['checkOutTimestamp']?.toString();
+    final outTsB = recB['checkOutTimestamp']?.toString();
+    final latestOutTs = _pickLaterTimestamp(outTsA, outTsB);
+    if (latestOutTs != null) merged['checkOutTimestamp'] = latestOutTs;
+
+    final lastPunchA = merged['lastPunchTime']?.toString();
+    final lastPunchB = recB['lastPunchTime']?.toString();
+    final latestPunch = _pickLaterTimestamp(lastPunchA, lastPunchB);
+    if (latestPunch != null) merged['lastPunchTime'] = latestPunch;
+
+    final shiftsA = merged['shifts'] is Map ? Map<String, dynamic>.from(merged['shifts'] as Map) : <String, dynamic>{};
+    final shiftsB = recB['shifts'] is Map ? Map<String, dynamic>.from(recB['shifts'] as Map) : <String, dynamic>{};
+    for (final entry in shiftsB.entries) {
+      if (shiftsA.containsKey(entry.key) && entry.value is Map && shiftsA[entry.key] is Map) {
+        final shiftA = Map<String, dynamic>.from(shiftsA[entry.key] as Map);
+        final shiftB = Map<String, dynamic>.from(entry.value as Map);
+        final sIn = _pickEarlierTime(shiftA['checkInTime']?.toString(), shiftB['checkInTime']?.toString());
+        final sOut = _pickLaterTime(shiftA['checkOutTime']?.toString(), shiftB['checkOutTime']?.toString());
+        if (sIn != null) {
+          shiftA['checkInTime'] = sIn;
+          shiftA['arrivalTime'] = sIn;
+          shiftA['checkIn'] = sIn;
+        }
+        if (sOut != null) {
+          shiftA['checkOutTime'] = sOut;
+          shiftA['departureTime'] = sOut;
+          shiftA['checkOut'] = sOut;
+        }
+        if (shiftA['status'] != 'present' && shiftB['status'] == 'present') {
+          shiftA['status'] = 'present';
+        }
+        shiftsA[entry.key] = shiftA;
+      } else {
+        shiftsA[entry.key] = entry.value;
+      }
+    }
+    if (shiftsA.isNotEmpty) {
+      merged['shifts'] = shiftsA;
+    }
+
+    final sessA = merged['shiftSessions'] is List ? List<dynamic>.from(merged['shiftSessions'] as List) : <dynamic>[];
+    final sessB = recB['shiftSessions'] is List ? List<dynamic>.from(recB['shiftSessions'] as List) : <dynamic>[];
+    if (sessA.isNotEmpty || sessB.isNotEmpty) {
+      final combinedSessions = [...sessA, ...sessB];
+      final uniqueSessions = <String, dynamic>{};
+      for (final s in combinedSessions) {
+        if (s is Map) {
+          final sIn = s['in'] ?? s['checkIn'] ?? s['checkInTime'] ?? '';
+          final sOut = s['out'] ?? s['checkOut'] ?? s['checkOutTime'] ?? '';
+          uniqueSessions['${sIn}_$sOut'] = s;
+        }
+      }
+      merged['shiftSessions'] = uniqueSessions.values.toList();
+    }
+
+    final punchesExist = _hasAnyPunch(merged);
+    final statusA = (merged['status'] ?? '').toString().toLowerCase();
+    final statusB = (recB['status'] ?? '').toString().toLowerCase();
+
+    if (punchesExist) {
+      if (statusA == 'late' || statusB == 'late') {
+        merged['status'] = 'Late';
+      } else {
+        merged['status'] = 'Present';
+      }
+      merged['leaveType'] = null;
+    } else {
+      const statusRank = {
+        'present': 10,
+        'late': 9,
+        'half_day': 8,
+        'leave': 7,
+        'holiday': 6,
+        'off': 5,
+        'absent': 4,
+        'unmarked': 1,
+        '': 0,
+      };
+      final rankA = statusRank[statusA] ?? 2;
+      final rankB = statusRank[statusB] ?? 2;
+      if (rankB > rankA) {
+        merged['status'] = recB['status'];
+        merged['leaveType'] = recB['leaveType'];
+      }
+    }
+
+    final noteA = (merged['note'] ?? merged['notes'] ?? merged['remarks'] ?? '').toString().trim();
+    final noteB = (recB['note'] ?? recB['notes'] ?? recB['remarks'] ?? '').toString().trim();
+    if (noteA.isEmpty && noteB.isNotEmpty) {
+      merged['note'] = noteB;
+      merged['notes'] = noteB;
+    } else if (noteA.isNotEmpty && noteB.isNotEmpty && noteA != noteB) {
+      if (!noteA.contains(noteB)) {
+        final combinedNotes = '$noteA; $noteB';
+        merged['note'] = combinedNotes;
+        merged['notes'] = combinedNotes;
+      }
+    } else if (noteA.isNotEmpty) {
+      merged['note'] = noteA;
+      merged['notes'] = noteA;
+    }
+
+    if (merged['syncStatus'] != 'pending' && recB['syncStatus'] == 'pending') {
+      merged['syncStatus'] = 'pending';
+    }
+
+    return merged;
+  }
+
+  static List<String> getEmployeeCamps(Map<String, dynamic> emp) {
+    final branch = (emp['branchId'] ?? '').toString().toLowerCase().trim();
+    if (branch.isNotEmpty && !CampSessionService.hasCampsForBranch(branch) && !CampSessionService.isKarachiFamily(branch)) {
+      return <String>[];
+    }
+    final list = <String>{};
+    final rawList = emp['camps'] ?? emp['campLocations'];
+    if (rawList is List) {
+      for (final c in rawList) {
+        final s = c.toString().trim();
+        if (s.isNotEmpty) list.add(s);
+      }
+    }
+    final singleCamp = getEmployeeCamp(emp);
+    if (singleCamp.isNotEmpty) list.add(singleCamp);
+    return list.toList();
+  }
+
+  /// Merges employee profile data non-destructively: retains PINs, salary, roles, schedules, camps, sessions, etc.
+  static Map<String, dynamic> _mergeEmployeeData(Map<String, dynamic> winner, Map<String, dynamic> loser) {
+    final merged = Map<String, dynamic>.from(winner);
+
+    // 1. PIN / Biometric PIN
+    final winnerPin = (merged['biometricPin'] ?? merged['pin'] ?? '').toString().trim();
+    final loserPin = (loser['biometricPin'] ?? loser['pin'] ?? '').toString().trim();
+    if (winnerPin.isEmpty && loserPin.isNotEmpty) {
+      merged['biometricPin'] = loserPin;
+      merged['pin'] = loserPin;
+    }
+
+    // 2. User Linking
+    final loserUser = loser['userId'] ?? loser['linkedUserId'];
+    if ((merged['userId'] == null || merged['userId'].toString().isEmpty) && loserUser != null) {
+      merged['userId'] = loserUser;
+      merged['linkedUserId'] = loserUser;
+    }
+
+    // 3. Name (Prefer title-cased or longer professional name)
+    final nameW = (merged['name'] ?? merged['employeeName'] ?? '').toString().trim();
+    final nameL = (loser['name'] ?? loser['employeeName'] ?? '').toString().trim();
+    if (nameW.isEmpty && nameL.isNotEmpty) {
+      merged['name'] = nameL;
+    } else if (nameW.isNotEmpty && nameL.isNotEmpty) {
+      if (nameW.toLowerCase() == nameL.toLowerCase()) {
+        if (nameL[0] == nameL[0].toUpperCase() && nameW[0] != nameW[0].toUpperCase()) {
+          merged['name'] = nameL;
+        }
+      } else if (nameL.length > nameW.length && (nameL.toLowerCase().startsWith('dr') || nameL.toLowerCase().startsWith('doctor'))) {
+        merged['name'] = nameL;
+      }
+    }
+
+    // 4. Role / Designation
+    final roleW = (merged['role'] ?? merged['designation'] ?? '').toString().trim();
+    final roleL = (loser['role'] ?? loser['designation'] ?? '').toString().trim();
+    final isGenericW = roleW.isEmpty || roleW.toLowerCase() == 'staff' || roleW.toLowerCase() == 'employee' || roleW.toLowerCase() == 'helper';
+    final isSpecificL = roleL.isNotEmpty && roleL.toLowerCase() != 'staff' && roleL.toLowerCase() != 'employee';
+    if (isGenericW && isSpecificL) {
+      merged['role'] = roleL;
+      merged['designation'] = roleL;
+    } else if (roleW.isEmpty && roleL.isNotEmpty) {
+      merged['role'] = roleL;
+      merged['designation'] = roleL;
+    }
+
+    // 5. Department
+    final deptW = (merged['department'] ?? '').toString().trim();
+    final deptL = (loser['department'] ?? '').toString().trim();
+    if ((deptW.isEmpty || deptW.toLowerCase() == 'unassigned' || deptW.toLowerCase() == 'unknown') && deptL.isNotEmpty) {
+      merged['department'] = deptL;
+    }
+
+    // 6. Salary
+    final salW = (merged['currentSalary'] as num?)?.toDouble() ?? (merged['baseSalary'] as num?)?.toDouble() ?? 0.0;
+    final salL = (loser['currentSalary'] as num?)?.toDouble() ?? (loser['baseSalary'] as num?)?.toDouble() ?? 0.0;
+    if (salW <= 0 && salL > 0) {
+      merged['currentSalary'] = salL;
+      merged['baseSalary'] = salL;
+      merged['salary'] = salL;
+      if (loser['salaryText'] != null) merged['salaryText'] = loser['salaryText'];
+    }
+
+    // 7. Camps & Sessions (Union)
+    final branch = (merged['branchId'] ?? loser['branchId'] ?? '').toString().toLowerCase().trim();
+    if (branch.isNotEmpty && !CampSessionService.hasCampsForBranch(branch) && !CampSessionService.isKarachiFamily(branch)) {
+      merged.remove('camps');
+      merged['camp'] = '';
+      merged['sessions'] = <dynamic>[];
+    } else {
+      final campsW = getEmployeeCamps(merged);
+      final campsL = getEmployeeCamps(loser);
+      final allCamps = {...campsW, ...campsL}.toList();
+      if (allCamps.isNotEmpty) {
+        merged['camps'] = allCamps;
+        merged['camp'] = allCamps.length == 1 ? allCamps.first : 'Multiple Camps';
+      }
+    }
+
+    final sessW = (merged['sessions'] is List) ? List<dynamic>.from(merged['sessions']) : <dynamic>[];
+    final sessL = (loser['sessions'] is List) ? List<dynamic>.from(loser['sessions']) : <dynamic>[];
+    final seenSessions = <String>{};
+    final combinedSessions = <dynamic>[];
+    for (final s in [...sessW, ...sessL]) {
+      if (s is Map) {
+        final key = '${s['camp']}_${s['session']}'.toLowerCase();
+        if (!seenSessions.contains(key)) {
+          seenSessions.add(key);
+          combinedSessions.add(s);
+        }
+      }
+    }
+    if (combinedSessions.isNotEmpty) {
+      merged['sessions'] = combinedSessions;
+    }
+
+    final shW = (merged['shiftHours'] ?? merged['workingHours'] ?? '').toString().trim();
+    final shL = (loser['shiftHours'] ?? loser['workingHours'] ?? '').toString().trim();
+    if (shW.isEmpty && shL.isNotEmpty) {
+      merged['shiftHours'] = shL;
+      merged['workingHours'] = shL;
+    } else if (shW.isNotEmpty && shL.isNotEmpty && shW != shL) {
+      if (!shW.contains(shL)) {
+        merged['shiftHours'] = '$shW | $shL';
+        merged['workingHours'] = '$shW | $shL';
+      }
+    }
+
+    // 8. Contact, CNIC, Bank
+    for (final field in ['phone', 'contact', 'contactNumber', 'alternatePhone', 'cnic', 'bankName', 'bankAccount', 'profilePictureUrl', 'profilePicturePath']) {
+      final vW = (merged[field] ?? '').toString().trim();
+      final vL = (loser[field] ?? '').toString().trim();
+      if ((vW.isEmpty || vW == 'N/A') && vL.isNotEmpty && vL != 'N/A') {
+        merged[field] = loser[field];
+      }
+    }
+
+    // 9. Status & Activity (If either is Active, keep Active!)
+    final activeW = merged['isActive'] == true || (merged['status']?.toString().toLowerCase() == 'active');
+    final activeL = loser['isActive'] == true || (loser['status']?.toString().toLowerCase() == 'active');
+    if (!activeW && activeL) {
+      merged['isActive'] = true;
+      merged['status'] = 'Active';
+      merged['isOffboarded'] = false;
+      merged.remove('offboardingDetails');
+    }
+
+    // 10. Advance Balance
+    final advW = (merged['currentAdvanceBalance'] as num?)?.toDouble() ?? 0.0;
+    final advL = (loser['currentAdvanceBalance'] as num?)?.toDouble() ?? 0.0;
+    if (advL > advW) {
+      merged['currentAdvanceBalance'] = advL;
+    }
+
+    return merged;
+  }
+
   static List<Map<String, dynamic>> getEmployees(String branchId) {
     if (!Hive.isBoxOpen(LocalStorageService.employeesBox)) return const [];
     final list = <Map<String, dynamic>>[];
     final cleanBranch = branchId.trim().toLowerCase();
     final isGlobal = cleanBranch == 'all' || cleanBranch.isEmpty;
 
-    for (final val in employeesBox.values) {
+    // Pre-index outstanding loan balances once across the whole box (O(M) single pass)
+    final advanceBalances = FinanceLoansStorage.getAllEmployeeOutstandingBalances();
+
+    // In-memory deduplication index maps to guarantee each employee appears only ONCE,
+    // and merging attributes if duplicate entries exist for the same individual.
+    final localIdToIndex = <String, int>{};
+    final remoteIdToIndex = <String, int>{};
+    final cnicToIndex = <String, int>{};
+    final nameToIndex = <String, int>{};
+
+    for (final key in employeesBox.keys) {
+      final val = employeesBox.get(key);
       if (val is! Map) continue;
       final record = Map<String, dynamic>.from(val);
+      final keyStr = key.toString();
+      if ((record['localId'] == null || record['localId'].toString().trim().isEmpty) &&
+          (record['id'] == null || record['id'].toString().trim().isEmpty)) {
+        record['localId'] = keyStr;
+        record['id'] = keyStr;
+        try {
+          employeesBox.put(key, record);
+        } catch (_) {}
+      } else {
+        record['localId'] ??= record['id'] ?? keyStr;
+        record['id'] ??= record['localId'] ?? keyStr;
+      }
       final role = (record['role'] ?? record['linkedUserRole'] ?? record['designation'] ?? '').toString().toLowerCase().trim();
       final dept = (record['department'] ?? record['linkedDepartment'] ?? '').toString().toLowerCase().trim();
 
@@ -548,6 +1049,11 @@ class FinanceLocalStorage {
           role.contains('terminal') ||
           record['isEmployee'] == false ||
           record['isServerAccount'] == true) {
+        continue;
+      }
+
+      // Exclude executive level leadership (CEO, Chairman, Directors, Global Admins, etc.) from branch payroll
+      if (isExecutiveEmployee(record)) {
         continue;
       }
 
@@ -578,6 +1084,7 @@ class FinanceLocalStorage {
       }
 
       final empBranch = (record['branchId'] ?? '').toString().trim().toLowerCase();
+      final empCamp = getEmployeeCamp(record).toLowerCase();
 
       if (!isGlobal && empBranch.isNotEmpty && empBranch != cleanBranch) {
         final empNameBranch = getBranchName(record['branchId']?.toString() ?? '').toLowerCase();
@@ -586,13 +1093,26 @@ class FinanceLocalStorage {
         final matchClean = empBranch.replaceAll('branch_', '') == cleanBranch.replaceAll('branch_', '');
         final matchPrefix = empBranch.startsWith(cleanBranch) || cleanBranch.startsWith(empBranch);
 
-        // Support multi-branch staff (e.g. allowedBranches / branches or branchId == 'all')
+        // Camp-specific filtering for Karachi (Strict isolation between Haji Camp and Saddar Camp)
+        final reqIsHaji = cleanBranch.contains('haji');
+        final reqIsSaddar = cleanBranch.contains('saddar') || cleanBranch.contains('kapaya');
+
+        if (reqIsHaji && !empCamp.contains('haji') && !empBranch.contains('haji')) {
+          continue;
+        }
+        if (reqIsSaddar && !empCamp.contains('saddar') && !empBranch.contains('saddar') && !empBranch.contains('kapaya')) {
+          continue;
+        }
+
+        // Support multi-branch staff
         bool matchMulti = empBranch == 'all' || empBranch == 'global';
         if (!matchMulti) {
-          // Karachi multi-camp family support (Saddar, Haji Camp, Kapaya, Karachi)
-          bool isKarachiFamily(String b) => b.contains('karachi') || b.contains('saddar') || b.contains('haji') || b.contains('kapaya');
-          if (isKarachiFamily(empBranch) && isKarachiFamily(cleanBranch)) {
-            matchMulti = true;
+          // Karachi multi-camp family support ONLY when requesting generic Karachi (not a specific sub-camp)
+          if (!reqIsHaji && !reqIsSaddar) {
+            bool isKarachiFamily(String b) => b.contains('karachi') || b.contains('saddar') || b.contains('haji') || b.contains('kapaya');
+            if (isKarachiFamily(empBranch) && isKarachiFamily(cleanBranch)) {
+              matchMulti = true;
+            }
           }
         }
         if (!matchMulti) {
@@ -614,8 +1134,79 @@ class FinanceLocalStorage {
         }
       }
 
-      // Recalculate advance balance on demand
-      record['currentAdvanceBalance'] = getAdvanceBalance(record['localId']);
+      // Deduplication & Data Merging: prevent duplicates and unify all employee attributes
+      final localId = (record['localId'] ?? record['id'] ?? '').toString().trim();
+      final remoteId = (record['remoteId'] ?? '').toString().trim();
+      final rawCnic = (record['cnic'] ?? '').toString().replaceAll(RegExp(r'\D'), '').trim();
+      final normName = (record['name'] ?? '').toString().toLowerCase().trim();
+      final normDept = normalizeDepartment(record['department']?.toString());
+      final nameKey = normName.isNotEmpty ? '$normName|$normDept|${empCamp.isNotEmpty ? empCamp : empBranch}' : '';
+
+      int existingIdx = -1;
+      if (localId.isNotEmpty && localIdToIndex.containsKey(localId)) {
+        existingIdx = localIdToIndex[localId]!;
+      } else if (remoteId.isNotEmpty && remoteIdToIndex.containsKey(remoteId)) {
+        existingIdx = remoteIdToIndex[remoteId]!;
+      } else if (rawCnic.length >= 8 && cnicToIndex.containsKey(rawCnic)) {
+        existingIdx = cnicToIndex[rawCnic]!;
+      } else if (normName.isNotEmpty) {
+        if (nameToIndex.containsKey(nameKey)) {
+          existingIdx = nameToIndex[nameKey]!;
+        } else if (nameToIndex.containsKey(normName)) {
+          existingIdx = nameToIndex[normName]!;
+        }
+      }
+
+      if (existingIdx >= 0 && existingIdx < list.length) {
+        // Merge duplicate employee record into existing in-memory profile
+        // Compare updatedAt to ensure the most recently updated record takes precedence
+        final existingRec = list[existingIdx];
+        final existingUpdated = DateTime.tryParse(existingRec['updatedAt']?.toString() ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final currentUpdated = DateTime.tryParse(record['updatedAt']?.toString() ?? '') ?? DateTime.fromMillisecondsSinceEpoch(0);
+        final winner = currentUpdated.isAfter(existingUpdated) ? record : existingRec;
+        final loser = currentUpdated.isAfter(existingUpdated) ? existingRec : record;
+
+        final merged = _mergeEmployeeData(winner, loser);
+        merged['currentAdvanceBalance'] = advanceBalances[merged['localId'] ?? localId] ?? list[existingIdx]['currentAdvanceBalance'] ?? 0.0;
+        merged['camp'] = getEmployeeCamp(merged);
+        final effectiveDept = (winner['department'] != null && winner['department'].toString().trim().isNotEmpty)
+            ? winner['department']?.toString()
+            : loser['department']?.toString();
+        merged['department'] = normalizeDepartment(effectiveDept);
+        list[existingIdx] = merged;
+
+        // Register any additional identifiers from this duplicate
+        if (localId.isNotEmpty) localIdToIndex[localId] = existingIdx;
+        if (remoteId.isNotEmpty) remoteIdToIndex[remoteId] = existingIdx;
+        if (rawCnic.length >= 8) cnicToIndex[rawCnic] = existingIdx;
+        if (nameKey.isNotEmpty) nameToIndex[nameKey] = existingIdx;
+        if (normName.isNotEmpty) nameToIndex[normName] = existingIdx;
+        continue;
+      }
+
+      final newIdx = list.length;
+      if (localId.isNotEmpty) localIdToIndex[localId] = newIdx;
+      if (remoteId.isNotEmpty) remoteIdToIndex[remoteId] = newIdx;
+      if (rawCnic.length >= 8) cnicToIndex[rawCnic] = newIdx;
+      if (nameKey.isNotEmpty) nameToIndex[nameKey] = newIdx;
+      if (normName.isNotEmpty) nameToIndex[normName] = newIdx;
+
+      // Pre-indexed advance balance lookup (instant O(1))
+      record['currentAdvanceBalance'] = advanceBalances[localId] ?? 0.0;
+      record['camp'] = getEmployeeCamp(record);
+      record['department'] = normDept;
+
+      // Cleanse spurious camps/sessions for branches without camps
+      final hasCamps = CampSessionService.hasCampsForBranch(empBranch) || CampSessionService.isKarachiFamily(empBranch);
+      if (!hasCamps) {
+        record['camps'] = <String>[];
+        record['camp'] = '';
+        record['sessions'] = <dynamic>[];
+        if (record['allowedBranches'] is List) {
+          record['allowedBranches'] = [empBranch.isNotEmpty ? empBranch : cleanBranch];
+        }
+      }
+
       list.add(record);
     }
     return list..sort((a, b) => (a['name']?.toString() ?? '').compareTo(b['name']?.toString() ?? ''));
@@ -623,10 +1214,58 @@ class FinanceLocalStorage {
 
   static Map<String, dynamic>? getEmployee(String employeeId) {
     if (!Hive.isBoxOpen(LocalStorageService.employeesBox)) return null;
-    final val = employeesBox.get(employeeId);
+    final cleanId = employeeId.trim();
+    if (cleanId.isEmpty) return null;
+
+    dynamic val = employeesBox.get(cleanId);
+    String resolvedKey = cleanId;
+
+    if (val == null || val is! Map) {
+      for (final k in employeesBox.keys) {
+        final v = employeesBox.get(k);
+        if (v is Map) {
+          final loc = v['localId']?.toString().trim();
+          final id = v['id']?.toString().trim();
+          final emp = v['employeeId']?.toString().trim();
+          final rem = v['remoteId']?.toString().trim();
+          final pin = (v['pin'] ?? v['biometricPin'])?.toString().trim();
+          final name = v['name']?.toString().trim().toLowerCase();
+
+          if (loc == cleanId || id == cleanId || emp == cleanId || rem == cleanId || k.toString() == cleanId) {
+            val = v;
+            resolvedKey = k.toString();
+            break;
+          }
+          if (pin != null && pin.isNotEmpty && pin == cleanId) {
+            val = v;
+            resolvedKey = k.toString();
+            break;
+          }
+          if (name != null && name.isNotEmpty && cleanId.toLowerCase() == name) {
+            val = v;
+            resolvedKey = k.toString();
+            break;
+          }
+        }
+      }
+    }
+
     if (val == null || val is! Map) return null;
     final record = Map<String, dynamic>.from(val);
-    record['currentAdvanceBalance'] = getAdvanceBalance(employeeId);
+    record['localId'] = (record['localId'] ?? record['id'] ?? resolvedKey).toString();
+    record['id'] = (record['id'] ?? record['localId'] ?? resolvedKey).toString();
+    record['currentAdvanceBalance'] = getAdvanceBalance(record['localId'] as String);
+
+    final empBranch = (record['branchId'] ?? '').toString().trim().toLowerCase();
+    final branchHasCamps = CampSessionService.hasCampsForBranch(empBranch) || CampSessionService.isKarachiFamily(empBranch);
+    if (!branchHasCamps) {
+      record['camps'] = <String>[];
+      record['camp'] = '';
+      record['sessions'] = <dynamic>[];
+      if (record['allowedBranches'] is List) {
+        record['allowedBranches'] = [empBranch];
+      }
+    }
     return record;
   }
 
@@ -894,8 +1533,8 @@ class FinanceLocalStorage {
     final isGlobal = cleanBranch.isEmpty || cleanBranch == 'all' || cleanBranch == 'global';
 
     return box.values
-        .where((v) => v is Map)
-        .map((v) => Map<String, dynamic>.from(v as Map))
+        .whereType<Map>()
+        .map((v) => Map<String, dynamic>.from(v))
         .where((emp) {
           final bId = (emp['branchId'] ?? '').toString().toLowerCase().trim();
           if (!isGlobal && bId.isNotEmpty && bId != cleanBranch) return false;
@@ -1270,8 +1909,13 @@ class FinanceLocalStorage {
 
   static double getSalaryRateForDay(String employeeId, DateTime date) {
     final history = getSalaryHistory(employeeId);
+    final emp = getEmployee(employeeId);
+    return getSalaryRateForDayWithHistory(history, emp, date);
+  }
+
+  /// High-performance salary rate lookup using pre-fetched salary history to eliminate repetitive box scans.
+  static double getSalaryRateForDayWithHistory(List<Map<String, dynamic>> history, Map<String, dynamic>? emp, DateTime date) {
     if (history.isEmpty) {
-      final emp = getEmployee(employeeId);
       if (emp == null) return 0.0;
       if (emp['currentSalary'] != null) {
         return (emp['currentSalary'] as num).toDouble();
@@ -1446,16 +2090,53 @@ class FinanceLocalStorage {
     final attendanceKey = '${employeeId}_$dateStr';
     final now = _nowIso();
 
-    final record = Map<String, dynamic>.from(data);
-    record['localId'] = attendanceKey;
-    record['remoteId'] = null;
-    record['updatedAt'] = now;
-    record['syncStatus'] = 'pending';
-    record['markedBy'] = performedBy;
-    record['markedAt'] = now;
+    // Look for existing record under direct key, PIN key, or alternative employee keys
+    Map<String, dynamic>? existingRecord;
+    final direct = attendanceBox.get(attendanceKey);
+    if (direct is Map) {
+      existingRecord = Map<String, dynamic>.from(direct);
+    }
 
-    final sanitized = _sanitize(record);
+    final emp = getEmployee(employeeId);
+    final pin = (emp?['biometricPin'] ?? emp?['pin'] ?? '').toString().trim();
+    final altId = emp?['id']?.toString() ?? '';
+    final obsoleteKeys = <dynamic>[];
+
+    if (pin.isNotEmpty) {
+      final pinKey = '${pin}_$dateStr';
+      final pinVal = attendanceBox.get(pinKey);
+      if (pinVal is Map) {
+        existingRecord = mergeAttendanceRecordMaps(existingRecord, Map<String, dynamic>.from(pinVal));
+        if (pinKey != attendanceKey) obsoleteKeys.add(pinKey);
+      }
+    }
+
+    if (altId.isNotEmpty && altId != employeeId) {
+      final altKey = '${altId}_$dateStr';
+      final altVal = attendanceBox.get(altKey);
+      if (altVal is Map) {
+        existingRecord = mergeAttendanceRecordMaps(existingRecord, Map<String, dynamic>.from(altVal));
+        if (altKey != attendanceKey) obsoleteKeys.add(altKey);
+      }
+    }
+
+    // Merge incoming data with existing record to avoid wiping punches, shifts, or notes
+    final merged = mergeAttendanceRecordMaps(existingRecord, data) ?? Map<String, dynamic>.from(data);
+    merged['localId'] = attendanceKey;
+    merged['employeeId'] = employeeId;
+    merged['date'] = dateStr;
+    merged['branchId'] = branchId;
+    merged['remoteId'] = existingRecord?['remoteId'];
+    merged['updatedAt'] = now;
+    merged['syncStatus'] = 'pending';
+    merged['markedBy'] = performedBy;
+    merged['markedAt'] ??= now;
+
+    final sanitized = _sanitize(merged);
     await attendanceBox.put(attendanceKey, sanitized);
+    for (final ok in obsoleteKeys) {
+      await attendanceBox.delete(ok);
+    }
     await attendanceBox.flush();
 
     // Mirror to sync
@@ -1504,7 +2185,7 @@ class FinanceLocalStorage {
       if (att == null && altId.isNotEmpty && altId != empId) {
         att = attendanceBox.get('${altId}_$dateStr');
       }
-      // If still not found by direct composite key, search attendanceBox values for matching date, employeeId, pin, or name
+
       // Search attendanceBox values for matching date, employeeId, pin, or name, merging all shift records
       Map<String, dynamic>? mergedAtt;
       if (att is Map) {
@@ -1526,22 +2207,7 @@ class FinanceLocalStorage {
             final matchName = !isOtherExplicitEmp && name.isNotEmpty && recName.isNotEmpty && recName == name;
 
             if (matchId || matchAltId || matchPin || matchName) {
-              if (mergedAtt == null) {
-                mergedAtt = Map<String, dynamic>.from(v);
-              } else {
-                // Merge multiple session records (e.g. morning + evening)
-                final currentShifts = Map<String, dynamic>.from((mergedAtt['shifts'] as Map?) ?? {});
-                final newShifts = v['shifts'];
-                if (newShifts is Map) {
-                  currentShifts.addAll(Map<String, dynamic>.from(newShifts));
-                }
-                mergedAtt['shifts'] = currentShifts;
-
-                final vIn = v['checkInTime'] ?? v['arrivalTime'];
-                final vOut = v['checkOutTime'] ?? v['departureTime'];
-                if (mergedAtt['checkInTime'] == null && vIn != null) mergedAtt['checkInTime'] = vIn;
-                if (vOut != null) mergedAtt['checkOutTime'] = vOut;
-              }
+              mergedAtt = mergeAttendanceRecordMaps(mergedAtt, Map<String, dynamic>.from(v));
             }
           }
         }
@@ -1555,16 +2221,8 @@ class FinanceLocalStorage {
         final rec = Map<String, dynamic>.from(att);
         rec['employeeId'] = empId;
         // Ensure presence is recognized if ANY punch times or shifts exist
-        final checkIn = rec['checkInTime']?.toString() ?? rec['arrivalTime']?.toString();
-        final checkOut = rec['checkOutTime']?.toString() ?? rec['departureTime']?.toString();
-        final lastPunch = rec['lastPunchTime']?.toString();
-        final shifts = rec['shifts'] is Map ? (rec['shifts'] as Map) : null;
-        final hasPunch = (checkIn != null && checkIn.isNotEmpty && checkIn != '--:--') ||
-            (checkOut != null && checkOut.isNotEmpty && checkOut != '--:--') ||
-            (lastPunch != null && lastPunch.isNotEmpty) ||
-            (shifts != null && shifts.isNotEmpty);
-
-        if (hasPunch) {
+        final hasPunch = _hasAnyPunch(rec);
+        if (hasPunch && rec['status'] != 'late') {
           rec['status'] = 'present';
           rec['leaveType'] = null;
         }
@@ -1600,6 +2258,60 @@ class FinanceLocalStorage {
     if ([4, 6, 9, 11].contains(month)) return 30;
     return 31;
   }
+
+  /// High-performance helper to pre-fetch all holiday date strings for a branch, month, and department.
+  /// Eliminates scanning financeHolidaysBox 30 times per employee.
+  static Set<String> getHolidaysForBranchAndMonth({
+    required String branchId,
+    required String monthKey,
+    String? department,
+  }) {
+    if (branchId.isEmpty || !Hive.isBoxOpen(LocalStorageService.financeHolidaysBox)) return const {};
+    final holidays = <String>{};
+    final prefix = '${branchId.toLowerCase().trim()}__hol__';
+    final box = Hive.box(LocalStorageService.financeHolidaysBox);
+    final cleanDept = (department ?? '').trim().toLowerCase();
+
+    for (final key in box.keys) {
+      if (!key.toString().startsWith(prefix)) continue;
+      final raw = box.get(key);
+      if (raw is! Map) continue;
+      final record = Map<String, dynamic>.from(raw);
+      final rawDate = record['date'];
+      String? recordDateStr;
+      if (rawDate is Timestamp) {
+        recordDateStr = DateFormat('yyyy-MM-dd').format(rawDate.toDate());
+      } else if (rawDate is String) {
+        try {
+          recordDateStr = DateFormat('yyyy-MM-dd').format(DateTime.parse(rawDate));
+        } catch (_) {
+          recordDateStr = rawDate;
+        }
+      }
+      if (recordDateStr == null || !recordDateStr.startsWith(monthKey)) continue;
+
+      final departments = record['departments'] is List
+          ? List<String>.from(record['departments'] as List).map((d) => d.trim().toLowerCase()).toList()
+          : <String>[];
+      bool deptApplies = departments.isEmpty || departments.contains('all') || (cleanDept.isNotEmpty && departments.contains(cleanDept));
+      if (!deptApplies) continue;
+
+      final exceptions = record['exceptions'] is List ? List<dynamic>.from(record['exceptions'] as List) : [];
+      bool isExcepted = false;
+      for (final ex in exceptions) {
+        final exStr = ex.toString().trim().toLowerCase();
+        if (cleanDept.isNotEmpty && exStr == cleanDept) {
+          isExcepted = true;
+          break;
+        }
+      }
+      if (isExcepted) continue;
+
+      holidays.add(recordDateStr);
+    }
+    return holidays;
+  }
+
   static bool isHoliday({
     required String branchId,
     required String department,
@@ -1830,6 +2542,13 @@ class FinanceLocalStorage {
     int totalEmployedDays = 0;
     int unmarkedDays = 0;
     int forfeitedSundaysCount = 0;
+    final List<int> presentDates = [];
+    final List<int> absentDates = [];
+    final List<int> paidLeaveDates = [];
+    final List<int> unpaidLeaveDates = [];
+    final List<int> halfDayDates = [];
+    final List<int> unmarkedDates = [];
+    final Map<int, Map<String, dynamic>> dailyStatus = {};
 
     final joinStr = emp?['joiningDate']?.toString();
     final exitStr = emp?['exitDate']?.toString();
@@ -1858,6 +2577,43 @@ class FinanceLocalStorage {
       cutoffDate = todayDateOnly;
     }
 
+    // Pre-fetch employee salary history and holidays once to avoid repeated box iterations in 30-day loop
+    final salaryHistory = getSalaryHistory(employeeId);
+    final branchHolidays = getHolidaysForBranchAndMonth(
+      branchId: branchId,
+      monthKey: monthKey,
+      department: employeeDept,
+    );
+
+    final empLocalId = (emp?['localId'] ?? emp?['id'] ?? employeeId).toString();
+    final altId = (emp?['id'] ?? '').toString();
+    final cred = ZkTecoNetworkService.getCredentialByEntityId(empLocalId);
+    final empPin = (cred?.biometricPin.isNotEmpty == true 
+        ? cred!.biometricPin.trim() 
+        : (emp?['biometricPin'] ?? emp?['pin'] ?? '').toString().trim());
+    final empName = (emp?['name'] ?? '').toString().trim().toLowerCase();
+
+    // Fast single-pass index of all attendance records for this month matching ID, PIN, or name
+    final monthAttendanceMap = <String, Map<String, dynamic>>{};
+    for (final v in attendanceBox.values) {
+      if (v is! Map) continue;
+      final recDate = v['date']?.toString() ?? '';
+      if (!recDate.startsWith(monthKey)) continue;
+
+      final recEmpId = (v['employeeId'] ?? v['localId'] ?? v['id'])?.toString() ?? '';
+      final recPin = (v['pin'] ?? v['biometricPin'])?.toString().trim() ?? '';
+      final recName = (v['employeeName'] ?? v['name'])?.toString().trim().toLowerCase() ?? '';
+
+      final matchId = recEmpId.isNotEmpty && (recEmpId == empLocalId || recEmpId == altId || recEmpId == employeeId);
+      final isOtherExplicitEmp = recEmpId.isNotEmpty && recEmpId != empLocalId && recEmpId != altId && recEmpId != employeeId && getEmployee(recEmpId) != null;
+      final matchPin = !isOtherExplicitEmp && empPin.isNotEmpty && (recPin.isNotEmpty && (recPin == empPin || (int.tryParse(empPin) != null && int.tryParse(empPin) == int.tryParse(recPin))) || recEmpId == empPin);
+      final matchName = !isOtherExplicitEmp && empName.isNotEmpty && recName.isNotEmpty && recName == empName;
+
+      if (matchId || matchPin || matchName) {
+        final existing = monthAttendanceMap[recDate];
+        monthAttendanceMap[recDate] = mergeAttendanceRecordMaps(existing, Map<String, dynamic>.from(v))!;
+      }
+    }
 
     for (var d = 1; d <= daysInMonth; d++) {
       final dd = d.toString().padLeft(2, '0');
@@ -1881,20 +2637,20 @@ class FinanceLocalStorage {
 
       if (!isEmployed) continue;
 
-      final activeSalaryRate = getSalaryRateForDay(employeeId, date);
+      final activeSalaryRate = getSalaryRateForDayWithHistory(salaryHistory, emp, date);
       final dailyRate = activeSalaryRate / daysInMonth;
       fullMonthWeightedSalary += dailyRate;
 
       final isFutureDay = date.isAfter(cutoffDate);
       final key = '${employeeId}_$dateStr';
-      final val = attendanceBox.get(key);
+      final directVal = attendanceBox.get(key) ?? (empLocalId.isNotEmpty ? attendanceBox.get('${empLocalId}_$dateStr') : null);
+      final val = mergeAttendanceRecordMaps(
+        directVal is Map ? Map<String, dynamic>.from(directVal) : null,
+        monthAttendanceMap[dateStr],
+      );
       final hasRecord = val != null;
 
-      final isHolidayDay = isHoliday(
-        branchId: branchId,
-        department: employeeDept,
-        dateStr: dateStr,
-      );
+      final isHolidayDay = branchHolidays.contains(dateStr);
       final isSunday = date.weekday == DateTime.sunday;
 
       // Skip future dates if they do not have any explicit attendance record marked.
@@ -1914,11 +2670,25 @@ class FinanceLocalStorage {
       String status;
       String? leaveType;
       String? overtimeDuration;
+      final Map<String, dynamic>? recMap = val;
 
-      if (val is Map) {
-        status = val['status']?.toString() ?? 'absent';
-        leaveType = val['leaveType']?.toString();
-        overtimeDuration = val['overtimeDuration']?.toString();
+      if (recMap != null) {
+        status = recMap['status']?.toString() ?? 'absent';
+        leaveType = recMap['leaveType']?.toString();
+        overtimeDuration = recMap['overtimeDuration']?.toString();
+
+        final inTime = recMap['checkInTime']?.toString() ?? recMap['arrivalTime']?.toString();
+        final outTime = recMap['checkOutTime']?.toString() ?? recMap['departureTime']?.toString();
+        final lastPunch = recMap['lastPunchTime']?.toString();
+        final shifts = recMap['shifts'] is Map ? (recMap['shifts'] as Map) : null;
+        final hasPunch = (inTime != null && inTime.isNotEmpty && inTime != '--:--') ||
+            (outTime != null && outTime.isNotEmpty && outTime != '--:--') ||
+            (lastPunch != null && lastPunch.isNotEmpty) ||
+            (shifts != null && shifts.isNotEmpty);
+
+        if (hasPunch && status != 'late') {
+          status = 'present';
+        }
       } else {
         if (isFutureDay && !isSunday && !isHolidayDay) continue;
 
@@ -1931,6 +2701,21 @@ class FinanceLocalStorage {
         leaveType = null;
         overtimeDuration = null;
       }
+
+      dailyStatus[d] = {
+        'day': d,
+        'date': dateStr,
+        'status': status,
+        'leaveType': leaveType,
+        'checkInTime': recMap != null ? (recMap['checkInTime'] ?? recMap['arrivalTime'])?.toString() : null,
+        'checkOutTime': recMap != null ? (recMap['checkOutTime'] ?? recMap['departureTime'])?.toString() : null,
+        'shifts': recMap != null ? recMap['shifts'] : null,
+        'isSunday': isSunday,
+        'isHoliday': isHolidayDay,
+        'isFuture': isFutureDay,
+        'note': recMap != null ? recMap['note']?.toString() : null,
+      };
+
       if (isHolidayDay) {
         holidayCount++;
       }
@@ -1960,8 +2745,7 @@ class FinanceLocalStorage {
             eligibleWeekdaysCount++;
 
             final weekdayDateStr = DateFormat('yyyy-MM-dd').format(weekdayDate);
-            final weekdayKey = '${employeeId}_$weekdayDateStr';
-            final weekdayVal = attendanceBox.get(weekdayKey);
+            final weekdayVal = monthAttendanceMap[weekdayDateStr] ?? attendanceBox.get('${employeeId}_$weekdayDateStr') ?? (empLocalId.isNotEmpty ? attendanceBox.get('${empLocalId}_$weekdayDateStr') : null);
 
             if (weekdayVal == null) {
               // Defaults to unmarked, which counts as worked/paid for eligibility
@@ -2015,22 +2799,28 @@ class FinanceLocalStorage {
 
         if (status == 'present') {
           presentDays += 1.0;
+          presentDates.add(d);
         } else if (status == 'late') {
           lateDays += 1.0;
+          presentDates.add(d);
         } else if (status == 'leave') {
           if (leaveType == 'unpaid') {
             unpaidLeaves += 1.0;
+            unpaidLeaveDates.add(d);
             absenceDeductions += dailyRate;
           } else {
             paidLeaves += 1.0;
+            paidLeaveDates.add(d);
           }
         } else if (status == 'absent') {
           if (!isHolidayDay) {
             absentDays += 1.0;
+            absentDates.add(d);
             absenceDeductions += dailyRate;
           }
         } else if (status == 'half_day') {
-          final hdType = val is Map ? (val['halfDayType']?.toString() ?? 'unpaid') : 'unpaid';
+          halfDayDates.add(d);
+          final hdType = recMap != null ? (recMap['halfDayType']?.toString() ?? 'unpaid') : 'unpaid';
           if (hdType == 'unpaid') {
             presentDays += 0.5;
             unpaidLeaves += 0.5;
@@ -2063,7 +2853,35 @@ class FinanceLocalStorage {
       'fullMonthWeightedSalary': fullMonthWeightedSalary,
       'unmarkedDays': unmarkedDays,
       'forfeitedSundays': forfeitedSundaysCount,
+      'presentDates': presentDates,
+      'absentDates': absentDates,
+      'paidLeaveDates': paidLeaveDates,
+      'unpaidLeaveDates': unpaidLeaveDates,
+      'halfDayDates': halfDayDates,
+      'unmarkedDates': unmarkedDates,
+      'dailyStatus': dailyStatus,
     };
+  }
+
+  /// Helper to convert a list of day numbers (e.g. [1, 2, 3, 5, 8]) into compact human-readable ranges ("1-3, 5, 8").
+  static String formatDayRanges(List<dynamic> rawDays) {
+    if (rawDays.isEmpty) return 'None';
+    final days = rawDays.map((e) => (e as num).toInt()).toList()..sort();
+    final ranges = <String>[];
+    int start = days[0];
+    int prev = days[0];
+
+    for (int i = 1; i < days.length; i++) {
+      if (days[i] == prev + 1) {
+        prev = days[i];
+      } else {
+        ranges.add(start == prev ? '$start' : '$start-$prev');
+        start = days[i];
+        prev = days[i];
+      }
+    }
+    ranges.add(start == prev ? '$start' : '$start-$prev');
+    return ranges.join(', ');
   }
 
   static int getAbsentDaysCount(String employeeId, String monthKey) {
@@ -2087,18 +2905,28 @@ class FinanceLocalStorage {
           final halfDayType = val['halfDayType']?.toString();
 
           if (status == 'leave') {
-            if (leaveType == 'sick') sick += 1.0;
-            else if (leaveType == 'casual') casual += 1.0;
-            else if (leaveType == 'annual') annual += 1.0;
-            else if (leaveType == 'unpaid') unpaid += 1.0;
-            else sick += 1.0;
+            if (leaveType == 'sick') {
+              sick += 1.0;
+            } else if (leaveType == 'casual') {
+              casual += 1.0;
+            } else if (leaveType == 'annual') {
+              annual += 1.0;
+            } else if (leaveType == 'unpaid') {
+              unpaid += 1.0;
+            } else {
+              sick += 1.0;
+            }
           } else if (status == 'half_day') {
             if (halfDayType == 'unpaid') {
               unpaid += 0.5;
             } else {
-              if (leaveType == 'sick') sick += 0.5;
-              else if (leaveType == 'annual') annual += 0.5;
-              else casual += 0.5;
+              if (leaveType == 'sick') {
+                sick += 0.5;
+              } else if (leaveType == 'annual') {
+                annual += 0.5;
+              } else {
+                casual += 0.5;
+              }
             }
           }
         }
@@ -2673,25 +3501,27 @@ class FinanceLocalStorage {
   }
 
   static List<String> getRolesForDepartment(String dept) {
-    final normDept = dept.trim();
+    final normDept = normalizeDepartment(dept).toLowerCase();
     final defaultRoles = <String>[];
-    if (normDept.toLowerCase() == 'administration' || normDept.toLowerCase() == 'admin') {
+    if (normDept.contains('admin')) {
       defaultRoles.addAll(['Chairman', 'CEO', 'HQ Manager', 'Admin', 'Branch Manager', 'IT']);
-    } else if (normDept.toLowerCase() == 'dispensary') {
+    } else if (normDept.contains('dispens')) {
       defaultRoles.addAll(['Supervisor', 'Dispenser', 'Receptionist', 'Doctor']);
-    } else if (normDept.toLowerCase() == 'office') {
+    } else if (normDept.contains('office')) {
       defaultRoles.addAll(['Sweeper', 'CEO', 'Admin', 'IT', 'Office Boy', 'Branch Manager']);
-    } else if (normDept.toLowerCase() == 'madrassa') {
+    } else if (normDept.contains('madras')) {
       defaultRoles.addAll(['Madrassa Teacher', 'Madrassa Admin', 'Principal', 'Khateeb', 'Imam', 'Moazan']);
-    } else if (normDept.toLowerCase() == 'school') {
-      defaultRoles.addAll(['Peon', 'Admin', 'Principal']);
-    } else if (normDept.toLowerCase() == 'dasterkhwaan') {
+    } else if (normDept.contains('school')) {
+      defaultRoles.addAll(['Teacher', 'Peon', 'Admin', 'Principal']);
+    } else if (normDept.contains('daster') || normDept.contains('dastar')) {
       defaultRoles.addAll(['Helper', 'Cook']);
+    } else if (normDept.contains('security') || normDept.contains('maintenance')) {
+      defaultRoles.addAll(['Security Guard', 'CCTV Operator', 'Maintenance Tech', 'Electrician', 'Janitor']);
     } else {
       defaultRoles.addAll(['Helper', 'Staff', 'Manager']);
     }
 
-    final custom = getCustomRolesForDepartment(normDept);
+    final custom = getCustomRolesForDepartment(dept.trim());
     for (final r in custom) {
       if (!defaultRoles.contains(r)) {
         defaultRoles.add(r);
@@ -2789,8 +3619,18 @@ class FinanceLocalStorage {
   }
 
   static List<String> _getKnownBranchIds(String branchId) {
-    if (branchId.isNotEmpty && branchId != 'all' && branchId != 'global') {
-      return [branchId.toLowerCase().trim()];
+    final clean = branchId.toLowerCase().trim();
+    if (clean.isNotEmpty && clean != 'all' && clean != 'global') {
+      if (clean == 'karachi') {
+        return ['karachi', 'saddar', 'haji_camp', 'kapaya'];
+      }
+      if (clean.contains('saddar') || clean.contains('kapaya')) {
+        return ['saddar', 'kapaya'];
+      }
+      if (clean.contains('haji')) {
+        return ['haji_camp'];
+      }
+      return [clean];
     }
     final empBranches = employeesBox.values
         .whereType<Map>()
@@ -2798,13 +3638,18 @@ class FinanceLocalStorage {
         .where((b) => b.isNotEmpty && b != 'all' && b != 'global')
         .toSet()
         .toList();
-    if (empBranches.isNotEmpty) return empBranches;
-    return ['gujrat', 'sialkot', 'rawalpindi', 'karachi'];
+    if (empBranches.isNotEmpty) {
+      if (empBranches.any((b) => b == 'karachi')) {
+        empBranches.addAll(['karachi', 'saddar', 'haji_camp', 'kapaya']);
+      }
+      return empBranches.toSet().toList();
+    }
+    return ['gujrat', 'sialkot', 'rawalpindi', 'karachi', 'saddar', 'haji_camp'];
   }
 
   // ── Firestore Download Operations ─────────────────────────────────────────
-  static Future<void> downloadEmployees(String branchId, {bool force = false}) async {
-    final key = 'employees_$branchId';
+  static Future<void> downloadEmployees(String branchId, {bool force = false, String? camp}) async {
+    final key = 'employees_${branchId}_${camp ?? ''}';
     if (!force && !_shouldRefresh(key)) {
       debugPrint('[FinanceLS] Skipping downloadEmployees — cache is fresh');
       return;
@@ -2837,6 +3682,25 @@ class FinanceLocalStorage {
             Hive.box(LocalStorageService.biometricCredentialsBox).delete(localId).ignore();
           }
           continue;
+        }
+
+        // Strict Camp isolation: Ensure Saddar downloads only Saddar, and Haji downloads only Haji
+        final empCamp = getEmployeeCamp(data).toLowerCase();
+        final empBranch = (data['branchId'] ?? '').toString().toLowerCase().trim();
+
+        final reqIsSaddar = branchId.toLowerCase().contains('saddar') || (camp != null && camp.toLowerCase().contains('saddar'));
+        final reqIsHaji = branchId.toLowerCase().contains('haji') || (camp != null && camp.toLowerCase().contains('haji'));
+
+        if (reqIsSaddar) {
+          final isSaddar = empCamp.contains('saddar') || empBranch.contains('saddar') || empBranch.contains('kapaya');
+          if (!isSaddar && (empCamp.contains('haji') || empBranch.contains('haji'))) {
+            continue; // Skip Haji Camp staff when downloading Saddar Camp
+          }
+        } else if (reqIsHaji) {
+          final isHaji = empCamp.contains('haji') || empBranch.contains('haji');
+          if (!isHaji && (empCamp.contains('saddar') || empBranch.contains('saddar') || empBranch.contains('kapaya'))) {
+            continue; // Skip Saddar Camp staff when downloading Haji Camp
+          }
         }
 
         final localRecord = box.get(localId);
@@ -3002,8 +3866,9 @@ class FinanceLocalStorage {
     }
   }
 
-  static Future<void> downloadAttendance(String branchId, {bool force = false, String? specificDateStr}) async {
-    final key = 'attendance_$branchId';
+  static Future<void> downloadAttendance(String branchId, {bool force = false, String? specificDateStr, String? monthKey, String? camp}) async {
+    final effectiveMonthKey = monthKey ?? (specificDateStr == null ? DateFormat('yyyy-MM').format(DateTime.now()) : null);
+    final key = 'attendance_${branchId}_${camp ?? ''}${effectiveMonthKey != null ? '_$effectiveMonthKey' : ''}';
     if (!force && specificDateStr == null && !_shouldRefresh(key)) {
       debugPrint('[FinanceLS] Skipping downloadAttendance — cache is fresh');
       return;
@@ -3012,6 +3877,61 @@ class FinanceLocalStorage {
       final box = attendanceBox;
       final Map<String, dynamic> updates = {};
       final List<String> branches = _getKnownBranchIds(branchId);
+
+      void processDoc(dynamic doc, String dStr) {
+        final employeeId = doc.id;
+        final rKey = '${employeeId}_$dStr';
+        final localRecord = box.get(rKey);
+
+        final data = doc.data() as Map<String, dynamic>;
+        final record = Map<String, dynamic>.from(data);
+        for (final field in ['markedAt', 'createdAt', 'updatedAt']) {
+          if (record[field] is Timestamp) {
+            record[field] = (record[field] as Timestamp).toDate().toIso8601String();
+          }
+        }
+
+        final empId = (record['employeeId'] ?? record['localId'] ?? record['id'])?.toString();
+
+        // Strict Camp isolation for downloaded attendance
+        final reqIsSaddar = branchId.toLowerCase().contains('saddar') || (camp != null && camp.toLowerCase().contains('saddar'));
+        final reqIsHaji = branchId.toLowerCase().contains('haji') || (camp != null && camp.toLowerCase().contains('haji'));
+
+        if (reqIsSaddar || reqIsHaji) {
+          final matchedEmp = getEmployee(employeeId) ?? (empId != null ? getEmployee(empId) : null);
+          if (matchedEmp != null) {
+            final empCamp = getEmployeeCamp(matchedEmp).toLowerCase();
+            final empBranch = (matchedEmp['branchId'] ?? '').toString().toLowerCase().trim();
+            if (reqIsSaddar && !empCamp.contains('saddar') && !empBranch.contains('saddar') && !empBranch.contains('kapaya')) {
+              return; // Exclude Haji Camp attendance when downloading Saddar
+            }
+            if (reqIsHaji && !empCamp.contains('haji') && !empBranch.contains('haji')) {
+              return; // Exclude Saddar attendance when downloading Haji Camp
+            }
+          }
+        }
+
+        final isPending = localRecord is Map && localRecord['syncStatus'] == 'pending';
+        record['syncStatus'] = isPending ? 'pending' : 'synced';
+
+        final existingLocal = localRecord is Map ? Map<String, dynamic>.from(localRecord) : null;
+        final existingUpdate = updates[rKey] is Map ? Map<String, dynamic>.from(updates[rKey] as Map) : null;
+        final merged = mergeAttendanceRecordMaps(existingUpdate, mergeAttendanceRecordMaps(existingLocal, record));
+        final sanitized = _sanitize(merged ?? record);
+        updates[rKey] = sanitized;
+
+        if (empId != null && empId.isNotEmpty && empId != employeeId) {
+          final aliasKey = '${empId}_$dStr';
+          final existingAlias = updates[aliasKey] is Map ? Map<String, dynamic>.from(updates[aliasKey] as Map) : null;
+          updates[aliasKey] = _sanitize(mergeAttendanceRecordMaps(existingAlias, sanitized) ?? sanitized);
+        }
+        final pin = (record['pin'] ?? record['biometricPin'])?.toString().trim();
+        if (pin != null && pin.isNotEmpty && pin != employeeId) {
+          final pinKey = '${pin}_$dStr';
+          final existingPin = updates[pinKey] is Map ? Map<String, dynamic>.from(updates[pinKey] as Map) : null;
+          updates[pinKey] = _sanitize(mergeAttendanceRecordMaps(existingPin, sanitized) ?? sanitized);
+        }
+      }
 
       for (final bId in branches) {
         try {
@@ -3022,53 +3942,51 @@ class FinanceLocalStorage {
                 .collection('employee_attendance')
                 .doc(specificDateStr)
                 .collection('records')
-                .get();
+                .get()
+                .timeout(const Duration(seconds: 4));
 
             for (final doc in recSnap.docs) {
-              final employeeId = doc.id;
-              final rKey = '${employeeId}_$specificDateStr';
-              final localRecord = box.get(rKey);
-              if (localRecord is Map && localRecord['syncStatus'] == 'pending') continue;
-
-              final data = doc.data();
-              final record = Map<String, dynamic>.from(data);
-              record['syncStatus'] = 'synced';
-              for (final field in ['markedAt', 'createdAt', 'updatedAt']) {
-                if (record[field] is Timestamp) {
-                  record[field] = (record[field] as Timestamp).toDate().toIso8601String();
-                }
-              }
-              updates[rKey] = _sanitize(record);
+              processDoc(doc, specificDateStr);
             }
+          } else if (effectiveMonthKey != null && effectiveMonthKey.isNotEmpty) {
+            final dateDocsSnap = await FirebaseFirestore.instance
+                .collection('branches')
+                .doc(bId)
+                .collection('employee_attendance')
+                .where(FieldPath.documentId, isGreaterThanOrEqualTo: '$effectiveMonthKey-01')
+                .where(FieldPath.documentId, isLessThanOrEqualTo: '$effectiveMonthKey-31')
+                .get()
+                .timeout(const Duration(seconds: 4));
+
+            await Future.wait(dateDocsSnap.docs.map((dateDoc) async {
+              try {
+                final dStr = dateDoc.id;
+                final recSnap = await dateDoc.reference.collection('records').get().timeout(const Duration(seconds: 3));
+                for (final doc in recSnap.docs) {
+                  processDoc(doc, dStr);
+                }
+              } catch (_) {}
+            }));
           } else {
+            final fetchLimit = force ? 31 : 14;
             final dateDocsSnap = await FirebaseFirestore.instance
                 .collection('branches')
                 .doc(bId)
                 .collection('employee_attendance')
                 .orderBy(FieldPath.documentId, descending: true)
-                .limit(5)
-                .get();
+                .limit(fetchLimit)
+                .get()
+                .timeout(const Duration(seconds: 4));
 
-            for (final dateDoc in dateDocsSnap.docs) {
-              final dStr = dateDoc.id;
-              final recSnap = await dateDoc.reference.collection('records').get();
-              for (final doc in recSnap.docs) {
-                final employeeId = doc.id;
-                final rKey = '${employeeId}_$dStr';
-                final localRecord = box.get(rKey);
-                if (localRecord is Map && localRecord['syncStatus'] == 'pending') continue;
-
-                final data = doc.data();
-                final record = Map<String, dynamic>.from(data);
-                record['syncStatus'] = 'synced';
-                for (final field in ['markedAt', 'createdAt', 'updatedAt']) {
-                  if (record[field] is Timestamp) {
-                    record[field] = (record[field] as Timestamp).toDate().toIso8601String();
-                  }
+            await Future.wait(dateDocsSnap.docs.map((dateDoc) async {
+              try {
+                final dStr = dateDoc.id;
+                final recSnap = await dateDoc.reference.collection('records').get().timeout(const Duration(seconds: 3));
+                for (final doc in recSnap.docs) {
+                  processDoc(doc, dStr);
                 }
-                updates[rKey] = _sanitize(record);
-              }
-            }
+              } catch (_) {}
+            }));
           }
         } catch (be) {
           debugPrint('[FinanceLS] Branch $bId attendance download note: $be');
@@ -3079,8 +3997,10 @@ class FinanceLocalStorage {
         await box.putAll(updates);
         await box.flush();
       }
+      await deduplicateAndMergeAttendanceRecords();
+      await _markRefreshed(key);
       await _markRefreshed('attendance_$branchId');
-      debugPrint('[FinanceLS] Downloaded ${updates.length} attendance records for $branchId');
+      debugPrint('[FinanceLS] Downloaded and merged ${updates.length} attendance records for $branchId');
     } catch (e) {
       debugPrint('[FinanceLS] downloadAttendance error: $e');
     }
@@ -3740,7 +4660,7 @@ class FinanceLocalStorage {
   }
 
   /// Scans local_employees for duplicate profiles (e.g. shadow lowercase user account + title-cased HR record)
-  /// and automatically consolidates them into the single authoritative record.
+  /// and automatically consolidates them into the single authoritative record, non-destructively merging all data.
   static Future<int> deduplicateEmployeeRecords() async {
     if (!Hive.isBoxOpen(LocalStorageService.employeesBox)) return 0;
     final empBox = employeesBox;
@@ -3804,18 +4724,69 @@ class FinanceLocalStorage {
         final loserId = (loser['localId'] ?? loser['id']).toString();
         if (loserId == winnerId) continue;
 
-        // Merge any valuable loser attributes into winner
-        final loserPin = (loser['biometricPin'] ?? loser['pin'] ?? '').toString().trim();
-        final winnerPin = (winner['biometricPin'] ?? winner['pin'] ?? '').toString().trim();
-        if (winnerPin.isEmpty && loserPin.isNotEmpty) {
-          winner['biometricPin'] = loserPin;
-          winner['pin'] = loserPin;
+        // Comprehensive merge of all valuable loser attributes into winner
+        final mergedWinner = _mergeEmployeeData(winner, loser);
+        winner.addAll(mergedWinner);
+
+        // Migrate & merge loser's attendance records in attendanceBox into winner
+        if (Hive.isBoxOpen(LocalStorageService.attendanceBox)) {
+          final attBox = attendanceBox;
+          final attKeys = List.from(attBox.keys);
+          for (final attKey in attKeys) {
+            final attVal = attBox.get(attKey);
+            if (attVal is! Map) continue;
+            final recEmpId = (attVal['employeeId'] ?? attVal['localId'] ?? attVal['id'])?.toString();
+            final keyStr = attKey.toString();
+            final matchesLoser = recEmpId == loserId || keyStr.startsWith('${loserId}_');
+            if (matchesLoser) {
+              final dateStr = (attVal['date'] ?? (keyStr.length >= 10 ? keyStr.substring(keyStr.length - 10) : '')).toString();
+              if (dateStr.isNotEmpty) {
+                final canonicalKey = '${winnerId}_$dateStr';
+                final existingCanonical = attBox.get(canonicalKey);
+                final mergedAtt = mergeAttendanceRecordMaps(
+                  existingCanonical is Map ? Map<String, dynamic>.from(existingCanonical) : null,
+                  Map<String, dynamic>.from(attVal),
+                );
+                if (mergedAtt != null) {
+                  mergedAtt['employeeId'] = winnerId;
+                  mergedAtt['localId'] = canonicalKey;
+                  mergedAtt['employeeName'] = winner['name'];
+                  await attBox.put(canonicalKey, _sanitize(mergedAtt));
+                }
+                if (attKey != canonicalKey) {
+                  await attBox.delete(attKey);
+                }
+              }
+            }
+          }
         }
 
-        final loserUser = loser['userId'] ?? loser['linkedUserId'];
-        if ((winner['userId'] == null || winner['userId'].toString().isEmpty) && loserUser != null) {
-          winner['userId'] = loserUser;
-          winner['linkedUserId'] = loserUser;
+        // Migrate advance loan records in financeLoansBox
+        if (Hive.isBoxOpen(LocalStorageService.financeLoansBox)) {
+          final advBox = FinanceLoansStorage.loansBox;
+          for (final advKey in advBox.keys) {
+            final advVal = advBox.get(advKey);
+            if (advVal is Map && (advVal['employeeId'] == loserId || advVal['localId'] == loserId)) {
+              final advMap = Map<String, dynamic>.from(advVal);
+              advMap['employeeId'] = winnerId;
+              advMap['employeeName'] = winner['name'];
+              await advBox.put(advKey, _sanitize(advMap));
+            }
+          }
+        }
+
+        // Migrate salary records in salaryLedgerBox
+        if (Hive.isBoxOpen(LocalStorageService.salaryLedgerBox)) {
+          final slBox = Hive.box(LocalStorageService.salaryLedgerBox);
+          for (final slKey in slBox.keys) {
+            final slVal = slBox.get(slKey);
+            if (slVal is Map && (slVal['employeeId'] == loserId)) {
+              final slMap = Map<String, dynamic>.from(slVal);
+              slMap['employeeId'] = winnerId;
+              slMap['employeeName'] = winner['name'];
+              await slBox.put(slKey, _sanitize(slMap));
+            }
+          }
         }
 
         // Delete loser locally
@@ -3860,7 +4831,112 @@ class FinanceLocalStorage {
       await empBox.flush();
       SyncService().triggerUpload();
     }
+
+    // After deduplicating employees, run attendance deduplication and merge
+    await deduplicateAndMergeAttendanceRecords();
+
     return deduplicatedCount;
+  }
+
+  /// Scans attendanceBox for duplicate attendance entries (e.g. punches under PIN vs employee ID vs UUID)
+  /// and consolidates them into a single canonical record for each employee and date, merging all punches.
+  static Future<int> deduplicateAndMergeAttendanceRecords() async {
+    if (!Hive.isBoxOpen(LocalStorageService.attendanceBox)) return 0;
+    final attBox = attendanceBox;
+    final keys = List.from(attBox.keys);
+
+    final groups = <String, List<MapEntry<dynamic, Map<String, dynamic>>>>{};
+    final allEmployees = getEmployees('all');
+    final pinToEmpId = <String, String>{};
+    for (final emp in allEmployees) {
+      final eId = (emp['localId'] ?? emp['id'] ?? '').toString();
+      final pin = (emp['biometricPin'] ?? emp['pin'] ?? '').toString().trim();
+      if (pin.isNotEmpty && eId.isNotEmpty) {
+        pinToEmpId[pin] = eId;
+      }
+    }
+
+    for (final k in keys) {
+      final val = attBox.get(k);
+      if (val is! Map) continue;
+      final map = Map<String, dynamic>.from(val);
+      final rawDate = (map['date'] ?? '').toString().trim();
+      final kStr = k.toString();
+      final dateStr = rawDate.isNotEmpty
+          ? rawDate
+          : (kStr.length >= 10 && kStr.contains('-') ? kStr.substring(kStr.length - 10) : '');
+      if (dateStr.length != 10) continue;
+
+      final rawEmpId = (map['employeeId'] ?? map['localId'] ?? map['id'] ?? '').toString().trim();
+      final pin = (map['pin'] ?? map['biometricPin'] ?? '').toString().trim();
+
+      String canonicalEmpId = rawEmpId;
+      final empObj = rawEmpId.isNotEmpty ? getEmployee(rawEmpId) : null;
+      if (empObj != null) {
+        canonicalEmpId = (empObj['localId'] ?? empObj['id'] ?? rawEmpId).toString();
+      } else if (pin.isNotEmpty && pinToEmpId.containsKey(pin)) {
+        canonicalEmpId = pinToEmpId[pin]!;
+      } else if (rawEmpId.isNotEmpty && pinToEmpId.containsKey(rawEmpId)) {
+        canonicalEmpId = pinToEmpId[rawEmpId]!;
+      }
+
+      if (canonicalEmpId.isEmpty) continue;
+
+      final groupKey = '${canonicalEmpId}_$dateStr';
+      groups.putIfAbsent(groupKey, () => []).add(MapEntry(k, map));
+    }
+
+    int mergedCount = 0;
+    for (final entry in groups.entries) {
+      final canonicalKey = entry.key;
+      final recList = entry.value;
+
+      final needsMerge = recList.length > 1;
+      final hasNonCanonicalKey = recList.any((e) => e.key.toString() != canonicalKey);
+
+      if (!needsMerge && !hasNonCanonicalKey) continue;
+
+      Map<String, dynamic>? merged;
+      for (final item in recList) {
+        merged = mergeAttendanceRecordMaps(merged, item.value);
+      }
+
+      if (merged != null) {
+        final parts = canonicalKey.split('_');
+        final cEmpId = parts.sublist(0, parts.length - 1).join('_');
+        final cDate = parts.last;
+        merged['employeeId'] = cEmpId;
+        merged['localId'] = canonicalKey;
+        merged['date'] = cDate;
+
+        final emp = getEmployee(cEmpId);
+        if (emp != null) {
+          merged['employeeName'] = emp['name'];
+          if (emp['branchId'] != null) merged['branchId'] = emp['branchId'];
+          final p = (emp['biometricPin'] ?? emp['pin'] ?? '').toString().trim();
+          if (p.isNotEmpty) {
+            merged['pin'] = p;
+            merged['biometricPin'] = p;
+          }
+        }
+
+        await attBox.put(canonicalKey, _sanitize(merged));
+
+        for (final item in recList) {
+          if (item.key.toString() != canonicalKey) {
+            await attBox.delete(item.key);
+          }
+        }
+
+        mergedCount++;
+        debugPrint('[FinanceLS] 🧹 Merged double attendance for $canonicalKey');
+      }
+    }
+
+    if (mergedCount > 0) {
+      await attBox.flush();
+    }
+    return mergedCount;
   }
 
   /// Non-destructive self-healing synchronizer: Normalizes employee records without deleting non-user employees

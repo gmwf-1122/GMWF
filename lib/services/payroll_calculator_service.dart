@@ -1,22 +1,13 @@
 // lib/services/payroll_calculator_service.dart
 
 import 'package:flutter/foundation.dart';
-import 'package:hive/hive.dart';
 import 'finance_local_storage.dart';
 import 'finance_loans_storage.dart';
-
-
 
 class PayrollCalculatorService {
   static final PayrollCalculatorService _instance = PayrollCalculatorService._internal();
   factory PayrollCalculatorService() => _instance;
   PayrollCalculatorService._internal();
-
-  static const String _cacheBoxName = 'payroll_cache';
-
-  Future<Box> get _cacheBox async {
-    return await Hive.openBox(_cacheBoxName);
-  }
 
   /// Calculates payroll for all employees in a branch for a given month.
   /// First attempts to call the Cloud Function via REST API, then falls back to local computation.
@@ -33,6 +24,9 @@ class PayrollCalculatorService {
     debugPrint('[PayrollCalculatorService] Running offline payroll math for branch: $branchId, month: $monthKey');
     final employees = FinanceLocalStorage.getEmployees(branchId);
     final results = <Map<String, dynamic>>[];
+
+    // Pre-index loans once for O(1) instant lookups across all employees
+    final outstandingBalances = FinanceLoansStorage.getAllEmployeeOutstandingBalances();
 
     for (final emp in employees) {
       try {
@@ -66,15 +60,8 @@ class PayrollCalculatorService {
         // 3. Compute Gross Salary
         final grossSalaryMinor = baseSalaryMinor + holidayBonusMinor + sundayOvertimeBonusMinor - absenceDeductionsMinor;
 
-        // 4. Calculate outstanding advance/loans installment recovery
-        final activeLoans = FinanceLoansStorage.getLoansForEmployee(employeeId)
-            .where((l) => l['status'] == 'active')
-            .toList();
-
-        double outstandingLoansTotalDouble = 0.0;
-        for (final loan in activeLoans) {
-          outstandingLoansTotalDouble += FinanceLoansStorage.getLoanBalance(loan);
-        }
+        // 4. Calculate outstanding advance/loans installment recovery (O(1) lookup)
+        final double outstandingLoansTotalDouble = outstandingBalances[employeeId] ?? 0.0;
         final outstandingLoansTotalMinor = (outstandingLoansTotalDouble * 100).round();
 
         final double monthlyInstallmentDouble = (emp['monthlyAdvanceInstallment'] as num?)?.toDouble() ?? 0.0;
@@ -125,10 +112,14 @@ class PayrollCalculatorService {
           'unpaidLeaves': unpaidLeaves,
           'sundayOvertimeDays': sundayOvertimeDays,
           'hasAttendanceData': hasAttData,
+          'presentDates': summary['presentDates'] ?? [],
+          'absentDates': summary['absentDates'] ?? [],
+          'paidLeaveDates': summary['paidLeaveDates'] ?? [],
           // Employee metadata for UI (avoids re-fetching in build)
           'empName': employeeName,
           'empRole': emp['role']?.toString() ?? 'Employee',
           'empDepartment': emp['department']?.toString() ?? 'Other',
+          'empCamp': emp['camp'] ?? FinanceLocalStorage.getEmployeeCamp(emp),
           'empBranchId': emp['branchId']?.toString() ?? branchId,
           'empIsActive': emp['isActive'] ?? true,
         });

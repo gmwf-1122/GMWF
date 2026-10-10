@@ -3,6 +3,8 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
+import '../utils/ui_stall_monitor.dart';
+
 /// Global Manager and NavigatorObserver that coordinates dialog backdrop blur.
 ///
 /// Architectural Guarantee:
@@ -20,7 +22,7 @@ class DialogBlurManager extends NavigatorObserver {
   static bool get isBlurEnabled {
     try {
       if (Hive.isBoxOpen('app_settings')) {
-        return Hive.box('app_settings').get('dialog_blur_enabled', defaultValue: true) as bool;
+        return Hive.box('app_settings').get('dialog_blur_enabled', defaultValue: false) as bool;
       }
     } catch (_) {}
     return true;
@@ -29,8 +31,10 @@ class DialogBlurManager extends NavigatorObserver {
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
     super.didPush(route, previousRoute);
+    UiStallMonitor.mark('push ${route.settings.name ?? route.runtimeType}');
     if (_isDialog(route)) {
       _dialogCount++;
+      debugPrint('[Dialog] opened ${route.runtimeType} (count $_dialogCount)');
       _update();
     }
   }
@@ -38,8 +42,10 @@ class DialogBlurManager extends NavigatorObserver {
   @override
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
     super.didPop(route, previousRoute);
+    UiStallMonitor.mark('pop ${route.settings.name ?? route.runtimeType}');
     if (_isDialog(route)) {
       _dialogCount = (_dialogCount - 1).clamp(0, 9999);
+      debugPrint('[Dialog] closed ${route.runtimeType} (count $_dialogCount)');
       _update();
     }
   }
@@ -112,9 +118,14 @@ class BlurOnDialogPageTransitionsBuilder extends PageTransitionsBuilder {
           curve: Curves.easeOutCubic,
           tween: Tween<double>(begin: 0.0, end: shouldBlur ? 7.0 : 0.0),
           builder: (context, sigma, innerChild) {
-            if (sigma <= 0.05) return innerChild!;
+            // Keep ImageFiltered in the tree at all times and only toggle `enabled`.
+            // Swapping `innerChild` <-> `ImageFiltered(innerChild)` changes the parent
+            // type, so Flutter disposes and recreates every State under the page
+            // (forms reset, tabs reset, panels re-run initState) each time a dialog
+            // opens or closes.
             return ImageFiltered(
-              imageFilter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+              enabled: sigma > 0.05,
+              imageFilter: ImageFilter.blur(sigmaX: sigma <= 0.05 ? 0.1 : sigma, sigmaY: sigma <= 0.05 ? 0.1 : sigma),
               child: innerChild,
             );
           },
@@ -156,9 +167,11 @@ class BlurredUnderDialogBackground extends StatelessWidget {
             curve: Curves.easeOutCubic,
             tween: Tween<double>(begin: 0.0, end: (isDialogOpen && DialogBlurManager.isBlurEnabled) ? 7.0 : 0.0),
             builder: (context, sigma, innerChild) {
-              if (sigma <= 0.05) return innerChild!;
+              // See BlurOnDialogPageTransitionsBuilder: never swap the tree shape,
+              // only toggle `enabled`, so page State survives dialogs opening/closing.
               return ImageFiltered(
-                imageFilter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma),
+                enabled: sigma > 0.05,
+                imageFilter: ImageFilter.blur(sigmaX: sigma <= 0.05 ? 0.1 : sigma, sigmaY: sigma <= 0.05 ? 0.1 : sigma),
                 child: innerChild,
               );
             },

@@ -78,6 +78,21 @@ int _ipScore(String ip, String interfaceName) {
 bool _isLikelyWifiOrEthernet(String interfaceName) {
   final name = interfaceName.toLowerCase();
 
+  // Virtual adapters first: names like "vEthernet (WSL)" contain 'eth' and
+  // would otherwise be mistaken for a real LAN adapter.
+  if (name.contains('vethernet') ||
+      name.contains('wsl') ||
+      name.contains('hyper-v') ||
+      name.contains('virtual') ||
+      name.contains('default switch') ||
+      name.contains('tailscale') ||
+      name.contains('zerotier') ||
+      name.contains('hamachi') ||
+      name.contains('npcap') ||
+      name.contains('loopback')) {
+    return false;
+  }
+
   // Explicit includes
   if (name.contains('wlan')) return true;
   if (name.contains('wifi')) return true;

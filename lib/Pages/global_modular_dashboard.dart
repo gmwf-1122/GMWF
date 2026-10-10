@@ -7,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui';
 import 'package:lottie/lottie.dart';
 
 import '../models/module_registry.dart';
@@ -33,6 +34,8 @@ import '../services/image_upload_service.dart';
 import '../services/auto_update_service.dart';
 import '../services/finance_local_storage.dart';
 import '../utils/formatters.dart';
+import '../realtime/realtime_manager.dart';
+import '../realtime/realtime_events.dart';
 
 const String _kGlobalBranchId = 'all';
 
@@ -599,6 +602,43 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
   Widget build(BuildContext context) {
     final roleTheme = RoleThemeData.fromString(_role);
 
+    // Guard against Hive lock contention (e.g. two app instances running simultaneously).
+    // Extracts the body build into a local closure so it can be called with default
+    // or loaded settings, without duplicating scaffold code.
+    Widget buildBody(Color? customColor, bool isDark) {
+      RoleThemeData t = RoleThemeData.of(roleTheme, customColor);
+      t = isDark ? t.toDarkMode() : t.toLightMode();
+      return RoleThemeScope(
+        role: roleTheme,
+        child: Builder(builder: (ctx) {
+          final isDesktop = GBreakpoint.isDesktop(ctx);
+          if (_isSupervisor) {
+            return FadeTransition(
+              opacity: _pageOpacity,
+              child: _SupervisorScaffold(state: this, t: t),
+            );
+          }
+          return FadeTransition(
+            opacity: _pageOpacity,
+            child: Scaffold(
+              backgroundColor: t.bg,
+              body: isDesktop
+                  ? Row(children: [
+                      _Sidebar(state: this, t: t),
+                      Expanded(child: _MainContent(state: this, t: t, isDesktop: true)),
+                    ])
+                  : _MobileLayout(state: this, t: t),
+            ),
+          );
+        }),
+      );
+    }
+
+    if (!Hive.isBoxOpen('app_settings')) {
+      // Box not yet open — render with default theme; will rebuild when box opens
+      return buildBody(null, false);
+    }
+
     return ValueListenableBuilder(
       valueListenable: Hive.box('app_settings').listenable(keys: ['custom_accent_color', 'is_dark_mode']),
       builder: (context, Box box, child) {
@@ -625,38 +665,7 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
         }
 
         final isDark = box.get('is_dark_mode', defaultValue: false) == true;
-
-        return RoleThemeScope(
-          role: roleTheme,
-          child: Builder(builder: (ctx) {
-            RoleThemeData t = RoleThemeData.of(roleTheme, customColor);
-            t = isDark ? t.toDarkMode() : t.toLightMode();
-            final isDesktop = GBreakpoint.isDesktop(ctx);
-
-            // ── SUPERVISOR DEDICATED LAYOUT: Bottom NavBar + Module Navigation Home Hub ──
-            if (_isSupervisor) {
-              return FadeTransition(
-                opacity: _pageOpacity,
-                child: _SupervisorScaffold(state: this, t: t),
-              );
-            }
-
-            return FadeTransition(
-              opacity: _pageOpacity,
-              child: Scaffold(
-                backgroundColor: t.bg,
-                body: isDesktop
-                    ? Row(children: [
-                        _Sidebar(state: this, t: t),
-                        Expanded(
-                            child:
-                                _MainContent(state: this, t: t, isDesktop: true)),
-                      ])
-                    : _MobileLayout(state: this, t: t),
-              ),
-            );
-          }),
-        );
+        return buildBody(customColor, isDark);
       },
     );
   }
@@ -1595,7 +1604,9 @@ class _Sidebar extends StatelessWidget {
               ],
             ),
             child: ClipRect(
-              child: Container(
+              child: BackdropFilter(
+                filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+                child: Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       begin: Alignment.topCenter,
@@ -1684,6 +1695,7 @@ class _Sidebar extends StatelessWidget {
                   ),
                 ),
               ),
+            ),
             ),
           ),
         ),
@@ -3816,8 +3828,30 @@ Future<void> _updateUserProfilePhoto({
       } catch (_) {}
     }
   } catch (e) {
-    debugPrint('[GlobalDashboard] Error syncing updated profile photo to cloud: $e');
+    debugPrint('[GlobalDashboard] Direct Firestore sync notice (will rely on durable sync queue): $e');
   }
+
+  // 5. Durable Queue for Offline Sync & Background SyncService
+  try {
+    final branchId = (state.widget.userData['branchId'] ?? 'all').toString();
+    await LocalStorageService.enqueueSync({
+      'type': 'save_user',
+      'uid': updaterUid,
+      'branchId': branchId,
+      'data': state.widget.userData,
+    });
+  } catch (e) {
+    debugPrint('[GlobalDashboard] Error enqueuing user profile sync: $e');
+  }
+
+  // 6. Broadcast updated profile over LAN WebSocket so other active stations update immediately
+  try {
+    RealtimeManager().sendMessage(RealtimeEvents.payload(
+      type: 'user_updated',
+      branchId: (state.widget.userData['branchId'] ?? 'all').toString(),
+      data: state.widget.userData,
+    ));
+  } catch (_) {}
 }
 
 String _timeOfDayString(int hour) {

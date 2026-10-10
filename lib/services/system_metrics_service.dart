@@ -1,8 +1,15 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io' as io;
 import 'package:flutter/foundation.dart';
 
+/// A reading of this PC's real resource use. A value is only shown when it was actually
+/// measured: [cpuKnown] / [ramKnown] / [diskKnown] are false when the OS query failed or the
+/// platform is unsupported, and the UI must then show "n/a" rather than an invented number.
 class SystemSnapshot {
+  final bool cpuKnown;
+  final bool ramKnown;
+  final bool diskKnown;
   final double cpuPercent; // 0.0 - 1.0
   final double ramPercent; // 0.0 - 1.0
   final double usedRamGb;
@@ -10,22 +17,25 @@ class SystemSnapshot {
   final double diskPercent; // 0.0 - 1.0
   final double usedDiskGb;
   final double totalDiskGb;
+  final String diskDrive;
   final double appProcessRamMb;
   final String cpuStatus;
-  final String networkStatus;
   final DateTime timestamp;
 
   const SystemSnapshot({
-    this.cpuPercent = 0.08,
-    this.ramPercent = 0.25,
-    this.usedRamGb = 4.0,
-    this.totalRamGb = 16.0,
-    this.diskPercent = 0.40,
-    this.usedDiskGb = 80.0,
-    this.totalDiskGb = 250.0,
-    this.appProcessRamMb = 120.0,
-    this.cpuStatus = 'Optimal',
-    this.networkStatus = 'Stable',
+    this.cpuKnown = false,
+    this.ramKnown = false,
+    this.diskKnown = false,
+    this.cpuPercent = 0,
+    this.ramPercent = 0,
+    this.usedRamGb = 0,
+    this.totalRamGb = 0,
+    this.diskPercent = 0,
+    this.usedDiskGb = 0,
+    this.totalDiskGb = 0,
+    this.diskDrive = '',
+    this.appProcessRamMb = 0,
+    this.cpuStatus = 'Measuring…',
     required this.timestamp,
   });
 }
@@ -44,7 +54,7 @@ class SystemMetricsService {
   Timer? _timer;
   bool _isQuerying = false;
 
-  void startMonitoring({Duration interval = const Duration(seconds: 60)}) {
+  void startMonitoring({Duration interval = const Duration(seconds: 30)}) {
     _timer?.cancel();
     _queryMetrics();
     _timer = Timer.periodic(interval, (_) => _queryMetrics());
@@ -56,56 +66,87 @@ class SystemMetricsService {
   }
 
   Future<void> _queryMetrics() async {
-    if (_isQuerying) return;
+    if (_isQuerying || kIsWeb) return;
     _isQuerying = true;
-
     try {
-      if (kIsWeb) {
-        _isQuerying = false;
-        return;
-      }
-
-      double cpu = 0.08;
-      double usedRamGb = 4.0;
-      double totalRamGb = 16.0;
-      double usedDiskGb = 50.0;
-      double totalDiskGb = 250.0;
-      double appRamMb = 0.0;
-
+      double appRamMb = 0;
       try {
-        appRamMb = (io.ProcessInfo.currentRss / (1024 * 1024));
+        appRamMb = io.ProcessInfo.currentRss / (1024 * 1024);
       } catch (_) {}
 
-      // In-process memory metric calculation: lightweight and 0 CPU overhead
-      final estimatedUsedGb = (appRamMb / 1024.0) + 3.5;
-      usedRamGb = estimatedUsedGb.clamp(0.5, totalRamGb);
+      var cpuKnown = false, ramKnown = false, diskKnown = false;
+      double cpu = 0, ramPct = 0, usedRam = 0, totalRam = 0, diskPct = 0, usedDisk = 0, totalDisk = 0;
+      var drive = '';
 
-      final ramPercent = (totalRamGb > 0 ? (usedRamGb / totalRamGb) : 0.25).clamp(0.01, 1.0);
-      final diskPercent = (totalDiskGb > 0 ? (usedDiskGb / totalDiskGb) : 0.40).clamp(0.01, 1.0);
-
-      String cpuStatus = 'Optimal';
-      if (cpu > 0.8) {
-        cpuStatus = 'High Load';
-      } else if (cpu > 0.4) {
-        cpuStatus = 'Moderate';
-      } else {
-        cpuStatus = 'Optimal';
+      if (io.Platform.isWindows) {
+        // One short PowerShell query (async, off the UI thread) every 30 s. Measures the whole
+        // machine: CPU load, physical memory, and the drive the app is installed on.
+        drive = io.Platform.resolvedExecutable.isNotEmpty ? io.Platform.resolvedExecutable.substring(0, 2) : 'C:';
+        const script = r'''
+$ErrorActionPreference='Stop'
+$cpu=(Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average
+$os=Get-CimInstance Win32_OperatingSystem
+$d=Get-CimInstance Win32_LogicalDisk -Filter "DeviceID='__DRIVE__'"
+@{cpu=$cpu;totalKb=$os.TotalVisibleMemorySize;freeKb=$os.FreePhysicalMemory;dsize=$d.Size;dfree=$d.FreeSpace} | ConvertTo-Json -Compress
+''';
+        try {
+          final result = await io.Process.run(
+            'powershell',
+            ['-NoProfile', '-NonInteractive', '-Command', script.replaceAll('__DRIVE__', drive)],
+          ).timeout(const Duration(seconds: 15));
+          if (result.exitCode == 0) {
+            final j = jsonDecode(result.stdout.toString().trim()) as Map<String, dynamic>;
+            final c = j['cpu'];
+            if (c is num) {
+              cpu = (c / 100).clamp(0.0, 1.0);
+              cpuKnown = true;
+            }
+            final totalKb = j['totalKb'], freeKb = j['freeKb'];
+            if (totalKb is num && freeKb is num && totalKb > 0) {
+              totalRam = totalKb / (1024 * 1024);
+              usedRam = (totalKb - freeKb) / (1024 * 1024);
+              ramPct = (usedRam / totalRam).clamp(0.0, 1.0);
+              ramKnown = true;
+            }
+            final dsize = j['dsize'], dfree = j['dfree'];
+            if (dsize is num && dfree is num && dsize > 0) {
+              totalDisk = dsize / (1024 * 1024 * 1024);
+              usedDisk = (dsize - dfree) / (1024 * 1024 * 1024);
+              diskPct = (usedDisk / totalDisk).clamp(0.0, 1.0);
+              diskKnown = true;
+            }
+          } else {
+            debugPrint('[SystemMetricsService] PowerShell exit ${result.exitCode}: ${result.stderr}');
+          }
+        } catch (e) {
+          debugPrint('[SystemMetricsService] Windows metrics query failed: $e');
+        }
       }
 
+      final cpuStatus = !cpuKnown
+          ? 'Not available'
+          : cpu > 0.8
+              ? 'High load'
+              : cpu > 0.4
+                  ? 'Moderate'
+                  : 'Low';
+
       _currentSnapshot = SystemSnapshot(
+        cpuKnown: cpuKnown,
+        ramKnown: ramKnown,
+        diskKnown: diskKnown,
         cpuPercent: cpu,
-        ramPercent: ramPercent,
-        usedRamGb: double.parse(usedRamGb.toStringAsFixed(1)),
-        totalRamGb: double.parse(totalRamGb.toStringAsFixed(1)),
-        diskPercent: diskPercent,
-        usedDiskGb: double.parse(usedDiskGb.toStringAsFixed(1)),
-        totalDiskGb: double.parse(totalDiskGb.toStringAsFixed(1)),
+        ramPercent: ramPct,
+        usedRamGb: double.parse(usedRam.toStringAsFixed(1)),
+        totalRamGb: double.parse(totalRam.toStringAsFixed(1)),
+        diskPercent: diskPct,
+        usedDiskGb: double.parse(usedDisk.toStringAsFixed(1)),
+        totalDiskGb: double.parse(totalDisk.toStringAsFixed(1)),
+        diskDrive: drive,
         appProcessRamMb: double.parse(appRamMb.toStringAsFixed(1)),
         cpuStatus: cpuStatus,
-        networkStatus: 'Stable',
         timestamp: DateTime.now(),
       );
-
       _metricsController.add(_currentSnapshot);
     } catch (e) {
       debugPrint('[SystemMetricsService] Error querying system metrics: $e');

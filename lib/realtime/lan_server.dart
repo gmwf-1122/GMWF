@@ -24,6 +24,16 @@ import '../utils/network_utils.dart';
 import '../services/auto_update_service.dart';
 
 class LanServer {
+  static bool _isRunning = false;
+  static bool get isRunning => _isRunning;
+
+  /// Real traffic counters (since process start) used by the server dashboard.
+  /// "Out" counts every payload delivered to a device; "in" every message received from one.
+  static int trafficMsgsIn = 0;
+  static int trafficMsgsOut = 0;
+  static int trafficBytesIn = 0;
+  static int trafficBytesOut = 0;
+
   HttpServer? _server;
 
   final List<WebSocket>                      _clients    = [];
@@ -58,6 +68,8 @@ class LanServer {
 
   // Staged messages received before client completed 'identify' handshake
   final Map<WebSocket, List<String>> _stagedPreHandshakeMessages = {};
+  String? _serverIp;
+  String? get serverIp => _serverIp;
 
   // ── Callbacks ──────────────────────────────────────────────────────────────
   Function(String socketId, Map<String, dynamic> info)? onClientConnected;
@@ -75,8 +87,10 @@ class LanServer {
     try {
       _server = await HttpServer.bind(
           InternetAddress.anyIPv4, port, shared: true);
+      _isRunning = true;
 
       final ipShown = forcedIp ?? 'your-LAN-IP';
+      _serverIp = ipShown;
       print('╔════════════════════════════════════════════════════════════╗');
       print('║ LAN WebSocket Server STARTED                               ║');
       print('║ Listening: 0.0.0.0:$port  (share $ipShown:$port)          ║');
@@ -122,6 +136,24 @@ class LanServer {
               await webFile.openRead().pipe(request.response);
               return;
             } catch (_) {}
+          }
+
+          // HTTP endpoint: return connected client details
+          if (request.uri.path == '/api/clients' || request.uri.path == '/clients') {
+            request.response
+              ..headers.add('Access-Control-Allow-Origin', '*')
+              ..headers.add('Access-Control-Allow-Private-Network', 'true')
+              ..headers.contentType = ContentType.json
+              ..statusCode = HttpStatus.ok
+              ..write(jsonEncode({
+                'serverIp': ipShown,
+                'port': port,
+                'clientsCount': _clientInfo.length,
+                'clients': getConnectedClients(),
+                'timestamp': DateTime.now().toIso8601String(),
+              }))
+              ..close();
+            return;
           }
 
           // HTTP health-check — LanDiscovery._verify() looks for 'GMWF'.
@@ -278,10 +310,33 @@ class LanServer {
     );
   }
 
+  // ── Stress-test support (used by StressTestEngine) ───────────────────────────
+  /// Set by the engine while a test runs; receives every `stress_*` message from a device.
+  void Function(String socketId, Map<String, dynamic> message)? onStressMessage;
+
+  /// Identified, open client connections right now.
+  List<Map<String, dynamic>> stressClientSnapshot() {
+    final out = <Map<String, dynamic>>[];
+    _clientInfo.forEach((ws, info) {
+      if (info['identified'] != true || ws.readyState != WebSocket.open) return;
+      out.add({
+        'socketId': ws.hashCode.toString(),
+        'role': info['role'],
+        'username': info['username'],
+        'clientId': info['clientId'],
+        'ip': info['ipAddress'],
+        'branchId': info['branchId'],
+      });
+    });
+    return out;
+  }
+
   // ── Handle message ─────────────────────────────────────────────────────────
   void _handleMessage(WebSocket socket, String socketId, dynamic message) {
     _lastActiveTimes[socket] = DateTime.now();
     if (message is! String) return;
+    trafficMsgsIn++;
+    trafficBytesIn += message.length;
     final trimmed = message.trim();
 
     // Ping / pong keep-alive.
@@ -321,6 +376,26 @@ class LanServer {
           return;
         }
         socket.add(jsonEncode({'type': 'auth_ack', 'status': 'authenticated'}));
+        return;
+      }
+
+      // ── Stress-test replies (probe / token / cleanup acks) ───────────────────
+      // Handled by StressTestEngine only: never saved, routed to other devices, or queued.
+      if (eventType != null && eventType.startsWith('stress_')) {
+        onStressMessage?.call(socketId, data);
+        return;
+      }
+
+      // ── Connected clients query ──────────────────────────────────────────
+      if (eventType == 'get_connected_clients' || data['type'] == 'get_connected_clients') {
+        socket.add(jsonEncode({
+          'event_type': 'connected_clients_response',
+          'serverIp': _serverIp ?? '',
+          'port': port,
+          'clientsCount': _clientInfo.length,
+          'clients': getConnectedClients(),
+          'timestamp': DateTime.now().toIso8601String(),
+        }));
         return;
       }
 
@@ -561,6 +636,8 @@ class LanServer {
 
       try {
         client.add(messageJson);
+        trafficMsgsOut++;
+        trafficBytesOut += messageJson.length;
         sentCount++;
         _messagesSent++;
       } catch (e) {
@@ -618,6 +695,8 @@ class LanServer {
     }
     try {
       socket.add(rawMessage);
+      trafficMsgsOut++;
+      trafficBytesOut += rawMessage.length;
       _messagesSent++;
       return true;
     } catch (e) {
@@ -634,6 +713,8 @@ class LanServer {
       if (client.readyState != WebSocket.open) continue;
       try {
         client.add(rawMessage);
+        trafficMsgsOut++;
+        trafficBytesOut += rawMessage.length;
         forwarded++;
         _messagesSent++;
       } catch (_) {}
@@ -700,6 +781,7 @@ class LanServer {
       print('[LanServer] Error closing server socket: $e');
     }
     _server = null;
+    _isRunning = false;
     if (!kIsWeb && PythonRunnerService.instance.isRunning) {
       try {
         await PythonRunnerService.instance.stopProcess();

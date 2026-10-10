@@ -290,7 +290,11 @@ Future<BranchStats> fetchBranchStats(String originalBranchId, {DashboardFilter? 
       final box = Hive.box(LocalStorageService.entriesBox);
       final Map<String, Map<String, dynamic>> entryMap = {};
 
+      int processedEntries = 0;
       for (final k in box.keys) {
+        if (++processedEntries % 120 == 0) {
+          await Future.delayed(Duration.zero);
+        }
         final val = box.get(k);
         if (val is! Map) continue;
         final e = Map<String, dynamic>.from(val);
@@ -390,7 +394,11 @@ Future<BranchStats> fetchBranchStats(String originalBranchId, {DashboardFilter? 
     if (Hive.isBoxOpen(LocalStorageService.dispensaryBox)) {
       final dispBox = Hive.box(LocalStorageService.dispensaryBox);
       int localDispCount = 0;
+      int processedDisp = 0;
       for (final raw in dispBox.values) {
+        if (++processedDisp % 120 == 0) {
+          await Future.delayed(Duration.zero);
+        }
         if (raw is! Map) continue;
         final d = Map<String, dynamic>.from(raw);
         final b = (d['branchId'] as String? ?? '').toLowerCase().trim();
@@ -406,9 +414,16 @@ Future<BranchStats> fetchBranchStats(String originalBranchId, {DashboardFilter? 
     }
 
     // 2b. Dasterkhwaan tokens (food tokens issued & served)
+    if (!Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)) {
+      await LocalStorageService.openBoxSafe(LocalStorageService.dasterkhwaanTokensBox);
+    }
     if (Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)) {
       final tokenBox = Hive.box(LocalStorageService.dasterkhwaanTokensBox);
+      int processedTokens = 0;
       for (final raw in tokenBox.values) {
+        if (++processedTokens % 120 == 0) {
+          await Future.delayed(Duration.zero);
+        }
         if (raw is! Map) continue;
         final t = Map<String, dynamic>.from(raw);
         final b = (t['branchId'] as String? ?? '').toLowerCase().trim();
@@ -442,7 +457,11 @@ Future<BranchStats> fetchBranchStats(String originalBranchId, {DashboardFilter? 
     if (donBoxName != null) {
       final donBox = Hive.box(donBoxName);
       final seenReceipts = <String>{};
+      int processedDon = 0;
       for (final raw in donBox.values) {
+        if (++processedDon % 120 == 0) {
+          await Future.delayed(Duration.zero);
+        }
         if (raw is! Map) continue;
         final val = Map<String, dynamic>.from(raw);
         final status = val['status']?.toString().toLowerCase();
@@ -650,6 +669,9 @@ Stream<BranchStats> _streamTodayStatsFromHive(String branchId, {DashboardFilter?
 
     // ── Food Tokens (dasterkhwaan_tokens box) ──────────────────────────────
     int das = 0, dasServed = 0;
+    if (!Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)) {
+      LocalStorageService.openBoxSafe(LocalStorageService.dasterkhwaanTokensBox);
+    }
     if (Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)) {
       final tokenBox = Hive.box(LocalStorageService.dasterkhwaanTokensBox);
       for (final raw in tokenBox.values) {
@@ -685,7 +707,7 @@ Stream<BranchStats> _streamTodayStatsFromHive(String branchId, {DashboardFilter?
   if (Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)) streams.add(Hive.box(LocalStorageService.dasterkhwaanTokensBox).watch());
 
   if (streams.isNotEmpty) {
-    await for (final _ in Rx.merge(streams)) {
+    await for (final _ in Rx.merge(streams).debounceTime(const Duration(milliseconds: 300))) {
       yield _compute();
     }
   }
@@ -787,6 +809,9 @@ Stream<BranchStats> _streamCombinedTodayStatsFromHive(List<String> ids, {Dashboa
 
     // ── 4. Food Tokens (dasterkhwaan_tokens box) ───────────────────────────
     int das = 0, dasServed = 0;
+    if (!Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)) {
+      LocalStorageService.openBoxSafe(LocalStorageService.dasterkhwaanTokensBox);
+    }
     if (Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)) {
       final tokenBox = Hive.box(LocalStorageService.dasterkhwaanTokensBox);
       for (final raw in tokenBox.values) {
@@ -820,7 +845,7 @@ Stream<BranchStats> _streamCombinedTodayStatsFromHive(List<String> ids, {Dashboa
   if (Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)) streams.add(Hive.box(LocalStorageService.dasterkhwaanTokensBox).watch());
 
   if (streams.isNotEmpty) {
-    await for (final _ in Rx.merge(streams)) {
+    await for (final _ in Rx.merge(streams).debounceTime(const Duration(milliseconds: 300))) {
       yield _compute();
     }
   }

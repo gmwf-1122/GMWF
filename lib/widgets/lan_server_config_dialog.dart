@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import '../realtime/connection_manager.dart';
+import '../realtime/realtime_manager.dart';
 
 class LanServerConfigDialog extends StatefulWidget {
   const LanServerConfigDialog({super.key});
@@ -126,15 +127,82 @@ class _LanServerConfigDialogState extends State<LanServerConfigDialog> {
     }
   }
 
+  Future<void> _runNetworkPressureTest() async {
+    try {
+      if (!Platform.isWindows) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Network pressure testing is supported on Windows.')),
+        );
+        return;
+      }
+
+      const exeName = 'gmwf_pressure_test.exe';
+      final currentExeDir = File(Platform.resolvedExecutable).parent.path;
+      final candidatePaths = [
+        p.join(currentExeDir, exeName),
+        p.join(Directory.current.path, exeName),
+        p.join(Directory.current.path, 'build', 'windows', 'x64', 'runner', 'Release', exeName),
+        p.join('E:', 'GMWF', 'gmwf', exeName),
+      ];
+
+      File? targetExe;
+      for (final cp in candidatePaths) {
+        final f = File(cp);
+        if (f.existsSync()) {
+          targetExe = f;
+          break;
+        }
+      }
+
+      if (targetExe != null) {
+        Process.run('cmd.exe', [
+          '/c',
+          'start',
+          'GMWF LAN Network Pressure & Real Device Chaos Audit',
+          'cmd.exe',
+          '/k',
+          targetExe.path,
+          '--all',
+        ]);
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('🚀 Network Pressure Test launched! Report will be saved to Desktop & opened in Notepad.'),
+              backgroundColor: Color(0xFF0F5B46),
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+      } else {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('⚠️ gmwf_pressure_test.exe not found. Run Pressure_Test_Network.bat or compile it.'),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 4),
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Error launching pressure test: $e'), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<ConnectionStatus>(
       stream: ConnectionManager().statusStream,
       initialData: ConnectionManager().status,
       builder: (context, snapshot) {
+        final rm = RealtimeManager();
         final status = snapshot.data ?? ConnectionManager().status;
-        final isConnected = status.isConnected;
-        final isSearching = status.isSearching || status.isConnecting;
+        final isConnected = status.isConnected || (rm.isConnected && rm.isServerIdentified);
+        final isSearching = !isConnected && (status.isSearching || status.isConnecting);
 
         final Color badgeColor = isConnected
             ? const Color(0xFF10B981)
@@ -346,6 +414,18 @@ class _LanServerConfigDialogState extends State<LanServerConfigDialog> {
                         label: const Text('View Log'),
                         style: TextButton.styleFrom(
                           foregroundColor: Colors.grey.shade700,
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      TextButton.icon(
+                        onPressed: _runNetworkPressureTest,
+                        icon: const Icon(Icons.speed_rounded, size: 16, color: Color(0xFF0F5B46)),
+                        label: const Text(
+                          '⚡ Pressure Test',
+                          style: TextStyle(color: Color(0xFF0F5B46), fontWeight: FontWeight.bold),
+                        ),
+                        style: TextButton.styleFrom(
+                          foregroundColor: const Color(0xFF0F5B46),
                         ),
                       ),
                       const Spacer(),

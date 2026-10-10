@@ -8,6 +8,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/services/sync_service.dart';
 import 'package:gmwf/services/camp_session_service.dart';
 import 'package:gmwf/services/master_proforma_service.dart';
 import 'package:gmwf/utils/string_similarity_helper.dart';
@@ -300,6 +301,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
 
   @override
   void dispose() {
+    debugPrint('[InventoryUpdate] page State disposed (showMode ${widget.showMode}, embedded ${widget.isEmbedded})');
     CampSessionService.activeCampNotifier.removeListener(_onActiveCampChanged);
     _regNameCtrl.removeListener(_onRegNameChanged);
     _tabCtrl.dispose();
@@ -419,7 +421,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
             'performedBy': userInfo['uid'],
             'performedByName': userInfo['username'],
             'branchId': widget.branchId,
-            'timestamp': FieldValue.serverTimestamp(),
+            'timestamp': DateTime.now().toIso8601String(),
             'createdAt': DateTime.now().toIso8601String(),
           };
           LocalStorageService.saveLocalInventoryLog(logData);
@@ -431,25 +433,26 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
             'logData': logData,
           });
 
-          if (!RealtimeManager().isConnected) {
-            LocalStorageService.enqueueSync({
-              'type': 'register_medicine',
-              'branchId': widget.branchId,
-              'medicineId': docId,
-              'data': updatedItem,
-              'logData': logData,
-            });
+          // Always enqueue sync and update Firestore directly to ensure durable cloud persistence
+          await LocalStorageService.enqueueSync({
+            'type': 'register_medicine',
+            'branchId': widget.branchId,
+            'medicineId': docId,
+            'data': updatedItem,
+            'logData': logData,
+          });
 
-            // Background fire-and-forget sync to Firestore only if not connected via LAN
-            unawaited(FirebaseFirestore.instance
-                .collection('branches')
-                .doc(widget.branchId)
-                .collection('inventory')
-                .doc(docId)
-                .update(Map<String, dynamic>.from(updatedFields)..addAll({
-                  'updatedAt': FieldValue.serverTimestamp(),
-                })).catchError((_) {}));
-          }
+          unawaited(FirebaseFirestore.instance
+              .collection('branches')
+              .doc(widget.branchId)
+              .collection('inventory')
+              .doc(docId)
+              .set(Map<String, dynamic>.from(updatedFields)..addAll({
+                'updatedAt': FieldValue.serverTimestamp(),
+              }), SetOptions(merge: true)).catchError((e) {
+                debugPrint('[InventoryUpdate] Firestore direct update error: $e');
+              }));
+          SyncService().triggerUpload();
 
           _snack('Medicine updated successfully!');
           _loadAllMedicines();
@@ -726,11 +729,12 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
             ...d,
             'quantity': dQty,
             '_docId': docId,
-            '_docIds': docId != null ? [docId] : <String>[],
+            '_docIds': docId != null ? <String>[docId] : <String>[],
           };
         } else {
           final existing = consolidated[key]!;
-          final existingDocIds = existing['_docIds'] as List<String>;
+          final existingDocIds = List<String>.from(existing['_docIds'] as List? ?? []);
+          existing['_docIds'] = existingDocIds;
           if (docId != null && !existingDocIds.contains(docId)) {
             existingDocIds.add(docId);
             existing['quantity'] = ((existing['quantity'] as num?)?.toInt() ?? 0) + dQty;
@@ -891,7 +895,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         'campName': campLabel,
         'performedBy': userInfo['uid'],
         'performedByName': userInfo['username'],
-        'timestamp': FieldValue.serverTimestamp(),
+        'timestamp': DateTime.now().toIso8601String(),
         'createdAt': DateTime.now().toIso8601String(),
       };
       await LocalStorageService.saveLocalInventoryLog(logData);
@@ -915,22 +919,33 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         });
       }
 
-      // STEP 3: If LAN is disconnected, enqueue locally so background sync uploads when connected
-      if (!RealtimeManager().isConnected) {
-        await LocalStorageService.enqueueSync({
-          'type': 'add_inventory_stock',
-          'branchId': _effectiveBranchId,
-          'dispensaryId': targetCamp,
-          'campId': targetCamp,
-          'campName': campLabel,
-          'medicineId': medId,
-          'medicineName': _selectedMed!['name'],
-          'quantity': qty,
-          'performedBy': userInfo['uid'],
-          'performedByName': userInfo['username'],
-          'logData': logData,
-        });
-      }
+      // STEP 3: Always enqueue sync and update Firestore directly so quantities stay in sync
+      await LocalStorageService.enqueueSync({
+        'type': 'add_inventory_stock',
+        'branchId': _effectiveBranchId,
+        'dispensaryId': targetCamp,
+        'campId': targetCamp,
+        'campName': campLabel,
+        'medicineId': medId,
+        'medicineName': _selectedMed!['name'],
+        'quantity': qty,
+        'performedBy': userInfo['uid'],
+        'performedByName': userInfo['username'],
+        'logData': logData,
+      });
+
+      unawaited(FirebaseFirestore.instance
+          .collection('branches')
+          .doc(_effectiveBranchId)
+          .collection('inventory')
+          .doc(medId)
+          .update({
+            'quantity': FieldValue.increment(qty),
+            'updatedAt': FieldValue.serverTimestamp(),
+          }).catchError((e) {
+            debugPrint('[InventoryUpdate] Direct Firestore addStock error: $e');
+          }));
+      SyncService().triggerUpload();
 
       _snack('+$qty added to ${_selectedMed!['name']} at $campLabel (${_currentBranchId.toUpperCase()})!');
       _clearSelection();
@@ -1240,6 +1255,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         if (val != null) return val == true;
       }
     } catch (_) {}
+    if (!mounted) return false;
     return Theme.of(context).brightness == Brightness.dark;
   }
 
@@ -2367,7 +2383,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         'campName': campLabel,
         'performedBy': userInfo['uid'],
         'performedByName': userInfo['username'],
-        'timestamp': FieldValue.serverTimestamp(),
+        'timestamp': DateTime.now().toIso8601String(),
         'createdAt': DateTime.now().toIso8601String(),
       };
       await LocalStorageService.saveLocalInventoryLog(logData);
@@ -2390,22 +2406,33 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         'logData': logData,
       });
 
-      // STEP 3: If LAN is disconnected, enqueue locally for background sync
-      if (!RealtimeManager().isConnected) {
-        await LocalStorageService.enqueueSync({
-          'type': 'add_inventory_stock',
-          'branchId': _effectiveBranchId,
-          'dispensaryId': targetCamp,
-          'campId': targetCamp,
-          'campName': campLabel,
-          'medicineId': medId,
-          'medicineName': medName,
-          'quantity': qty,
-          'performedBy': userInfo['uid'],
-          'performedByName': userInfo['username'],
-          'logData': logData,
-        });
-      }
+      // STEP 3: Always enqueue sync and update Firestore directly so quantities stay in sync
+      await LocalStorageService.enqueueSync({
+        'type': 'add_inventory_stock',
+        'branchId': _effectiveBranchId,
+        'dispensaryId': targetCamp,
+        'campId': targetCamp,
+        'campName': campLabel,
+        'medicineId': medId,
+        'medicineName': medName,
+        'quantity': qty,
+        'performedBy': userInfo['uid'],
+        'performedByName': userInfo['username'],
+        'logData': logData,
+      });
+
+      unawaited(FirebaseFirestore.instance
+          .collection('branches')
+          .doc(_effectiveBranchId)
+          .collection('inventory')
+          .doc(medId)
+          .update({
+            'quantity': FieldValue.increment(qty),
+            'updatedAt': FieldValue.serverTimestamp(),
+          }).catchError((e) {
+            debugPrint('[InventoryUpdate] Direct Firestore addStock error: $e');
+          }));
+      SyncService().triggerUpload();
 
       _snack('+$qty added to $medName at $campLabel (${_currentBranchId.toUpperCase()})!');
       _loadAllMedicines();

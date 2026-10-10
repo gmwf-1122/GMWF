@@ -1,4 +1,6 @@
 // lib/services/prescription_template_service.dart
+import 'dart:async';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -22,12 +24,12 @@ class PrescriptionTemplateService {
 
   /// Get list of templates created specifically by this doctor (max 5)
   /// Automatically synchronizes from Firestore so templates persist across any device/PC.
-  static Future<List<Map<String, dynamic>>> loadTemplates(String branchId, {String? doctorId}) async {
+  static Future<List<Map<String, dynamic>>> loadTemplates(String branchId, {String? doctorId, bool syncCloud = true}) async {
     final List<Map<String, dynamic>> list = [];
     final targetDoctor = (doctorId ?? '').trim().toLowerCase();
 
     // 1. Fetch from Firestore if doctorId is provided to sync across devices
-    if (targetDoctor.isNotEmpty) {
+    if (syncCloud && targetDoctor.isNotEmpty) {
       try {
         final box = await _getBox();
         final effectiveBranch = branchId.isNotEmpty ? branchId : 'karachi';
@@ -38,7 +40,8 @@ class PrescriptionTemplateService {
             .doc(effectiveBranch)
             .collection('doctor_templates')
             .where('doctorId', isEqualTo: doctorId)
-            .get();
+            .get()
+            .timeout(const Duration(seconds: 6));
 
         for (final doc in branchSnap.docs) {
           final data = doc.data();
@@ -52,7 +55,8 @@ class PrescriptionTemplateService {
             .collection('users')
             .doc(doctorId)
             .collection('doctor_templates')
-            .get();
+            .get()
+            .timeout(const Duration(seconds: 6));
 
         for (final doc in userSnap.docs) {
           final data = doc.data();
@@ -68,19 +72,43 @@ class PrescriptionTemplateService {
     try {
       final box = await _getBox();
 
+      final seenSignatures = <String>{};
+      final duplicates = <dynamic>[];
       for (final key in box.keys) {
         final raw = box.get(key);
         if (raw is Map) {
           final item = Map<String, dynamic>.from(raw);
           final tplDoctor = (item['doctorId'] ?? item['userId'] ?? '').toString().trim().toLowerCase();
-          
+
           // Strictly include only templates belonging to this doctor if doctorId specified
           if (targetDoctor.isNotEmpty) {
             if (tplDoctor != targetDoctor) {
               continue; // Belongs to another doctor or unassigned, skip
             }
           }
+
+          // Exact copies (same owner, name and content) are removed: earlier versions created a
+          // new template every time Save was pressed.
+          String signature;
+          try {
+            signature = '$tplDoctor|${(item['name'] ?? '').toString().trim().toLowerCase()}|'
+                '${jsonEncode(item['medicines'])}|${jsonEncode(item['labResults'])}|'
+                '${item['complaint']}|${item['diagnosis']}|${item['defaultDays']}';
+          } catch (_) {
+            signature = key.toString();
+          }
+          if (!seenSignatures.add(signature)) {
+            duplicates.add(key);
+            continue;
+          }
           list.add(item);
+        }
+      }
+      if (duplicates.isNotEmpty) {
+        debugPrint('[TemplateService] Removing ${duplicates.length} duplicate template(s)');
+        for (final key in duplicates) {
+          final id = key.toString();
+          unawaited(deleteTemplate(branchId, id, doctorId: doctorId));
         }
       }
     } catch (e) {
@@ -106,9 +134,25 @@ class PrescriptionTemplateService {
   static Future<void> saveTemplate(String branchId, Map<String, dynamic> template, {String? doctorId}) async {
     try {
       final box = await _getBox();
-      final id = template['id'] ?? 'tpl_${DateTime.now().millisecondsSinceEpoch}';
+      var id = template['id'] ?? 'tpl_${DateTime.now().millisecondsSinceEpoch}';
       final effectiveDoctorId = (doctorId ?? template['doctorId'] ?? template['userId'] ?? '').toString().trim();
       final effectiveBranch = branchId.isNotEmpty ? branchId : 'karachi';
+
+      // Saving a template whose name this doctor already uses UPDATES that template instead of
+      // creating another copy (pressing Save twice used to create duplicates with new ids).
+      final nameKey = (template['name'] ?? '').toString().trim().toLowerCase();
+      if (effectiveDoctorId.isNotEmpty && nameKey.isNotEmpty) {
+        for (final k in box.keys) {
+          final raw = box.get(k);
+          if (raw is! Map) continue;
+          final owner = (raw['doctorId'] ?? raw['userId'] ?? '').toString().trim().toLowerCase();
+          final name = (raw['name'] ?? '').toString().trim().toLowerCase();
+          if (owner == effectiveDoctorId.toLowerCase() && name == nameKey) {
+            id = raw['id']?.toString() ?? k.toString();
+            break;
+          }
+        }
+      }
 
       // Check current count for this doctor if this is a new template
       if (effectiveDoctorId.isNotEmpty) {
@@ -129,26 +173,33 @@ class PrescriptionTemplateService {
 
       await box.put(id, template);
 
-      // Cloud background sync to branch collection AND user account collection
-      try {
-        await FirebaseFirestore.instance
-            .collection('branches')
-            .doc(effectiveBranch)
-            .collection('doctor_templates')
-            .doc(id)
-            .set(template, SetOptions(merge: true));
-
-        if (effectiveDoctorId.isNotEmpty) {
+      // Cloud sync runs in the background and never blocks the UI: Firestore write futures
+      // only complete once the server acknowledges, so awaiting them left the "Save Template"
+      // dialog stuck whenever the connection was slow or the write stream was stalled.
+      final cloudCopy = Map<String, dynamic>.from(template);
+      unawaited(() async {
+        try {
           await FirebaseFirestore.instance
-              .collection('users')
-              .doc(effectiveDoctorId)
+              .collection('branches')
+              .doc(effectiveBranch)
               .collection('doctor_templates')
               .doc(id)
-              .set(template, SetOptions(merge: true));
+              .set(cloudCopy, SetOptions(merge: true))
+              .timeout(const Duration(seconds: 20));
+
+          if (effectiveDoctorId.isNotEmpty) {
+            await FirebaseFirestore.instance
+                .collection('users')
+                .doc(effectiveDoctorId)
+                .collection('doctor_templates')
+                .doc(id)
+                .set(cloudCopy, SetOptions(merge: true))
+                .timeout(const Duration(seconds: 20));
+          }
+        } catch (e) {
+          debugPrint('[TemplateService] Cloud template save deferred: $e');
         }
-      } catch (e) {
-        debugPrint('[TemplateService] Cloud template save deferred: $e');
-      }
+      }());
 
       // LAN broadcast
       try {
@@ -172,25 +223,29 @@ class PrescriptionTemplateService {
       final effectiveBranch = branchId.isNotEmpty ? branchId : 'karachi';
       final effectiveDoctorId = (doctorId ?? '').trim();
 
-      try {
-        await FirebaseFirestore.instance
-            .collection('branches')
-            .doc(effectiveBranch)
-            .collection('doctor_templates')
-            .doc(templateId)
-            .delete();
-
-        if (effectiveDoctorId.isNotEmpty) {
+      unawaited(() async {
+        try {
           await FirebaseFirestore.instance
-              .collection('users')
-              .doc(effectiveDoctorId)
+              .collection('branches')
+              .doc(effectiveBranch)
               .collection('doctor_templates')
               .doc(templateId)
-              .delete();
+              .delete()
+              .timeout(const Duration(seconds: 20));
+
+          if (effectiveDoctorId.isNotEmpty) {
+            await FirebaseFirestore.instance
+                .collection('users')
+                .doc(effectiveDoctorId)
+                .collection('doctor_templates')
+                .doc(templateId)
+                .delete()
+                .timeout(const Duration(seconds: 20));
+          }
+        } catch (e) {
+          debugPrint('[TemplateService] Cloud template delete error: $e');
         }
-      } catch (e) {
-        debugPrint('[TemplateService] Cloud template delete error: $e');
-      }
+      }());
 
       // LAN broadcast deletion
       try {

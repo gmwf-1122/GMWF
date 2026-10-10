@@ -7,6 +7,7 @@
 // Yesterday's data is historical/immutable, so — unlike the 5-minute TTL
 // cache used for "today" — we cache it indefinitely per branch+date.
 
+import 'dart:async';
 import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:flutter/material.dart';
@@ -21,6 +22,8 @@ import '../pages/madrassa/utils/madrassa_local_storage.dart';
 /// Keyed by "branchId|yyyy-MM-dd".
 final Map<String, BranchStats> _historicalStatsCache = {};
 final Map<String, _CachedLocalBranchStats> _localStatsTTLCache = {};
+
+void clearLocalStatsCache() => _localStatsTTLCache.clear();
 
 class _CachedLocalBranchStats {
   final BranchStats stats;
@@ -180,6 +183,9 @@ Future<BranchStats> fetchLocalBranchStats(String branchId, DateTime date, {bool 
 
   // 2b. Calculate food tokens from dasterkhwaan_tokens box
   try {
+    if (!Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)) {
+      await LocalStorageService.openBoxSafe(LocalStorageService.dasterkhwaanTokensBox);
+    }
     if (Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)) {
       final tokenBox = Hive.box(LocalStorageService.dasterkhwaanTokensBox);
       for (final raw in tokenBox.values) {
@@ -203,6 +209,30 @@ Future<BranchStats> fetchLocalBranchStats(String branchId, DateTime date, {bool 
     }
   } catch (e) {
     debugPrint('Error reading local food tokens: $e');
+  }
+
+  // Fast check: if local Hive had 0 food tokens for this branch, check Firestore day summary doc
+  if (das == 0) {
+    try {
+      final dasDoc = await FirebaseFirestore.instance
+          .collection('branches')
+          .doc(bId)
+          .collection('dasterkhwaan')
+          .doc(dateKeyYmd)
+          .get()
+          .timeout(const Duration(milliseconds: 2500));
+      if (dasDoc.exists) {
+        final dData = dasDoc.data() ?? {};
+        final tot = (dData['totalTokens'] as num?)?.toInt() ?? 0;
+        final srv = (dData['servedTokens'] as num?)?.toInt() ?? 0;
+        if (tot > 0) {
+          das = tot;
+          if (srv > 0) served = srv;
+          // Trigger asynchronous background download of tokens into local Hive box
+          unawaited(LocalStorageService.downloadDasterkhwaanTokens(bId, days: 2));
+        }
+      }
+    } catch (_) {}
   }
 
   // If no local entries were found, fallback to cached docs from remote
@@ -460,6 +490,7 @@ Future<BranchStats?> _fetchFirestoreBranchStats(String branchId, DateTime date) 
         final srv = (dData['servedTokens'] as num?)?.toInt() ?? 0;
         if (tot > 0) das = tot;
         if (srv > 0) served = srv;
+        unawaited(LocalStorageService.downloadDasterkhwaanTokens(bId, days: 2));
       }
       if (das == 0) {
         final dasDocDmyy = await FirebaseFirestore.instance
@@ -471,6 +502,7 @@ Future<BranchStats?> _fetchFirestoreBranchStats(String branchId, DateTime date) 
           final srv = (dData['servedTokens'] as num?)?.toInt() ?? 0;
           if (tot > 0) das = tot;
           if (srv > 0) served = srv;
+          unawaited(LocalStorageService.downloadDasterkhwaanTokens(bId, days: 2));
         }
       }
       if (das == 0) {
@@ -482,12 +514,10 @@ Future<BranchStats?> _fetchFirestoreBranchStats(String branchId, DateTime date) 
           served = tokensSnap.docs.where((d) => d.data()['served'] == true).length;
           // Populate local food tokens cache
           try {
-            if (Hive.isBoxOpen('dasterkhwaan_tokens')) {
-              final tBox = Hive.box('dasterkhwaan_tokens');
-              for (final doc in tokensSnap.docs) {
-                final d = doc.data();
-                tBox.put(doc.id, {...d, 'id': doc.id, 'branchId': bId, 'dateKey': dateKeyYmd});
-              }
+            final tBox = await LocalStorageService.openBoxSafe('dasterkhwaan_tokens');
+            for (final doc in tokensSnap.docs) {
+              final d = doc.data();
+              tBox.put(doc.id, {...d, 'id': doc.id, 'branchId': bId, 'dateKey': dateKeyYmd});
             }
           } catch (_) {}
         }
@@ -691,6 +721,9 @@ class KarachiCampBreakdown {
   });
 
   int get totalPatients => hajiCampPatients + kapayaPatients;
+  int get totalRevenue => hajiCampRevenue + kapayaRevenue;
+  int get morningTotal => hajiCampMorningPatients + kapayaMorningPatients;
+  int get eveningTotal => hajiCampEveningPatients + kapayaEveningPatients;
 }
 
 KarachiCampBreakdown? _cachedKarachiCampBreakdown;
@@ -1462,6 +1495,9 @@ Future<List<HomeLineChartPoint>> fetchLocalChartPoints(List<String> branchIds, {
 
   // Single pass 3: Food tokens
   try {
+    if (!Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)) {
+      await LocalStorageService.openBoxSafe(LocalStorageService.dasterkhwaanTokensBox);
+    }
     if (Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)) {
       final tokenBox = Hive.box(LocalStorageService.dasterkhwaanTokensBox);
       for (final raw in tokenBox.values) {

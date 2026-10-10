@@ -24,15 +24,14 @@ class NetworkHealthService {
 
   Timer? _pingTimer;
   StreamSubscription<List<ConnectivityResult>>? _connSub;
-  int _consecutiveStablePings = 0;
   bool _isChecking = false;
 
   void start() {
     _connSub?.cancel();
     _connSub = Connectivity().onConnectivityChanged.listen((results) {
       final hasInterface = results.any((r) => r != ConnectivityResult.none);
-      if (!hasInterface) {
-        _consecutiveStablePings = 0;
+      final isDesktop = !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+      if (!hasInterface && !isDesktop) {
         _updateState(NetworkQualityState.offline);
       } else {
         checkHealthNow();
@@ -62,7 +61,6 @@ class NetworkHealthService {
 
       final isDesktop = !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
       if (!hasInterface && !isDesktop) {
-        _consecutiveStablePings = 0;
         _updateState(NetworkQualityState.offline);
         return;
       }
@@ -70,20 +68,13 @@ class NetworkHealthService {
       final isPingOk = await _pingHighAvailabilityHost();
 
       if (isPingOk) {
-        _consecutiveStablePings++;
-        // On mobile, promote immediately after 1 stable ping (cellular is inherently less stable).
-        // On desktop, debounce with 2 consecutive stable pings (~10s window).
-        final threshold = (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) ? 1 : 2;
-        if (_consecutiveStablePings >= threshold || _currentState == NetworkQualityState.onlineStable) {
-          _updateState(NetworkQualityState.onlineStable);
-        }
+        // Promote immediately after 1 stable ping on all platforms
+        _updateState(NetworkQualityState.onlineStable);
       } else {
-        _consecutiveStablePings = 0;
         _updateState(NetworkQualityState.onlineUnstable);
       }
     } catch (e) {
       debugPrint('[NetworkHealthService] Health check exception: $e');
-      _consecutiveStablePings = 0;
       _updateState(NetworkQualityState.onlineUnstable);
     } finally {
       _isChecking = false;

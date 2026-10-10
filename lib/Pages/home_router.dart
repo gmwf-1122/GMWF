@@ -1,4 +1,5 @@
 // lib/pages/home_router.dart
+import '../utils/ui_stall_monitor.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -48,7 +49,8 @@ import 'madrassa/madrassa_guardian_screen.dart';
 import 'school/school_dashboard.dart';
 import '../theme/app_theme.dart';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:bitsdojo_window/bitsdojo_window.dart';
 import '../theme/role_theme_provider.dart';
 
 
@@ -74,6 +76,28 @@ class _HomeRouterState extends State<HomeRouter> {
   StreamSubscription? _revokeListener;
   Timer? _periodicUpdateTimer;
   Map<String, dynamic>? _accessRevokedData;
+  static bool _hasDispatchedCompositorWarmup = false;
+
+  void _ensureDesktopWindowComposited() {
+    if (_hasDispatchedCompositorWarmup) return;
+    _hasDispatchedCompositorWarmup = true;
+    if (!kIsWeb && Platform.isWindows) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        try {
+          WidgetsBinding.instance.scheduleWarmUpFrame();
+          if (!appWindow.isMaximized) {
+            appWindow.maximize();
+          } else {
+            final cur = appWindow.size;
+            appWindow.size = Size(cur.width, cur.height - 1);
+            Future.microtask(() {
+              try { appWindow.size = cur; } catch (_) {}
+            });
+          }
+        } catch (_) {}
+      });
+    }
+  }
 
   @override
   void initState() {
@@ -86,14 +110,7 @@ class _HomeRouterState extends State<HomeRouter> {
         final isServerMode = role == 'server';
         UpdateDialogWidget.showUpdateDialogIfNeeded(context, isServerMode: isServerMode);
 
-        final clinicRoles = {
-          'doctor', 'receptionist', 'dispenser', 'dispensar', 'pharmacist',
-          'rec+dis', 'doc+rec', 'doc+dis', 'doc+rec+dis', 'hybrid'
-        };
-        final isClinicRole = clinicRoles.contains(role) ||
-            clinicRoles.any((cr) => role.contains(cr));
-
-        if (!isServerMode && isClinicRole) {
+        if (!isServerMode) {
           final rawBranchId = (userData['branchId'] ?? '').toString().trim();
           // Executive roles (chairman, CEO) have branchId='all' — resolve to the
           // first known real branch so ConnectionManager can find the server IP.
@@ -255,11 +272,11 @@ class _HomeRouterState extends State<HomeRouter> {
     try {
       final connectivityResult = await Connectivity()
           .checkConnectivity()
-          .timeout(const Duration(milliseconds: 300));
+          .timeout(const Duration(milliseconds: 150));
       if (connectivityResult.every((r) => r == ConnectivityResult.none)) return false;
     } catch (_) {}
     try {
-      final lookup = await InternetAddress.lookup('google.com').timeout(const Duration(milliseconds: 400));
+      final lookup = await InternetAddress.lookup('google.com').timeout(const Duration(milliseconds: 250));
       if (lookup.isNotEmpty && lookup[0].rawAddress.isNotEmpty) return true;
     } catch (_) {}
     return false;
@@ -1282,6 +1299,7 @@ class _HomeRouterState extends State<HomeRouter> {
       debugPrint("HomeRouter: Routing Hybrid Role '$role' to HybridDispensaryScreen");
       LocalStorageService.ensureDoctorBoxesOpen();
       return HybridDispensaryScreen(
+        key: const PageStorageKey('hybrid_dispensary_main_screen'),
         branchId: branchId,
         userId: uid,
         userName: userName,
@@ -1470,6 +1488,7 @@ class _HomeRouterState extends State<HomeRouter> {
 
   @override
   Widget build(BuildContext context) {
+    UiStallMonitor.mark('HomeRouter.build');
     // 💡 FIX: We use a multi-stage loading to prevent the "Double Login" flicker.
     // We only redirect to login if we are CERTAIN there is no user.
     return FutureBuilder<Map<String, dynamic>?>(
@@ -1483,9 +1502,18 @@ class _HomeRouterState extends State<HomeRouter> {
           );
         }
 
-        // Only redirect if snapshot is done AND we definitely have no data.
+        // Window compositor warmup: swap front buffer cleanly to destination screen
+        _ensureDesktopWindowComposited();
+
+        // If there is no user session at all, immediately redirect to LoginPage
+        if (widget.user == null && widget.localUser == null) {
+          debugPrint("HomeRouter: No active user session — directing to LoginPage");
+          return const LoginPage();
+        }
+
+        // Only redirect or show error if snapshot is done AND we definitely have no data.
         if (snapshot.hasError || !snapshot.hasData || snapshot.data == null) {
-          debugPrint("HomeRouter: No user data found.");
+          debugPrint("HomeRouter: No user profile data found for session.");
           
           return Scaffold(
             body: Center(
@@ -1559,14 +1587,6 @@ class _HomeRouterState extends State<HomeRouter> {
               ),
             ),
           );
-        }
-
-        // ── Auth validation ──────────────────────────────────────────────────
-        // Only kick to login if there is definitely NO user (snapshot null AND
-        // Firebase currentUser null AND no offline creds).
-        if (!snapshot.hasData || snapshot.data == null) {
-          debugPrint("HomeRouter: No user data found — redirecting to LoginPage");
-          return const LoginPage();
         }
 
         final data = snapshot.data!;
@@ -2034,9 +2054,9 @@ class _UnassignedRoleRecoveryScreenState extends State<_UnassignedRoleRecoverySc
                         Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF0F766E).withOpacity(0.25),
+                            color: const Color(0xFF0F766E).withValues(alpha: 0.25),
                             shape: BoxShape.circle,
-                            border: Border.all(color: const Color(0xFF10B981).withOpacity(0.5)),
+                            border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.5)),
                           ),
                           child: const Icon(Icons.shield_outlined, size: 30, color: Color(0xFF34D399)),
                         ),
@@ -2072,7 +2092,7 @@ class _UnassignedRoleRecoveryScreenState extends State<_UnassignedRoleRecoverySc
                       child: ListView.separated(
                         shrinkWrap: true,
                         itemCount: _roleOptions.length,
-                        separatorBuilder: (_, __) => const SizedBox(height: 8),
+                        separatorBuilder: (context, index) => const SizedBox(height: 8),
                         itemBuilder: (context, idx) {
                           final item = _roleOptions[idx];
                           final isSelected = _selectedRole == item['role'];
@@ -2083,8 +2103,8 @@ class _UnassignedRoleRecoveryScreenState extends State<_UnassignedRoleRecoverySc
                               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
                               decoration: BoxDecoration(
                                 color: isSelected
-                                    ? const Color(0xFF0F766E).withOpacity(0.35)
-                                    : const Color(0xFF0F172A).withOpacity(0.6),
+                                    ? const Color(0xFF0F766E).withValues(alpha: 0.35)
+                                    : const Color(0xFF0F172A).withValues(alpha: 0.6),
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
                                   color: isSelected ? const Color(0xFF10B981) : const Color(0xFF334155),

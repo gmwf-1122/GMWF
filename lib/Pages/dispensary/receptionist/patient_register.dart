@@ -6,10 +6,11 @@ import 'package:dropdown_button2/dropdown_button2.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
 import 'dart:async';
+import 'dart:math' as math;
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:gmwf/services/firestore_service.dart';
 import 'package:gmwf/services/local_storage_service.dart';
-import 'package:gmwf/realtime/realtime_manager.dart';
-import 'package:gmwf/realtime/realtime_events.dart';
+import 'package:gmwf/services/sync_service.dart';
 import 'package:gmwf/utils/formatters.dart';
 import 'package:gmwf/design/design_system.dart';
 
@@ -17,7 +18,7 @@ class PatientRegisterPage extends StatefulWidget {
   final String branchId;
   final String receptionistId;
   final String? initialCnic;
-  final void Function(String patientId)? onPatientRegistered;
+  final void Function(String patientIdOrCnic)? onPatientRegistered;
 
   const PatientRegisterPage({
     super.key,
@@ -39,13 +40,20 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
   final _cnicController  = TextEditingController();
   final _phoneController = TextEditingController();
   final _dobController   = TextEditingController();
+  final _ageController   = TextEditingController();
 
-  String? _selectedGender;
-  String? _selectedBloodGroup;
+  String? _selectedGender = 'Male';
+  String? _selectedBloodGroup = 'N/A';
+  String? _guardianName;
+  String? _guardianPhone;
   String  _visitType     = 'Zakat';
   int     _calculatedAge = 0;
   bool    _isSaving      = false;
   bool    _isChild       = false;
+  // Child mode was forced because the CNIC belongs to a registered adult (shown inline).
+  bool    _autoSwitchedToChild = false;
+  // Bumped to replay the guardian notice's attention shake.
+  int     _guardianNoticePulse = 0;
 
   bool get _isKarachi {
     final b = widget.branchId.toLowerCase().trim();
@@ -55,6 +63,7 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
   final _nameNode        = FocusNode();
   final _cnicNode        = FocusNode();
   final _phoneNode       = FocusNode();
+  final _ageNode         = FocusNode();
   final _dobNode         = FocusNode();
   final _genderNode      = FocusNode();
   final _bloodGroupNode  = FocusNode();
@@ -64,18 +73,21 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
   final _nameKey       = GlobalKey();
   final _cnicKey       = GlobalKey();
   final _phoneKey      = GlobalKey();
+  final _ageKey        = GlobalKey();
   final _dobKey        = GlobalKey();
   final _genderKey     = GlobalKey();
   final _bloodGroupKey = GlobalKey();
   final _visitKey      = GlobalKey();
 
   final _scrollController = ScrollController();
+  Timer? _cnicDebounceTimer;
 
   List<FocusNode> get activeFocusNodes {
     return [
       _cnicNode,
       _phoneNode,
       _nameNode,
+      _ageNode,
       _dobNode,
       _genderNode,
       _bloodGroupNode,
@@ -87,17 +99,29 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
   @override
   void initState() {
     super.initState();
+    _selectedGender = 'Male';
+    _selectedBloodGroup ??= 'N/A';
     if (_isKarachi && _visitType == 'Non-Zakat') {
       _visitType = 'Zakat';
     }
     _addFocusListeners();
-    _cnicController.addListener(() {
-      _checkIfAdultExistsForCnic(_cnicController.text);
-    });
+    _cnicController.addListener(_handleCnicChanged);
     if (widget.initialCnic != null && widget.initialCnic!.isNotEmpty) {
+      _cnicController.text = _formatCnic(widget.initialCnic!);
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        prefillCnic(widget.initialCnic!);
+        _handleCnicChanged(widget.initialCnic!);
+        _nameNode.requestFocus();
       });
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant PatientRegisterPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialCnic != null &&
+        widget.initialCnic!.isNotEmpty &&
+        widget.initialCnic != oldWidget.initialCnic) {
+      prefillCnic(widget.initialCnic!);
     }
   }
 
@@ -118,30 +142,23 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
     _nameNode.addListener(()       { if (_nameNode.hasFocus)       scrollTo(_nameKey.currentContext); });
     _cnicNode.addListener(()       { if (_cnicNode.hasFocus)       scrollTo(_cnicKey.currentContext); });
     _phoneNode.addListener(()      { if (_phoneNode.hasFocus)      scrollTo(_phoneKey.currentContext); });
+    _ageNode.addListener(()        { if (_ageNode.hasFocus)        scrollTo(_ageKey.currentContext); });
     _dobNode.addListener(()        { if (_dobNode.hasFocus)        scrollTo(_dobKey.currentContext); });
     _genderNode.addListener(()     { if (_genderNode.hasFocus)     scrollTo(_genderKey.currentContext); });
     _bloodGroupNode.addListener(() { if (_bloodGroupNode.hasFocus) scrollTo(_bloodGroupKey.currentContext); });
     _visitNode.addListener(()      { if (_visitNode.hasFocus)      scrollTo(_visitKey.currentContext); });
-
-    _cnicController.addListener(() {
-      if (_isChild && _phoneController.text.trim().isEmpty) {
-        final digits = _cnicController.text.replaceAll(RegExp(r'[^0-9]'), '');
-        if (digits.length == 13) {
-          _autoFillGuardianPhoneIfChild();
-        }
-      }
-    });
   }
 
   @override
   void dispose() {
+    _cnicDebounceTimer?.cancel();
     _formScopeNode.dispose();
     _scrollController.dispose();
-    for (var c in [_nameController, _cnicController, _phoneController, _dobController]) {
+    for (var c in [_nameController, _cnicController, _phoneController, _dobController, _ageController]) {
       c.dispose();
     }
     for (var n in [
-      _nameNode, _cnicNode, _phoneNode, _dobNode,
+      _nameNode, _cnicNode, _phoneNode, _ageNode, _dobNode,
       _genderNode, _bloodGroupNode, _visitNode, _registerButtonNode,
     ]) {
       n.dispose();
@@ -149,47 +166,33 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
     super.dispose();
   }
 
-  void _autoFillGuardianPhoneIfChild([String? cnicOverride]) {
-    if (!_isChild) return;
-    final cnicInput = (cnicOverride ?? _cnicController.text).trim();
-    final digits = cnicInput.replaceAll(RegExp(r'[^0-9]'), '');
-    if (digits.length != 13) return;
-
-    final guardian = LocalStorageService.getLocalPatientByCnic(cnicInput) ??
-        LocalStorageService.getLocalPatientByCnic(digits);
-    if (guardian != null) {
-      final guardianPhone = (guardian['phone'] ?? guardian['contactPhone'])?.toString().trim();
-      if (guardianPhone != null && guardianPhone.isNotEmpty && _phoneController.text.trim().isEmpty) {
-        setState(() {
-          _phoneController.text = guardianPhone;
-        });
-      }
-    }
-  }
-
   void prefillCnic(String cnic) {
-    setState(() {
-      _cnicController.text = _formatCnic(cnic);
-      _autoFillGuardianPhoneIfChild(cnic);
-    });
-    _nameNode.requestFocus();
+    final formatted = _formatCnic(cnic);
+    if (_cnicController.text != formatted) {
+      _cnicController.text = formatted;
+    }
+    _handleCnicChanged(cnic);
+    if (mounted) {
+      setState(() {});
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _nameNode.requestFocus();
+      });
+    }
   }
 
   String _formatCnic(String input) {
     final digits = input.replaceAll(RegExp(r'[^0-9]'), '');
     if (digits.length <= 5)  return digits;
     if (digits.length <= 12) return '${digits.substring(0, 5)}-${digits.substring(5)}';
-    return '${digits.substring(0, 5)}-${digits.substring(5, 12)}-${digits.substring(12)}';
+    return '${digits.substring(0, 5)}-${digits.substring(5, 12)}-${digits.substring(12, digits.length > 13 ? 13 : digits.length)}';
   }
 
   void _calculateAge(String dob) {
     if (!RegExp(r'^\d{2}-\d{2}-\d{4}$').hasMatch(dob)) {
-      setState(() => _calculatedAge = 0);
       return;
     }
     final birth = parseDobDateTime(dob);
     if (birth == null) {
-      setState(() => _calculatedAge = 0);
       return;
     }
     final today = DateTime.now();
@@ -198,43 +201,166 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
         (today.month == birth.month && today.day < birth.day)) {
       age--;
     }
-    setState(() => _calculatedAge = age);
+    final newAge = age >= 0 ? age : 0;
+    if (_calculatedAge != newAge) {
+      setState(() => _calculatedAge = newAge);
+    }
+    if (_ageController.text != newAge.toString()) {
+      _ageController.text = newAge.toString();
+    }
+  }
+
+  void _onAgeChanged(String val) {
+    final age = int.tryParse(val.trim());
+    if (age != null && age >= 0 && age <= 130) {
+      if (_calculatedAge != age) {
+        setState(() => _calculatedAge = age);
+      }
+      final approxYear = DateTime.now().year - age;
+      final approxDob = '01-01-$approxYear';
+      if (_dobController.text != approxDob) {
+        _dobController.text = approxDob;
+      }
+    } else if (val.trim().isEmpty) {
+      if (_calculatedAge != 0) {
+        setState(() => _calculatedAge = 0);
+      }
+    }
+  }
+
+  Future<void> _pickDobDate() async {
+    final now = DateTime.now();
+    final initialDate = _calculatedAge > 0
+        ? now.subtract(Duration(days: 365 * _calculatedAge))
+        : (_isChild ? now.subtract(const Duration(days: 365 * 5)) : now.subtract(const Duration(days: 365 * 25)));
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initialDate.isAfter(now) ? now : (initialDate.year < 1900 ? DateTime(1900) : initialDate),
+      firstDate: DateTime(1900),
+      lastDate: now,
+    );
+    if (picked != null) {
+      final formatted = '${picked.day.toString().padLeft(2, '0')}-${picked.month.toString().padLeft(2, '0')}-${picked.year}';
+      _dobController.text = formatted;
+      _calculateAge(formatted);
+      if (_calculatedAge >= 0) {
+        _ageController.text = _calculatedAge.toString();
+      }
+    }
+  }
+
+  DateTime? _resolveDob() {
+    if (_dobController.text.trim().isNotEmpty) {
+      final parsed = parseDobDateTime(_dobController.text.trim());
+      if (parsed != null) return parsed;
+    }
+    final ageFromCtrl = int.tryParse(_ageController.text.trim()) ?? _calculatedAge;
+    if (ageFromCtrl > 0) {
+      return DateTime(DateTime.now().year - ageFromCtrl, 1, 1);
+    }
+    return null;
+  }
+
+  void _cleanupFormFields() {
+    _nameController.clear();
+    _cnicController.clear();
+    _phoneController.clear();
+    _dobController.clear();
+    _ageController.clear();
+    if (mounted) {
+      setState(() {
+        _guardianName       = null;
+        _guardianPhone      = null;
+        _selectedGender     = 'Male';
+        _selectedBloodGroup = 'N/A';
+        _visitType          = 'Zakat';
+        _isChild            = false;
+        _autoSwitchedToChild = false;
+        _calculatedAge      = 0;
+      });
+    }
   }
 
   Future<void> _savePatient() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Confirm Registration'),
-        content: const Text('Are you sure you want to register this patient?'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context, false),
-              child: const Text('Cancel')),
-          TextButton(
-              onPressed: () => Navigator.pop(context, true),
-              child: const Text('Confirm')),
-        ],
-      ),
-    );
-    if (confirmed != true) return;
+    if (!_formKey.currentState!.validate()) {
+      if (mounted) {
+        AppFeedback.showWarning(
+          context,
+          'Please complete all required fields',
+          subtitle: 'Ensure CNIC/Phone, Full Name, and Date of Birth or Age are entered.',
+        );
+      }
+      return;
+    }
 
     final formattedCnic = _cnicController.text.trim();
 
     setState(() => _isSaving = true);
 
     try {
-      final dob = parseDobDateTime(_dobController.text);
+      final ageFromCtrl = int.tryParse(_ageController.text.trim());
+      if (ageFromCtrl != null && ageFromCtrl >= 0) {
+        _calculatedAge = ageFromCtrl;
+      }
+
+      DateTime? dob = _resolveDob();
       if (dob == null) {
         if (mounted) {
-          AppFeedback.showWarning(context, 'Please enter a valid date of birth');
+          AppFeedback.showWarning(context, 'Please enter a valid date of birth or age');
         }
         return;
       }
 
-      if (_isChild && _calculatedAge >= 20) {
+      final enteredName = _nameController.text.trim();
+      final normEntered = enteredName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+      final rawClean = formattedCnic.replaceAll('-', '').trim();
+      final cleanBranch = LocalStorageService.sanitizeBranchId(widget.branchId);
+
+      Map<String, dynamic>? localAdult = LocalStorageService.getLocalPatientByCnic(formattedCnic) ??
+          LocalStorageService.getLocalPatientByCnic(rawClean);
+
+      // Verify Firestore in case adult was registered on another terminal in the branch
+      if (localAdult == null && rawClean.length == 13) {
+        try {
+          final doc = await FirebaseFirestore.instance
+              .collection('branches')
+              .doc(cleanBranch)
+              .collection('patients')
+              .doc(rawClean)
+              .get()
+              .timeout(const Duration(milliseconds: 600));
+          if (doc.exists && doc.data() != null) {
+            final data = doc.data()!;
+            final isAdult = data['isAdult'] != false && !(data['patientId']?.toString().contains('_child_') ?? false);
+            if (isAdult) {
+              await LocalStorageService.saveLocalPatient(data);
+              localAdult = data;
+            }
+          }
+        } catch (_) {}
+      }
+
+      bool isRegisteringAsChildOfAdult = false;
+      String? adultGuardianName;
+
+      if (localAdult != null) {
+        final isAdult = localAdult['isAdult'] != false &&
+            !(localAdult['patientId']?.toString().contains('_child_') ?? false);
+        if (isAdult) {
+          adultGuardianName = (localAdult['name'] ?? localAdult['patientName'] ?? 'Adult').toString().trim();
+          final normAdult = adultGuardianName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+
+          if (normEntered.isNotEmpty && normAdult.isNotEmpty && normEntered != normAdult) {
+            // Patient B is a different patient entering the same CNIC as Patient A!
+            // Never overwrite Patient A. Automatically register Patient B as the child of Patient A!
+            isRegisteringAsChildOfAdult = true;
+          }
+        }
+      }
+
+      final effectiveIsChild = _isChild || isRegisteringAsChildOfAdult;
+
+      if (!isRegisteringAsChildOfAdult && effectiveIsChild && _calculatedAge >= 20 && localAdult == null && formattedCnic.isEmpty) {
         if (mounted) {
           AppFeedback.showWarning(
             context,
@@ -245,73 +371,46 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
         return;
       }
 
-      final isMinor = _calculatedAge > 0 && _calculatedAge < 20;
-      final effectiveIsChild = _isChild || isMinor;
-
-      if (effectiveIsChild) {
-        if (formattedCnic.isEmpty) {
-          if (mounted) {
-            AppFeedback.showWarning(
-              context,
-              'Guardian CNIC required',
-              subtitle: 'A valid guardian CNIC is required for child registration.',
-            );
-          }
-          return;
+      if (effectiveIsChild && formattedCnic.isEmpty) {
+        if (mounted) {
+          AppFeedback.showWarning(
+            context,
+            'Guardian CNIC required',
+            subtitle: 'A valid guardian CNIC is required for child registration.',
+          );
         }
-
-        // Limitation: Do not allow registering a child if an adult is not already registered on the CNIC
-        final existingPatients = LocalStorageService.searchPatientsByCnicOrGuardian(
-          formattedCnic,
-          branchId: widget.branchId,
-        );
-
-        // An adult record must be POSITIVELY identified — check direct local adult first then list
-        final rawClean = formattedCnic.replaceAll('-', '').trim();
-        final localAdult = LocalStorageService.getLocalPatientByCnic(formattedCnic) ??
-            LocalStorageService.getLocalPatientByCnic(rawClean);
-        final hasDirectAdult = localAdult != null &&
-            localAdult['isAdult'] != false &&
-            !(localAdult['patientId']?.toString().contains('_child_') ?? false);
-
-        final adultExists = hasDirectAdult || existingPatients.any((p) {
-          final pid = (p['patientId'] ?? p['id'] ?? '').toString();
-          final isFlaggedAdult = p['isAdult'] == true;
-          final looksLikeChildRecord = pid.contains('_child_');
-          final pCnic = (p['cnic'] ?? p['patientCnic'])?.toString().replaceAll('-', '').trim();
-          return (isFlaggedAdult || pCnic == rawClean) && !looksLikeChildRecord;
-        });
-
-        if (!adultExists) {
-          if (mounted) {
-            AppFeedback.showWarning(
-              context,
-              'Cannot register child: No adult found',
-              subtitle: 'No adult (guardian) is registered under this CNIC. Please register the adult first.',
-            );
-          }
-          return;
-        }
+        return;
       }
 
-      final rawClean = formattedCnic.replaceAll('-', '').trim();
-      final localAdult = LocalStorageService.getLocalPatientByCnic(formattedCnic) ??
-          LocalStorageService.getLocalPatientByCnic(rawClean);
+      if (isRegisteringAsChildOfAdult && !_isChild) {
+        setState(() {
+          _isChild = true;
+          _guardianName = adultGuardianName;
+          _guardianPhone = (localAdult!['phone'] ?? localAdult['contactPhone'])?.toString();
+          if (_guardianPhone != null && _phoneController.text.trim().isEmpty) {
+            _phoneController.text = _guardianPhone!;
+          }
+        });
+      }
+
       final guardianPhone = (localAdult?['phone'] ?? localAdult?['contactPhone'])?.toString().trim();
 
       final patientMap = <String, dynamic>{
-        'branchId':    widget.branchId,
-        'name':        _nameController.text.trim(),
+        'branchId':    cleanBranch,
+        'name':        enteredName,
         'isAdult':     !effectiveIsChild,
         'guardianCnic': effectiveIsChild ? formattedCnic : null,
+        'guardianName': effectiveIsChild ? (_guardianName ?? adultGuardianName) : null,
         'cnic':        effectiveIsChild ? null : formattedCnic,
-        'dob':         dob,
-        'gender':      _selectedGender,
+        'dob':         dob.toIso8601String(),
+        'gender':      _selectedGender ?? 'Male',
         'bloodGroup':  _selectedBloodGroup ?? 'N/A',
         'status':      (_isKarachi && _visitType == 'Non-Zakat') ? 'Zakat' : _visitType,
         'phone':       _phoneController.text.trim().isNotEmpty
             ? _phoneController.text.trim()
-            : (effectiveIsChild && guardianPhone != null && guardianPhone.isNotEmpty ? guardianPhone : null),
+            : (effectiveIsChild && guardianPhone != null && guardianPhone.isNotEmpty
+                ? guardianPhone
+                : null),
         'age':         _calculatedAge,
         'createdBy':   widget.receptionistId,
         'createdAt':   DateTime.now().toIso8601String(),
@@ -320,81 +419,105 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
       final patientId = LocalStorageService.getPatientKey(patientMap);
       patientMap['patientId'] = patientId;
 
-      if (Hive.box(LocalStorageService.patientsBox).containsKey(patientId)) {
+      final pBox = await LocalStorageService.ensureBoxOpen(LocalStorageService.patientsBox);
+      if (pBox.containsKey(patientId)) {
+        final existingRaw = pBox.get(patientId);
+        final existingName = (existingRaw is Map ? (existingRaw['name'] ?? existingRaw['patientName']) : '')?.toString().trim() ?? '';
+        final normExisting = existingName.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+
+        // SAFETY LOCK: If an existing adult has a DIFFERENT name, NEVER overwrite! Register as child!
+        if (normExisting.isNotEmpty && normEntered.isNotEmpty && normExisting != normEntered) {
+          final childKey = '${rawClean}_child_${normEntered}';
+          final childMap = Map<String, dynamic>.from(patientMap)
+            ..['isAdult'] = false
+            ..['guardianCnic'] = formattedCnic
+            ..['guardianName'] = existingName
+            ..['cnic'] = null
+            ..['patientId'] = childKey;
+
+          await LocalStorageService.saveLocalPatient(childMap, recordAudit: true);
+          try {
+            await FirestoreService().savePatient(
+              branchId: cleanBranch,
+              patientId: childKey,
+              patientData: childMap,
+            );
+          } catch (_) {}
+          SyncService().triggerUpload();
+
+          if (mounted) {
+            AppFeedback.showSuccess(
+              context,
+              'Registered "$enteredName" as Child of $existingName',
+              subtitle: 'Adult record for $existingName was preserved and not overwritten.',
+            );
+          }
+          _cleanupFormFields();
+          widget.onPatientRegistered?.call(childKey);
+          return;
+        }
+
+        // Same person coming back for a visit
+        final merged = (existingRaw is Map)
+            ? (Map<String, dynamic>.from(existingRaw)..addAll(patientMap))
+            : patientMap;
+        await LocalStorageService.saveLocalPatient(merged, recordAudit: true);
+        try {
+          await FirestoreService().savePatient(
+            branchId: cleanBranch,
+            patientId: patientId,
+            patientData: merged,
+          );
+        } catch (e) {
+          debugPrint('[PatientRegister] Firestore update notice: $e');
+        }
+        SyncService().triggerUpload();
+
         if (mounted) {
-          AppFeedback.showWarning(
+          AppFeedback.showInfo(
             context,
-            'Patient already exists',
-            subtitle: 'A patient record with this identifier is already registered.',
+            'Patient already registered',
+            subtitle: 'Navigating to token screen to issue token.',
           );
         }
+        _cleanupFormFields();
+        widget.onPatientRegistered?.call(patientId);
         return;
       }
 
-      // STEP 1 — Hive first (offline-safe, instant).
+      // STEP 1 — Hive first (offline-safe, instant, with audit trail)
       await LocalStorageService.saveLocalPatient(patientMap, recordAudit: true);
       debugPrint('[PatientRegister] ✅ Hive write: $patientId');
 
-      // STEP 2 — LAN broadcast
+      // STEP 2 — Firestore Service handles LAN broadcast, durable queue, and direct cloud push
       try {
-        RealtimeManager().sendMessage({
-          ...RealtimeEvents.payload(
-            type: RealtimeEvents.savePatient,
-            branchId: widget.branchId,
-            data: patientMap,
-          ),
-          'patientId': patientId,
-        });
-      } catch (e) {
-        debugPrint('[PatientRegister] LAN broadcast error: $e');
-      }
-
-      // STEP 3 — Durable background queue & unawaited upload
-      LocalStorageService.enqueueSync({
-        'type': 'save_patient',
-        'branchId': widget.branchId,
-        'patientId': patientId,
-        'data': patientMap,
-        'createdAt': DateTime.now().toIso8601String(),
-      });
-
-      unawaited(
-        FirestoreService().savePatient(
-          branchId:    widget.branchId,
+        await FirestoreService().savePatient(
+          branchId:    cleanBranch,
           patientId:   patientId,
           patientData: patientMap,
-        ).timeout(const Duration(seconds: 4), onTimeout: () {}).catchError((e) {
-          debugPrint('[PatientRegister] Background Firestore upload notice: $e');
-        }),
-      );
+        );
+      } catch (e) {
+        debugPrint('[PatientRegister] Firestore save notice (offline-safe): $e');
+      }
+      SyncService().triggerUpload();
 
-      final message = _isChild
-          ? 'Child patient registered successfully!'
-          : 'Adult patient registered successfully!';
+      final message = isRegisteringAsChildOfAdult
+          ? '$enteredName registered as child under Guardian $adultGuardianName!'
+          : (effectiveIsChild
+              ? 'Child patient registered successfully!'
+              : 'Adult patient registered successfully!');
       if (mounted) {
         AppFeedback.showSuccess(
           context,
           message,
-          subtitle: 'Patient record saved locally and queued for sync.',
+          subtitle: isRegisteringAsChildOfAdult
+              ? 'Adult record for $adultGuardianName was preserved without being overwritten.'
+              : 'Patient record saved locally and queued for sync.',
         );
       }
 
-      final searchKey = _isChild
-          ? (_cnicController.text.trim().isNotEmpty ? _cnicController.text.trim() : patientId)
-          : (_cnicController.text.trim().isNotEmpty ? _cnicController.text.trim() : patientId);
-      widget.onPatientRegistered?.call(searchKey);
-
-      _nameController.clear();
-      _cnicController.clear();
-      _phoneController.clear();
-      _dobController.clear();
-      setState(() {
-        _selectedGender     = null;
-        _selectedBloodGroup = null;
-        _visitType          = 'Zakat';
-        _isChild            = false;
-        _calculatedAge      = 0;
-      });
+      _cleanupFormFields();
+      widget.onPatientRegistered?.call(patientId);
     } catch (e, stack) {
       debugPrint('Patient registration failed: $e\n$stack');
       if (mounted) {
@@ -411,33 +534,199 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
 
   // ── Build ─────────────────────────────────────────────────────────────────
 
-  void _checkIfAdultExistsForCnic(String cnic) {
-    final clean = cnic.replaceAll(RegExp(r'[^0-9]'), '');
-    if (clean.length < 13) return;
+  void _handleCnicChanged([String? overrideCnic]) {
+    _cnicDebounceTimer?.cancel();
+    final input = (overrideCnic ?? _cnicController.text).trim();
+    final clean = input.replaceAll(RegExp(r'[^0-9]'), '');
+    if (clean.length < 13) {
+      if (_guardianName != null || _guardianPhone != null || _autoSwitchedToChild) {
+        setState(() {
+          _guardianName = null;
+          _guardianPhone = null;
+          // CNIC changed: undo a Child switch that was forced by the old CNIC.
+          if (_autoSwitchedToChild) {
+            _isChild = false;
+            _autoSwitchedToChild = false;
+          }
+        });
+      }
+      return;
+    }
+
+    // Debounce fast O(1) check by 150ms to eliminate UI stutter/lag during typing
+    _cnicDebounceTimer = Timer(const Duration(milliseconds: 150), () {
+      if (!mounted) return;
+      _executeCnicCheck(clean);
+    });
+  }
+
+  void _executeCnicCheck(String clean) {
     final formatted = _formatCnic(clean);
 
+    // Fast O(1) direct key lookup first before any box scan
+    Map<String, dynamic>? adultRecord;
     try {
-      final list = LocalStorageService.searchPatientsByCnicOrGuardian(
-          formatted, branchId: widget.branchId);
-      final hasAdult = list.any((p) {
-        final pid = (p['patientId'] ?? p['id'] ?? '').toString();
-        final isFlaggedAdult = p['isAdult'] == true;
-        final looksLikeChildRecord = pid.contains('_child_');
-        return isFlaggedAdult && !looksLikeChildRecord;
-      });
-      if (hasAdult && !_isChild) {
-        setState(() {
-          _isChild = true;
-        });
-        if (mounted) {
-          AppFeedback.showInfo(
-            context,
-            'Adult patient found on CNIC',
-            subtitle: 'Switched form automatically to Child registration.',
-          );
+      if (Hive.isBoxOpen(LocalStorageService.patientsBox)) {
+        final box = Hive.box(LocalStorageService.patientsBox);
+        dynamic direct = box.get(clean) ?? box.get(formatted);
+        if (direct is Map) {
+          final isAdult = direct['isAdult'] != false && !(direct['patientId']?.toString().contains('_child_') ?? false);
+          if (isAdult) adultRecord = Map<String, dynamic>.from(direct);
         }
       }
+      adultRecord ??= LocalStorageService.getLocalPatientByCnic(formatted) ??
+          LocalStorageService.getLocalPatientByCnic(clean);
     } catch (_) {}
+
+    if (adultRecord != null) {
+      final isAdult = adultRecord['isAdult'] != false &&
+          !(adultRecord['patientId']?.toString().contains('_child_') ?? false);
+      if (isAdult) {
+        final gName = (adultRecord['name'] ?? adultRecord['patientName'] ?? adultRecord['fullName'])?.toString().trim();
+        final gPhone = (adultRecord['phone'] ?? adultRecord['contactPhone'])?.toString().trim();
+        final effectiveName = (gName != null && gName.isNotEmpty) ? gName : 'Registered Adult';
+
+        final wasAdultMode = !_isChild;
+        setState(() {
+          // Automatically switch to Child mode because this CNIC already belongs to an adult!
+          // Explained by the inline notice under the CNIC field (a top toast was ignored).
+          if (wasAdultMode) {
+            _autoSwitchedToChild = true;
+            _guardianNoticePulse++;
+          }
+          _isChild = true;
+          _guardianName = effectiveName;
+          _guardianPhone = (gPhone != null && gPhone.isNotEmpty) ? gPhone : null;
+          if (_guardianPhone != null && _guardianPhone!.isNotEmpty && _phoneController.text.trim().isEmpty) {
+            _phoneController.text = _guardianPhone!;
+          }
+        });
+        return;
+      }
+    }
+
+    // If local record not found, check Firestore in background in case registered on another terminal
+    if (adultRecord == null && clean.length == 13) {
+      final cleanBranch = LocalStorageService.sanitizeBranchId(widget.branchId);
+      FirebaseFirestore.instance
+          .collection('branches')
+          .doc(cleanBranch)
+          .collection('patients')
+          .doc(clean)
+          .get()
+          .then((doc) {
+        if (!mounted) return;
+        if (doc.exists && doc.data() != null) {
+          final data = doc.data()!;
+          final isAdult = data['isAdult'] != false && !(data['patientId']?.toString().contains('_child_') ?? false);
+          if (isAdult) {
+            LocalStorageService.saveLocalPatient(data);
+            if (mounted) {
+              _executeCnicCheck(clean);
+            }
+          }
+        }
+      }).catchError((_) {});
+    }
+
+    // If in Child mode and no guardian found
+    if (_isChild && adultRecord == null) {
+      if (_guardianName != null || _guardianPhone != null) {
+        setState(() {
+          _guardianName = null;
+          _guardianPhone = null;
+        });
+      }
+    }
+  }
+
+  /// Inline notice under the CNIC field. When Child mode was forced by an existing adult it
+  /// is an amber "attention" card (with a shake), so the receptionist actually reads it;
+  /// otherwise it is a calm green guardian confirmation.
+  Widget _buildGuardianNotice(bool isMobile) {
+    final forced = _autoSwitchedToChild;
+    final accent = forced
+        ? (_isDark ? const Color(0xFFF59E0B) : const Color(0xFFE65100))
+        : (_isDark ? const Color(0xFF34D399) : const Color(0xFF2E7D32));
+    final bg = forced
+        ? (_isDark ? const Color(0xFF451A03).withValues(alpha: 0.55) : const Color(0xFFFFF3E0))
+        : (_isDark ? const Color(0xFF064E3B).withValues(alpha: 0.45) : const Color(0xFFE8F5E9));
+    final titleColor = _isDark ? Colors.white : (forced ? const Color(0xFF4E2600) : const Color(0xFF004D40));
+    final bodyColor = _isDark ? const Color(0xFFE2E8F0) : (forced ? const Color(0xFF6D4C41) : const Color(0xFF2E7D32));
+
+    final card = Container(
+      padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border(
+          left: BorderSide(color: accent, width: 5),
+          top: BorderSide(color: accent.withValues(alpha: 0.5)),
+          right: BorderSide(color: accent.withValues(alpha: 0.5)),
+          bottom: BorderSide(color: accent.withValues(alpha: 0.5)),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(color: accent.withValues(alpha: 0.15), shape: BoxShape.circle),
+            child: Icon(forced ? Icons.family_restroom_rounded : Icons.verified_user_rounded, color: accent, size: 22),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  forced ? 'Registering a CHILD of $_guardianName' : 'Guardian: $_guardianName',
+                  style: TextStyle(fontWeight: FontWeight.w800, fontSize: isMobile ? 13.5 : 15, color: titleColor),
+                ),
+                if (forced) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'This CNIC already belongs to adult patient $_guardianName, so only children can be '
+                    'added under it. To register a different adult, use their own CNIC.',
+                    style: TextStyle(fontSize: isMobile ? 12 : 13, height: 1.35, color: bodyColor),
+                  ),
+                ],
+                if (_guardianPhone != null && _guardianPhone!.isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    'Parent contact $_guardianPhone auto-filled',
+                    style: TextStyle(fontSize: isMobile ? 11 : 12, color: bodyColor),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          if (forced)
+            TextButton(
+              onPressed: () {
+                _cnicController.clear();
+                _handleCnicChanged('');
+                _cnicNode.requestFocus();
+              },
+              style: TextButton.styleFrom(foregroundColor: accent, visualDensity: VisualDensity.compact),
+              child: const Text('Change CNIC', style: TextStyle(fontWeight: FontWeight.w700)),
+            ),
+        ],
+      ),
+    );
+
+    // Short horizontal shake each time the pulse counter changes.
+    return TweenAnimationBuilder<double>(
+      key: ValueKey(_guardianNoticePulse),
+      tween: Tween(begin: 0, end: 1),
+      duration: const Duration(milliseconds: 450),
+      builder: (context, t, child) => Transform.translate(
+        offset: Offset(math.sin(t * math.pi * 6) * (1 - t) * 8, 0),
+        child: child,
+      ),
+      child: card,
+    );
   }
 
   @override
@@ -572,7 +861,25 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                               value:      false,
                               groupValue: _isChild,
                               activeColor: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF00695C),
-                              onChanged: (v) => setState(() => _isChild = v!),
+                              onChanged: (v) {
+                                final clean = _cnicController.text.replaceAll(RegExp(r'[^0-9]'), '');
+                                if (clean.length == 13) {
+                                  final existingAdult = LocalStorageService.getLocalPatientByCnic(clean) ??
+                                      LocalStorageService.getLocalPatientByCnic(_formatCnic(clean));
+                                  if (existingAdult != null &&
+                                      existingAdult['isAdult'] != false &&
+                                      !(existingAdult['patientId']?.toString().contains('_child_') ?? false)) {
+                                    // The inline notice under the CNIC field explains why; shake it.
+                                    setState(() => _guardianNoticePulse++);
+                                    return;
+                                  }
+                                }
+                                setState(() {
+                                  _isChild = false;
+                                  _guardianName = null;
+                                  _guardianPhone = null;
+                                });
+                              },
                             )),
                             Expanded(child: RadioListTile<bool>(
                               dense: true,
@@ -585,16 +892,8 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                               groupValue: _isChild,
                               activeColor: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF00695C),
                               onChanged: (v) {
-                                setState(() {
-                                  if (!_isChild && v == true) {
-                                    _nameController.clear();
-                                    _dobController.clear();
-                                  }
-                                  _isChild = v!;
-                                  if (_isChild) {
-                                    _autoFillGuardianPhoneIfChild();
-                                  }
-                                });
+                                setState(() => _isChild = v!);
+                                _handleCnicChanged();
                               },
                             )),
                           ]),
@@ -614,14 +913,21 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                       maxLength: 15,
                       inputFormatters: [CNICInputFormatter()],
                       validator: (v) {
-                        final r = RegExp(r'^\d{5}-\d{7}-\d{1}$');
-                        if (v?.isEmpty ?? true) {
+                        if (v == null || v.trim().isEmpty) {
                           return 'Enter ${_isChild ? 'Guardian ' : ''}CNIC';
                         }
-                        if (!r.hasMatch(v!)) return 'Format: 12345-1234567-1';
+                        final clean = v.replaceAll(RegExp(r'[^0-9]'), '');
+                        if (clean.length != 13) {
+                          return 'CNIC must be 13 digits (XXXXX-XXXXXXX-X)';
+                        }
                         return null;
                       },
                     ),
+
+                    if (_isChild && _guardianName != null && _guardianName!.isNotEmpty) ...[
+                      const SizedBox(height: 10),
+                      _buildGuardianNotice(isMobile),
+                    ],
                     const SizedBox(height: 12),
 
                     _buildTextField(
@@ -653,52 +959,118 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                     ),
                     const SizedBox(height: 12),
 
-                    // DOB field
-                    TextFormField(
-                      key:        _dobKey,
-                      controller: _dobController,
-                      focusNode:  _dobNode,
-                      cursorColor: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF004D40),
-                      style: TextStyle(
-                          color: _isDark ? Colors.white : const Color(0xFF004D40), fontSize: fontSize - 2),
-                      decoration: _inputDecoration(
-                          '${_isChild ? 'Child ' : ''}Date of Birth (dd-MM-yyyy)',
-                          Icons.cake),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'[0-9-]')),
-                        LengthLimitingTextInputFormatter(10),
-                        _DobFormatter(),
+                    // Age & DOB row
+                    Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        SizedBox(
+                          width: isMobile ? 110 : 135,
+                          child: TextFormField(
+                            key: _ageKey,
+                            controller: _ageController,
+                            focusNode: _ageNode,
+                            cursorColor: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF004D40),
+                            style: TextStyle(
+                              color: _isDark ? Colors.white : const Color(0xFF004D40),
+                              fontSize: fontSize - 2,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            decoration: _inputDecoration(
+                              'Age (Yrs)',
+                              Icons.hourglass_bottom_rounded,
+                            ),
+                            keyboardType: TextInputType.number,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.digitsOnly,
+                              LengthLimitingTextInputFormatter(3),
+                            ],
+                            onChanged: _onAgeChanged,
+                            textInputAction: TextInputAction.next,
+                            onFieldSubmitted: (_) => _formScopeNode.requestFocus(_dobNode),
+                            validator: (v) {
+                              final ageVal = int.tryParse(v?.trim() ?? '');
+                              final dobVal = _dobController.text.trim();
+                              if ((ageVal == null || ageVal <= 0) && dobVal.isEmpty) {
+                                return 'Enter age';
+                              }
+                              if (ageVal != null && ageVal > 130) {
+                                return 'Max 130';
+                              }
+                              return null;
+                            },
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: TextFormField(
+                            key: _dobKey,
+                            controller: _dobController,
+                            focusNode: _dobNode,
+                            cursorColor: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF004D40),
+                            style: TextStyle(
+                              color: _isDark ? Colors.white : const Color(0xFF004D40),
+                              fontSize: fontSize - 2,
+                            ),
+                            decoration: _inputDecoration(
+                              '${_isChild ? 'Child ' : ''}Date of Birth (dd-MM-yyyy)',
+                              Icons.cake,
+                              suffixIcon: IconButton(
+                                tooltip: 'Pick Date of Birth from Calendar',
+                                icon: Icon(
+                                  Icons.calendar_month_rounded,
+                                  color: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF00695C),
+                                  size: 22,
+                                ),
+                                onPressed: _pickDobDate,
+                              ),
+                            ),
+                            autocorrect: false,
+                            enableSuggestions: false,
+                            inputFormatters: [
+                              FilteringTextInputFormatter.allow(RegExp(r'[0-9-]')),
+                              LengthLimitingTextInputFormatter(10),
+                              _DobFormatter(),
+                            ],
+                            keyboardType: TextInputType.datetime,
+                            validator: (v) {
+                              final ageVal = int.tryParse(_ageController.text.trim()) ?? _calculatedAge;
+                              if ((v == null || v.trim().isEmpty) && ageVal > 0) {
+                                return null;
+                              }
+                              if (v == null || v.trim().isEmpty) {
+                                return 'Enter DOB or Age';
+                              }
+                              if (!RegExp(r'^\d{2}-\d{2}-\d{4}$').hasMatch(v.trim())) {
+                                return 'Use dd-MM-yyyy';
+                              }
+                              final p = v.trim().split('-');
+                              final day = int.tryParse(p[0]) ?? 0;
+                              final month = int.tryParse(p[1]) ?? 0;
+                              final year = int.tryParse(p[2]) ?? 0;
+                              if (day < 1 || day > 31) return 'Day: 01-31';
+                              if (month < 1 || month > 12) return 'Month: 01-12';
+                              if (year < 1900 || year > DateTime.now().year) {
+                                return 'Year: 1900-${DateTime.now().year}';
+                              }
+                              try {
+                                final date = DateTime(year, month, day);
+                                if (date.day != day || date.month != month) {
+                                  return 'Invalid date';
+                                }
+                                if (date.isAfter(DateTime.now())) {
+                                  return 'DOB cannot be in future';
+                                }
+                                return null;
+                              } catch (_) {
+                                return 'Invalid date';
+                              }
+                            },
+                            onChanged: _calculateAge,
+                            textInputAction: TextInputAction.next,
+                            onFieldSubmitted: (_) => _formScopeNode.requestFocus(_genderNode),
+                          ),
+                        ),
                       ],
-                      keyboardType: TextInputType.datetime,
-                      validator: (v) {
-                        if (v!.isEmpty) return 'Enter DOB';
-                        if (!RegExp(r'^\d{2}-\d{2}-\d{4}$').hasMatch(v)) {
-                          return 'Use dd-MM-yyyy';
-                        }
-                        final p   = v.split('-');
-                        final day   = int.tryParse(p[0]) ?? 0;
-                        final month = int.tryParse(p[1]) ?? 0;
-                        final year  = int.tryParse(p[2]) ?? 0;
-                        if (day < 1 || day > 31)   return 'Day must be 01-31';
-                        if (month < 1 || month > 12) return 'Month must be 01-12';
-                        if (year < 1900 || year > DateTime.now().year + 1) {
-                          return 'Year must be between 1900 and ${DateTime.now().year + 1}';
-                        }
-                        try {
-                          final date = DateTime(year, month, day);
-                          if (date.day != day || date.month != month) {
-                            return 'Invalid date (e.g., Feb 30 does not exist)';
-                          }
-                          _calculateAge(v);
-                          return null;
-                        } catch (_) {
-                          return 'Invalid date';
-                        }
-                      },
-                      onChanged: _calculateAge,
-                      textInputAction: TextInputAction.next,
-                      onFieldSubmitted: (_) =>
-                          _formScopeNode.requestFocus(_genderNode),
                     ),
                     const SizedBox(height: 12),
 
@@ -725,6 +1097,7 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                       items: const [
                         'N/A', 'A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'
                       ],
+                      validator: (val) => null,
                       onChanged: (val) {
                         setState(() => _selectedBloodGroup = val);
                         _formScopeNode.requestFocus(_visitNode);
@@ -900,6 +1273,8 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
       buildCounter:   (_, {required currentLength, required isFocused, maxLength}) =>
           null,
       keyboardType:   keyboardType,
+      autocorrect:    false,
+      enableSuggestions: false,
       textInputAction: TextInputAction.next,
       onFieldSubmitted: (_) {
         final idx = activeFocusNodes.indexOf(focusNode);
@@ -918,6 +1293,7 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
     required GlobalKey? key,
     required List<String> items,
     required void Function(String?) onChanged,
+    String? Function(String?)? validator,
   }) {
     final isMobile = GBreakpoint.isMobile(context);
     final isDark = _isDark;
@@ -940,17 +1316,18 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
           .toList(),
       onChanged:  onChanged,
       decoration: _inputDecoration(label, icon),
-      validator:  (val) => val == null ? 'Select $label' : null,
+      validator:  validator ?? ((val) => val == null ? 'Select $label' : null),
       style: TextStyle(color: isDark ? Colors.white : const Color(0xFF004D40), fontSize: isMobile ? 14 : 16),
     );
   }
 
-  InputDecoration _inputDecoration(String label, IconData icon) {
+  InputDecoration _inputDecoration(String label, IconData icon, {Widget? suffixIcon}) {
     final isDark = _isDark;
     return InputDecoration(
       labelText:  label,
       labelStyle: TextStyle(color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF00695C)),
       prefixIcon: Icon(icon, color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF004D40)),
+      suffixIcon: suffixIcon,
       filled:     true,
       fillColor:  isDark ? const Color(0xFF334155) : const Color(0xFFE0F2F1),
       enabledBorder: OutlineInputBorder(
@@ -973,10 +1350,11 @@ class CNICInputFormatter extends TextInputFormatter {
       TextEditingValue oldValue, TextEditingValue newValue) {
     final digits = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
     final buffer = StringBuffer();
-    for (int i = 0; i < digits.length; i++) {
-      buffer.write(digits[i]);
+    final clean = digits.length > 13 ? digits.substring(0, 13) : digits;
+    for (int i = 0; i < clean.length; i++) {
+      buffer.write(clean[i]);
       if (i == 4 || i == 11) {
-        if (i != digits.length - 1) buffer.write('-');
+        if (i != clean.length - 1) buffer.write('-');
       }
     }
     return TextEditingValue(

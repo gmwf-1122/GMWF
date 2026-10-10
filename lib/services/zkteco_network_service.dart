@@ -825,7 +825,10 @@ class ZkTecoNetworkService {
 
         existingMap['lastPunchTime'] = punchTimestamp.toIso8601String();
         existingMap['status'] = 'present';
-        existingMap['synced'] = !enqueueForSync;
+        // BUGFIX: Never falsely mark as synced before Firestore acknowledges.
+        // Always set synced=false/pending so _enqueueMissingAttendance can backfill.
+        existingMap['synced'] = false;
+        existingMap['syncStatus'] = 'pending';
         // [BUG-FIX] Write pin/biometricPin so fallback matcher in getAttendanceForDate() works
         existingMap['pin'] = credential.biometricPin;
         existingMap['biometricPin'] = credential.biometricPin;
@@ -878,7 +881,10 @@ class ZkTecoNetworkService {
           },
           'source': '$source ($location)',
           'lastPunchTime': punchTimestamp.toIso8601String(),
-          'synced': !enqueueForSync,
+          // BUGFIX: Never falsely mark as synced before Firestore acknowledges.
+          // Always set synced=false/pending so _enqueueMissingAttendance can backfill.
+          'synced': false,
+          'syncStatus': 'pending',
           // [BUG-FIX] Write pin/biometricPin so fallback matcher in getAttendanceForDate() works
           'pin': credential.biometricPin,
           'biometricPin': credential.biometricPin,

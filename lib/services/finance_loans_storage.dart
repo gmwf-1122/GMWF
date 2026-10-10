@@ -497,6 +497,40 @@ class FinanceLoansStorage {
     return total;
   }
 
+  /// High-performance pre-indexed outstanding balances map for all employees.
+  /// Runs in a single O(M) pass instead of scanning the box N times.
+  static Map<String, double> getAllEmployeeOutstandingBalances() {
+    if (!Hive.isBoxOpen(LocalStorageService.financeLoansBox)) return const {};
+    final map = <String, double>{};
+    for (final val in loansBox.values) {
+      if (val is! Map) continue;
+      final loan = Map<String, dynamic>.from(val);
+      if (loan['status'] != 'active') continue;
+      final empId = loan['employeeId']?.toString() ?? '';
+      if (empId.isEmpty) continue;
+      final bal = getLoanBalance(loan);
+      if (bal > 0) {
+        map[empId] = (map[empId] ?? 0.0) + bal;
+      }
+    }
+    return map;
+  }
+
+  /// High-performance pre-grouped active loans map by employee ID.
+  static Map<String, List<Map<String, dynamic>>> getActiveLoansGroupedByEmployee() {
+    if (!Hive.isBoxOpen(LocalStorageService.financeLoansBox)) return const {};
+    final map = <String, List<Map<String, dynamic>>>{};
+    for (final val in loansBox.values) {
+      if (val is! Map) continue;
+      final loan = Map<String, dynamic>.from(val);
+      if (loan['status'] != 'active') continue;
+      final empId = loan['employeeId']?.toString() ?? '';
+      if (empId.isEmpty) continue;
+      map.putIfAbsent(empId, () => []).add(loan);
+    }
+    return map;
+  }
+
   /// For 'fixed' loans -- has this month's usual installment been met?
   static Map<String, dynamic> getMonthlyRepaymentStatus(Map<String, dynamic> loan, String monthKey) {
     final usual = (loan['usualInstallment'] as num?)?.toDouble() ?? 0.0;

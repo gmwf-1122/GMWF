@@ -676,7 +676,7 @@ class AuthService {
 
     // 2. Sign out from Firebase Auth
     try {
-      await FirebaseAuth.instance.signOut();
+      await FirebaseAuth.instance.signOut().timeout(const Duration(seconds: 3));
     } catch (e) {
       debugPrint('[AuthService] Firebase signOut error: $e');
     }

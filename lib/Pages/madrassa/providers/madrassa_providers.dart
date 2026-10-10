@@ -7,44 +7,54 @@ import '../../../services/local_storage_service.dart';
 import '../models/madrassa_config.dart';
 
 // Selected Date Provider for the daily log (keyed by branchId)
-final madrassaSelectedDateProvider = StateProvider.family<DateTime, String>((ref, branchId) => DateTime.now());
+final madrassaSelectedDateProvider = StateProvider.family<DateTime, String>((ref, branchId) {
+  return DateTime.now();
+});
 
 // Config Stream Provider (from Hive local storage)
 final madrassaConfigProvider = StreamProvider.family<MadrassaConfig, String>((ref, branchId) {
-  return MadrassaLocalStorage.streamConfigCached(branchId);
+  final norm = MadrassaLocalStorage.normalizeBranch(branchId);
+  return MadrassaLocalStorage.streamConfigCached(norm);
 });
 
 // Students List Stream Provider (from Hive local storage + Firestore realtime sync)
 final madrassaStudentsProvider = StreamProvider.family<List<Map<String, dynamic>>, String>((ref, branchId) {
-  MadrassaLocalStorage.listenToStudentsRealtime(branchId);
-  return MadrassaLocalStorage.streamStudentsCached(branchId);
+  final norm = MadrassaLocalStorage.normalizeBranch(branchId);
+  MadrassaLocalStorage.listenToStudentsRealtime(norm);
+  return MadrassaLocalStorage.streamStudentsCached(norm);
 });
 
 // Holidays List Stream Provider (from Hive local storage)
 final madrassaHolidaysProvider = StreamProvider.family<List<Map<String, dynamic>>, String>((ref, branchId) {
-  return MadrassaLocalStorage.streamHolidaysCached(branchId);
+  final norm = MadrassaLocalStorage.normalizeBranch(branchId);
+  return MadrassaLocalStorage.streamHolidaysCached(norm);
 });
 
-// Daily Log Stream Provider (from Hive local storage)
+// Daily Log Stream Provider (from Hive local storage + Firestore realtime sync)
 final madrassaDailyLogProvider = StreamProvider.family<Map<String, dynamic>, ({String branchId, String dateKey})>((ref, arg) {
-  return MadrassaLocalStorage.streamLogCached(arg.branchId, arg.dateKey);
+  final norm = MadrassaLocalStorage.normalizeBranch(arg.branchId);
+  MadrassaLocalStorage.listenToLogsRealtime(norm, arg.dateKey);
+  return MadrassaLocalStorage.streamLogCached(norm, arg.dateKey);
 });
 
 // Monthly Logs Stream Provider (from Hive local storage)
 final madrassaMonthlyLogsProvider = StreamProvider.family<List<Map<String, dynamic>>, ({String branchId, int year, int month})>((ref, arg) {
-  return MadrassaLocalStorage.streamLogsForMonthCached(arg.branchId, arg.year, arg.month);
+  final norm = MadrassaLocalStorage.normalizeBranch(arg.branchId);
+  return MadrassaLocalStorage.streamLogsForMonthCached(norm, arg.year, arg.month);
 });
 
 // Monthly Fee Payments Stream Provider (from Hive local storage)
 final madrassaFeePaymentsProvider = StreamProvider.family<Map<String, Map<String, dynamic>>, ({String branchId, int year, int month})>((ref, arg) {
-  return MadrassaLocalStorage.streamFeePaymentsForMonthCached(arg.branchId, arg.year, arg.month);
+  final norm = MadrassaLocalStorage.normalizeBranch(arg.branchId);
+  return MadrassaLocalStorage.streamFeePaymentsForMonthCached(norm, arg.year, arg.month);
 });
 
 // Filtered Students Provider for Daily Attendance Log (combines students roster, selected date, and log maps reactively)
 final madrassaFilteredStudentsProvider = Provider.family<AsyncValue<List<Map<String, dynamic>>>, ({String branchId, DateTime selectedDate})>((ref, arg) {
-  final studentsAsync = ref.watch(madrassaStudentsProvider(arg.branchId));
+  final norm = MadrassaLocalStorage.normalizeBranch(arg.branchId);
+  final studentsAsync = ref.watch(madrassaStudentsProvider(norm));
   final dateKey = DateFormat('yyyy-MM-dd').format(arg.selectedDate);
-  final logAsync = ref.watch(madrassaDailyLogProvider((branchId: arg.branchId, dateKey: dateKey)));
+  final logAsync = ref.watch(madrassaDailyLogProvider((branchId: norm, dateKey: dateKey)));
 
   return studentsAsync.when(
     loading: () => const AsyncValue.loading(),

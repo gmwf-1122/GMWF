@@ -153,6 +153,7 @@ Widget buildDropdownField({
     ),
     child: DropdownButtonFormField<String>(
       value: value,
+      isExpanded: true,
       dropdownColor: theme.bgCard,
       decoration: InputDecoration(
         labelText: label,
@@ -172,7 +173,7 @@ Widget buildDropdownField({
                 BankLogoWidget(bankName: i, size: 20),
                 const SizedBox(width: 8),
               ],
-              Text(i, overflow: TextOverflow.ellipsis),
+              Flexible(child: Text(i, overflow: TextOverflow.ellipsis)),
             ],
           ),
         );
