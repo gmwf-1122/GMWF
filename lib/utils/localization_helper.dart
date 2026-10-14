@@ -1,6 +1,6 @@
 // lib/utils/localization_helper.dart
 import 'package:flutter/material.dart';
-import 'package:hive/hive.dart';
+import 'package:gmwf/services/user_language_service.dart';
 
 class AppLocalizations {
   static const Map<String, Map<String, String>> _localizedValues = {
@@ -97,15 +97,12 @@ class AppLocalizations {
 // Extension for ergonomic usage in Widgets
 extension LocalizationContext on BuildContext {
   String tr(String key) {
-    if (!Hive.isBoxOpen('app_settings')) return key;
-    final language = Hive.box('app_settings').get('language', defaultValue: 'en') as String;
+    final language = UserLanguageService.getLanguage();
     return AppLocalizations.translate(key, language: language);
   }
 
   bool get isUrdu {
-    if (!Hive.isBoxOpen('app_settings')) return false;
-    final language = Hive.box('app_settings').get('language', defaultValue: 'en') as String;
-    return language == 'ur';
+    return UserLanguageService.getLanguage() == 'ur';
   }
 }
 

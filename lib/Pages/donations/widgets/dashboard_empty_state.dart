@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import '../../../constants/colors.dart';
 import '../../../theme/role_theme_provider.dart';
 import '../donations_shared.dart';
@@ -84,13 +85,13 @@ class DashboardEmptyState extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(Icons.filter_alt_off_rounded,
-                        size: 18, color: Colors.white),
+                        size: 18, color: SoftPalette.gray50),
                     SizedBox(width: 10),
                     Text('Clear All Filters',
                         style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w700,
-                            color: Colors.white)),
+                            color: SoftPalette.gray50)),
                   ],
                 ),
               )
@@ -100,13 +101,13 @@ class DashboardEmptyState extends StatelessWidget {
                 child: const Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.add_rounded, size: 20, color: Colors.white),
+                    Icon(Icons.add_rounded, size: 20, color: SoftPalette.gray50),
                     SizedBox(width: 8),
                     Text('Record First Donation',
                         style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.w700,
-                            color: Colors.white)),
+                            color: SoftPalette.gray50)),
                   ],
                 ),
               ),

@@ -18,6 +18,7 @@ import '../services/auth_service.dart';
 import '../services/auto_update_service.dart';
 import '../services/image_upload_service.dart';
 import '../services/user_theme_service.dart';
+import '../services/user_language_service.dart';
 import '../widgets/update_dialog_widget.dart';
 import '../realtime/realtime_events.dart';
 import '../realtime/realtime_manager.dart';
@@ -25,6 +26,9 @@ import 'settings/biometric_device_manager_page.dart';
 import 'settings/python_terminal_screen.dart';
 import 'school/views/school_about_view.dart';
 import 'support_page.dart';
+import '../services/quota_service.dart';
+import '../services/hidden_force_uploader.dart';
+import '../widgets/queue_doctor_dialog.dart';
 
 
 class SettingsPage extends StatefulWidget {
@@ -152,10 +156,10 @@ class _SettingsPageState extends State<SettingsPage> {
     }
 
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         const SnackBar(
           content: Text('✅ Profile picture updated successfully!'),
-          backgroundColor: Colors.green,
+          backgroundColor: SoftPalette.green400,
         ),
       );
     }
@@ -229,7 +233,7 @@ class _SettingsPageState extends State<SettingsPage> {
   Future<void> _launchNetworkPressureTest() async {
     try {
       if (!Platform.isWindows) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           const SnackBar(content: Text('Network pressure testing is supported on Windows.')),
         );
         return;
@@ -263,20 +267,20 @@ class _SettingsPageState extends State<SettingsPage> {
           targetExe.path,
         ]);
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          AppToast.showSnackBar(context, 
             const SnackBar(
               content: Text('🚀 Network Pressure Audit launched! Live terminal opened; report will save to Desktop & Notepad.'),
-              backgroundColor: Color(0xFF0F5B46),
+              backgroundColor: SoftPalette.emerald600,
               duration: Duration(seconds: 4),
             ),
           );
         }
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          AppToast.showSnackBar(context, 
             const SnackBar(
               content: Text('⚠️ gmwf_pressure_test.exe not found. Run Pressure_Test_Network.bat or compile it.'),
-              backgroundColor: Colors.orange,
+              backgroundColor: SoftPalette.amber300,
               duration: Duration(seconds: 4),
             ),
           );
@@ -284,8 +288,8 @@ class _SettingsPageState extends State<SettingsPage> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Error launching audit: $e'), backgroundColor: Colors.red),
+        AppToast.showSnackBar(context, 
+          SnackBar(content: Text('Error launching audit: $e'), backgroundColor: SoftPalette.red400),
         );
       }
     }
@@ -326,7 +330,7 @@ class _SettingsPageState extends State<SettingsPage> {
           child: isSelected
               ? Icon(
                   Icons.check,
-                  color: isLightColor ? Colors.black : Colors.white,
+                  color: isLightColor ? SoftPalette.gray900 : SoftPalette.gray50,
                   size: 20,
                 )
               : null,
@@ -376,7 +380,7 @@ class _SettingsPageState extends State<SettingsPage> {
           child: isCustomSelected
               ? Icon(
                   Icons.check,
-                  color: isLightColor ? Colors.black : Colors.white,
+                  color: isLightColor ? SoftPalette.gray900 : SoftPalette.gray50,
                   size: 20,
                 )
               : Icon(
@@ -452,7 +456,7 @@ class _SettingsPageState extends State<SettingsPage> {
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                   onPressed: preview != null ? () => Navigator.pop(ctx, tempHex.toUpperCase().trim()) : null,
-                  child: const Text('Apply', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  child: const Text('Apply', style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold)),
                 ),
               ],
             );
@@ -491,7 +495,7 @@ class _SettingsPageState extends State<SettingsPage> {
           text,
           textAlign: TextAlign.center,
           style: TextStyle(
-            color: isSelected ? Colors.white : t.textPrimary,
+            color: isSelected ? SoftPalette.gray50 : t.textPrimary,
             fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
             fontSize: 13,
           ),
@@ -612,10 +616,10 @@ class _SettingsPageState extends State<SettingsPage> {
               // Show success snackbar using the outer (parent) context
               if (this.context.mounted) {
                 setState(() {});  // Trigger rebuild with updated userData
-                ScaffoldMessenger.of(this.context).showSnackBar(
+                AppToast.showSnackBar(this.context, 
                   const SnackBar(
                     content: Text('✅ Profile updated and saved locally!'),
-                    backgroundColor: Colors.green,
+                    backgroundColor: SoftPalette.green400,
                   ),
                 );
               }
@@ -695,7 +699,7 @@ class _SettingsPageState extends State<SettingsPage> {
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: t.accent,
-              foregroundColor: Colors.white,
+              foregroundColor: SoftPalette.gray50,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
             child: Text(context.tr('confirm'), style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -790,10 +794,10 @@ class _SettingsPageState extends State<SettingsPage> {
                   
                   final email = (widget.userData['email'] as String? ?? widget.userData['username'] as String? ?? '').trim();
                   if (email.isEmpty) {
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    AppToast.showSnackBar(context, 
                       const SnackBar(
                         content: Text("❌ Email/Username not found on this profile!"),
-                        backgroundColor: Colors.red,
+                        backgroundColor: SoftPalette.red400,
                       ),
                     );
                     return;
@@ -803,10 +807,10 @@ class _SettingsPageState extends State<SettingsPage> {
                   final newPw = newPwCtrl.text.trim();
 
                   if (oldPw == newPw) {
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    AppToast.showSnackBar(context, 
                       const SnackBar(
                         content: Text("⚠️ New password must be different from old password!"),
-                        backgroundColor: Colors.orange,
+                        backgroundColor: SoftPalette.amber300,
                       ),
                     );
                     return;
@@ -835,8 +839,8 @@ class _SettingsPageState extends State<SettingsPage> {
                           final errMsg = e.code == 'wrong-password' || e.code == 'invalid-credential'
                               ? "❌ Incorrect old password! Please re-type your current password."
                               : (e.message ?? "Failed to update Firebase Auth password.");
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text(errMsg), backgroundColor: Colors.red),
+                          AppToast.showSnackBar(context, 
+                            SnackBar(content: Text(errMsg), backgroundColor: SoftPalette.red400),
                           );
                         }
                         return;
@@ -850,10 +854,10 @@ class _SettingsPageState extends State<SettingsPage> {
                       if (expectedPw != null && expectedPw.isNotEmpty && expectedPw != oldPw) {
                         setDialogState(() => isSubmitting = false);
                         if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
+                          AppToast.showSnackBar(context, 
                             const SnackBar(
                               content: Text("❌ Incorrect old password! Please check your credentials."),
-                              backgroundColor: Colors.red,
+                              backgroundColor: SoftPalette.red400,
                             ),
                           );
                         }
@@ -917,14 +921,14 @@ class _SettingsPageState extends State<SettingsPage> {
 
                     if (context.mounted) {
                       Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      AppToast.showSnackBar(context, 
                         SnackBar(
                           content: Text(
                             firebaseAuthUpdated
                                 ? "✅ Password changed successfully in Cloud & Local storage!"
                                 : "✅ Password changed successfully in local database!"
                           ),
-                          backgroundColor: Colors.green,
+                          backgroundColor: SoftPalette.green400,
                           duration: const Duration(seconds: 4),
                         ),
                       );
@@ -932,19 +936,19 @@ class _SettingsPageState extends State<SettingsPage> {
                   } catch (e) {
                     setDialogState(() => isSubmitting = false);
                     if (context.mounted) {
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(content: Text("❌ Failed to change password: $e"), backgroundColor: Colors.red),
+                      AppToast.showSnackBar(context, 
+                        SnackBar(content: Text("❌ Failed to change password: $e"), backgroundColor: SoftPalette.red400),
                       );
                     }
                   }
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: t.accent,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 child: isSubmitting
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50))
                     : Text(context.tr('confirm'), style: const TextStyle(fontWeight: FontWeight.bold)),
               ),
             ],
@@ -989,8 +993,9 @@ class _SettingsPageState extends State<SettingsPage> {
 
           final activeRadius = box.get('card_radius', defaultValue: 16.0) as double;
           final activeFontScale = box.get('font_scale', defaultValue: 1.0) as double;
-          final isDarkMode = box.get('is_dark_mode', defaultValue: false) as bool;
-          final activeLanguage = box.get('language', defaultValue: 'en') as String;
+          final userPrefKey = (widget.userData['uid'] ?? widget.userData['username'])?.toString();
+          final isDarkMode = UserThemeService.isDarkMode(userPrefKey);
+          final activeLanguage = UserLanguageService.getLanguage(userPrefKey);
           final isDialogBlur = box.get('dialog_blur_enabled', defaultValue: false) as bool;
 
           return Directionality(
@@ -1066,7 +1071,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                           ),
                                           child: CircleAvatar(
                                             radius: isDesktop ? 50 : 42,
-                                            backgroundColor: isDarkMode ? const Color(0xFF161B22) : Colors.white,
+                                            backgroundColor: isDarkMode ? SoftPalette.slate900 : SoftPalette.gray50,
                                             backgroundImage: profileProvider,
                                             child: profileProvider == null
                                                 ? Text(
@@ -1089,7 +1094,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                               color: t.accent,
                                               shape: BoxShape.circle,
                                               border: Border.all(
-                                                color: isDarkMode ? const Color(0xFF161B22) : Colors.white,
+                                                color: isDarkMode ? SoftPalette.slate900 : SoftPalette.gray50,
                                                 width: 2.0,
                                               ),
                                               boxShadow: [
@@ -1101,7 +1106,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                             ),
                                             child: const Icon(
                                               Icons.camera_alt_rounded,
-                                              color: Colors.white,
+                                              color: SoftPalette.gray50,
                                               size: 13,
                                             ),
                                           ),
@@ -1160,7 +1165,7 @@ class _SettingsPageState extends State<SettingsPage> {
                               _divider(t),
                               ListTile(
                                 onTap: () async {
-                                  ScaffoldMessenger.of(context).showSnackBar(
+                                  AppToast.showSnackBar(context, 
                                     SnackBar(
                                       content: const Text('Checking for application updates...'),
                                       duration: const Duration(seconds: 2),
@@ -1172,10 +1177,10 @@ class _SettingsPageState extends State<SettingsPage> {
                                     if (info != null && info.hasUpdate) {
                                       UpdateDialogWidget.showUpdateDialogIfNeeded(context, manualCheck: true);
                                     } else {
-                                      ScaffoldMessenger.of(context).showSnackBar(
+                                      AppToast.showSnackBar(context, 
                                         SnackBar(
                                           content: Text('Your GMWF Platform is up to date (v${AutoUpdateService.currentVersion})!'),
-                                          backgroundColor: Colors.green,
+                                          backgroundColor: SoftPalette.green400,
                                         ),
                                       );
                                     }
@@ -1358,10 +1363,10 @@ class _SettingsPageState extends State<SettingsPage> {
                               leading: Container(
                                 padding: const EdgeInsets.all(10),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF38BDF8).withValues(alpha: 0.12),
+                                  color: SoftPalette.sky350.withValues(alpha: 0.12),
                                   borderRadius: BorderRadius.circular(10),
                                 ),
-                                child: const Icon(Icons.terminal_rounded, color: Color(0xFF0284C7), size: 22),
+                                child: const Icon(Icons.terminal_rounded, color: SoftPalette.sky500, size: 22),
                               ),
                               title: Text(
                                 'Python Biometric & Hardware Terminal',
@@ -1390,10 +1395,10 @@ class _SettingsPageState extends State<SettingsPage> {
                               leading: Container(
                                 padding: const EdgeInsets.all(10),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                                  color: SoftPalette.emerald350.withValues(alpha: 0.12),
                                   borderRadius: BorderRadius.circular(10),
                                 ),
-                                child: const Icon(Icons.speed_rounded, color: Color(0xFF059669), size: 22),
+                                child: const Icon(Icons.speed_rounded, color: SoftPalette.emerald500, size: 22),
                               ),
                               title: Text(
                                 'LAN Network Pressure & Real-Device Chaos Audit',
@@ -1429,11 +1434,11 @@ class _SettingsPageState extends State<SettingsPage> {
                                     height: 48,
                                     padding: const EdgeInsets.all(4),
                                     decoration: BoxDecoration(
-                                      color: Colors.white,
+                                      color: SoftPalette.gray50,
                                       borderRadius: BorderRadius.circular(12),
                                       boxShadow: [
                                         BoxShadow(
-                                          color: Colors.black.withValues(alpha: 0.06),
+                                          color: SoftPalette.gray900.withValues(alpha: 0.06),
                                           blurRadius: 8,
                                         ),
                                       ],
@@ -1467,7 +1472,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                     ),
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: t.accent,
-                                      foregroundColor: Colors.white,
+                                      foregroundColor: SoftPalette.gray50,
                                       padding: const EdgeInsets.symmetric(vertical: 14),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                     ),
@@ -1540,7 +1545,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                     ),
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: t.accent,
-                                      foregroundColor: Colors.white,
+                                      foregroundColor: SoftPalette.gray50,
                                       padding: const EdgeInsets.symmetric(vertical: 14),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                     ),
@@ -1560,6 +1565,112 @@ class _SettingsPageState extends State<SettingsPage> {
                           const SizedBox(height: 16),
                         ],
 
+                        // CLOUD SYNC & OFFLINE STORAGE
+                        _sectionLabel(t, 'Cloud Sync & Offline Storage'),
+                        ValueListenableBuilder<bool>(
+                          valueListenable: QuotaService.isQuotaExhaustedNotifier,
+                          builder: (context, _, _) => ValueListenableBuilder(
+                            valueListenable: Hive.box(LocalStorageService.syncBox).listenable(),
+                            builder: (context, box, _) {
+                              final pending = box.length;
+                              final isPaused = QuotaService.isPausedForDailyReset;
+                              final pausedUntil = QuotaService.dailyResetPauseUntil;
+                              final isClean = pending == 0;
+
+                              return RoleCard(
+                                showGlow: !isClean,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    ListTile(
+                                      contentPadding: EdgeInsets.zero,
+                                      leading: Container(
+                                        width: 48,
+                                        height: 48,
+                                        padding: const EdgeInsets.all(8),
+                                        decoration: BoxDecoration(
+                                          color: isPaused
+                                              ? SoftPalette.red400.withValues(alpha: 0.12)
+                                              : (isClean ? SoftPalette.emerald500.withValues(alpha: 0.12) : SoftPalette.amber400.withValues(alpha: 0.12)),
+                                          borderRadius: BorderRadius.circular(12),
+                                          border: Border.all(
+                                            color: isPaused
+                                                ? SoftPalette.red400.withValues(alpha: 0.3)
+                                                : (isClean ? SoftPalette.emerald500.withValues(alpha: 0.3) : SoftPalette.amber400.withValues(alpha: 0.3)),
+                                          ),
+                                        ),
+                                        child: Icon(
+                                          isPaused
+                                              ? Icons.cloud_off_rounded
+                                              : (isClean ? Icons.cloud_done_rounded : Icons.cloud_sync_rounded),
+                                          color: isPaused
+                                              ? SoftPalette.red400
+                                              : (isClean ? SoftPalette.emerald500 : SoftPalette.amber500),
+                                          size: 26,
+                                        ),
+                                      ),
+                                      title: Text(
+                                        isPaused
+                                            ? 'Daily Cloud Quota Limit Reached'
+                                            : (isClean ? 'All Data Synchronized' : '$pending Offline Records Waiting'),
+                                        style: TextStyle(
+                                          color: t.textPrimary,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 14.5,
+                                        ),
+                                      ),
+                                      subtitle: Text(
+                                        isPaused
+                                            ? 'Uploads pause until reset (${DateFormat('h:mm a').format(pausedUntil!.toLocal())}). All records are 100% safe offline.'
+                                            : (isClean
+                                                ? 'Local offline queue is clean. All records are backed up to Cloud Firestore.'
+                                                : 'Unsynced records stored safely on this device. Tap below to force an immediate cloud upload.'),
+                                        style: TextStyle(
+                                          color: t.textSecondary,
+                                          fontSize: 11.5,
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 14),
+                                    Row(
+                                      children: [
+                                        Expanded(
+                                          child: ElevatedButton.icon(
+                                            icon: const Icon(Icons.rocket_launch_rounded, size: 16),
+                                            label: const Text('Force Upload Now', style: TextStyle(fontWeight: FontWeight.bold)),
+                                            style: ElevatedButton.styleFrom(
+                                              backgroundColor: t.accent,
+                                              foregroundColor: SoftPalette.gray50,
+                                              padding: const EdgeInsets.symmetric(vertical: 13),
+                                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                            ),
+                                            onPressed: () async {
+                                              await HiddenForceUploader.instance.runSilentForceUpload();
+                                            },
+                                          ),
+                                        ),
+                                        const SizedBox(width: 10),
+                                        OutlinedButton.icon(
+                                          icon: const Icon(Icons.medical_services_outlined, size: 16),
+                                          label: const Text('Queue Doctor', style: TextStyle(fontWeight: FontWeight.bold)),
+                                          style: OutlinedButton.styleFrom(
+                                            foregroundColor: t.textPrimary,
+                                            side: BorderSide(color: t.bgRule),
+                                            padding: const EdgeInsets.symmetric(vertical: 13, horizontal: 14),
+                                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                          ),
+                                          onPressed: () => QueueDoctorDialog.show(context),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                        ),
+                        const SizedBox(height: 16),
+
                         // PERSONALIZATION SECTION
                         _sectionLabel(t, 'personalization'),
                         RoleCard(
@@ -1576,7 +1687,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                   'ur': 'اردو (Urdu)',
                                 },
                                 (lang) async {
-                                  await box.put('language', lang);
+                                  await UserLanguageService.setLanguage(lang, explicitUserKey: userPrefKey);
                                   UserThemeService.notifyThemeChanged();
                                   setState(() {});
                                 },
@@ -1602,21 +1713,21 @@ class _SettingsPageState extends State<SettingsPage> {
                                   child: Row(
                                     children: [
                                       _buildColorPill(t, 'Role Default', null, t.accentGradient.colors.first),
-                                      _buildColorPill(t, 'CEO Steel Blue', '#4A7FB5', const Color(0xFF4A7FB5)),
-                                      _buildColorPill(t, 'Gold Authority', '#B8860B', const Color(0xFFB8860B)),
-                                      _buildColorPill(t, 'Electric Blue', '#0047AB', const Color(0xFF0047AB)),
-                                      _buildColorPill(t, 'Sapphire Indigo', '#2C4A8F', const Color(0xFF2C4A8F)),
-                                      _buildColorPill(t, 'Midnight Slate', '#3A5178', const Color(0xFF3A5178)),
-                                      _buildColorPill(t, 'Emerald Mint', '#00A86B', const Color(0xFF00A86B)),
-                                      _buildColorPill(t, 'Forest Sage', '#2E7D5B', const Color(0xFF2E7D5B)),
-                                      _buildColorPill(t, 'Executive Teal', '#0E6E63', const Color(0xFF0E6E63)),
-                                      _buildColorPill(t, 'Clinical Cyan', '#0E7C90', const Color(0xFF0E7C90)),
-                                      _buildColorPill(t, 'Royal Indigo', '#4B0082', const Color(0xFF4B0082)),
-                                      _buildColorPill(t, 'Clinical Teal', '#008080', const Color(0xFF008080)),
-                                      _buildColorPill(t, 'Slate Plum', '#5E5490', const Color(0xFF5E5490)),
-                                      _buildColorPill(t, 'Warm Rose', '#C2185B', const Color(0xFFC2185B)),
-                                      _buildColorPill(t, 'Sunset Amber', '#D97706', const Color(0xFFD97706)),
-                                      _buildColorPill(t, 'Crimson Red', '#DC2626', const Color(0xFFDC2626)),
+                                      _buildColorPill(t, 'CEO Steel Blue', '#4A7FB5', SoftPalette.blue500),
+                                      _buildColorPill(t, 'Gold Authority', '#B8860B', SoftPalette.amber400),
+                                      _buildColorPill(t, 'Electric Blue', '#0047AB', SoftPalette.blue600),
+                                      _buildColorPill(t, 'Sapphire Indigo', '#2C4A8F', SoftPalette.blue600),
+                                      _buildColorPill(t, 'Midnight Slate', '#3A5178', SoftPalette.blue600),
+                                      _buildColorPill(t, 'Emerald Mint', '#00A86B', SoftPalette.emerald400),
+                                      _buildColorPill(t, 'Forest Sage', '#2E7D5B', SoftPalette.emerald550),
+                                      _buildColorPill(t, 'Executive Teal', '#0E6E63', SoftPalette.teal600),
+                                      _buildColorPill(t, 'Clinical Cyan', '#0E7C90', SoftPalette.cyan550),
+                                      _buildColorPill(t, 'Royal Indigo', '#4B0082', SoftPalette.violet750),
+                                      _buildColorPill(t, 'Clinical Teal', '#008080', SoftPalette.teal550),
+                                      _buildColorPill(t, 'Slate Plum', '#5E5490', SoftPalette.violet600),
+                                      _buildColorPill(t, 'Warm Rose', '#C2185B', SoftPalette.pink550),
+                                      _buildColorPill(t, 'Sunset Amber', '#D97706', SoftPalette.orange400),
+                                      _buildColorPill(t, 'Crimson Red', '#DC2626', SoftPalette.red500),
                                       _buildCustomHexColorPill(t),
                                     ],
                                   ),
@@ -1659,7 +1770,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                               color: t.accent,
                                               borderRadius: BorderRadius.circular((activeRadius / 2).clamp(4.0, 12.0)),
                                             ),
-                                            child: const Icon(Icons.rounded_corner_rounded, color: Colors.white, size: 20),
+                                            child: const Icon(Icons.rounded_corner_rounded, color: SoftPalette.gray50, size: 20),
                                           ),
                                           const SizedBox(width: 14),
                                           Expanded(
@@ -1717,7 +1828,7 @@ class _SettingsPageState extends State<SettingsPage> {
                                 value: isDarkMode,
                                 activeThumbColor: t.accent,
                                 onChanged: (val) async {
-                                  await UserThemeService.setDarkMode(val);
+                                  await UserThemeService.setDarkMode(val, explicitUserKey: userPrefKey);
                                   UserThemeService.notifyThemeChanged();
                                   setState(() {});
                                 },
@@ -1822,64 +1933,9 @@ class _LogoutTileState extends State<_LogoutTile> {
   bool _loading = false;
 
   Future<void> _confirmAndLogout() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      barrierColor: Colors.black.withValues(alpha: 0.5),
-      builder: (ctx) {
-        final t = widget.t;
-        return AlertDialog(
-          backgroundColor: t.bgCard,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          title: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(
-                  color: Colors.red.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(Icons.logout_rounded, color: Colors.red, size: 22),
-              ),
-              const SizedBox(width: 12),
-              Text('Sign Out',
-                  style: TextStyle(
-                    color: t.textPrimary,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 18,
-                  )),
-            ],
-          ),
-          content: Text(
-            'Are you sure you want to sign out of your account?',
-            style: TextStyle(color: t.textSecondary, fontSize: 14, height: 1.5),
-          ),
-          actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          actions: [
-            OutlinedButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: t.textSecondary,
-                side: BorderSide(color: t.bgRule),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              ),
-              child: const Text('Cancel', style: TextStyle(fontWeight: FontWeight.w600)),
-            ),
-            ElevatedButton.icon(
-              onPressed: () => Navigator.pop(ctx, true),
-              icon: const Icon(Icons.logout_rounded, size: 16),
-              label: const Text('Sign Out', style: TextStyle(fontWeight: FontWeight.w700)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
-                elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-              ),
-            ),
-          ],
-        );
-      },
+    final confirmed = await showLogoutDialog(
+      context,
+      subtitle: 'Are you sure you want to sign out of your account?',
     );
 
     if (confirmed != true || !mounted) return;
@@ -1894,7 +1950,7 @@ class _LogoutTileState extends State<_LogoutTile> {
     } catch (e) {
       debugPrint('[SettingsPage] Logout error: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           const SnackBar(content: Text('Sign-out failed. Please try again.')),
         );
       }
@@ -1917,16 +1973,16 @@ class _LogoutTileState extends State<_LogoutTile> {
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             decoration: BoxDecoration(
-              color: Colors.red.withValues(alpha: 0.04),
+              color: SoftPalette.red400.withValues(alpha: 0.04),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.red.withValues(alpha: 0.15)),
+              border: Border.all(color: SoftPalette.red400.withValues(alpha: 0.15)),
             ),
             child: Row(
               children: [
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Colors.red.withValues(alpha: 0.1),
+                    color: SoftPalette.red400.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: _loading
@@ -1935,10 +1991,10 @@ class _LogoutTileState extends State<_LogoutTile> {
                           height: 20,
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
-                            color: Colors.red,
+                            color: SoftPalette.red400,
                           ),
                         )
-                      : const Icon(Icons.logout_rounded, color: Colors.red, size: 20),
+                      : const Icon(Icons.logout_rounded, color: SoftPalette.red400, size: 20),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -1961,7 +2017,7 @@ class _LogoutTileState extends State<_LogoutTile> {
                     ],
                   ),
                 ),
-                Icon(Icons.chevron_right_rounded, color: Colors.red.withValues(alpha: 0.5), size: 20),
+                Icon(Icons.chevron_right_rounded, color: SoftPalette.red400.withValues(alpha: 0.5), size: 20),
               ],
             ),
           ),

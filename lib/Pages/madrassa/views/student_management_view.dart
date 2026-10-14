@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:convert';
@@ -143,10 +144,10 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
 
       if (studentsToImport.isEmpty) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          AppToast.showSnackBar(context, 
             const SnackBar(
               content: Text('No valid student records found in file. Format should be JSON list or CSV.'),
-              backgroundColor: Colors.red,
+              backgroundColor: SoftPalette.red400,
             ),
           );
         }
@@ -170,9 +171,9 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
               child: Text(context.l.cancel, style: context.urduStyle()),
             ),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF008080)),
+              style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.teal550),
               onPressed: () => Navigator.pop(ctx, true),
-              child: Text(context.isUrdu ? 'درآمد کریں' : 'Import', style: context.urduStyle(style: const TextStyle(color: Colors.white))),
+              child: Text(context.isUrdu ? 'درآمد کریں' : 'Import', style: context.urduStyle(style: const TextStyle(color: SoftPalette.gray50))),
             ),
           ],
         ),
@@ -282,19 +283,19 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
         if (skippedCount > 0) {
           msg += ' Skipped $skippedCount existing students.';
         }
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text(msg),
-            backgroundColor: successCount > 0 ? Colors.green : Colors.orange,
+            backgroundColor: successCount > 0 ? SoftPalette.green400 : SoftPalette.amber300,
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('Import failed: $e'),
-            backgroundColor: Colors.red,
+            backgroundColor: SoftPalette.red400,
           ),
         );
       }
@@ -610,10 +611,10 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.red.withValues(alpha: 0.1),
+                color: ctx.adapt(SoftPalette.red400).withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.delete_forever, color: Colors.red, size: 24),
+              child: Icon(Icons.delete_forever, color: ctx.adapt(SoftPalette.red400), size: 24),
             ),
             const SizedBox(width: 12),
             Text(
@@ -635,8 +636,8 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.red400,
+              foregroundColor: SoftPalette.gray50,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
             onPressed: () => Navigator.pop(ctx, true),
@@ -662,10 +663,10 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
       );
       if (mounted) {
         setState(() {});
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('$studentName deleted successfully'),
-            backgroundColor: Colors.red,
+            backgroundColor: SoftPalette.red400,
           ),
         );
       }
@@ -680,36 +681,36 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
     switch (status) {
       case 'active':
         statusLabel = context.l.statusActive;
-        color = const Color(0xFF008080); // Teal
+        color = context.adapt(SoftPalette.teal550); // Teal
         break;
       case 'archived':
         statusLabel = context.l.statusArchived;
-        color = const Color(0xFFF59E0B); // Amber
+        color = context.adapt(SoftPalette.amber300); // Amber
         break;
       case 'hifz_completed':
         statusLabel = context.l.statusHifzCompleted;
-        color = const Color(0xFF4C4DDC); // Purple
+        color = context.adapt(SoftPalette.indigo550); // Purple
         break;
       case 'nazra_completed':
         statusLabel = context.l.statusNazraCompleted;
-        color = const Color(0xFF0D9488); // Teal / Emerald
+        color = context.adapt(SoftPalette.teal500); // Teal / Emerald
         break;
       case 'left':
         statusLabel = context.l.statusLeft;
-        color = const Color(0xFFEF4444); // Red/Rose
+        color = context.adapt(SoftPalette.red400); // Red/Rose
         break;
       case 'dropped':
       case 'dropped_out':
         statusLabel = context.isUrdu ? 'خارج' : 'Dropped Out';
-        color = const Color(0xFFDC2626); // Dark Red
+        color = context.adapt(SoftPalette.red500); // Dark Red
         break;
       case 'inactive':
         statusLabel = context.isUrdu ? 'غیر فعال' : 'Inactive';
-        color = const Color(0xFF6B7280); // Slate Gray
+        color = context.adapt(SoftPalette.slate550); // Slate Gray
         break;
       default:
         statusLabel = status.toString().toUpperCase();
-        color = const Color(0xFF6B7280);
+        color = context.adapt(SoftPalette.slate550);
     }
 
     // Extract the latest reason for this status from auditLog
@@ -785,10 +786,10 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
   Widget _buildMobileStudentCard(dynamic s, Map<String, dynamic> d, bool isDark) {
     final studentId = s is DocumentSnapshot ? s.id : s['id'].toString();
     final isExpanded = _expandedStudentIds.contains(studentId);
-    final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7);
-    final textPrimary = isDark ? Colors.white : const Color(0xFF1A1C1E);
-    final textMuted = isDark ? const Color(0xFF94A3B8) : Colors.grey[600]!;
+    final cardBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.slate150;
+    final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.gray900;
+    final textMuted = isDark ? SoftPalette.slate350 : SoftPalette.gray500;
 
     final rollVal = (d['rollNumber'] ?? d['rollNo'] ?? '?').toString();
     final classValRaw = (d['class'] ?? 'Hifz').toString();
@@ -831,15 +832,15 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: isDark ? const Color(0xFF475569) : const Color(0xFFCBD5E1),
+                  color: isDark ? SoftPalette.slate600 : SoftPalette.slate200,
                   width: 1.2,
                 ),
               ),
               child: ClipOval(
                 child: _uploadStates[studentId] == PhotoUploadStatus.uploading
-                    ? const Padding(
+                    ? Padding(
                         padding: EdgeInsets.all(6.0),
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF008080)),
+                        child: CircularProgressIndicator(strokeWidth: 2, color: context.adapt(SoftPalette.teal550)),
                       )
                     : _buildStudentAvatar(
                         (d['photoUrl'] ??
@@ -875,13 +876,13 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                   decoration: BoxDecoration(
-                    color: Colors.pink.withValues(alpha: 0.15),
+                    color: context.adapt(SoftPalette.red500).withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: Colors.pink.withValues(alpha: 0.35)),
+                    border: Border.all(color: context.adapt(SoftPalette.red500).withValues(alpha: 0.35)),
                   ),
                   child: Text(
                     context.isUrdu ? '👧 لڑکی' : '👧 Girl',
-                    style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.pink),
+                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.red500)),
                   ),
                 ),
               ] else if ((d['gender'] ?? '').toString().toLowerCase() == 'male' || (d['gender'] ?? '').toString().toLowerCase() == 'boy') ...[
@@ -889,13 +890,13 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                   decoration: BoxDecoration(
-                    color: Colors.blue.withValues(alpha: 0.15),
+                    color: context.adapt(SoftPalette.blue400).withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: Colors.blue.withValues(alpha: 0.35)),
+                    border: Border.all(color: context.adapt(SoftPalette.blue400).withValues(alpha: 0.35)),
                   ),
                   child: Text(
                     context.isUrdu ? '👦 لڑکا' : '👦 Boy',
-                    style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.blue),
+                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.blue400)),
                   ),
                 ),
               ],
@@ -904,9 +905,9 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                   decoration: BoxDecoration(
-                    color: Colors.amber.withValues(alpha: 0.18),
+                    color: context.adapt(SoftPalette.amber200).withValues(alpha: 0.18),
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: Colors.amber.withValues(alpha: 0.4)),
+                    border: Border.all(color: context.adapt(SoftPalette.amber200).withValues(alpha: 0.4)),
                   ),
                   child: Text(
                     (d['session'] ?? '').toString().toLowerCase() == 'morning'
@@ -914,7 +915,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                         : (d['session'] ?? '').toString().toLowerCase() == 'evening'
                             ? '🌅 E'
                             : '🌙 N',
-                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.amber[800]),
+                    style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.orange350)),
                   ),
                 ),
               ],
@@ -945,7 +946,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                 width: 26,
                 height: 26,
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF334155).withValues(alpha: 0.5) : const Color(0xFFF1F5F9),
+                  color: isDark ? SoftPalette.slate700.withValues(alpha: 0.5) : SoftPalette.slate100,
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
@@ -1012,7 +1013,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                             margin: const EdgeInsets.only(top: 10),
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                             decoration: BoxDecoration(
-                              color: isDark ? const Color(0xFF334155).withValues(alpha: 0.35) : const Color(0xFFF1F5F9),
+                              color: isDark ? SoftPalette.slate700.withValues(alpha: 0.35) : SoftPalette.slate100,
                               borderRadius: BorderRadius.circular(8),
                               border: Border.all(color: borderColor.withValues(alpha: 0.6)),
                             ),
@@ -1051,12 +1052,12 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                       Row(
                         children: [
                           IconButton(
-                            icon: const Icon(Icons.badge_outlined, color: Color(0xFF008080)),
+                            icon: Icon(Icons.badge_outlined, color: context.adapt(SoftPalette.teal550)),
                             tooltip: 'View Student Profile',
                             onPressed: () => _openStudentDetailPage(d),
                           ),
                           IconButton(
-                            icon: const Icon(Icons.info_outline, color: Color(0xFF008080)),
+                            icon: Icon(Icons.info_outline, color: context.adapt(SoftPalette.teal550)),
                             tooltip: context.l.moreInfo,
                             onPressed: () => _showStudentProgressDialog(context, d),
                           ),
@@ -1079,7 +1080,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
         (d['program']?.toString().toLowerCase() == 'nazra') ||
         (d['class']?.toString().toLowerCase() == 'nazra') ||
         LocalStorageService.isMadrassaNazraOnly(widget.branchId);
-    final textMuted = isDark ? const Color(0xFF94A3B8) : Colors.grey[600]!;
+    final textMuted = isDark ? SoftPalette.slate350 : SoftPalette.gray500;
 
     if (isNazra) {
       final isQComp = d['qaidaCompleted'] == true || d['qaidaSabak'] == 'completed';
@@ -1100,7 +1101,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
-                    color: isQComp ? const Color(0xFF10B981) : Colors.amber[800],
+                    color: isQComp ? context.adapt(SoftPalette.emerald350) : context.adapt(SoftPalette.orange350),
                   ),
                 ),
               ),
@@ -1109,7 +1110,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
-                  color: isQComp ? const Color(0xFF10B981) : Colors.amber[800],
+                  color: isQComp ? context.adapt(SoftPalette.emerald350) : context.adapt(SoftPalette.orange350),
                 ),
               ),
             ],
@@ -1119,8 +1120,8 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
             borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(
               value: qPct,
-              backgroundColor: isDark ? const Color(0xFF334155) : const Color(0xFFF0F2F5),
-              valueColor: AlwaysStoppedAnimation<Color>(isQComp ? const Color(0xFF10B981) : Colors.amber[700]!),
+              backgroundColor: isDark ? SoftPalette.slate700 : SoftPalette.gray100,
+              valueColor: AlwaysStoppedAnimation<Color>(isQComp ? context.adapt(SoftPalette.emerald350) : context.adapt(SoftPalette.amber300)),
               minHeight: 8,
             ),
           ),
@@ -1141,7 +1142,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
               '${context.l.memorizationProgress} ($currentLines ${context.l.lines})',
               style: context.urduStyle(style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: textMuted)),
             ),
-            Text('$pctText%', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080))),
+            Text('$pctText%', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.teal300 : SoftPalette.teal550)),
           ],
         ),
         const SizedBox(height: 6),
@@ -1149,8 +1150,8 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
           borderRadius: BorderRadius.circular(4),
           child: LinearProgressIndicator(
             value: pct,
-            backgroundColor: isDark ? const Color(0xFF334155) : const Color(0xFFF0F2F5),
-            valueColor: AlwaysStoppedAnimation<Color>(isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080)),
+            backgroundColor: isDark ? SoftPalette.slate700 : SoftPalette.gray100,
+            valueColor: AlwaysStoppedAnimation<Color>(isDark ? SoftPalette.teal300 : SoftPalette.teal550),
             minHeight: 8,
           ),
         ),
@@ -1166,10 +1167,10 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
       valueListenable: UserThemeService.listenable(widget.username),
       builder: (context, _, __) {
         final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.username);
-        final scaffoldBg = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8F9FD);
-        final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-        final textPrimary = isDark ? Colors.white : const Color(0xFF1A1C1E);
-        final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7);
+        final scaffoldBg = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+        final cardBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+        final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.gray900;
+        final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.slate150;
 
         final studentsAsync = ref.watch(madrassaStudentsProvider(_effectiveBranch));
 
@@ -1269,13 +1270,13 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.school_outlined, size: 64, color: Colors.grey.withValues(alpha: 0.5)),
+                          Icon(Icons.school_outlined, size: 64, color: context.adapt(SoftPalette.gray350).withValues(alpha: 0.5)),
                           const SizedBox(height: 16),
                           Text(
                             context.isUrdu 
                                 ? 'اس برانچ (${widget.branchId.toUpperCase()}) میں کوئی طالب علم نہیں ملا'
                                 : 'No students found in branch: ${widget.branchId.toUpperCase()}',
-                            style: context.urduStyle(style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.grey)),
+                            style: context.urduStyle(style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.gray350))),
                           ),
                           const SizedBox(height: 8),
                           Text(
@@ -1283,7 +1284,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                                 ? 'اگر طلبہ دوسری برانچ (مثلاً گجرات) میں ہیں تو اوپر برانچ ڈراپ ڈاؤن تبدیل کریں، یا نیا طالب علم داخل کریں۔'
                                 : 'If students are enrolled in another branch (e.g. Gujrat), switch the branch selector in the top bar, or click "+ Add Student".',
                             textAlign: TextAlign.center,
-                            style: context.urduStyle(style: TextStyle(fontSize: 13, color: Colors.grey[600])),
+                            style: context.urduStyle(style: TextStyle(fontSize: 13, color: context.adapt(SoftPalette.gray500))),
                           ),
                         ],
                       ),
@@ -1356,7 +1357,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                                     // ── Table Header ──
                                     Container(
                                       decoration: BoxDecoration(
-                                        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F4F9),
+                                        color: isDark ? SoftPalette.slate900 : SoftPalette.slate100,
                                         border: Border(bottom: BorderSide(color: borderColor)),
                                       ),
                                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -1439,7 +1440,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                                           decoration: BoxDecoration(
                                             color: i.isEven
                                                 ? cardBg
-                                                : (isDark ? const Color(0xFF1E293B).withValues(alpha: 0.25) : const Color(0xFFF8FAFC)),
+                                                : (isDark ? SoftPalette.slate800.withValues(alpha: 0.25) : SoftPalette.gray50),
                                             border: i < studentsByBatch[batch]!.length - 1
                                                 ? Border(bottom: BorderSide(color: borderColor.withValues(alpha: 0.6), width: 0.8))
                                                 : null,
@@ -1464,9 +1465,9 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                                                         width: 28,
                                                         height: 28,
                                                         child: _uploadStates[studentId] == PhotoUploadStatus.uploading
-                                                            ? const Padding(
+                                                            ? Padding(
                                                                 padding: EdgeInsets.all(4.0),
-                                                                child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF008080)),
+                                                                child: CircularProgressIndicator(strokeWidth: 1.5, color: context.adapt(SoftPalette.teal550)),
                                                               )
                                                             : _buildStudentAvatar(d['photoUrl']?.toString(), d['name']?.toString(), size: 28),
                                                       ),
@@ -1486,7 +1487,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                                                               style: TextStyle(
                                                                 fontWeight: FontWeight.bold,
                                                                 fontSize: 13,
-                                                                color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080),
+                                                                color: isDark ? SoftPalette.teal300 : SoftPalette.teal550,
                                                               ),
                                                             ),
                                                           ),
@@ -1500,41 +1501,41 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                                                                   Container(
                                                                     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                                                                     decoration: BoxDecoration(
-                                                                      color: Colors.pink.withValues(alpha: 0.15),
+                                                                      color: context.adapt(SoftPalette.red500).withValues(alpha: 0.15),
                                                                       borderRadius: BorderRadius.circular(4),
-                                                                      border: Border.all(color: Colors.pink.withValues(alpha: 0.35)),
+                                                                      border: Border.all(color: context.adapt(SoftPalette.red500).withValues(alpha: 0.35)),
                                                                     ),
                                                                     child: Text(
                                                                       context.isUrdu ? '👧 لڑکی' : '👧 Girl',
-                                                                      style: const TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Colors.pink),
+                                                                      style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.red500)),
                                                                     ),
                                                                   )
                                                                 else if (isBoy)
                                                                   Container(
                                                                     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                                                                     decoration: BoxDecoration(
-                                                                      color: Colors.blue.withValues(alpha: 0.15),
+                                                                      color: context.adapt(SoftPalette.blue400).withValues(alpha: 0.15),
                                                                       borderRadius: BorderRadius.circular(4),
-                                                                      border: Border.all(color: Colors.blue.withValues(alpha: 0.35)),
+                                                                      border: Border.all(color: context.adapt(SoftPalette.blue400).withValues(alpha: 0.35)),
                                                                     ),
                                                                     child: Text(
                                                                       context.isUrdu ? '👦 لڑکا' : '👦 Boy',
-                                                                      style: const TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Colors.blue),
+                                                                      style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.blue400)),
                                                                     ),
                                                                   ),
                                                                 if (session.isNotEmpty)
                                                                   Container(
                                                                     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                                                                     decoration: BoxDecoration(
-                                                                      color: Colors.amber.withValues(alpha: 0.18),
+                                                                      color: context.adapt(SoftPalette.amber200).withValues(alpha: 0.18),
                                                                       borderRadius: BorderRadius.circular(4),
-                                                                      border: Border.all(color: Colors.amber.withValues(alpha: 0.4)),
+                                                                      border: Border.all(color: context.adapt(SoftPalette.amber200).withValues(alpha: 0.4)),
                                                                     ),
                                                                     child: Text(
                                                                       session.toLowerCase() == 'morning'
                                                                           ? '☀️ Morning'
                                                                           : (session.toLowerCase() == 'evening' ? '🌅 Evening' : '🌙 Night'),
-                                                                      style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Colors.amber[800]),
+                                                                      style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.orange350)),
                                                                     ),
                                                                   ),
                                                               ],
@@ -1609,10 +1610,10 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                                                           ? Container(
                                                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                                               decoration: BoxDecoration(
-                                                                color: isQComp ? Colors.green.withValues(alpha: 0.15) : Colors.teal.withValues(alpha: 0.15),
+                                                                color: isQComp ? context.adapt(SoftPalette.green400).withValues(alpha: 0.15) : context.adapt(SoftPalette.teal500).withValues(alpha: 0.15),
                                                                 borderRadius: BorderRadius.circular(6),
                                                                 border: Border.all(
-                                                                  color: isQComp ? Colors.green.withValues(alpha: 0.4) : Colors.teal.withValues(alpha: 0.4),
+                                                                  color: isQComp ? context.adapt(SoftPalette.green400).withValues(alpha: 0.4) : context.adapt(SoftPalette.teal500).withValues(alpha: 0.4),
                                                                 ),
                                                               ),
                                                               child: Text(
@@ -1624,7 +1625,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                                                                 style: TextStyle(
                                                                   fontSize: 10.5,
                                                                   fontWeight: FontWeight.bold,
-                                                                  color: isQComp ? Colors.green : (isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080)),
+                                                                  color: isQComp ? context.adapt(SoftPalette.green400) : (isDark ? SoftPalette.teal300 : SoftPalette.teal550),
                                                                 ),
                                                               ),
                                                             )
@@ -1635,12 +1636,12 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                                                               style: TextStyle(
                                                                 fontSize: 11.5,
                                                                 fontWeight: FontWeight.bold,
-                                                                color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080),
+                                                                color: isDark ? SoftPalette.teal300 : SoftPalette.teal550,
                                                               ),
                                                             ),
                                                     ),
                                                     IconButton(
-                                                      icon: Icon(Icons.info_outline, size: 14, color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080)),
+                                                      icon: Icon(Icons.info_outline, size: 14, color: isDark ? SoftPalette.teal300 : SoftPalette.teal550),
                                                       tooltip: context.l.moreInfo,
                                                       padding: const EdgeInsets.all(4),
                                                       constraints: const BoxConstraints(),
@@ -1670,7 +1671,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                                                   children: [
                                                     if (_isHQManager) ...[
                                                       IconButton(
-                                                        icon: const Icon(Icons.delete_outline, size: 18, color: Colors.red),
+                                                        icon: Icon(Icons.delete_outline, size: 18, color: context.adapt(SoftPalette.red400)),
                                                         tooltip: context.isUrdu ? 'طالب علم ڈیلیٹ کریں (صرف HQ)' : 'Delete Student (HQ Only)',
                                                         padding: const EdgeInsets.all(4),
                                                         constraints: const BoxConstraints(),
@@ -1722,44 +1723,44 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
     switch (batch) {
       case 'active':
         displayName = 'Active Students';
-        batchColor = Colors.green;
+        batchColor = context.adapt(SoftPalette.green400);
         batchIcon = Icons.check_circle;
         break;
       case 'pending':
         displayName = context.isUrdu ? 'زیر التواء / Pending' : 'Pending Students';
-        batchColor = const Color(0xFF8B5CF6);
+        batchColor = context.adapt(SoftPalette.violet500);
         batchIcon = Icons.hourglass_top_rounded;
         break;
       case 'left':
         displayName = 'Students Left';
-        batchColor = Colors.orange;
+        batchColor = context.adapt(SoftPalette.amber300);
         batchIcon = Icons.exit_to_app;
         break;
       case 'dropped':
         displayName = 'Dropped Students';
-        batchColor = Colors.red;
+        batchColor = context.adapt(SoftPalette.red400);
         batchIcon = Icons.cancel;
         break;
       case 'hifz_complete':
       case 'hifz_completed':
         displayName = context.isUrdu ? 'حفظ مکمل' : 'Hifz Complete';
-        batchColor = Colors.blue;
+        batchColor = context.adapt(SoftPalette.blue400);
         batchIcon = Icons.auto_stories;
         break;
       case 'nazra_complete':
       case 'nazra_completed':
         displayName = context.isUrdu ? 'ناظرہ مکمل' : 'Nazra Complete';
-        batchColor = const Color(0xFF0D9488);
+        batchColor = context.adapt(SoftPalette.teal500);
         batchIcon = Icons.menu_book_rounded;
         break;
       case 'archived':
         displayName = context.isUrdu ? 'آرکائیو شدہ' : 'Archived Students';
-        batchColor = Colors.amber[800]!;
+        batchColor = context.adapt(SoftPalette.orange350);
         batchIcon = Icons.archive_rounded;
         break;
       default:
         displayName = batch;
-        batchColor = Colors.grey;
+        batchColor = context.adapt(SoftPalette.gray350);
         batchIcon = Icons.people;
     }
 
@@ -1785,10 +1786,10 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
   }
 
   Widget _buildHeader(BuildContext context, bool isDark) {
-    final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7);
-    final textPrimary = isDark ? Colors.white : const Color(0xFF1A1C1E);
-    final textMuted = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+    final cardBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.slate150;
+    final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.gray900;
+    final textMuted = isDark ? SoftPalette.slate350 : SoftPalette.slate550;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
@@ -1820,20 +1821,20 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                     if (_effectiveIsAdmin)
                       ElevatedButton.icon(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF008080),
-                          foregroundColor: Colors.white,
+                          backgroundColor: SoftPalette.teal550,
+                          foregroundColor: SoftPalette.gray50,
                         ),
                         onPressed: _importStudentsFile,
                         icon: const Icon(Icons.upload_file),
                         label: Text(
                           context.isUrdu ? 'درآمد کریں' : 'Import File',
-                          style: context.urduStyle(style: const TextStyle(color: Colors.white)),
+                          style: context.urduStyle(style: const TextStyle(color: SoftPalette.gray50)),
                         ),
                       ),
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF008080),
-                        foregroundColor: Colors.white,
+                        backgroundColor: SoftPalette.teal550,
+                        foregroundColor: SoftPalette.gray50,
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       ),
                       onPressed: () => showAddStudentDialog(
@@ -1842,10 +1843,10 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                         username: widget.username,
                         role: widget.role,
                       ),
-                      icon: const Icon(Icons.person_add_rounded, color: Colors.white),
+                      icon: const Icon(Icons.person_add_rounded, color: SoftPalette.gray50),
                       label: Text(
                         context.isUrdu ? 'نیا طالب علم داخل کریں / Add Student' : '+ Add Student',
-                        style: context.urduStyle(style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                        style: context.urduStyle(style: const TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold)),
                       ),
                     ),
                   ],
@@ -1875,7 +1876,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: Color(0xFF008080), width: 2),
+                      borderSide: BorderSide(color: context.adapt(SoftPalette.teal550), width: 2),
                     ),
                   ),
                   onChanged: (val) {
@@ -1895,7 +1896,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                 child: IconButton(
                   icon: Icon(
                     Icons.tune,
-                    color: _showFilters ? const Color(0xFF008080) : textMuted,
+                    color: _showFilters ? context.adapt(SoftPalette.teal550) : textMuted,
                   ),
                   onPressed: () {
                     setState(() {
@@ -1917,11 +1918,11 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                   onSelected: (val) {
                     if (val) setState(() => _programFilter = 'all');
                   },
-                  selectedColor: const Color(0xFF008080),
+                  selectedColor: SoftPalette.teal550,
                   labelStyle: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
-                    color: _programFilter == 'all' ? Colors.white : (isDark ? Colors.white70 : const Color(0xFF475569)),
+                    color: _programFilter == 'all' ? SoftPalette.gray50 : (isDark ? SoftPalette.gray50A70 : SoftPalette.slate600),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1931,11 +1932,11 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                   onSelected: (val) {
                     if (val) setState(() => _programFilter = 'hifz');
                   },
-                  selectedColor: const Color(0xFF7C3AED),
+                  selectedColor: SoftPalette.violet550,
                   labelStyle: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
-                    color: _programFilter == 'hifz' ? Colors.white : (isDark ? Colors.white70 : const Color(0xFF475569)),
+                    color: _programFilter == 'hifz' ? SoftPalette.gray50 : (isDark ? SoftPalette.gray50A70 : SoftPalette.slate600),
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -1945,11 +1946,11 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                   onSelected: (val) {
                     if (val) setState(() => _programFilter = 'nazra');
                   },
-                  selectedColor: const Color(0xFF0D9488),
+                  selectedColor: SoftPalette.teal500,
                   labelStyle: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
-                    color: _programFilter == 'nazra' ? Colors.white : (isDark ? Colors.white70 : const Color(0xFF475569)),
+                    color: _programFilter == 'nazra' ? SoftPalette.gray50 : (isDark ? SoftPalette.gray50A70 : SoftPalette.slate600),
                   ),
                 ),
               ],
@@ -1965,7 +1966,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                   value: _statusFilter,
                   decoration: InputDecoration(
                     labelText: context.isUrdu ? 'حیثیت کے لحاظ سے فلٹر کریں' : 'Filter by Status',
-                    labelStyle: context.urduStyle(style: TextStyle(fontSize: 12, color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080))),
+                    labelStyle: context.urduStyle(style: TextStyle(fontSize: 12, color: isDark ? SoftPalette.teal300 : SoftPalette.teal550)),
                     filled: true,
                     fillColor: cardBg,
                     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -2002,7 +2003,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                   value: _sortBy,
                   decoration: InputDecoration(
                     labelText: context.isUrdu ? 'ترتیب دیں' : 'Sort By',
-                    labelStyle: context.urduStyle(style: TextStyle(fontSize: 12, color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080))),
+                    labelStyle: context.urduStyle(style: TextStyle(fontSize: 12, color: isDark ? SoftPalette.teal300 : SoftPalette.teal550)),
                     filled: true,
                     fillColor: cardBg,
                     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -2035,7 +2036,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                   value: _sessionFilter,
                   decoration: InputDecoration(
                     labelText: context.isUrdu ? 'سیشن فلٹر' : 'Session',
-                    labelStyle: context.urduStyle(style: TextStyle(fontSize: 12, color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080))),
+                    labelStyle: context.urduStyle(style: TextStyle(fontSize: 12, color: isDark ? SoftPalette.teal300 : SoftPalette.teal550)),
                     filled: true,
                     fillColor: cardBg,
                     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -2069,7 +2070,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                   value: _genderFilter,
                   decoration: InputDecoration(
                     labelText: context.isUrdu ? 'جنس فلٹر' : 'Gender',
-                    labelStyle: context.urduStyle(style: TextStyle(fontSize: 12, color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080))),
+                    labelStyle: context.urduStyle(style: TextStyle(fontSize: 12, color: isDark ? SoftPalette.teal300 : SoftPalette.teal550)),
                     filled: true,
                     fillColor: cardBg,
                     contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -2153,7 +2154,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
               ),
             ),
             ListTile(
-              leading: const Icon(Icons.camera_alt_outlined, color: Color(0xFF008080)),
+              leading: Icon(Icons.camera_alt_outlined, color: ctx.adapt(SoftPalette.teal550)),
               title: Text(
                 context.isUrdu ? 'کیمرہ سے تصویر لیں' : 'Take Photo with Camera',
                 style: context.urduStyle(),
@@ -2161,7 +2162,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
               onTap: () => Navigator.pop(ctx, ImageSource.camera),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF008080)),
+              leading: Icon(Icons.photo_library_outlined, color: ctx.adapt(SoftPalette.teal550)),
               title: Text(
                 context.isUrdu ? 'گیلری سے منتخب کریں' : 'Choose from Gallery',
                 style: context.urduStyle(),
@@ -2191,6 +2192,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
       studentCache['photoBase64'] = b64;
       studentCache['studentPhotoBase64'] = b64;
       studentCache['lastUpdatedAt'] = DateTime.now().toIso8601String();
+      studentCache['syncStatus'] = 'pending';
       await MadrassaLocalStorage.cacheStudent(_effectiveBranch, studentId, studentCache);
 
       // Broadcast to LAN WebSocket
@@ -2221,21 +2223,21 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
         setState(() {
           _uploadStates[studentId] = PhotoUploadStatus.success;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text(
               context.isUrdu ? 'تصویر کامیابی کے ساتھ اپ ڈیٹ ہو گئی' : 'Student photo updated successfully!',
               style: context.urduStyle(),
             ),
-            backgroundColor: const Color(0xFF008080),
+            backgroundColor: SoftPalette.teal550,
           ),
         );
       }
     } catch (e) {
       if (!mounted) return;
       setState(() => _uploadStates[studentId] = PhotoUploadStatus.error);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to update photo: $e'), backgroundColor: Colors.red),
+      AppToast.showSnackBar(context, 
+        SnackBar(content: Text('Failed to update photo: $e'), backgroundColor: SoftPalette.red400),
       );
     }
   }
@@ -2273,15 +2275,15 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
   Widget _buildAvatarFallback(String? name, {double? fontSize}) {
     final firstLetter = name != null && name.isNotEmpty ? name[0].toUpperCase() : '?';
     return Container(
-      decoration: const BoxDecoration(
-        color: Color(0xFFE0F2F1),
+      decoration: BoxDecoration(
+        color: context.adapt(SoftPalette.teal100m),
         shape: BoxShape.circle,
       ),
       alignment: Alignment.center,
       child: Text(
         firstLetter,
         style: TextStyle(
-          color: const Color(0xFF008080),
+          color: context.adapt(SoftPalette.teal550),
           fontWeight: FontWeight.bold,
           fontSize: fontSize,
         ),
@@ -2297,20 +2299,20 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
       margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: const Color(0xFFFEF3C7), // Light amber
+        color: context.adapt(SoftPalette.yellow100), // Light amber
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFFDE68A)),
+        border: Border.all(color: context.adapt(SoftPalette.yellow150)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.hail_rounded, color: Color(0xFFD97706), size: 24),
+              Icon(Icons.hail_rounded, color: context.adapt(SoftPalette.orange400), size: 24),
               const SizedBox(width: 12),
               Text(
                 'Pending Rejoining Requests (${docs.length})',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF92400E)),
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: context.adapt(SoftPalette.orange600)),
               ),
             ],
           ),
@@ -2319,7 +2321,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
             shrinkWrap: true,
             physics: const NeverScrollableScrollPhysics(),
             itemCount: docs.length,
-            separatorBuilder: (_, _) => const Divider(color: Color(0xFFFDE68A)),
+            separatorBuilder: (_, _) => Divider(color: context.adapt(SoftPalette.yellow150)),
             itemBuilder: (context, i) {
               final d = docs[i];
               final dynamic dateRaw = d['rejoinRequestDate'];
@@ -2341,18 +2343,18 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                         children: [
                           Text(
                             '${d['name'] ?? ''} (Roll: ${d['rollNumber'] ?? '?'})',
-                            style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF78350F)),
+                            style: TextStyle(fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.orange700)),
                           ),
                           const SizedBox(height: 4),
                           Text(
                             'Reason: "${d['rejoinRequestReason'] ?? 'No reason specified'}"',
-                            style: const TextStyle(fontSize: 12, color: Color(0xFF92400E)),
+                            style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.orange600)),
                           ),
                           if (dateStr.isNotEmpty) ...[
                             const SizedBox(height: 2),
                             Text(
                               'Requested on: $dateStr',
-                              style: const TextStyle(fontSize: 10, color: Color(0xFFB45309)),
+                              style: TextStyle(fontSize: 10, color: context.adapt(SoftPalette.orange500)),
                             ),
                           ],
                         ],
@@ -2363,8 +2365,8 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                       icon: const Icon(Icons.check, size: 14),
                       label: const Text('Approve', style: TextStyle(fontSize: 11)),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.green,
-                        foregroundColor: Colors.white,
+                        backgroundColor: SoftPalette.green400,
+                        foregroundColor: SoftPalette.gray50,
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         minimumSize: Size.zero,
                       ),
@@ -2372,8 +2374,8 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                     const SizedBox(width: 8),
                     TextButton.icon(
                       onPressed: () => _rejectRejoin(d),
-                      icon: const Icon(Icons.close, size: 14, color: Colors.red),
-                      label: const Text('Reject', style: TextStyle(fontSize: 11, color: Colors.red)),
+                      icon: Icon(Icons.close, size: 14, color: context.adapt(SoftPalette.red400)),
+                      label: Text('Reject', style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.red400))),
                       style: TextButton.styleFrom(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         minimumSize: Size.zero,
@@ -2413,6 +2415,8 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
       'reason': auditReason,
     });
     studentCache['auditLog'] = auditList;
+    studentCache['lastUpdatedAt'] = now.toIso8601String();
+    studentCache['syncStatus'] = 'pending';
 
     await MadrassaLocalStorage.cacheStudent(widget.branchId, studentId, studentCache);
 
@@ -2452,7 +2456,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
     ));
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(content: Text('Rejoin approved for ${sData['name'] ?? ''}')),
       );
     }
@@ -2475,15 +2479,15 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                 Text('Are you sure you want to reject the rejoin request for ${sData['name'] ?? ''}?'),
                 const SizedBox(height: 16),
                 RichText(
-                  text: const TextSpan(
+                  text: TextSpan(
                     children: [
                       TextSpan(
                         text: 'Rejection Reason',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate800)),
                       ),
                       TextSpan(
                         text: ' *',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFD32F2F)),
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.red500)),
                       ),
                     ],
                   ),
@@ -2497,11 +2501,11 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: reasonError != null ? const Color(0xFFD32F2F) : const Color(0xFFD0D3D9)),
+                      borderSide: BorderSide(color: reasonError != null ? context.adapt(SoftPalette.red500) : context.adapt(SoftPalette.slate200)),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: Colors.red, width: 2),
+                      borderSide: BorderSide(color: context.adapt(SoftPalette.red400), width: 2),
                     ),
                   ),
                   onChanged: (v) {
@@ -2522,7 +2526,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                   }
                   Navigator.pop(ctx, true);
                 },
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+                style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.red400, foregroundColor: SoftPalette.gray50),
                 child: const Text('Reject'),
               ),
             ],
@@ -2553,6 +2557,8 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
         'reason': finalReason,
       });
       studentCache['auditLog'] = auditList;
+      studentCache['lastUpdatedAt'] = now.toIso8601String();
+      studentCache['syncStatus'] = 'pending';
 
       await MadrassaLocalStorage.cacheStudent(widget.branchId, studentId, studentCache);
 
@@ -2589,7 +2595,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
       ));
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(content: Text('Rejoin rejected for ${sData['name'] ?? ''}')),
         );
       }

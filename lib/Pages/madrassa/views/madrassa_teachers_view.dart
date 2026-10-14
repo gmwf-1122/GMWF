@@ -5,9 +5,12 @@
 // 2. Teacher Directory & Management (all teacher details editable)
 // Offline-first: Hive local cache -> LAN broadcast -> Firestore sync
 
-import 'dart:convert';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:gmwf/utils/base64_image_cache.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
@@ -45,10 +48,10 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
   String _filterSpec = 'All';
   String _filterShift = 'All';
 
-  static const _emerald = Color(0xFF0F766E);
-  static const _presentColor = Color(0xFF10B981);
-  static const _absentColor = Color(0xFFEF4444);
-  static const _leaveColor = Color(0xFFF59E0B);
+  static const _emerald = SoftPalette.teal550;
+  static const _presentColor = SoftPalette.emerald350;
+  static const _absentColor = SoftPalette.red400;
+  static const _leaveColor = SoftPalette.amber300;
 
   @override
   void initState() {
@@ -186,7 +189,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
         _localAttendanceChanges[id]!['markedAt'] = DateTime.now().toIso8601String();
       }
     });
-    ScaffoldMessenger.of(context).showSnackBar(
+    AppToast.showSnackBar(context, 
       const SnackBar(
         content: Text('All teachers set to Present for this date.'),
         duration: Duration(seconds: 1),
@@ -221,7 +224,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
             final isSaveDisabled = textCtrl.text.trim().isEmpty;
 
             return AlertDialog(
-              backgroundColor: dark ? const Color(0xFF131B2E) : Colors.white,
+              backgroundColor: dark ? SoftPalette.slate900 : SoftPalette.gray50,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
               titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
               contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
@@ -247,7 +250,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
-                              color: dark ? Colors.white : const Color(0xFF0F172A),
+                              color: dark ? SoftPalette.gray50 : SoftPalette.slate900,
                             ),
                           ),
                         ),
@@ -255,7 +258,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                           '$teacherName • ${DateFormat('d MMM yyyy').format(_selectedDate)}',
                           style: TextStyle(
                             fontSize: 12,
-                            color: dark ? Colors.white60 : Colors.black54,
+                            color: dark ? SoftPalette.gray50A60 : SoftPalette.gray900A54,
                           ),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
@@ -288,7 +291,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                                   : 'A documented reason is mandatory to record teacher leave.',
                               style: TextStyle(
                                 fontSize: 11.5,
-                                color: dark ? const Color(0xFFFBBF24) : const Color(0xFFB45309),
+                                color: dark ? SoftPalette.amber200 : SoftPalette.orange500,
                                 fontWeight: FontWeight.w600,
                               ),
                             ),
@@ -299,7 +302,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                     const SizedBox(height: 12),
                     Text(
                       context.isUrdu ? 'فوری وجوہات منتخب کریں:' : 'Quick Select Preset:',
-                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: dark ? Colors.white70 : Colors.black87),
+                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: dark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
                     ),
                     const SizedBox(height: 6),
                     Wrap(
@@ -320,10 +323,10 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                             decoration: BoxDecoration(
                               color: isSel
                                   ? _leaveColor.withValues(alpha: 0.2)
-                                  : (dark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
+                                  : (dark ? SoftPalette.slate800 : SoftPalette.slate100),
                               borderRadius: BorderRadius.circular(8),
                               border: Border.all(
-                                color: isSel ? _leaveColor : (dark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                                color: isSel ? _leaveColor : (dark ? SoftPalette.slate700 : SoftPalette.slate150),
                                 width: isSel ? 1.2 : 1,
                               ),
                             ),
@@ -332,7 +335,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                               style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: isSel ? FontWeight.bold : FontWeight.w500,
-                                color: isSel ? _leaveColor : (dark ? Colors.white70 : const Color(0xFF334155)),
+                                color: isSel ? _leaveColor : (dark ? SoftPalette.gray50A70 : SoftPalette.slate700),
                               ),
                             ),
                           ),
@@ -342,7 +345,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                     const SizedBox(height: 12),
                     Text(
                       context.isUrdu ? 'تفصیلی وجہ (لازمی):' : 'Detailed Reason (Mandatory):',
-                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: dark ? Colors.white70 : Colors.black87),
+                      style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: dark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
                     ),
                     const SizedBox(height: 6),
                     TextField(
@@ -352,15 +355,15 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                       onChanged: (_) => setDialogState(() {}),
                       decoration: InputDecoration(
                         hintText: context.isUrdu ? 'رخصت کی تفصیل درج کریں...' : 'Enter reason for leave...',
-                        hintStyle: TextStyle(fontSize: 12, color: dark ? Colors.white38 : Colors.black38),
+                        hintStyle: TextStyle(fontSize: 12, color: dark ? SoftPalette.gray50A38 : SoftPalette.gray900A38),
                         filled: true,
-                        fillColor: dark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: dark ? const Color(0xFF334155) : const Color(0xFFCBD5E1))),
-                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: dark ? const Color(0xFF334155) : const Color(0xFFCBD5E1))),
+                        fillColor: dark ? SoftPalette.slate900 : SoftPalette.gray50,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: dark ? SoftPalette.slate700 : SoftPalette.slate200)),
+                        enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: dark ? SoftPalette.slate700 : SoftPalette.slate200)),
                         focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: _leaveColor, width: 1.5)),
                         contentPadding: const EdgeInsets.all(10),
                       ),
-                      style: TextStyle(fontSize: 13, color: dark ? Colors.white : Colors.black87),
+                      style: TextStyle(fontSize: 13, color: dark ? SoftPalette.gray50 : SoftPalette.gray900A87),
                     ),
                   ],
                 ),
@@ -368,7 +371,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(ctx, null),
-                  child: Text(context.isUrdu ? 'منسوخ' : 'Cancel', style: TextStyle(color: dark ? Colors.white60 : Colors.black54)),
+                  child: Text(context.isUrdu ? 'منسوخ' : 'Cancel', style: TextStyle(color: dark ? SoftPalette.gray50A60 : SoftPalette.gray900A54)),
                 ),
                 ElevatedButton.icon(
                   onPressed: isSaveDisabled ? null : () => Navigator.pop(ctx, textCtrl.text.trim()),
@@ -376,8 +379,8 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                   label: Text(context.isUrdu ? 'رخصت منظور کریں' : 'Confirm Leave'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _leaveColor,
-                    foregroundColor: Colors.white,
-                    disabledBackgroundColor: Colors.grey.shade400,
+                    foregroundColor: SoftPalette.gray50,
+                    disabledBackgroundColor: context.adapt(SoftPalette.gray300),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
@@ -412,7 +415,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
             final monthDisplay = DateFormat('MMMM yyyy').format(DateTime(selectedYear, selectedMonth));
 
             return AlertDialog(
-              backgroundColor: dark ? const Color(0xFF131B2E) : Colors.white,
+              backgroundColor: dark ? SoftPalette.slate900 : SoftPalette.gray50,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
               titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
               contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
@@ -422,10 +425,10 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0F766E).withValues(alpha: 0.12),
+                      color: dialogCtx.adapt(SoftPalette.teal550).withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(Icons.file_download_rounded, color: Color(0xFF0F766E), size: 22),
+                    child: Icon(Icons.file_download_rounded, color: dialogCtx.adapt(SoftPalette.teal550), size: 22),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -438,13 +441,13 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
-                              color: dark ? Colors.white : const Color(0xFF0F172A),
+                              color: dark ? SoftPalette.gray50 : SoftPalette.slate900,
                             ),
                           ),
                         ),
                         Text(
                           context.isUrdu ? 'حاضری اور رخصت کی تفصیلی رپورٹ' : 'Presence records with mandatory leave reasons',
-                          style: TextStyle(fontSize: 11.5, color: dark ? Colors.white60 : Colors.black54),
+                          style: TextStyle(fontSize: 11.5, color: dark ? SoftPalette.gray50A60 : SoftPalette.gray900A54),
                         ),
                       ],
                     ),
@@ -461,9 +464,9 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       decoration: BoxDecoration(
-                        color: dark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                        color: dark ? SoftPalette.slate900 : SoftPalette.gray50,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: dark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0)),
+                        border: Border.all(color: dark ? SoftPalette.slate800 : SoftPalette.slate150),
                       ),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -483,7 +486,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                           ),
                           Row(
                             children: [
-                              const Icon(Icons.calendar_month_rounded, size: 18, color: Color(0xFF0F766E)),
+                              Icon(Icons.calendar_month_rounded, size: 18, color: dialogCtx.adapt(SoftPalette.teal550)),
                               const SizedBox(width: 8),
                               Text(
                                 monthDisplay,
@@ -512,27 +515,27 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                     // Teacher Selection
                     Text(
                       context.isUrdu ? 'استاد منتخب کریں:' : 'Select Faculty / Teacher:',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: dark ? Colors.white70 : Colors.black87),
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: dark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
                     ),
                     const SizedBox(height: 6),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12),
                       decoration: BoxDecoration(
-                        color: dark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                        color: dark ? SoftPalette.slate900 : SoftPalette.gray50,
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: dark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0)),
+                        border: Border.all(color: dark ? SoftPalette.slate800 : SoftPalette.slate150),
                       ),
                       child: DropdownButtonHideUnderline(
                         child: DropdownButton<String>(
                           value: selectedTeacherId,
                           isExpanded: true,
-                          dropdownColor: dark ? const Color(0xFF1E293B) : Colors.white,
+                          dropdownColor: dark ? SoftPalette.slate800 : SoftPalette.gray50,
                           items: [
                             DropdownMenuItem(
                               value: 'ALL',
                               child: Row(
                                 children: [
-                                  const Icon(Icons.groups_rounded, size: 18, color: Color(0xFF0F766E)),
+                                  Icon(Icons.groups_rounded, size: 18, color: dialogCtx.adapt(SoftPalette.teal550)),
                                   const SizedBox(width: 8),
                                   Text(
                                     context.isUrdu ? 'تمام اساتذہ (پورے برانچ کا خلاصہ)' : 'All Faculty (Complete Branch Matrix)',
@@ -569,7 +572,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           child: Column(
                             children: [
-                              const CircularProgressIndicator(color: Color(0xFF0F766E), strokeWidth: 2.5),
+                              CircularProgressIndicator(color: dialogCtx.adapt(SoftPalette.teal550), strokeWidth: 2.5),
                               const SizedBox(height: 10),
                               Text(exportStatus, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                             ],
@@ -579,7 +582,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                     ] else ...[
                       Text(
                         context.isUrdu ? 'ڈاؤن لوڈ فارمیٹ:' : 'Export Format:',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: dark ? Colors.white70 : Colors.black87),
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: dark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
                       ),
                       const SizedBox(height: 8),
                       Row(
@@ -632,7 +635,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                                   }
                                 } catch (e) {
                                   if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error generating PDF: $e')));
+                                    AppToast.showSnackBar(context, SnackBar(content: Text('Error generating PDF: $e')));
                                   }
                                 } finally {
                                   if (dialogCtx.mounted) Navigator.pop(dialogCtx);
@@ -641,8 +644,8 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                               icon: const Icon(Icons.picture_as_pdf_rounded, size: 16),
                               label: const Text('PDF Document'),
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF0F766E),
-                                foregroundColor: Colors.white,
+                                backgroundColor: SoftPalette.teal550,
+                                foregroundColor: SoftPalette.gray50,
                                 padding: const EdgeInsets.symmetric(vertical: 12),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                               ),
@@ -697,7 +700,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                                   }
                                 } catch (e) {
                                   if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error exporting Excel: $e')));
+                                    AppToast.showSnackBar(context, SnackBar(content: Text('Error exporting Excel: $e')));
                                   }
                                 } finally {
                                   if (dialogCtx.mounted) Navigator.pop(dialogCtx);
@@ -706,8 +709,8 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                               icon: const Icon(Icons.table_view_rounded, size: 16),
                               label: const Text('Excel (.xlsx)'),
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF10B981),
-                                foregroundColor: Colors.white,
+                                backgroundColor: SoftPalette.emerald350,
+                                foregroundColor: SoftPalette.gray50,
                                 padding: const EdgeInsets.symmetric(vertical: 12),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                               ),
@@ -722,7 +725,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(ctx),
-                  child: Text(context.isUrdu ? 'بند کریں' : 'Close', style: TextStyle(color: dark ? Colors.white60 : Colors.black54)),
+                  child: Text(context.isUrdu ? 'بند کریں' : 'Close', style: TextStyle(color: dark ? SoftPalette.gray50A60 : SoftPalette.gray900A54)),
                 ),
               ],
             );
@@ -816,10 +819,10 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
           _localAttendanceChanges.clear();
           _isSavingAttendance = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           const SnackBar(
             content: Row(children: [
-              Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+              Icon(Icons.check_circle_rounded, color: SoftPalette.gray50, size: 18),
               SizedBox(width: 8),
               Text('Teacher attendance saved offline & queued for cloud sync ✓'),
             ]),
@@ -832,7 +835,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
     } catch (e) {
       if (mounted) {
         setState(() => _isSavingAttendance = false);
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('Error saving attendance: $e'),
             backgroundColor: _absentColor,
@@ -881,10 +884,10 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
   @override
   Widget build(BuildContext context) {
     final dark = _isDark(context);
-    final cardBg = dark ? const Color(0xFF131B2E) : Colors.white;
-    final borderColor = dark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0);
-    final textPrimary = dark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A);
-    final textMuted = dark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+    final cardBg = dark ? SoftPalette.slate900 : SoftPalette.gray50;
+    final borderColor = dark ? SoftPalette.slate800 : SoftPalette.slate150;
+    final textPrimary = dark ? SoftPalette.slate100 : SoftPalette.slate900;
+    final textMuted = dark ? SoftPalette.slate350 : SoftPalette.slate550;
 
     return StreamBuilder<List<Map<String, dynamic>>>(
       stream: MadrassaLocalStorage.streamTeachersCached(widget.branchId),
@@ -903,7 +906,9 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                   controller: _tabController,
                   children: [
                     // Tab 1: Attendance
-                    _buildAttendanceTab(context, dark, cardBg, borderColor, textPrimary, textMuted, allTeachers),
+                    // Only active teachers are listed, counted, and saved in attendance.
+                    _buildAttendanceTab(context, dark, cardBg, borderColor, textPrimary, textMuted,
+                        allTeachers.where(MadrassaLocalStorage.isTeacherActive).toList()),
                     // Tab 2: Directory & Management
                     _buildDirectoryTab(context, dark, cardBg, borderColor, textPrimary, textMuted, allTeachers),
                   ],
@@ -980,7 +985,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                   if (isVeryNarrow)
                     IconButton(
                       tooltip: context.isUrdu ? 'نیا استاد درج کریں' : 'Register Teacher',
-                      icon: const Icon(Icons.person_add_rounded, color: Colors.white, size: 18),
+                      icon: const Icon(Icons.person_add_rounded, color: SoftPalette.gray50, size: 18),
                       style: IconButton.styleFrom(
                         backgroundColor: _emerald,
                         padding: const EdgeInsets.all(10),
@@ -998,7 +1003,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: _emerald,
-                        foregroundColor: Colors.white,
+                        foregroundColor: SoftPalette.gray50,
                         elevation: 1,
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -1014,9 +1019,9 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
             controller: _tabController,
             isScrollable: false,
             labelPadding: const EdgeInsets.symmetric(horizontal: 4),
-            labelColor: dark ? const Color(0xFF2DD4BF) : _emerald,
+            labelColor: dark ? SoftPalette.teal300 : _emerald,
             unselectedLabelColor: textMuted,
-            indicatorColor: dark ? const Color(0xFF2DD4BF) : _emerald,
+            indicatorColor: dark ? SoftPalette.teal300 : _emerald,
             indicatorWeight: 3,
             labelStyle: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
             tabs: [
@@ -1167,16 +1172,16 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
-                          color: Colors.amber.withValues(alpha: 0.15),
+                          color: context.adapt(SoftPalette.amber200).withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: Colors.amber.withValues(alpha: 0.4)),
+                          border: Border.all(color: context.adapt(SoftPalette.amber200).withValues(alpha: 0.4)),
                         ),
                         child: Text(
                           '${_localAttendanceChanges.length} unsaved edits',
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
-                            color: Colors.amber[800],
+                            color: context.adapt(SoftPalette.orange350),
                           ),
                         ),
                       ),
@@ -1313,7 +1318,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                       ),
                       child: const Text(
                         'TODAY',
-                        style: TextStyle(color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.bold),
+                        style: TextStyle(color: SoftPalette.gray50, fontSize: 9.5, fontWeight: FontWeight.bold),
                       ),
                     ),
                   ],
@@ -1351,8 +1356,8 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                   style: context.urduStyle(style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                 ),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF0284C7),
-                  side: const BorderSide(color: Color(0xFF0284C7)),
+                  foregroundColor: context.adapt(SoftPalette.sky500),
+                  side: BorderSide(color: context.adapt(SoftPalette.sky500)),
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
@@ -1363,7 +1368,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                     ? const SizedBox(
                         width: 14,
                         height: 14,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                        child: CircularProgressIndicator(color: SoftPalette.gray50, strokeWidth: 2),
                       )
                     : const Icon(Icons.save_rounded, size: 16),
                 label: Text(
@@ -1374,7 +1379,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                 ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _emerald,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                   elevation: 2,
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -1415,7 +1420,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
             _kpiCard(
               title: totalTitle,
               count: total,
-              color: const Color(0xFF3B82F6),
+              color: context.adapt(SoftPalette.blue500),
               icon: Icons.people_alt_rounded,
               width: cardWidth,
               dark: dark,
@@ -1504,7 +1509,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
-                    color: dark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                    color: dark ? SoftPalette.slate350 : SoftPalette.slate550,
                   ),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -1567,7 +1572,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                     label: context.isUrdu ? 'ناظرہ' : 'Nazra',
                     count: nazraCount,
                     icon: Icons.auto_stories_rounded,
-                    activeColor: const Color(0xFF0D9488),
+                    activeColor: SoftPalette.teal500,
                   ),
                   const SizedBox(width: 6),
                   _filterPill(
@@ -1575,7 +1580,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                     label: context.isUrdu ? 'حفظ' : 'Hifz',
                     count: hifzCount,
                     icon: Icons.mosque_rounded,
-                    activeColor: const Color(0xFF4C4DDC),
+                    activeColor: SoftPalette.indigo550,
                   ),
                 ],
               ),
@@ -1605,10 +1610,10 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
         decoration: BoxDecoration(
           color: isSelected
               ? activeColor
-              : (dark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9)),
+              : (dark ? SoftPalette.slate900 : SoftPalette.slate100),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: isSelected ? activeColor : (dark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+            color: isSelected ? activeColor : (dark ? SoftPalette.slate700 : SoftPalette.slate150),
             width: isSelected ? 1.4 : 1.0,
           ),
         ),
@@ -1618,7 +1623,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
             Icon(
               icon,
               size: 13.5,
-              color: isSelected ? Colors.white : (dark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+              color: isSelected ? SoftPalette.gray50 : (dark ? SoftPalette.slate350 : SoftPalette.slate550),
             ),
             const SizedBox(width: 6),
             Text(
@@ -1626,7 +1631,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-                color: isSelected ? Colors.white : (dark ? Colors.white70 : const Color(0xFF1E293B)),
+                color: isSelected ? SoftPalette.gray50 : (dark ? SoftPalette.gray50A70 : SoftPalette.slate800),
               ),
             ),
             const SizedBox(width: 6),
@@ -1634,8 +1639,8 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
               decoration: BoxDecoration(
                 color: isSelected
-                    ? Colors.white.withValues(alpha: 0.25)
-                    : (dark ? Colors.black38 : Colors.black.withValues(alpha: 0.06)),
+                    ? SoftPalette.gray50.withValues(alpha: 0.25)
+                    : (dark ? SoftPalette.gray900A38 : SoftPalette.gray900.withValues(alpha: 0.06)),
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Text(
@@ -1643,7 +1648,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.bold,
-                  color: isSelected ? Colors.white : (dark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                  color: isSelected ? SoftPalette.gray50 : (dark ? SoftPalette.slate350 : SoftPalette.slate550),
                 ),
               ),
             ),
@@ -1682,7 +1687,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
         border: Border.all(color: borderColor),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: dark ? 0.2 : 0.03),
+            color: SoftPalette.gray900.withValues(alpha: dark ? 0.2 : 0.03),
             blurRadius: 6,
             offset: const Offset(0, 2),
           ),
@@ -1696,7 +1701,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
             radius: 22,
             backgroundColor: _emerald.withValues(alpha: 0.12),
             backgroundImage: (photo != null && photo.isNotEmpty)
-                ? MemoryImage(base64Decode(photo)) as ImageProvider
+                ? Base64ImageCache.of(photo) as ImageProvider
                 : null,
             child: (photo == null || photo.isEmpty)
                 ? const Icon(Icons.person_rounded, color: _emerald, size: 22)
@@ -1770,7 +1775,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
               _statusChoiceChip(teacherId, username, 'leave', context.isUrdu ? 'رخصت' : 'Leave', _leaveColor, status, leaveReason),
               IconButton(
                 tooltip: 'Download Monthly Presence (${DateFormat('MMMM yyyy').format(_selectedDate)})',
-                icon: const Icon(Icons.file_download_outlined, size: 20, color: Color(0xFF0284C7)),
+                icon: Icon(Icons.file_download_outlined, size: 20, color: context.adapt(SoftPalette.sky500)),
                 padding: const EdgeInsets.all(6),
                 constraints: const BoxConstraints(),
                 onPressed: () => _showMonthlyPresenceDialog(context, teachers: allTeachers, preselectedTeacher: teacher),
@@ -1802,7 +1807,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                           style: TextStyle(
                             fontSize: 10.5,
                             fontWeight: FontWeight.bold,
-                            color: dark ? const Color(0xFFFBBF24) : const Color(0xFFB45309),
+                            color: dark ? SoftPalette.amber200 : SoftPalette.orange500,
                           ),
                         ),
                         Text(
@@ -1906,9 +1911,9 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
       label: Text(label),
       selected: isSelected,
       selectedColor: color,
-      backgroundColor: _isDark(context) ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+      backgroundColor: _isDark(context) ? SoftPalette.slate900 : SoftPalette.slate100,
       labelStyle: TextStyle(
-        color: isSelected ? Colors.white : (_isDark(context) ? const Color(0xFFCBD5E1) : const Color(0xFF334155)),
+        color: isSelected ? SoftPalette.gray50 : (_isDark(context) ? SoftPalette.slate200 : SoftPalette.slate700),
         fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
         fontSize: 12,
       ),
@@ -1947,6 +1952,57 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
           });
         }
       },
+    );
+  }
+
+  Widget _segmentedFilterChip({
+    required String label,
+    required bool isSelected,
+    required Color activeColor,
+    required bool isDark,
+    required VoidCallback onTap,
+  }) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 160),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6.5),
+          decoration: BoxDecoration(
+            color: isSelected
+                ? activeColor
+                : (isDark ? SoftPalette.slate900 : SoftPalette.gray50),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: isSelected
+                  ? activeColor
+                  : (isDark ? SoftPalette.slate700 : SoftPalette.slate200),
+              width: isSelected ? 1.2 : 1,
+            ),
+            boxShadow: isSelected
+                ? [
+                    BoxShadow(
+                      color: activeColor.withValues(alpha: 0.28),
+                      blurRadius: 6,
+                      offset: const Offset(0, 2),
+                    ),
+                  ]
+                : null,
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              color: isSelected
+                  ? SoftPalette.gray50
+                  : (isDark ? SoftPalette.slate200 : SoftPalette.slate700),
+              fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+              fontSize: 11.5,
+            ),
+          ),
+        ),
+      ),
     );
   }
 
@@ -2023,7 +2079,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                             )
                           : null,
                       filled: true,
-                      fillColor: dark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                      fillColor: dark ? SoftPalette.slate900 : SoftPalette.gray50,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
                         borderSide: BorderSide.none,
@@ -2031,51 +2087,151 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
                       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  // Filter Chips (Specialization & Shift)
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      Text(
-                        'Specialization:',
-                        style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: textMuted),
-                      ),
-                      for (final s in ['All', 'Nazra', 'Hifz'])
-                        ChoiceChip(
-                          label: Text(s),
-                          selected: _filterSpec == s,
-                          selectedColor: _emerald,
-                          labelStyle: TextStyle(
-                            color: _filterSpec == s ? Colors.white : textPrimary,
-                            fontWeight: _filterSpec == s ? FontWeight.bold : FontWeight.normal,
-                            fontSize: 11,
-                          ),
-                          onSelected: (val) {
-                            if (val) setState(() => _filterSpec = s);
-                          },
-                        ),
-                      const SizedBox(width: 12),
-                      Text(
-                        'Shift:',
-                        style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: textMuted),
-                      ),
-                      for (final sh in ['All', 'Morning', 'Evening', 'Night'])
-                        ChoiceChip(
-                          label: Text(sh),
-                          selected: _filterShift == sh,
-                          selectedColor: const Color(0xFF0284C7),
-                          labelStyle: TextStyle(
-                            color: _filterShift == sh ? Colors.white : textPrimary,
-                            fontWeight: _filterShift == sh ? FontWeight.bold : FontWeight.normal,
-                            fontSize: 11,
-                          ),
-                          onSelected: (val) {
-                            if (val) setState(() => _filterShift = sh);
-                          },
-                        ),
-                    ],
+                  const SizedBox(height: 14),
+                  // Filter Chips (Specialization & Shift) with clean hierarchy
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final isNarrow = constraints.maxWidth < 620;
+                      final hasActiveFilters = _filterSpec != 'All' || _filterShift != 'All' || query.isNotEmpty;
+
+                      Widget buildSpecFilter() {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.workspace_premium_outlined, size: 14, color: _emerald),
+                                const SizedBox(width: 5),
+                                Text(
+                                  context.isUrdu ? 'شعبہ' : 'SPECIALIZATION',
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.5,
+                                    color: textMuted,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: [
+                                for (final s in ['All', 'Nazra', 'Hifz'])
+                                  _segmentedFilterChip(
+                                    label: s == 'All'
+                                        ? (context.isUrdu ? 'تمام' : 'All')
+                                        : (s == 'Nazra'
+                                            ? (context.isUrdu ? 'ناظرہ' : 'Nazra')
+                                            : (context.isUrdu ? 'حفظ' : 'Hifz')),
+                                    isSelected: _filterSpec == s,
+                                    activeColor: _emerald,
+                                    isDark: dark,
+                                    onTap: () => setState(() => _filterSpec = s),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        );
+                      }
+
+                      Widget buildShiftFilter() {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(Icons.schedule_outlined, size: 14, color: SoftPalette.sky500),
+                                const SizedBox(width: 5),
+                                Text(
+                                  context.isUrdu ? 'شفٹ' : 'SHIFT',
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w700,
+                                    letterSpacing: 0.5,
+                                    color: textMuted,
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 6),
+                            Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: [
+                                for (final sh in ['All', 'Morning', 'Evening', 'Night'])
+                                  _segmentedFilterChip(
+                                    label: sh == 'All'
+                                        ? (context.isUrdu ? 'تمام' : 'All')
+                                        : (sh == 'Morning'
+                                            ? (context.isUrdu ? 'صبح' : 'Morning')
+                                            : (sh == 'Evening'
+                                                ? (context.isUrdu ? 'شام' : 'Evening')
+                                                : (context.isUrdu ? 'رات' : 'Night'))),
+                                    isSelected: _filterShift == sh,
+                                    activeColor: SoftPalette.sky500,
+                                    isDark: dark,
+                                    onTap: () => setState(() => _filterShift = sh),
+                                  ),
+                              ],
+                            ),
+                          ],
+                        );
+                      }
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (isNarrow) ...[
+                            buildSpecFilter(),
+                            const SizedBox(height: 12),
+                            buildShiftFilter(),
+                          ] else ...[
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Expanded(child: buildSpecFilter()),
+                                const SizedBox(width: 20),
+                                Expanded(child: buildShiftFilter()),
+                              ],
+                            ),
+                          ],
+                          if (hasActiveFilters) ...[
+                            const SizedBox(height: 10),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: InkWell(
+                                onTap: () => setState(() {
+                                  _filterSpec = 'All';
+                                  _filterShift = 'All';
+                                  _searchCtrl.clear();
+                                }),
+                                borderRadius: BorderRadius.circular(8),
+                                child: Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.restart_alt_rounded, size: 13, color: context.adapt(SoftPalette.red400)),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        context.isUrdu ? 'فلٹرز صاف کریں' : 'Reset filters',
+                                        style: TextStyle(
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.w600,
+                                          color: context.adapt(SoftPalette.red400),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ],
+                      );
+                    },
                   ),
                 ],
               ),
@@ -2135,134 +2291,151 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
     final photo = (teacher['profilePictureBase64'] ?? teacher['profilePictureUrl'] ?? teacher['avatarUrl'])?.toString();
     final isActive = teacher['status']?.toString().toLowerCase() != 'inactive' && teacher['isActive'] != false;
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: cardBg,
-        borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: borderColor),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: dark ? 0.2 : 0.03),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Avatar
-              CircleAvatar(
-                radius: 26,
-                backgroundColor: _emerald.withValues(alpha: 0.12),
-                backgroundImage: (photo != null && photo.isNotEmpty)
-                    ? MemoryImage(base64Decode(photo)) as ImageProvider
-                    : null,
-                child: (photo == null || photo.isEmpty)
-                    ? const Icon(Icons.person_rounded, color: _emerald, size: 28)
-                    : null,
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            username,
-                            style: TextStyle(
-                              fontSize: 16.5,
-                              fontWeight: FontWeight.bold,
-                              color: textPrimary,
-                              letterSpacing: 0.2,
-                            ),
-                          ),
-                        ),
-                        if (realName != null) ...[
-                          const SizedBox(width: 6),
-                          Flexible(
-                            child: Text(
-                              '($realName)',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w500,
-                                color: textMuted,
-                              ),
-                            ),
-                          ),
-                        ],
-                        const SizedBox(width: 8),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: (isActive ? Colors.green : Colors.red).withValues(alpha: 0.12),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: (isActive ? Colors.green : Colors.red).withValues(alpha: 0.3)),
-                          ),
-                          child: Text(
-                            isActive ? 'ACTIVE' : 'INACTIVE',
-                            style: TextStyle(
-                              fontSize: 9.5,
-                              fontWeight: FontWeight.bold,
-                              color: isActive ? Colors.green : Colors.red,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 5),
-                    // Below line: Is it a Nazra or Hifz teacher badge + shift + email
-                    Wrap(
-                      spacing: 6,
-                      runSpacing: 4,
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      children: [
-                        _specBadge(context, spec),
-                        _shiftBadge(shift),
-                        if (email.isNotEmpty)
-                          Text(email, style: TextStyle(fontSize: 11.5, color: textMuted)),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              // Action buttons: Monthly presence & edit details
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  IconButton(
-                    tooltip: 'Download Monthly Presence',
-                    icon: const Icon(Icons.file_download_outlined, size: 20, color: Color(0xFF0284C7)),
-                    padding: const EdgeInsets.all(6),
-                    constraints: const BoxConstraints(),
-                    onPressed: () => _showMonthlyPresenceDialog(context, teachers: allTeachers, preselectedTeacher: teacher),
-                  ),
-                  const SizedBox(width: 4),
-                  ElevatedButton.icon(
-                    onPressed: () => _openEditTeacherDialog(teacher),
-                    icon: const Icon(Icons.edit_rounded, size: 14),
-                    label: Text(context.isUrdu ? 'ترمیم کریں' : 'Edit Details'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: _emerald.withValues(alpha: 0.12),
-                      foregroundColor: _emerald,
-                      elevation: 0,
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10),
-                        side: BorderSide(color: _emerald.withValues(alpha: 0.25)),
-                      ),
-                    ),
-                  ),
-                ],
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isCompact = constraints.maxWidth < 520;
+
+        return Container(
+          padding: EdgeInsets.all(isCompact ? 12 : 16),
+          decoration: BoxDecoration(
+            color: cardBg,
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: borderColor),
+            boxShadow: [
+              BoxShadow(
+                color: SoftPalette.gray900.withValues(alpha: dark ? 0.2 : 0.03),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
               ),
             ],
           ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // Avatar
+                  CircleAvatar(
+                    radius: isCompact ? 22 : 26,
+                    backgroundColor: _emerald.withValues(alpha: 0.12),
+                    backgroundImage: (photo != null && photo.isNotEmpty)
+                        ? Base64ImageCache.of(photo) as ImageProvider
+                        : null,
+                    child: (photo == null || photo.isEmpty)
+                        ? Icon(Icons.person_rounded, color: _emerald, size: isCompact ? 22 : 28)
+                        : null,
+                  ),
+                  SizedBox(width: isCompact ? 10 : 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            Text(
+                              username,
+                              style: TextStyle(
+                                fontSize: isCompact ? 15 : 16.5,
+                                fontWeight: FontWeight.bold,
+                                color: textPrimary,
+                                letterSpacing: 0.2,
+                              ),
+                            ),
+                            if (realName != null)
+                              Text(
+                                '($realName)',
+                                style: TextStyle(
+                                  fontSize: isCompact ? 12 : 13,
+                                  fontWeight: FontWeight.w500,
+                                  color: textMuted,
+                                ),
+                              ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                              decoration: BoxDecoration(
+                                color: (isActive ? context.adapt(SoftPalette.green400) : context.adapt(SoftPalette.red400)).withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: (isActive ? context.adapt(SoftPalette.green400) : context.adapt(SoftPalette.red400)).withValues(alpha: 0.3)),
+                              ),
+                              child: Text(
+                                isActive ? 'ACTIVE' : 'INACTIVE',
+                                style: TextStyle(
+                                  fontSize: 9.5,
+                                  fontWeight: FontWeight.bold,
+                                  color: isActive ? context.adapt(SoftPalette.green400) : context.adapt(SoftPalette.red400),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 5),
+                        // Below line: Is it a Nazra or Hifz teacher badge + shift + email
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [
+                            _specBadge(context, spec),
+                            _shiftBadge(shift),
+                            if (email.isNotEmpty)
+                              Text(email, style: TextStyle(fontSize: 11.5, color: textMuted)),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                  // Action buttons: Monthly presence & edit details
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        tooltip: 'Download Monthly Presence',
+                        icon: Icon(Icons.file_download_outlined, size: 20, color: context.adapt(SoftPalette.sky500)),
+                        padding: const EdgeInsets.all(6),
+                        constraints: const BoxConstraints(),
+                        onPressed: () => _showMonthlyPresenceDialog(context, teachers: allTeachers, preselectedTeacher: teacher),
+                      ),
+                      const SizedBox(width: 4),
+                      if (isCompact)
+                        IconButton(
+                          tooltip: context.isUrdu ? 'ترمیم کریں' : 'Edit Details',
+                          icon: const Icon(Icons.edit_rounded, size: 16),
+                          style: IconButton.styleFrom(
+                            backgroundColor: _emerald.withValues(alpha: 0.12),
+                            foregroundColor: _emerald,
+                            padding: const EdgeInsets.all(8),
+                            minimumSize: const Size(36, 36),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              side: BorderSide(color: _emerald.withValues(alpha: 0.25)),
+                            ),
+                          ),
+                          onPressed: () => _openEditTeacherDialog(teacher),
+                        )
+                      else
+                        ElevatedButton.icon(
+                          onPressed: () => _openEditTeacherDialog(teacher),
+                          icon: const Icon(Icons.edit_rounded, size: 14),
+                          label: Text(context.isUrdu ? 'ترمیم کریں' : 'Edit Details'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: _emerald.withValues(alpha: 0.12),
+                            foregroundColor: _emerald,
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              side: BorderSide(color: _emerald.withValues(alpha: 0.25)),
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
           const SizedBox(height: 14),
           const Divider(height: 1),
           const SizedBox(height: 12),
@@ -2282,6 +2455,8 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
         ],
       ),
     );
+  },
+);
   }
 
   Widget _infoPill(IconData icon, String text, Color color) {
@@ -2304,18 +2479,18 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
     IconData icon;
 
     if (s.contains('both') || (s.contains('nazra') && s.contains('hifz'))) {
-      bg = const Color(0xFF7C3AED).withValues(alpha: 0.14);
-      fg = const Color(0xFF7C3AED);
+      bg = context.adapt(SoftPalette.violet550).withValues(alpha: 0.14);
+      fg = context.adapt(SoftPalette.violet550);
       label = isUrdu ? 'ناظرہ و حفظ استاد' : 'Nazra & Hifz Teacher';
       icon = Icons.menu_book_rounded;
     } else if (s.contains('nazra')) {
-      bg = const Color(0xFF0D9488).withValues(alpha: 0.14);
-      fg = const Color(0xFF0D9488);
+      bg = context.adapt(SoftPalette.teal500).withValues(alpha: 0.14);
+      fg = context.adapt(SoftPalette.teal500);
       label = isUrdu ? 'ناظرہ استاد' : 'Nazra Teacher';
       icon = Icons.auto_stories_rounded;
     } else {
-      bg = const Color(0xFF4C4DDC).withValues(alpha: 0.14);
-      fg = const Color(0xFF4C4DDC);
+      bg = context.adapt(SoftPalette.indigo550).withValues(alpha: 0.14);
+      fg = context.adapt(SoftPalette.indigo550);
       label = isUrdu ? 'حفظ استاد' : 'Hifz Teacher';
       icon = Icons.mosque_rounded;
     }
@@ -2350,19 +2525,19 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
     if (sh.contains('evening')) {
       label = 'Evening';
       icon = Icons.wb_twilight_rounded;
-      color = const Color(0xFFD97706);
+      color = context.adapt(SoftPalette.orange400);
     } else if (sh.contains('night')) {
       label = 'Night';
       icon = Icons.nightlight_round;
-      color = const Color(0xFF4338CA);
+      color = context.adapt(SoftPalette.indigo600);
     } else if (sh.contains('all')) {
       label = 'Full Day';
       icon = Icons.all_inclusive_rounded;
-      color = const Color(0xFF0284C7);
+      color = context.adapt(SoftPalette.sky500);
     } else {
       label = 'Morning';
       icon = Icons.wb_sunny_rounded;
-      color = const Color(0xFF059669);
+      color = context.adapt(SoftPalette.emerald500);
     }
 
     return Container(
@@ -2410,7 +2585,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
-                color: dark ? Colors.white : const Color(0xFF1E293B),
+                color: dark ? SoftPalette.gray50 : SoftPalette.slate800,
               ),
             ),
             const SizedBox(height: 6),
@@ -2419,7 +2594,7 @@ class _MadrassaTeachersViewState extends State<MadrassaTeachersView>
               textAlign: TextAlign.center,
               style: TextStyle(
                 fontSize: 13,
-                color: dark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                color: dark ? SoftPalette.slate350 : SoftPalette.slate550,
               ),
             ),
           ],

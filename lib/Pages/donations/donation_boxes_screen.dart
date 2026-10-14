@@ -236,11 +236,11 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                       children: [
                         _buildFilterChip('all', 'All (${_boxes.length})', t),
                         _buildFilterChip('active', 'Active ($activeCount)', t),
-                        _buildFilterChip('overdue', 'Overdue ($overdueCount)', t, color: const Color(0xFFDC2626)),
-                        _buildFilterChip('snatched', 'Snatched 🚨 ($snatchedCount)', t, color: const Color(0xFFDC2626)),
-                        _buildFilterChip('stolen', 'Stolen ⚠️ ($stolenCount)', t, color: const Color(0xFFEA580C)),
-                        _buildFilterChip('broken', 'Broken 🔨 ($brokenCount)', t, color: const Color(0xFFD97706)),
-                        _buildFilterChip('replaced', 'Replaced 🔄 ($replacedCount)', t, color: const Color(0xFF7C3AED)),
+                        _buildFilterChip('overdue', 'Overdue ($overdueCount)', t, color: SoftPalette.red500),
+                        _buildFilterChip('snatched', 'Snatched 🚨 ($snatchedCount)', t, color: SoftPalette.red500),
+                        _buildFilterChip('stolen', 'Stolen ⚠️ ($stolenCount)', t, color: SoftPalette.orange400),
+                        _buildFilterChip('broken', 'Broken 🔨 ($brokenCount)', t, color: SoftPalette.orange400),
+                        _buildFilterChip('replaced', 'Replaced 🔄 ($replacedCount)', t, color: SoftPalette.violet550),
                       ],
                     ),
                   ),
@@ -392,7 +392,7 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.inventory_2_rounded, size: 16, color: _selectedView == 0 ? Colors.white : t.textSecondary),
+                    Icon(Icons.inventory_2_rounded, size: 16, color: _selectedView == 0 ? SoftPalette.gray50 : t.textSecondary),
                     const SizedBox(width: 6),
                     Flexible(
                       child: Text(
@@ -402,7 +402,7 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                         style: TextStyle(
                           fontSize: isMobile ? 12 : 12.5,
                           fontWeight: FontWeight.w700,
-                          color: _selectedView == 0 ? Colors.white : t.textSecondary,
+                          color: _selectedView == 0 ? SoftPalette.gray50 : t.textSecondary,
                         ),
                       ),
                     ),
@@ -426,7 +426,7 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    Icon(Icons.analytics_rounded, size: 16, color: _selectedView == 1 ? Colors.white : t.textSecondary),
+                    Icon(Icons.analytics_rounded, size: 16, color: _selectedView == 1 ? SoftPalette.gray50 : t.textSecondary),
                     const SizedBox(width: 6),
                     Flexible(
                       child: Text(
@@ -436,7 +436,7 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                         style: TextStyle(
                           fontSize: isMobile ? 12 : 12.5,
                           fontWeight: FontWeight.w700,
-                          color: _selectedView == 1 ? Colors.white : t.textSecondary,
+                          color: _selectedView == 1 ? SoftPalette.gray50 : t.textSecondary,
                         ),
                       ),
                     ),
@@ -462,11 +462,11 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
         labelStyle: TextStyle(
           fontSize: 11.5,
           fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
-          color: isSelected ? Colors.white : (color ?? t.textPrimary),
+          color: isSelected ? SoftPalette.gray50 : (color ?? t.textPrimary),
         ),
         backgroundColor: color != null ? color.withValues(alpha: 0.08) : t.bgCard,
         selectedColor: chipColor,
-        checkmarkColor: Colors.white,
+        checkmarkColor: SoftPalette.gray50,
         showCheckmark: false,
         side: BorderSide(
           color: isSelected ? chipColor : (color?.withValues(alpha: 0.3) ?? t.bgRule),
@@ -489,7 +489,7 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
         labelStyle: TextStyle(
           fontSize: 11,
           fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
-          color: isSelected ? Colors.white : t.textPrimary,
+          color: isSelected ? SoftPalette.gray50 : t.textPrimary,
         ),
         backgroundColor: t.bgCard,
         selectedColor: t.accent,
@@ -546,7 +546,7 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
-                color: isSelected ? Colors.white : color,
+                color: isSelected ? SoftPalette.gray50 : color,
               ),
             ),
           ),
@@ -589,7 +589,7 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
         OutlinedButton.icon(
           onPressed: () async {
             if (_boxes.isEmpty) {
-              ScaffoldMessenger.of(context).showSnackBar(
+              AppToast.showSnackBar(context, 
                 const SnackBar(content: Text('No donation boxes to export')),
               );
               return;
@@ -638,7 +638,7 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
         label: 'Active Boxes',
         value: '$activeCount',
         icon: Icons.inventory_2_rounded,
-        color: const Color(0xFF047857),
+        color: SoftPalette.emerald550,
         t: t,
         trendText: 'Active',
         subtitle: 'Deployed in field',
@@ -649,7 +649,7 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
         label: 'Overdue (30d+)',
         value: '$overdueCount',
         icon: Icons.warning_amber_rounded,
-        color: overdueCount > 0 ? const Color(0xFFDC2626) : const Color(0xFF6B7280),
+        color: overdueCount > 0 ? SoftPalette.red500 : SoftPalette.slate550,
         t: t,
         trendText: overdueCount > 0 ? '$overdueCount urgent' : 'All clear',
         subtitle: 'Opening due',
@@ -660,7 +660,7 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
         label: 'Total Collected',
         value: 'PKR ${fmt.format(totalCollected)}',
         icon: Icons.payments_rounded,
-        color: const Color(0xFF1D4ED8),
+        color: SoftPalette.blue550,
         t: t,
         trendText: 'All time',
         subtitle: 'Box collections',
@@ -671,7 +671,7 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
         label: 'Incidents / Risk',
         value: '$incidentsCount',
         icon: Icons.report_problem_rounded,
-        color: incidentsCount > 0 ? const Color(0xFFDC2626) : const Color(0xFF10B981),
+        color: incidentsCount > 0 ? SoftPalette.red500 : SoftPalette.emerald350,
         t: t,
         trendText: incidentsCount > 0 ? 'Alert' : 'Normal',
         subtitle: 'Integrity check',
@@ -747,7 +747,7 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
               label: const Text('Register Box', style: TextStyle(fontWeight: FontWeight.w700)),
               style: ElevatedButton.styleFrom(
                 backgroundColor: t.accent,
-                foregroundColor: Colors.white,
+                foregroundColor: SoftPalette.gray50,
                 padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
@@ -903,22 +903,22 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                             onPressed: () async {
                               final boxNum = numberCtrl.text.trim().toUpperCase();
                               if (boxNum.isEmpty) {
-                                ScaffoldMessenger.of(ctx).showSnackBar(
-                                  const SnackBar(content: Text('Box number is required'), backgroundColor: Colors.red),
+                                AppToast.showSnackBar(ctx, 
+                                  const SnackBar(content: Text('Box number is required'), backgroundColor: SoftPalette.red400),
                                 );
                                 return;
                               }
                               if (nameCtrl.text.trim().isEmpty) {
-                                ScaffoldMessenger.of(ctx).showSnackBar(
-                                  const SnackBar(content: Text('Holder name is required'), backgroundColor: Colors.red),
+                                AppToast.showSnackBar(ctx, 
+                                  const SnackBar(content: Text('Holder name is required'), backgroundColor: SoftPalette.red400),
                                 );
                                 return;
                               }
                               if (DonationBoxStorage.isBoxNumberTaken(boxNum)) {
-                                ScaffoldMessenger.of(ctx).showSnackBar(
+                                AppToast.showSnackBar(ctx, 
                                   SnackBar(
                                     content: Text('Box number "$boxNum" has already been assigned in the past. Box numbers can never be reused.'),
-                                    backgroundColor: Colors.red,
+                                    backgroundColor: SoftPalette.red400,
                                   ),
                                 );
                                 return;
@@ -937,14 +937,14 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                               if (ctx.mounted) Navigator.pop(ctx);
                               _refresh();
                               if (mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(content: Text('Box ${box.boxNumber} registered'), backgroundColor: Colors.green),
+                                AppToast.showSnackBar(context, 
+                                  SnackBar(content: Text('Box ${box.boxNumber} registered'), backgroundColor: SoftPalette.green400),
                                 );
                               }
                             },
                             style: ElevatedButton.styleFrom(
                               backgroundColor: t.accent,
-                              foregroundColor: Colors.white,
+                              foregroundColor: SoftPalette.gray50,
                               padding: const EdgeInsets.symmetric(vertical: 14),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             ),
@@ -1008,10 +1008,10 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                             Container(
                               padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
-                                color: Colors.blue.withValues(alpha: 0.1),
+                                color: SoftPalette.blue400.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(12),
                               ),
-                              child: const Icon(Icons.edit_note_rounded, size: 22, color: Colors.blue),
+                              child: const Icon(Icons.edit_note_rounded, size: 22, color: SoftPalette.blue400),
                             ),
                             const SizedBox(width: 14),
                             Expanded(
@@ -1109,7 +1109,7 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                               ),
                               Switch(
                                 value: isActive,
-                                activeThumbColor: const Color(0xFF047857),
+                                activeThumbColor: SoftPalette.emerald550,
                                 onChanged: (v) => setDialogState(() => isActive = v),
                               ),
                             ],
@@ -1146,29 +1146,29 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                                 onPressed: () async {
                                   final cleanNum = numberCtrl.text.trim().toUpperCase();
                                   if (cleanNum.isEmpty) {
-                                    ScaffoldMessenger.of(ctx).showSnackBar(
-                                      const SnackBar(content: Text('Box number cannot be empty'), backgroundColor: Colors.red),
+                                    AppToast.showSnackBar(ctx, 
+                                      const SnackBar(content: Text('Box number cannot be empty'), backgroundColor: SoftPalette.red400),
                                     );
                                     return;
                                   }
                                   if (cleanNum != box.boxNumber.toUpperCase() && DonationBoxStorage.isBoxNumberTaken(cleanNum, excludeBoxId: box.id)) {
-                                    ScaffoldMessenger.of(ctx).showSnackBar(
+                                    AppToast.showSnackBar(ctx, 
                                       SnackBar(
                                         content: Text('Box number "$cleanNum" has already been assigned in the past. Box numbers can never be reused.'),
-                                        backgroundColor: Colors.red,
+                                        backgroundColor: SoftPalette.red400,
                                       ),
                                     );
                                     return;
                                   }
                                   if (nameCtrl.text.trim().isEmpty) {
-                                    ScaffoldMessenger.of(ctx).showSnackBar(
-                                      const SnackBar(content: Text('Holder name is required'), backgroundColor: Colors.red),
+                                    AppToast.showSnackBar(ctx, 
+                                      const SnackBar(content: Text('Holder name is required'), backgroundColor: SoftPalette.red400),
                                     );
                                     return;
                                   }
                                   if (reasonCtrl.text.trim().isEmpty) {
-                                    ScaffoldMessenger.of(ctx).showSnackBar(
-                                      const SnackBar(content: Text('Please provide a reason for editing for audit trail'), backgroundColor: Colors.red),
+                                    AppToast.showSnackBar(ctx, 
+                                      const SnackBar(content: Text('Please provide a reason for editing for audit trail'), backgroundColor: SoftPalette.red400),
                                     );
                                     return;
                                   }
@@ -1206,14 +1206,14 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                                   if (ctx.mounted) Navigator.pop(ctx);
                                   _refresh();
                                   if (mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      SnackBar(content: Text('Box ${updated.boxNumber} updated successfully'), backgroundColor: Colors.green),
+                                    AppToast.showSnackBar(context, 
+                                      SnackBar(content: Text('Box ${updated.boxNumber} updated successfully'), backgroundColor: SoftPalette.green400),
                                     );
                                   }
                                 },
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: t.accent,
-                                  foregroundColor: Colors.white,
+                                  foregroundColor: SoftPalette.gray50,
                                   padding: const EdgeInsets.symmetric(vertical: 14),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                 ),
@@ -1263,10 +1263,10 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                           Container(
                             padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF047857).withValues(alpha: 0.1),
+                              color: SoftPalette.emerald550.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(12),
                             ),
-                            child: const Icon(Icons.lock_open_rounded, size: 22, color: Color(0xFF047857)),
+                            child: const Icon(Icons.lock_open_rounded, size: 22, color: SoftPalette.emerald550),
                           ),
                           const SizedBox(width: 14),
                           Expanded(
@@ -1344,15 +1344,15 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                             child: ElevatedButton(
                               onPressed: () async {
                                 if (selectedDate.isAfter(DateTime.now())) {
-                                  ScaffoldMessenger.of(ctx).showSnackBar(
-                                    const SnackBar(content: Text('Cannot record donation box openings for future dates'), backgroundColor: Colors.red),
+                                  AppToast.showSnackBar(ctx, 
+                                    const SnackBar(content: Text('Cannot record donation box openings for future dates'), backgroundColor: SoftPalette.red400),
                                   );
                                   return;
                                 }
                                 final amt = double.tryParse(amountCtrl.text.trim().replaceAll(',', ''));
                                 if (amt == null || amt < 0) {
-                                  ScaffoldMessenger.of(ctx).showSnackBar(
-                                    const SnackBar(content: Text('Enter a valid amount'), backgroundColor: Colors.red),
+                                  AppToast.showSnackBar(ctx, 
+                                    const SnackBar(content: Text('Enter a valid amount'), backgroundColor: SoftPalette.red400),
                                   );
                                   return;
                                 }
@@ -1414,17 +1414,17 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                                 if (ctx.mounted) Navigator.pop(ctx);
                                 _refresh();
                                 if (mounted) {
-                                  ScaffoldMessenger.of(context).showSnackBar(
+                                  AppToast.showSnackBar(context, 
                                     SnackBar(
                                       content: Text('Box ${box.boxNumber} opened — PKR ${NumberFormat('#,##0').format(amt)}'),
-                                      backgroundColor: Colors.green,
+                                      backgroundColor: SoftPalette.green400,
                                     ),
                                   );
                                 }
                               },
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF047857),
-                                foregroundColor: Colors.white,
+                                backgroundColor: SoftPalette.emerald550,
+                                foregroundColor: SoftPalette.gray50,
                                 padding: const EdgeInsets.symmetric(vertical: 14),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                               ),
@@ -1477,10 +1477,10 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                             Container(
                               padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFDC2626).withValues(alpha: 0.1),
+                                color: SoftPalette.red500.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(12),
                               ),
-                              child: const Icon(Icons.report_problem_rounded, size: 24, color: Color(0xFFDC2626)),
+                              child: const Icon(Icons.report_problem_rounded, size: 24, color: SoftPalette.red500),
                             ),
                             const SizedBox(width: 14),
                             Expanded(
@@ -1503,11 +1503,11 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                         const SizedBox(height: 8),
                         Row(
                           children: [
-                            _buildIncidentTypeChip('snatched', 'Snatched 🚨', const Color(0xFFDC2626), incidentType, (val) => setDialogState(() => incidentType = val)),
+                            _buildIncidentTypeChip('snatched', 'Snatched 🚨', SoftPalette.red500, incidentType, (val) => setDialogState(() => incidentType = val)),
                             const SizedBox(width: 8),
-                            _buildIncidentTypeChip('stolen', 'Stolen ⚠️', const Color(0xFFEA580C), incidentType, (val) => setDialogState(() => incidentType = val)),
+                            _buildIncidentTypeChip('stolen', 'Stolen ⚠️', SoftPalette.orange400, incidentType, (val) => setDialogState(() => incidentType = val)),
                             const SizedBox(width: 8),
-                            _buildIncidentTypeChip('broken', 'Broken 🔨', const Color(0xFFD97706), incidentType, (val) => setDialogState(() => incidentType = val)),
+                            _buildIncidentTypeChip('broken', 'Broken 🔨', SoftPalette.orange400, incidentType, (val) => setDialogState(() => incidentType = val)),
                           ],
                         ),
                         const SizedBox(height: 16),
@@ -1618,18 +1618,18 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                                     _showAssignReplacementBoxDialog(updatedBox);
                                   } else {
                                     if (mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(
+                                      AppToast.showSnackBar(context, 
                                         SnackBar(
                                           content: Text('Incident logged for ${box.boxNumber}. Historical collections preserved.'),
-                                          backgroundColor: Colors.orange.shade800,
+                                          backgroundColor: SoftPalette.orange400,
                                         ),
                                       );
                                     }
                                   }
                                 },
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFFDC2626),
-                                  foregroundColor: Colors.white,
+                                  backgroundColor: SoftPalette.red500,
+                                  foregroundColor: SoftPalette.gray50,
                                   padding: const EdgeInsets.symmetric(vertical: 14),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                 ),
@@ -1680,10 +1680,10 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                         Container(
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF7C3AED).withValues(alpha: 0.1),
+                            color: SoftPalette.violet550.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(12),
                           ),
-                          child: const Icon(Icons.sync_alt_rounded, size: 24, color: Color(0xFF7C3AED)),
+                          child: const Icon(Icons.sync_alt_rounded, size: 24, color: SoftPalette.violet550),
                         ),
                         const SizedBox(width: 14),
                         Expanded(
@@ -1726,18 +1726,18 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF7C3AED).withValues(alpha: 0.08),
+                        color: SoftPalette.violet550.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFF7C3AED).withValues(alpha: 0.2)),
+                        border: Border.all(color: SoftPalette.violet550.withValues(alpha: 0.2)),
                       ),
                       child: const Row(
                         children: [
-                          Icon(Icons.edit_note_rounded, size: 16, color: Color(0xFF7C3AED)),
+                          Icon(Icons.edit_note_rounded, size: 16, color: SoftPalette.violet550),
                           SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               'Please manually enter the physical box number. Box numbers can never be reused.',
-                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF7C3AED)),
+                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: SoftPalette.violet550),
                             ),
                           ),
                         ],
@@ -1782,16 +1782,16 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                             onPressed: () async {
                               final newBoxNo = boxNumCtrl.text.trim().toUpperCase();
                               if (newBoxNo.isEmpty) {
-                                ScaffoldMessenger.of(ctx).showSnackBar(
-                                  const SnackBar(content: Text('Please enter a new box number'), backgroundColor: Colors.red),
+                                AppToast.showSnackBar(ctx, 
+                                  const SnackBar(content: Text('Please enter a new box number'), backgroundColor: SoftPalette.red400),
                                 );
                                 return;
                               }
                               if (DonationBoxStorage.isBoxNumberTaken(newBoxNo)) {
-                                ScaffoldMessenger.of(ctx).showSnackBar(
+                                AppToast.showSnackBar(ctx, 
                                   SnackBar(
                                     content: Text('Box number "$newBoxNo" has already been assigned in the past. An assigned box number can never be reused.'),
-                                    backgroundColor: Colors.red,
+                                    backgroundColor: SoftPalette.red400,
                                   ),
                                 );
                                 return;
@@ -1811,17 +1811,17 @@ class _DonationBoxesWidgetState extends State<DonationBoxesWidget> {
                               _refresh();
 
                               if (mounted) {
-                                ScaffoldMessenger.of(context).showSnackBar(
+                                AppToast.showSnackBar(context, 
                                   SnackBar(
                                     content: Text('Replacement Box ${created.boxNumber} successfully registered and linked!'),
-                                    backgroundColor: Colors.green.shade800,
+                                    backgroundColor: SoftPalette.green550,
                                   ),
                                 );
                               }
                             },
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF7C3AED),
-                              foregroundColor: Colors.white,
+                              backgroundColor: SoftPalette.violet550,
+                              foregroundColor: SoftPalette.gray50,
                               padding: const EdgeInsets.symmetric(vertical: 14),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             ),
@@ -1908,31 +1908,31 @@ class _BoxCardState extends State<_BoxCard> {
     final IconData statusIcon;
 
     if (box.isSnatched) {
-      statusColor = const Color(0xFFDC2626);
+      statusColor = SoftPalette.red500;
       statusLabel = 'Snatched 🚨';
       statusIcon = Icons.warning_rounded;
     } else if (box.isStolen) {
-      statusColor = const Color(0xFFEA580C);
+      statusColor = SoftPalette.orange400;
       statusLabel = 'Stolen ⚠️';
       statusIcon = Icons.warning_amber_rounded;
     } else if (box.isBroken) {
-      statusColor = const Color(0xFFD97706);
+      statusColor = SoftPalette.orange400;
       statusLabel = 'Broken 🔨';
       statusIcon = Icons.build_circle_rounded;
     } else if (box.isReplaced) {
-      statusColor = const Color(0xFF7C3AED);
+      statusColor = SoftPalette.violet550;
       statusLabel = 'Replaced 🔄';
       statusIcon = Icons.sync_alt_rounded;
     } else if (!box.isActive) {
-      statusColor = const Color(0xFF6B7280);
+      statusColor = SoftPalette.slate550;
       statusLabel = 'Inactive';
       statusIcon = Icons.pause_circle_rounded;
     } else if (box.isOverdue) {
-      statusColor = const Color(0xFFDC2626);
+      statusColor = SoftPalette.red500;
       statusLabel = 'Overdue ${box.daysSinceLastOpened ?? 30}d';
       statusIcon = Icons.warning_amber_rounded;
     } else {
-      statusColor = const Color(0xFF047857);
+      statusColor = SoftPalette.emerald550;
       statusLabel = box.lastOpenedDate != null ? '${box.daysSinceLastOpened}d ago' : 'New';
       statusIcon = Icons.check_circle_rounded;
     }
@@ -1956,7 +1956,7 @@ class _BoxCardState extends State<_BoxCard> {
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: _isHovered ? 0.04 : 0.02),
+                  color: SoftPalette.gray900.withValues(alpha: _isHovered ? 0.04 : 0.02),
                   blurRadius: _isHovered ? 12 : 6,
                   offset: Offset(0, _isHovered ? 4 : 2),
                 ),
@@ -2094,7 +2094,7 @@ class _BoxCardState extends State<_BoxCard> {
                           if (val == 'detail') widget.onTap();
                           if (val == 'copy_phone' && box.holderPhone.isNotEmpty) {
                             Clipboard.setData(ClipboardData(text: box.holderPhone));
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            AppToast.showSnackBar(context, 
                               SnackBar(
                                 content: Text('Copied ${box.holderPhone} to clipboard'),
                                 duration: const Duration(seconds: 2),
@@ -2109,7 +2109,7 @@ class _BoxCardState extends State<_BoxCard> {
                             height: 38,
                             child: Row(
                               children: [
-                                Icon(Icons.lock_open_rounded, size: 16, color: Color(0xFF047857)),
+                                Icon(Icons.lock_open_rounded, size: 16, color: SoftPalette.emerald550),
                                 SizedBox(width: 10),
                                 Text('Open Box & Collect', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
                               ],
@@ -2156,9 +2156,9 @@ class _BoxCardState extends State<_BoxCard> {
                               height: 38,
                               child: Row(
                                 children: [
-                                  Icon(Icons.report_problem_outlined, size: 16, color: Color(0xFFDC2626)),
+                                  Icon(Icons.report_problem_outlined, size: 16, color: SoftPalette.red500),
                                   SizedBox(width: 10),
-                                  Text('Report Problem / Snatched', style: TextStyle(fontSize: 13, color: Color(0xFFDC2626), fontWeight: FontWeight.w600)),
+                                  Text('Report Problem / Snatched', style: TextStyle(fontSize: 13, color: SoftPalette.red500, fontWeight: FontWeight.w600)),
                                 ],
                               ),
                             )
@@ -2168,9 +2168,9 @@ class _BoxCardState extends State<_BoxCard> {
                               height: 38,
                               child: Row(
                                 children: [
-                                  Icon(Icons.sync_alt_rounded, size: 16, color: Color(0xFF7C3AED)),
+                                  Icon(Icons.sync_alt_rounded, size: 16, color: SoftPalette.violet550),
                                   SizedBox(width: 10),
-                                  Text('Assign Replacement Box', style: TextStyle(fontSize: 13, color: Color(0xFF7C3AED), fontWeight: FontWeight.w600)),
+                                  Text('Assign Replacement Box', style: TextStyle(fontSize: 13, color: SoftPalette.violet550, fontWeight: FontWeight.w600)),
                                 ],
                               ),
                             ),
@@ -2232,13 +2232,13 @@ class _BoxCardState extends State<_BoxCard> {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3.5),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF7C3AED).withValues(alpha: 0.08),
+                                color: SoftPalette.violet550.withValues(alpha: 0.08),
                                 borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: const Color(0xFF7C3AED).withValues(alpha: 0.2)),
+                                border: Border.all(color: SoftPalette.violet550.withValues(alpha: 0.2)),
                               ),
                               child: Text(
                                 'Replaces ${box.replacementForBoxId}',
-                                style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: Color(0xFF7C3AED)),
+                                style: const TextStyle(fontSize: 9.5, fontWeight: FontWeight.w700, color: SoftPalette.violet550),
                               ),
                             ),
                         ],
@@ -2253,7 +2253,7 @@ class _BoxCardState extends State<_BoxCard> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF7C3AED).withValues(alpha: 0.1),
+                            color: SoftPalette.violet550.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(7),
                           ),
                           child: Text(
@@ -2261,7 +2261,7 @@ class _BoxCardState extends State<_BoxCard> {
                             style: GoogleFonts.plusJakartaSans(
                               fontSize: 11,
                               fontWeight: FontWeight.w800,
-                              color: const Color(0xFF7C3AED),
+                              color: SoftPalette.violet550,
                             ),
                           ),
                         )
@@ -2271,8 +2271,8 @@ class _BoxCardState extends State<_BoxCard> {
                           icon: const Icon(Icons.sync_alt_rounded, size: 12),
                           label: const Text('Replace', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF7C3AED),
-                            foregroundColor: Colors.white,
+                            backgroundColor: SoftPalette.violet550,
+                            foregroundColor: SoftPalette.gray50,
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                             visualDensity: VisualDensity.compact,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
@@ -2285,16 +2285,16 @@ class _BoxCardState extends State<_BoxCard> {
                           // Compact Report Incident button
                           IconButton(
                             onPressed: widget.onReportIncident,
-                            icon: const Icon(Icons.report_problem_outlined, size: 15, color: Color(0xFFDC2626)),
+                            icon: const Icon(Icons.report_problem_outlined, size: 15, color: SoftPalette.red500),
                             tooltip: 'Report Incident (Snatched/Broken)',
                             padding: EdgeInsets.zero,
                             constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                             visualDensity: VisualDensity.compact,
                             style: IconButton.styleFrom(
-                              backgroundColor: const Color(0xFFDC2626).withValues(alpha: 0.08),
+                              backgroundColor: SoftPalette.red500.withValues(alpha: 0.08),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(7),
-                                side: BorderSide(color: const Color(0xFFDC2626).withValues(alpha: 0.2)),
+                                side: BorderSide(color: SoftPalette.red500.withValues(alpha: 0.2)),
                               ),
                             ),
                           ),
@@ -2327,21 +2327,21 @@ class _BoxCardState extends State<_BoxCard> {
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5.5),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF047857).withValues(alpha: 0.08),
+                                  color: SoftPalette.emerald550.withValues(alpha: 0.08),
                                   borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: const Color(0xFF047857).withValues(alpha: 0.25)),
+                                  border: Border.all(color: SoftPalette.emerald550.withValues(alpha: 0.25)),
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(Icons.lock_open_rounded, size: 13, color: Color(0xFF047857)),
+                                    const Icon(Icons.lock_open_rounded, size: 13, color: SoftPalette.emerald550),
                                     const SizedBox(width: 4),
                                     Text(
                                       'Open',
                                       style: GoogleFonts.plusJakartaSans(
                                         fontSize: 11.5,
                                         fontWeight: FontWeight.w800,
-                                        color: const Color(0xFF047857),
+                                        color: SoftPalette.emerald550,
                                       ),
                                     ),
                                   ],
@@ -2430,7 +2430,7 @@ class _BoxDetailDialogState extends State<_BoxDetailDialog> {
                   Container(
                     width: 48, height: 48,
                     decoration: BoxDecoration(
-                      color: (box.isCompromised ? const Color(0xFFDC2626) : t.accent).withValues(alpha: 0.1),
+                      color: (box.isCompromised ? SoftPalette.red500 : t.accent).withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: Center(
@@ -2439,7 +2439,7 @@ class _BoxDetailDialogState extends State<_BoxDetailDialog> {
                         style: GoogleFonts.dmMono(
                           fontSize: 18,
                           fontWeight: FontWeight.w800,
-                          color: box.isCompromised ? const Color(0xFFDC2626) : t.accent,
+                          color: box.isCompromised ? SoftPalette.red500 : t.accent,
                         ),
                       ),
                     ),
@@ -2457,13 +2457,13 @@ class _BoxDetailDialogState extends State<_BoxDetailDialog> {
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFDC2626).withValues(alpha: 0.1),
+                                  color: SoftPalette.red500.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(6),
-                                  border: Border.all(color: const Color(0xFFDC2626).withValues(alpha: 0.3)),
+                                  border: Border.all(color: SoftPalette.red500.withValues(alpha: 0.3)),
                                 ),
                                 child: Text(
                                   box.status.toUpperCase(),
-                                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: Color(0xFFDC2626)),
+                                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w900, color: SoftPalette.red500),
                                 ),
                               ),
                             ],
@@ -2493,20 +2493,20 @@ class _BoxDetailDialogState extends State<_BoxDetailDialog> {
                         padding: const EdgeInsets.all(14),
                         margin: const EdgeInsets.only(bottom: 18),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFDC2626).withValues(alpha: 0.06),
+                          color: SoftPalette.red500.withValues(alpha: 0.06),
                           borderRadius: BorderRadius.circular(14),
-                          border: Border.all(color: const Color(0xFFDC2626).withValues(alpha: 0.25)),
+                          border: Border.all(color: SoftPalette.red500.withValues(alpha: 0.25)),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Row(
                               children: [
-                                const Icon(Icons.report_problem_rounded, color: Color(0xFFDC2626), size: 20),
+                                const Icon(Icons.report_problem_rounded, color: SoftPalette.red500, size: 20),
                                 const SizedBox(width: 8),
                                 Text(
                                   'INCIDENT REPORTED: ${box.status.toUpperCase()}',
-                                  style: const TextStyle(fontWeight: FontWeight.w900, color: Color(0xFFDC2626), fontSize: 13),
+                                  style: const TextStyle(fontWeight: FontWeight.w900, color: SoftPalette.red500, fontSize: 13),
                                 ),
                               ],
                             ),
@@ -2516,7 +2516,7 @@ class _BoxDetailDialogState extends State<_BoxDetailDialog> {
                             if (box.policeReportNo != null && box.policeReportNo!.isNotEmpty)
                               Text('FIR / Police Report #: ${box.policeReportNo}', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: t.textPrimary)),
                             if (box.estimatedCashLost != null && box.estimatedCashLost! > 0)
-                              Text('Estimated Cash Lost: PKR ${fmt.format(box.estimatedCashLost)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: Color(0xFFDC2626))),
+                              Text('Estimated Cash Lost: PKR ${fmt.format(box.estimatedCashLost)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: SoftPalette.red500)),
                             if (box.incidentNotes != null && box.incidentNotes!.isNotEmpty)
                               Padding(
                                 padding: const EdgeInsets.only(top: 4),
@@ -2527,10 +2527,10 @@ class _BoxDetailDialogState extends State<_BoxDetailDialog> {
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF7C3AED).withValues(alpha: 0.1),
+                                  color: SoftPalette.violet550.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
-                                child: Text('Replaced by Box: ${box.replacedByBoxId}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Color(0xFF7C3AED))),
+                                child: Text('Replaced by Box: ${box.replacedByBoxId}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: SoftPalette.violet550)),
                               ),
                             ],
                           ],
@@ -2543,18 +2543,18 @@ class _BoxDetailDialogState extends State<_BoxDetailDialog> {
                         padding: const EdgeInsets.all(12),
                         margin: const EdgeInsets.only(bottom: 18),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF7C3AED).withValues(alpha: 0.08),
+                          color: SoftPalette.violet550.withValues(alpha: 0.08),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFF7C3AED).withValues(alpha: 0.2)),
+                          border: Border.all(color: SoftPalette.violet550.withValues(alpha: 0.2)),
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.sync_alt_rounded, size: 16, color: Color(0xFF7C3AED)),
+                            const Icon(Icons.sync_alt_rounded, size: 16, color: SoftPalette.violet550),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 'This box is a replacement for compromised box ${box.replacementForBoxId}. Historical data has been transferred and preserved.',
-                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF7C3AED)),
+                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: SoftPalette.violet550),
                               ),
                             ),
                           ],
@@ -2575,76 +2575,160 @@ class _BoxDetailDialogState extends State<_BoxDetailDialog> {
                     const SizedBox(height: 20),
 
                     // Actions
-                    Row(
-                      children: [
-                        if (!box.isCompromised && !box.isReplaced) ...[
-                          Expanded(
-                            child: ElevatedButton.icon(
-                              onPressed: widget.onOpenBox,
-                              icon: const Icon(Icons.lock_open_rounded, size: 18),
-                              label: const Text('Open Box', style: TextStyle(fontWeight: FontWeight.w800)),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFF047857),
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 12),
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final isCompact = constraints.maxWidth < 440;
+                        if (isCompact) {
+                          return Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              if (!box.isCompromised && !box.isReplaced) ...[
+                                ElevatedButton.icon(
+                                  onPressed: widget.onOpenBox,
+                                  icon: const Icon(Icons.lock_open_rounded, size: 18),
+                                  label: const Text('Open Box', style: TextStyle(fontWeight: FontWeight.w800)),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: SoftPalette.emerald550,
+                                    foregroundColor: SoftPalette.gray50,
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                              ] else if (box.replacedByBoxId == null) ...[
+                                ElevatedButton.icon(
+                                  onPressed: widget.onAssignReplacement,
+                                  icon: const Icon(Icons.sync_alt_rounded, size: 18),
+                                  label: const Text('Assign Replacement Box', style: TextStyle(fontWeight: FontWeight.w800)),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: SoftPalette.violet550,
+                                    foregroundColor: SoftPalette.gray50,
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                ),
+                                const SizedBox(height: 8),
+                              ],
+                              Row(
+                                children: [
+                                  if (!box.isCompromised && !box.isReplaced) ...[
+                                    Expanded(
+                                      child: OutlinedButton.icon(
+                                        onPressed: widget.onReportIncident,
+                                        icon: const Icon(Icons.report_problem_outlined, size: 16, color: SoftPalette.red500),
+                                        label: const Text('Report', style: TextStyle(fontWeight: FontWeight.w800, color: SoftPalette.red500)),
+                                        style: OutlinedButton.styleFrom(
+                                          side: BorderSide(color: SoftPalette.red500.withValues(alpha: 0.3)),
+                                          padding: const EdgeInsets.symmetric(vertical: 11),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                        ),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 8),
+                                  ],
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      onPressed: widget.onEditBox,
+                                      icon: Icon(Icons.edit_rounded, size: 16, color: t.accent),
+                                      label: Text('Edit', style: TextStyle(fontWeight: FontWeight.w800, color: t.accent)),
+                                      style: OutlinedButton.styleFrom(
+                                        side: BorderSide(color: t.accent.withValues(alpha: 0.3)),
+                                        padding: const EdgeInsets.symmetric(vertical: 11),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      onPressed: () => _showYearlyReport(),
+                                      icon: Icon(Icons.download_rounded, size: 18, color: t.textSecondary),
+                                      label: Text('Report', style: TextStyle(fontWeight: FontWeight.w800, color: t.textPrimary)),
+                                      style: OutlinedButton.styleFrom(
+                                        side: BorderSide(color: t.bgRule),
+                                        padding: const EdgeInsets.symmetric(vertical: 11),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          );
+                        }
+
+                        return Row(
+                          children: [
+                            if (!box.isCompromised && !box.isReplaced) ...[
+                              Expanded(
+                                child: ElevatedButton.icon(
+                                  onPressed: widget.onOpenBox,
+                                  icon: const Icon(Icons.lock_open_rounded, size: 18),
+                                  label: const Text('Open Box', style: TextStyle(fontWeight: FontWeight.w800)),
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: SoftPalette.emerald550,
+                                    foregroundColor: SoftPalette.gray50,
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              OutlinedButton.icon(
+                                onPressed: widget.onReportIncident,
+                                icon: const Icon(Icons.report_problem_outlined, size: 16, color: SoftPalette.red500),
+                                label: const Text('Report', style: TextStyle(fontWeight: FontWeight.w800, color: SoftPalette.red500)),
+                                style: OutlinedButton.styleFrom(
+                                  side: BorderSide(color: SoftPalette.red500.withValues(alpha: 0.3)),
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                ),
+                              ),
+                            ] else ...[
+                              if (box.replacedByBoxId == null) ...[
+                                Expanded(
+                                  child: ElevatedButton.icon(
+                                    onPressed: widget.onAssignReplacement,
+                                    icon: const Icon(Icons.sync_alt_rounded, size: 18),
+                                    label: const Text('Assign Replacement Box', style: TextStyle(fontWeight: FontWeight.w800)),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: SoftPalette.violet550,
+                                      foregroundColor: SoftPalette.gray50,
+                                      padding: const EdgeInsets.symmetric(vertical: 12),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                              ],
+                            ],
+                            const SizedBox(width: 8),
+                            OutlinedButton.icon(
+                              onPressed: widget.onEditBox,
+                              icon: Icon(Icons.edit_rounded, size: 16, color: t.accent),
+                              label: Text('Edit', style: TextStyle(fontWeight: FontWeight.w800, color: t.accent)),
+                              style: OutlinedButton.styleFrom(
+                                side: BorderSide(color: t.accent.withValues(alpha: 0.3)),
+                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          OutlinedButton.icon(
-                            onPressed: widget.onReportIncident,
-                            icon: const Icon(Icons.report_problem_outlined, size: 16, color: Color(0xFFDC2626)),
-                            label: const Text('Report', style: TextStyle(fontWeight: FontWeight.w800, color: Color(0xFFDC2626))),
-                            style: OutlinedButton.styleFrom(
-                              side: BorderSide(color: const Color(0xFFDC2626).withValues(alpha: 0.3)),
-                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                          ),
-                        ] else ...[
-                          if (box.replacedByBoxId == null) ...[
+                            const SizedBox(width: 8),
                             Expanded(
-                              child: ElevatedButton.icon(
-                                onPressed: widget.onAssignReplacement,
-                                icon: const Icon(Icons.sync_alt_rounded, size: 18),
-                                label: const Text('Assign Replacement Box', style: TextStyle(fontWeight: FontWeight.w800)),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF7C3AED),
-                                  foregroundColor: Colors.white,
+                              child: OutlinedButton.icon(
+                                onPressed: () => _showYearlyReport(),
+                                icon: Icon(Icons.download_rounded, size: 18, color: t.textSecondary),
+                                label: Text('Report', style: TextStyle(fontWeight: FontWeight.w800, color: t.textPrimary)),
+                                style: OutlinedButton.styleFrom(
+                                  side: BorderSide(color: t.bgRule),
                                   padding: const EdgeInsets.symmetric(vertical: 12),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                 ),
                               ),
                             ),
-                            const SizedBox(width: 8),
                           ],
-                        ],
-                        const SizedBox(width: 8),
-                        OutlinedButton.icon(
-                          onPressed: widget.onEditBox,
-                          icon: Icon(Icons.edit_rounded, size: 16, color: t.accent),
-                          label: Text('Edit', style: TextStyle(fontWeight: FontWeight.w800, color: t.accent)),
-                          style: OutlinedButton.styleFrom(
-                            side: BorderSide(color: t.accent.withValues(alpha: 0.3)),
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: () => _showYearlyReport(),
-                            icon: Icon(Icons.download_rounded, size: 18, color: t.textSecondary),
-                            label: Text('Report', style: TextStyle(fontWeight: FontWeight.w800, color: t.textPrimary)),
-                            style: OutlinedButton.styleFrom(
-                              side: BorderSide(color: t.bgRule),
-                              padding: const EdgeInsets.symmetric(vertical: 12),
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                            ),
-                          ),
-                        ),
-                      ],
+                        );
+                      },
                     ),
 
                     const SizedBox(height: 24),
@@ -2775,11 +2859,11 @@ class _BoxDetailDialogState extends State<_BoxDetailDialog> {
                             // Monthly rows
                             ...report.map((r) {
                               final Color rowColor = r.wasOpened
-                                  ? const Color(0xFF047857).withValues(alpha: 0.06)
-                                  : const Color(0xFFDC2626).withValues(alpha: 0.04);
+                                  ? SoftPalette.emerald550.withValues(alpha: 0.06)
+                                  : SoftPalette.red500.withValues(alpha: 0.04);
                               final Color textColor = r.wasOpened
-                                  ? const Color(0xFF047857)
-                                  : const Color(0xFFDC2626);
+                                  ? SoftPalette.emerald550
+                                  : SoftPalette.red500;
 
                               return Container(
                                 margin: const EdgeInsets.only(bottom: 6),
@@ -2844,8 +2928,8 @@ class _BoxDetailDialogState extends State<_BoxDetailDialog> {
                               onPressed: () async {
                                 await DonationBoxStorage.exportBoxYearlyReport(widget.box, _reportYear);
                                 if (ctx.mounted) {
-                                  ScaffoldMessenger.of(ctx).showSnackBar(
-                                    const SnackBar(content: Text('Report exported'), backgroundColor: Colors.green),
+                                  AppToast.showSnackBar(ctx, 
+                                    const SnackBar(content: Text('Report exported'), backgroundColor: SoftPalette.green400),
                                   );
                                 }
                               },
@@ -2853,7 +2937,7 @@ class _BoxDetailDialogState extends State<_BoxDetailDialog> {
                               label: const Text('Download Excel', style: TextStyle(fontWeight: FontWeight.w800)),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: t.accent,
-                                foregroundColor: Colors.white,
+                                foregroundColor: SoftPalette.gray50,
                                 padding: const EdgeInsets.symmetric(vertical: 12),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                               ),
@@ -2913,7 +2997,7 @@ class _SummaryMiniCard extends StatelessWidget {
           border: Border.all(color: t.bgRule.withValues(alpha: 0.8), width: 1),
           boxShadow: [
             BoxShadow(
-              color: isDark ? Colors.black.withValues(alpha: 0.25) : color.withValues(alpha: 0.04),
+              color: isDark ? SoftPalette.gray900.withValues(alpha: 0.25) : color.withValues(alpha: 0.04),
               blurRadius: 10,
               offset: const Offset(0, 3),
             ),
@@ -2949,7 +3033,7 @@ class _SummaryMiniCard extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
                     decoration: BoxDecoration(
-                      color: (isPositiveTrend ? const Color(0xFF10B981) : Colors.amber).withValues(alpha: 0.14),
+                      color: (isPositiveTrend ? SoftPalette.emerald350 : SoftPalette.amber200).withValues(alpha: 0.14),
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Row(
@@ -2958,7 +3042,7 @@ class _SummaryMiniCard extends StatelessWidget {
                         Icon(
                           isPositiveTrend ? Icons.arrow_upward_rounded : Icons.schedule_rounded,
                           size: 10,
-                          color: isPositiveTrend ? const Color(0xFF10B981) : Colors.amber[800],
+                          color: isPositiveTrend ? SoftPalette.emerald350 : SoftPalette.orange350,
                         ),
                         const SizedBox(width: 3),
                         ConstrainedBox(
@@ -2968,7 +3052,7 @@ class _SummaryMiniCard extends StatelessWidget {
                             style: TextStyle(
                               fontSize: 9.5,
                               fontWeight: FontWeight.w700,
-                              color: isPositiveTrend ? const Color(0xFF10B981) : Colors.amber[800],
+                              color: isPositiveTrend ? SoftPalette.emerald350 : SoftPalette.orange350,
                             ),
                             overflow: TextOverflow.ellipsis,
                             maxLines: 1,
@@ -3034,7 +3118,7 @@ class _SummaryMiniCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: t.bgRule),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 6, offset: const Offset(0, 2)),
+          BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.02), blurRadius: 6, offset: const Offset(0, 2)),
         ],
       ),
       child: Column(
@@ -3108,10 +3192,10 @@ class _RegisterBoxButtonState extends State<_RegisterBoxButton> {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.add_rounded, size: 18, color: Colors.white),
+              const Icon(Icons.add_rounded, size: 18, color: SoftPalette.gray50),
               if (!widget.isMobile) ...[
                 const SizedBox(width: 8),
-                const Text('Register Box', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w800, fontSize: 14)),
+                const Text('Register Box', style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.w800, fontSize: 14)),
               ],
             ],
           ),
@@ -3253,9 +3337,9 @@ class _OpeningTimelineItem extends StatelessWidget {
               Container(
                 width: 10, height: 10,
                 decoration: BoxDecoration(
-                  color: const Color(0xFF047857),
+                  color: SoftPalette.emerald550,
                   shape: BoxShape.circle,
-                  border: Border.all(color: const Color(0xFF047857).withValues(alpha: 0.3), width: 2),
+                  border: Border.all(color: SoftPalette.emerald550.withValues(alpha: 0.3), width: 2),
                 ),
               ),
               Container(width: 2, height: 30, color: t.bgRule),
@@ -3283,13 +3367,13 @@ class _OpeningTimelineItem extends StatelessWidget {
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF047857).withValues(alpha: 0.1),
+                                  color: SoftPalette.emerald550.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(color: const Color(0xFF047857).withValues(alpha: 0.25)),
+                                  border: Border.all(color: SoftPalette.emerald550.withValues(alpha: 0.25)),
                                 ),
                                 child: Text(
                                   'Receipt #: ${opening.physicalReceiptNo}',
-                                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Color(0xFF047857)),
+                                  style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: SoftPalette.emerald550),
                                 ),
                               ),
                             ],
@@ -3307,7 +3391,7 @@ class _OpeningTimelineItem extends StatelessWidget {
                   ),
                   Text(
                     'PKR ${fmt.format(opening.amount)}',
-                    style: GoogleFonts.dmMono(fontSize: 14, fontWeight: FontWeight.w800, color: const Color(0xFF047857)),
+                    style: GoogleFonts.dmMono(fontSize: 14, fontWeight: FontWeight.w800, color: SoftPalette.emerald550),
                   ),
                 ],
               ),
@@ -3360,23 +3444,23 @@ class _PersonAuditCardState extends State<_PersonAuditCard> {
     final IconData riskIcon;
 
     if (s.totalIncidents >= 2) {
-      riskColor = const Color(0xFFDC2626);
-      riskBg = const Color(0xFFDC2626).withValues(alpha: 0.1);
+      riskColor = SoftPalette.red500;
+      riskBg = SoftPalette.red500.withValues(alpha: 0.1);
       riskBadge = 'High Accident Risk (${s.totalIncidents} Incidents)';
       riskIcon = Icons.warning_rounded;
     } else if (s.totalIncidents == 1) {
-      riskColor = const Color(0xFFEA580C);
-      riskBg = const Color(0xFFEA580C).withValues(alpha: 0.1);
+      riskColor = SoftPalette.orange400;
+      riskBg = SoftPalette.orange400.withValues(alpha: 0.1);
       riskBadge = 'Incident Reported (1 Accident)';
       riskIcon = Icons.warning_amber_rounded;
     } else if (s.totalMoneyOutput > 50000) {
-      riskColor = const Color(0xFF047857);
-      riskBg = const Color(0xFF047857).withValues(alpha: 0.1);
+      riskColor = SoftPalette.emerald550;
+      riskBg = SoftPalette.emerald550.withValues(alpha: 0.1);
       riskBadge = 'Top Output / Trusted';
       riskIcon = Icons.verified_rounded;
     } else {
-      riskColor = const Color(0xFF2563EB);
-      riskBg = const Color(0xFF2563EB).withValues(alpha: 0.1);
+      riskColor = SoftPalette.blue550;
+      riskBg = SoftPalette.blue550.withValues(alpha: 0.1);
       riskBadge = 'Normal / Stable';
       riskIcon = Icons.check_circle_outline_rounded;
     }
@@ -3388,12 +3472,12 @@ class _PersonAuditCardState extends State<_PersonAuditCard> {
           color: t.bgCard,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
-            color: hasIncidents ? const Color(0xFFDC2626).withValues(alpha: 0.3) : t.bgRule,
+            color: hasIncidents ? SoftPalette.red500.withValues(alpha: 0.3) : t.bgRule,
             width: hasIncidents ? 1.5 : 1.0,
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: hasIncidents ? 0.04 : 0.02),
+              color: SoftPalette.gray900.withValues(alpha: hasIncidents ? 0.04 : 0.02),
               blurRadius: 10,
               offset: const Offset(0, 3),
             ),
@@ -3501,7 +3585,7 @@ class _PersonAuditCardState extends State<_PersonAuditCard> {
                       children: [
                         Row(
                           children: [
-                            const Icon(Icons.payments_rounded, size: 13, color: Color(0xFF047857)),
+                            const Icon(Icons.payments_rounded, size: 13, color: SoftPalette.emerald550),
                             const SizedBox(width: 4),
                             Text('TOTAL MONEY OUTPUT', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: t.textTertiary, letterSpacing: 0.5)),
                           ],
@@ -3509,7 +3593,7 @@ class _PersonAuditCardState extends State<_PersonAuditCard> {
                         const SizedBox(height: 3),
                         Text(
                           'PKR ${fmt.format(s.totalMoneyOutput)}',
-                          style: GoogleFonts.dmMono(fontSize: 16, fontWeight: FontWeight.w900, color: const Color(0xFF047857)),
+                          style: GoogleFonts.dmMono(fontSize: 16, fontWeight: FontWeight.w900, color: SoftPalette.emerald550),
                         ),
                         Text('${s.totalOpeningsCount} collections', style: TextStyle(fontSize: 10.5, color: t.textTertiary)),
                       ],
@@ -3524,9 +3608,9 @@ class _PersonAuditCardState extends State<_PersonAuditCard> {
                       children: [
                         Row(
                           children: [
-                            Icon(Icons.report_problem_rounded, size: 13, color: hasIncidents ? const Color(0xFFDC2626) : t.textTertiary),
+                            Icon(Icons.report_problem_rounded, size: 13, color: hasIncidents ? SoftPalette.red500 : t.textTertiary),
                             const SizedBox(width: 4),
-                            Text('TOTAL ACCIDENTS', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: hasIncidents ? const Color(0xFFDC2626) : t.textTertiary, letterSpacing: 0.5)),
+                            Text('TOTAL ACCIDENTS', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w800, color: hasIncidents ? SoftPalette.red500 : t.textTertiary, letterSpacing: 0.5)),
                           ],
                         ),
                         const SizedBox(height: 3),
@@ -3535,7 +3619,7 @@ class _PersonAuditCardState extends State<_PersonAuditCard> {
                           style: TextStyle(
                             fontSize: 15,
                             fontWeight: FontWeight.w900,
-                            color: hasIncidents ? const Color(0xFFDC2626) : t.textPrimary,
+                            color: hasIncidents ? SoftPalette.red500 : t.textPrimary,
                           ),
                         ),
                         Text(
@@ -3549,7 +3633,7 @@ class _PersonAuditCardState extends State<_PersonAuditCard> {
                           style: TextStyle(
                             fontSize: 10.5,
                             fontWeight: hasIncidents ? FontWeight.w700 : FontWeight.w500,
-                            color: hasIncidents ? const Color(0xFFDC2626) : t.textTertiary,
+                            color: hasIncidents ? SoftPalette.red500 : t.textTertiary,
                           ),
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -3593,17 +3677,17 @@ class _PersonAuditCardState extends State<_PersonAuditCard> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFDC2626).withValues(alpha: 0.08),
+                    color: SoftPalette.red500.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFDC2626).withValues(alpha: 0.2)),
+                    border: Border.all(color: SoftPalette.red500.withValues(alpha: 0.2)),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.money_off_rounded, size: 14, color: Color(0xFFDC2626)),
+                      const Icon(Icons.money_off_rounded, size: 14, color: SoftPalette.red500),
                       const SizedBox(width: 6),
                       Text(
                         'Estimated Cash Lost in Incidents: PKR ${fmt.format(s.totalEstimatedCashLost)}',
-                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Color(0xFFDC2626)),
+                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: SoftPalette.red500),
                       ),
                     ],
                   ),
@@ -3625,22 +3709,22 @@ class _PersonAuditCardState extends State<_PersonAuditCard> {
                       final Color bColor;
                       final String bLabel;
                       if (box.isSnatched) {
-                        bColor = const Color(0xFFDC2626);
+                        bColor = SoftPalette.red500;
                         bLabel = 'Snatched 🚨';
                       } else if (box.isStolen) {
-                        bColor = const Color(0xFFEA580C);
+                        bColor = SoftPalette.orange400;
                         bLabel = 'Stolen ⚠️';
                       } else if (box.isBroken) {
-                        bColor = const Color(0xFFD97706);
+                        bColor = SoftPalette.orange400;
                         bLabel = 'Broken 🔨';
                       } else if (box.isReplaced) {
-                        bColor = const Color(0xFF7C3AED);
+                        bColor = SoftPalette.violet550;
                         bLabel = 'Replaced 🔄';
                       } else if (!box.isActive) {
-                        bColor = const Color(0xFF6B7280);
+                        bColor = SoftPalette.slate550;
                         bLabel = 'Inactive';
                       } else {
-                        bColor = const Color(0xFF047857);
+                        bColor = SoftPalette.emerald550;
                         bLabel = 'Active';
                       }
 
@@ -3688,8 +3772,8 @@ class _PersonAuditCardState extends State<_PersonAuditCard> {
                                 icon: const Icon(Icons.sync_alt_rounded, size: 12),
                                 label: const Text('Replace', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800)),
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF7C3AED),
-                                  foregroundColor: Colors.white,
+                                  backgroundColor: SoftPalette.violet550,
+                                  foregroundColor: SoftPalette.gray50,
                                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                   visualDensity: VisualDensity.compact,
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
@@ -3699,10 +3783,10 @@ class _PersonAuditCardState extends State<_PersonAuditCard> {
                             ] else if (box.isActive) ...[
                               OutlinedButton.icon(
                                 onPressed: () => widget.onReportIncident(box),
-                                icon: const Icon(Icons.report_problem_outlined, size: 12, color: Color(0xFFDC2626)),
-                                label: const Text('Incident', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Color(0xFFDC2626))),
+                                icon: const Icon(Icons.report_problem_outlined, size: 12, color: SoftPalette.red500),
+                                label: const Text('Incident', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: SoftPalette.red500)),
                                 style: OutlinedButton.styleFrom(
-                                  side: BorderSide(color: const Color(0xFFDC2626).withValues(alpha: 0.3)),
+                                  side: BorderSide(color: SoftPalette.red500.withValues(alpha: 0.3)),
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                                   visualDensity: VisualDensity.compact,
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
@@ -3712,8 +3796,8 @@ class _PersonAuditCardState extends State<_PersonAuditCard> {
                               ElevatedButton(
                                 onPressed: () => widget.onOpenBox(box),
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF047857),
-                                  foregroundColor: Colors.white,
+                                  backgroundColor: SoftPalette.emerald550,
+                                  foregroundColor: SoftPalette.gray50,
                                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                   visualDensity: VisualDensity.compact,
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),

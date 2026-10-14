@@ -1,6 +1,9 @@
 // lib/pages/school/dialogs/school_enrollment_dialog.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:hive_flutter/hive_flutter.dart';
@@ -161,10 +164,10 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
     }
 
     if (madrassaStudents.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         const SnackBar(
           content: Text('No Madrassa students found in local storage to transfer.'),
-          backgroundColor: Colors.orange,
+          backgroundColor: SoftPalette.amber300,
         ),
       );
       return;
@@ -191,7 +194,7 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               title: Row(
                 children: [
-                  const Icon(Icons.sync_alt_rounded, color: SchoolTheme.primary),
+                  Icon(Icons.sync_alt_rounded, color: context.adapt(SchoolTheme.primary)),
                   const SizedBox(width: 10),
                   const Expanded(
                     child: Text(
@@ -209,7 +212,7 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
                     TextField(
                       decoration: InputDecoration(
                         hintText: 'Search by Student Name, Father, CNIC or PIN...',
-                        prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF1B4965)),
+                        prefixIcon: Icon(Icons.search_rounded, color: context.adapt(SoftPalette.sky700)),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                         isDense: true,
                       ),
@@ -218,7 +221,7 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
                     const SizedBox(height: 12),
                     Expanded(
                       child: filtered.isEmpty
-                          ? const Center(child: Text('No matching Madrassa students found', style: TextStyle(color: Colors.grey)))
+                          ? Center(child: Text('No matching Madrassa students found', style: TextStyle(color: context.adapt(SoftPalette.gray350))))
                           : ListView.separated(
                               itemCount: filtered.length,
                               separatorBuilder: (_, __) => const Divider(height: 1),
@@ -232,10 +235,10 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
 
                                 return ListTile(
                                   leading: CircleAvatar(
-                                    backgroundColor: SchoolTheme.primary.withValues(alpha: 0.1),
+                                    backgroundColor: context.adapt(SchoolTheme.primary).withValues(alpha: 0.1),
                                     backgroundImage: photoBytes != null && photoBytes.isNotEmpty ? MemoryImage(photoBytes) : null,
                                     child: photoBytes == null || photoBytes.isEmpty
-                                        ? const Icon(Icons.person_rounded, color: Color(0xFF1B4965))
+                                        ? Icon(Icons.person_rounded, color: context.adapt(SoftPalette.sky700))
                                         : null,
                                   ),
                                   title: Row(
@@ -246,22 +249,22 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
                                         Container(
                                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                                           decoration: BoxDecoration(
-                                            color: SchoolTheme.primary.withValues(alpha: 0.1),
+                                            color: context.adapt(SchoolTheme.primary).withValues(alpha: 0.1),
                                             borderRadius: BorderRadius.circular(4),
                                           ),
-                                          child: Text('PIN: $pin', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF1B4965))),
+                                          child: Text('PIN: $pin', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.sky700))),
                                         ),
                                       ],
                                     ],
                                   ),
                                   subtitle: Text(
                                     'Father: ${std['guardianName'] ?? std['fatherName'] ?? '—'} • CNIC: ${std['studentCnic'] ?? std['bFormNo'] ?? '—'}\nClass: ${std['classLevel'] ?? std['hifzStatus'] ?? 'Madrassa'}',
-                                    style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                                    style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.gray550)),
                                   ),
                                   trailing: ElevatedButton(
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: SchoolTheme.primary,
-                                      foregroundColor: Colors.white,
+                                      foregroundColor: SoftPalette.gray50,
                                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                                     ),
                                     onPressed: () => Navigator.pop(ctx, std),
@@ -310,7 +313,7 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
         }
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: Text('✅ Successfully transferred details for "${selected['name']}". Biometric PIN ($pin) preserved.'),
           backgroundColor: SchoolTheme.primary,
@@ -334,10 +337,10 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
       );
 
       if (conflict != null && !isTransferredStudent) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('❌ PIN $enteredPin is already assigned to "${conflict.entityName}" (${conflict.branchId.toUpperCase()} • ${conflict.entityType.toUpperCase()}). Please choose a unique PIN.'),
-            backgroundColor: Colors.red,
+            backgroundColor: SoftPalette.red400,
           ),
         );
         setState(() => _isSaving = false);
@@ -420,10 +423,10 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
 
       if (conflict != null && !isTransferredStudent) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          AppToast.showSnackBar(context, 
             SnackBar(
               content: Text('❌ PIN $enteredPin is already assigned to "${conflict.entityName}" (${conflict.branchId.toUpperCase()} • ${conflict.entityType.toUpperCase()}). Please choose a unique PIN.'),
-              backgroundColor: Colors.red,
+              backgroundColor: SoftPalette.red400,
             ),
           );
         }
@@ -501,9 +504,9 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.note_add_rounded, color: Color(0xFF1B4965)),
+            Icon(Icons.note_add_rounded, color: context.adapt(SoftPalette.sky700)),
             SizedBox(width: 10),
             Text('دیگر دستاویزات / Add Custom Document', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
           ],
@@ -512,9 +515,9 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Enter document title (e.g., Previous School Certificate, Medical Certificate, Character Letter):',
-              style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+              style: TextStyle(fontSize: 13, color: context.adapt(SoftPalette.slate550)),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -531,7 +534,7 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: SchoolTheme.primary, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: SchoolTheme.primary, foregroundColor: SoftPalette.gray50),
             onPressed: () {
               final text = titleCtrl.text.trim();
               if (text.isNotEmpty) Navigator.pop(ctx, text);
@@ -555,7 +558,7 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: context.adapt(SoftPalette.gray50),
       child: Container(
         width: 780,
         constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.94),
@@ -569,12 +572,12 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
                 // ── Official Authentic Admission Form Card ───────────────────
                 Container(
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: context.adapt(SoftPalette.gray50),
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: const Color(0xFF0F172A), width: 2),
+                    border: Border.all(color: context.adapt(SoftPalette.slate900), width: 2),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.05),
+                        color: SoftPalette.gray900.withValues(alpha: 0.05),
                         blurRadius: 10,
                         offset: const Offset(0, 4),
                       ),
@@ -585,7 +588,7 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
                     padding: const EdgeInsets.all(18),
                     decoration: BoxDecoration(
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFF334155), width: 1.2),
+                      border: Border.all(color: context.adapt(SoftPalette.slate700), width: 1.2),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -597,7 +600,7 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
                         _buildFormHeader(),
 
                         const SizedBox(height: 16),
-                        const Divider(color: Color(0xFF0F172A), thickness: 1.5, height: 1),
+                        Divider(color: context.adapt(SoftPalette.slate900), thickness: 1.5, height: 1),
                         const SizedBox(height: 16),
 
                         // 2. Admission No & Date Row
@@ -609,14 +612,14 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
                         _buildFormFieldsSection(),
 
                         const SizedBox(height: 20),
-                        const Divider(color: Color(0xFFCBD5E1), thickness: 1),
+                        Divider(color: context.adapt(SoftPalette.slate200), thickness: 1),
                         const SizedBox(height: 14),
 
                         // 4. Documents & Photos Section
                         _buildDocumentsAndPhotosSection(),
 
                         const SizedBox(height: 20),
-                        const Divider(color: Color(0xFFCBD5E1), thickness: 1),
+                        Divider(color: context.adapt(SoftPalette.slate200), thickness: 1),
                         const SizedBox(height: 14),
 
                         // 5. Parent Signature & Declaration
@@ -645,8 +648,8 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
                       icon: const Icon(Icons.print_rounded, size: 18),
                       label: const Text('Save & Print PDF / محفوظ و پرنٹ کریں', style: TextStyle(fontWeight: FontWeight.bold)),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: SchoolTheme.primary,
-                        side: const BorderSide(color: SchoolTheme.primary, width: 1.2),
+                        foregroundColor: context.adapt(SchoolTheme.primary),
+                        side: BorderSide(color: context.adapt(SchoolTheme.primary), width: 1.2),
                         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
@@ -658,7 +661,7 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
                           ? const SizedBox(
                               width: 18,
                               height: 18,
-                              child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                              child: CircularProgressIndicator(color: SoftPalette.gray50, strokeWidth: 2),
                             )
                           : const Icon(Icons.check_circle_rounded, size: 20),
                       label: Text(
@@ -669,7 +672,7 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
                       ),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: SchoolTheme.primary,
-                        foregroundColor: Colors.white,
+                        foregroundColor: SoftPalette.gray50,
                         padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         elevation: 2,
@@ -690,16 +693,16 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: const Color(0xFFF0FDF4),
+        color: context.adapt(SoftPalette.emerald50m),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: const Color(0xFF86EFAC)),
+        border: Border.all(color: context.adapt(SoftPalette.emerald200)),
       ),
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Row(
             children: [
-              const Icon(Icons.school_outlined, size: 20, color: Color(0xFF16A34A)),
+              const Icon(Icons.school_outlined, size: 20, color: SoftPalette.green400),
               const SizedBox(width: 8),
               Text(
                 _transferredMadrassaInfo != null
@@ -708,15 +711,15 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
                 style: TextStyle(
                   fontSize: 12.5,
                   fontWeight: FontWeight.bold,
-                  color: _transferredMadrassaInfo != null ? const Color(0xFF15803D) : const Color(0xFF334155),
+                  color: _transferredMadrassaInfo != null ? context.adapt(SoftPalette.green550) : context.adapt(SoftPalette.slate700),
                 ),
               ),
             ],
           ),
           OutlinedButton.icon(
             style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFF15803D),
-              side: const BorderSide(color: Color(0xFF16A34A)),
+              foregroundColor: context.adapt(SoftPalette.green550),
+              side: const BorderSide(color: SoftPalette.green400),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               visualDensity: VisualDensity.compact,
             ),
@@ -744,7 +747,7 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
           style: GoogleFonts.notoSansArabic(
             fontSize: 26,
             fontWeight: FontWeight.w800,
-            color: const Color(0xFF0F172A),
+            color: context.adapt(SoftPalette.slate900),
             height: 1.3,
           ),
         ),
@@ -758,7 +761,7 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
           style: GoogleFonts.notoSansArabic(
             fontSize: 13.5,
             fontWeight: FontWeight.w600,
-            color: const Color(0xFF334155),
+            color: context.adapt(SoftPalette.slate700),
             height: 1.3,
           ),
         ),
@@ -775,7 +778,7 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
                 height: 48,
                 width: 48,
                 fit: BoxFit.contain,
-                errorBuilder: (_, __, ___) => const Icon(Icons.school_rounded, size: 40, color: Color(0xFF1B4965)),
+                errorBuilder: (_, __, ___) => Icon(Icons.school_rounded, size: 40, color: context.adapt(SoftPalette.sky700)),
               ),
             ),
             const SizedBox(width: 12),
@@ -789,7 +792,7 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
                   style: GoogleFonts.notoSansArabic(
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
-                    color: const Color(0xFF0F172A),
+                    color: context.adapt(SoftPalette.slate900),
                     height: 1.1,
                   ),
                 ),
@@ -800,7 +803,7 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
                     fontSize: 10,
                     letterSpacing: 2,
                     fontWeight: FontWeight.w800,
-                    color: Colors.grey.shade700,
+                    color: context.adapt(SoftPalette.gray550),
                   ),
                 ),
               ],
@@ -821,17 +824,21 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
             children: [
               Text(
                 'داخلہ نمبر / Roll No:',
-                style: GoogleFonts.notoSansArabic(fontSize: 13.5, fontWeight: FontWeight.bold, color: const Color(0xFF0F172A)),
+                style: GoogleFonts.notoSansArabic(fontSize: 13.5, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate900)),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: TextFormField(
                   controller: _rollNoCtrl,
-                  decoration: const InputDecoration(
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: context.adapt(SoftPalette.slate900)),
+                  decoration: InputDecoration(
                     hintText: 'e.g. 101',
+                    hintStyle: TextStyle(fontSize: 13, color: context.adapt(SoftPalette.gray300)),
                     isDense: true,
-                    contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                    border: UnderlineInputBorder(borderSide: BorderSide(color: Color(0xFF0F172A), width: 1.5)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                    border: UnderlineInputBorder(borderSide: BorderSide(color: context.adapt(SoftPalette.slate900), width: 1.5)),
+                    enabledBorder: UnderlineInputBorder(borderSide: BorderSide(color: context.adapt(SoftPalette.slate900), width: 1.5)),
+                    focusedBorder: UnderlineInputBorder(borderSide: BorderSide(color: context.adapt(SoftPalette.sky700), width: 2.0)),
                   ),
                   validator: (v) => v == null || v.trim().isEmpty ? 'Required / ضروری ہے' : null,
                 ),
@@ -857,23 +864,23 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
               children: [
                 Text(
                   'تاریخ / Date:',
-                  style: GoogleFonts.notoSansArabic(fontSize: 13.5, fontWeight: FontWeight.bold, color: const Color(0xFF0F172A)),
+                  style: GoogleFonts.notoSansArabic(fontSize: 13.5, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate900)),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Container(
                     padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
-                    decoration: const BoxDecoration(
-                      border: Border(bottom: BorderSide(color: Color(0xFF0F172A), width: 1.5)),
+                    decoration: BoxDecoration(
+                      border: Border(bottom: BorderSide(color: context.adapt(SoftPalette.slate900), width: 1.5)),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text(
                           DateFormat('dd-MM-yyyy').format(_admissionDate),
-                          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Color(0xFF0F172A)),
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: context.adapt(SoftPalette.slate900)),
                         ),
-                        const Icon(Icons.calendar_today_rounded, size: 16, color: Color(0xFF1B4965)),
+                        Icon(Icons.calendar_today_rounded, size: 16, color: context.adapt(SoftPalette.sky700)),
                       ],
                     ),
                   ),
@@ -1020,19 +1027,19 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
             Row(
               children: [
                 if (prefixIcon != null) ...[
-                  Icon(prefixIcon, size: 16, color: SchoolTheme.primary),
+                  Icon(prefixIcon, size: 16, color: context.adapt(SchoolTheme.primary)),
                   const SizedBox(width: 6),
                 ],
                 Text(
                   '$englishLabel ${isRequired ? '*' : ''}',
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.slate600)),
                 ),
               ],
             ),
             Text(
               urduLabel,
               textDirection: TextDirection.rtl,
-              style: GoogleFonts.notoSansArabic(fontSize: 13.5, fontWeight: FontWeight.bold, color: const Color(0xFF0F172A)),
+              style: GoogleFonts.notoSansArabic(fontSize: 13.5, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate900)),
             ),
           ],
         ),
@@ -1041,23 +1048,23 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
           controller: controller,
           keyboardType: keyboardType,
           inputFormatters: inputFormatters,
-          style: const TextStyle(fontSize: 14, color: Color(0xFF0F172A)),
+          style: TextStyle(fontSize: 14, color: context.adapt(SoftPalette.slate900)),
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: TextStyle(fontSize: 12, color: Colors.grey.shade400),
+            hintStyle: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.gray300)),
             isDense: true,
             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: Colors.grey.shade300),
+              borderSide: BorderSide(color: context.adapt(SoftPalette.gray150)),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: BorderSide(color: Colors.grey.shade300),
+              borderSide: BorderSide(color: context.adapt(SoftPalette.gray150)),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: Color(0xFF1B4965), width: 1.5),
+              borderSide: BorderSide(color: context.adapt(SoftPalette.sky700), width: 1.5),
             ),
           ),
           validator: customValidator ?? (isRequired ? (v) => v == null || v.trim().isEmpty ? '$englishLabel is required' : null : null),
@@ -1074,14 +1081,14 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text(
+            Text(
               'Date of Birth (DOB)',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.slate600)),
             ),
             Text(
               'تاریخ پیدائش',
               textDirection: TextDirection.rtl,
-              style: GoogleFonts.notoSansArabic(fontSize: 13.5, fontWeight: FontWeight.bold, color: const Color(0xFF0F172A)),
+              style: GoogleFonts.notoSansArabic(fontSize: 13.5, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate900)),
             ),
           ],
         ),
@@ -1100,7 +1107,7 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.grey.shade300),
+              border: Border.all(color: context.adapt(SoftPalette.gray150)),
             ),
             child: Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1109,11 +1116,11 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
                   _dob != null ? DateFormat('dd-MM-yyyy').format(_dob!) : 'Select Date of Birth (تاریخ پیدائش منتخب کریں)',
                   style: TextStyle(
                     fontSize: 13,
-                    color: _dob != null ? const Color(0xFF0F172A) : Colors.grey.shade500,
+                    color: _dob != null ? context.adapt(SoftPalette.slate900) : context.adapt(SoftPalette.gray350),
                     fontWeight: _dob != null ? FontWeight.bold : FontWeight.normal,
                   ),
                 ),
-                const Icon(Icons.cake_outlined, size: 18, color: Color(0xFF1B4965)),
+                Icon(Icons.cake_outlined, size: 18, color: context.adapt(SoftPalette.sky700)),
               ],
             ),
           ),
@@ -1133,14 +1140,14 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Text(
+            Text(
               'Class, Section & Academic Stream',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF475569)),
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.slate600)),
             ),
             Text(
               'کلاس اور تعلیمی گروپ',
               textDirection: TextDirection.rtl,
-              style: GoogleFonts.notoSansArabic(fontSize: 13.5, fontWeight: FontWeight.bold, color: const Color(0xFF0F172A)),
+              style: GoogleFonts.notoSansArabic(fontSize: 13.5, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate900)),
             ),
           ],
         ),
@@ -1223,20 +1230,20 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            const Row(
+            Row(
               children: [
-                Icon(Icons.perm_media_outlined, size: 18, color: Color(0xFF1B4965)),
+                Icon(Icons.perm_media_outlined, size: 18, color: context.adapt(SoftPalette.sky700)),
                 SizedBox(width: 8),
                 Text(
                   'Official Documents & Student Photo',
-                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate900)),
                 ),
               ],
             ),
             Text(
               'دستاویزات اور تصویر',
               textDirection: TextDirection.rtl,
-              style: GoogleFonts.notoSansArabic(fontSize: 14, fontWeight: FontWeight.bold, color: SchoolTheme.primary),
+              style: GoogleFonts.notoSansArabic(fontSize: 14, fontWeight: FontWeight.bold, color: context.adapt(SchoolTheme.primary)),
             ),
           ],
         ),
@@ -1285,9 +1292,9 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
         // Custom Additional Documents
         if (_additionalDocuments.isNotEmpty) ...[
           const SizedBox(height: 12),
-          const Text(
+          Text(
             'Custom Attached Documents / دیگر دستاویزات:',
-            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF64748B)),
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate550)),
           ),
           const SizedBox(height: 6),
           ..._additionalDocuments.asMap().entries.map((entry) {
@@ -1311,7 +1318,7 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
+                    icon: const Icon(Icons.delete_outline_rounded, color: SoftPalette.red400, size: 20),
                     onPressed: () {
                       setState(() {
                         _additionalDocuments.removeAt(index);
@@ -1329,8 +1336,8 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
           alignment: Alignment.centerLeft,
           child: OutlinedButton.icon(
             style: OutlinedButton.styleFrom(
-              foregroundColor: SchoolTheme.primary,
-              side: const BorderSide(color: Color(0xFF1B4965)),
+              foregroundColor: context.adapt(SchoolTheme.primary),
+              side: BorderSide(color: context.adapt(SoftPalette.sky700)),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
@@ -1358,9 +1365,9 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
               activeColor: SchoolTheme.primary,
               onChanged: (v) => setState(() => _parentSignatureConfirmed = v ?? true),
             ),
-            const Text(
+            Text(
               'Parent / Guardian Verified & Declared\n(تصدیق شدہ برائے والدین / سرپرست)',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate700)),
             ),
           ],
         ),
@@ -1370,11 +1377,11 @@ class _SchoolEnrollmentDialogState extends State<SchoolEnrollmentDialog> {
             Text(
               'دستخط والدین',
               textDirection: TextDirection.rtl,
-              style: GoogleFonts.notoSansArabic(fontSize: 15, fontWeight: FontWeight.bold, color: const Color(0xFF0F172A)),
+              style: GoogleFonts.notoSansArabic(fontSize: 15, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate900)),
             ),
-            const SizedBox(
+            SizedBox(
               width: 140,
-              child: Divider(color: Color(0xFF0F172A), thickness: 1.5),
+              child: Divider(color: context.adapt(SoftPalette.slate900), thickness: 1.5),
             ),
           ],
         ),

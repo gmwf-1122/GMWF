@@ -13,6 +13,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/role_theme_provider.dart' show RoleThemeScope;
 import '../tokens/spacing.dart';
@@ -197,7 +198,7 @@ class AppButton extends StatelessWidget {
     return switch (variant) {
       AppButtonVariant.primary => (
         t.accent,
-        Colors.white,
+        SoftPalette.gray50,
         null,
       ),
       AppButtonVariant.secondary => (
@@ -212,7 +213,7 @@ class AppButton extends StatelessWidget {
       ),
       AppButtonVariant.danger => (
         GColor.dangerOf(isDark),
-        Colors.white,
+        SoftPalette.gray50,
         null,
       ),
     };

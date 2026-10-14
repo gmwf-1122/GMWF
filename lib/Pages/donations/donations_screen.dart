@@ -1,6 +1,7 @@
 // lib/pages/donations/donations_screen.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import '../../widgets/lazy_indexed_stack.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -33,18 +34,18 @@ const String kStatusPending = 'pending';
 // ─────────────────────────────────────────────────────────────────────────────
 
 class DonDS {
-  static const headerTop    = Color(0xFF0D1F1F);
-  static const headerBot    = Color(0xFF163030);
-  static const headerBorder = Color(0xFF1F3D3D);
-  static const teal         = Color(0xFF0D9488);
-  static const tealLight    = Color(0xFF2DD4BF);
-  static const tealMuted    = Color(0x1A0D9488);
+  static const headerTop    = SoftPalette.teal900;
+  static const headerBot    = SoftPalette.teal800m;
+  static const headerBorder = SoftPalette.teal750m;
+  static const teal         = SoftPalette.teal500;
+  static const tealLight    = SoftPalette.teal300;
+  static const tealMuted    = SoftPalette.teal500A10;
   // Keep amber only for currency/financial amounts — NOT for status
-  static const amber        = Color(0xFFF59E0B);
-  static const amberMuted   = Color(0x1AF59E0B);
-  static const onDark       = Color(0xFFFFFFFF);
-  static const onDarkSub    = Color(0xFF94B4B4);
-  static const onDarkMuted  = Color(0xFF4D7070);
+  static const amber        = SoftPalette.amber300;
+  static const amberMuted   = SoftPalette.amber300A10;
+  static const onDark       = SoftPalette.gray50;
+  static const onDarkSub    = SoftPalette.cyan350m;
+  static const onDarkMuted  = SoftPalette.teal550m;
 }
 
 // UserRole moved to donations_shared.dart
@@ -429,7 +430,7 @@ class _DonationsScreenState extends ConsumerState<DonationsScreen> with TickerPr
               elevation: 4,
               highlightElevation: 8,
               backgroundColor: t.accent,
-              foregroundColor: Colors.white,
+              foregroundColor: SoftPalette.gray50,
               icon: const Icon(Icons.add_rounded, size: 22),
               label: const Text(
                 'New Receipt',
@@ -469,7 +470,7 @@ class _DonationsScreenState extends ConsumerState<DonationsScreen> with TickerPr
             elevation: 4,
             highlightElevation: 8,
             backgroundColor: t.accent,
-            foregroundColor: Colors.white,
+            foregroundColor: SoftPalette.gray50,
             icon: const Icon(Icons.add_rounded, size: 22),
             label: const Text(
               'New Receipt',
@@ -497,7 +498,7 @@ class _DonationsScreenState extends ConsumerState<DonationsScreen> with TickerPr
                   tabIconSize: 26.0,
                   tabIconSelectedSize: 24.0,
                   tabSelectedColor: t.accent,
-                  tabIconSelectedColor: Colors.white,
+                  tabIconSelectedColor: SoftPalette.gray50,
                   tabBarColor: t.bgCard,
                   onTabItemSelected: (int value) {
                     setState(() {
@@ -529,7 +530,7 @@ class _DonationsScreenState extends ConsumerState<DonationsScreen> with TickerPr
         border: Border(bottom: BorderSide(color: t.bgRule, width: 1.5)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.02),
+            color: SoftPalette.gray900.withValues(alpha: 0.02),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -545,10 +546,10 @@ class _DonationsScreenState extends ConsumerState<DonationsScreen> with TickerPr
                 width: isMobile ? 36 : 42,
                 height: isMobile ? 36 : 42,
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: SoftPalette.gray50,
                   borderRadius: BorderRadius.circular(10),
                   boxShadow: [
-                    BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6, offset: const Offset(0, 2)),
+                    BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.05), blurRadius: 6, offset: const Offset(0, 2)),
                   ],
                 ),
                 padding: const EdgeInsets.all(4),
@@ -655,7 +656,7 @@ class _DonationsScreenState extends ConsumerState<DonationsScreen> with TickerPr
                   label: const Text('New Receipt', style: TextStyle(fontWeight: FontWeight.w700)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: t.accent,
-                    foregroundColor: Colors.white,
+                    foregroundColor: SoftPalette.gray50,
                     padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     elevation: 0,
@@ -698,7 +699,7 @@ class _DonationsScreenState extends ConsumerState<DonationsScreen> with TickerPr
     return Container(
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: t.isDarkCanvas ? const Color(0xFF0D1117) : const Color(0xFFF1F5F9),
+        color: t.isDarkCanvas ? SoftPalette.slate900 : SoftPalette.slate100,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: t.bgRule),
       ),
@@ -735,7 +736,7 @@ class _DonationsScreenState extends ConsumerState<DonationsScreen> with TickerPr
                   Icon(
                     tab.icon,
                     size: 16,
-                    color: isSelected ? Colors.white : t.textSecondary,
+                    color: isSelected ? SoftPalette.gray50 : t.textSecondary,
                   ),
                   const SizedBox(width: 6),
                   Text(
@@ -743,7 +744,7 @@ class _DonationsScreenState extends ConsumerState<DonationsScreen> with TickerPr
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
-                      color: isSelected ? Colors.white : t.textSecondary,
+                      color: isSelected ? SoftPalette.gray50 : t.textSecondary,
                     ),
                   ),
                 ],
@@ -942,7 +943,7 @@ class _Avatar extends StatelessWidget {
       child: Center(
         child: Text(
           username.isNotEmpty ? username[0].toUpperCase() : 'B',
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Colors.white),
+          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: SoftPalette.gray50),
         ),
       ),
     );
@@ -998,7 +999,7 @@ class _BranchPickerSheet extends StatelessWidget {
         borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.08),
+            color: SoftPalette.gray900.withValues(alpha: 0.08),
             blurRadius: 20,
             offset: const Offset(0, -4),
           ),

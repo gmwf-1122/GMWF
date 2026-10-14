@@ -1,5 +1,7 @@
 // lib/services/zkteco_network_service.dart
 
+import 'package:gmwf/services/cloud/cloud_db.dart';
+import 'package:gmwf/utils/ui_stall_monitor.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -17,6 +19,7 @@ import 'camp_session_service.dart';
 import 'sync_service.dart';
 import '../realtime/realtime_events.dart';
 import '../realtime/realtime_manager.dart';
+import '../realtime/lan_server.dart';
 
 class ZkTecoNetworkService {
   static const int defaultHttpPort = 8088;
@@ -196,16 +199,18 @@ class ZkTecoNetworkService {
         debugPrint('[ZkTecoNetworkService] Unmapped box init notice: $e');
       }
 
-      // 5. Initial Cloud sync of Biometric Devices & Credentials from Firestore.
-      // Keep the live listeners branch-scoped to avoid global device streams and quota spikes.
-      syncBiometricDevicesFromFirestore();
-      syncBiometricCredentialsFromFirestore();
+      // 5. Cloud refresh of biometric devices & credentials. It ran at every launch on every
+      // PC and, with no branch known yet, read these collections for ALL branches. Now at
+      // most every 12 h per PC, and only for this PC's branch once it is known (the
+      // branch-scoped listeners started by the attendance screens keep them current).
+      unawaited(_startupCloudRefresh());
 
       // 6. Start listening to Cloud Firestore for biometric punches from Python services
       listenToFirestorePunches();
 
-      // 7. Upload any pending/recorded attendance to Cloud Firestore
-      syncAllRecordedAttendanceToFirestore();
+      // 7. Queue any attendance recorded on this PC that is not in the cloud yet — after the
+      // app has finished starting, so the full scan doesn't compete with the first screens.
+      Future.delayed(const Duration(minutes: 2), syncAllRecordedAttendanceToFirestore);
 
       return true;
     } catch (e) {
@@ -213,6 +218,22 @@ class ZkTecoNetworkService {
       isServerRunningNotifier.value = false;
       _isListening = false;
       return false;
+    }
+  }
+
+  static Future<void> _startupCloudRefresh() async {
+    const flagKey = 'zk_cloud_refresh_at';
+    try {
+      final flags = Hive.isBoxOpen('app_flags') ? Hive.box('app_flags') : null;
+      final last = DateTime.tryParse(flags?.get(flagKey)?.toString() ?? '');
+      if (last != null && DateTime.now().difference(last) < const Duration(hours: 12)) return;
+      final branch = (LocalStorageService.getActiveBranchId() ?? '').trim().toLowerCase();
+      final scoped = branch.isNotEmpty && branch != 'all' && branch != 'global' ? branch : null;
+      await syncBiometricDevicesFromFirestore(branchId: scoped);
+      await syncBiometricCredentialsFromFirestore(branchId: scoped);
+      await flags?.put(flagKey, DateTime.now().toIso8601String());
+    } catch (e) {
+      debugPrint('[ZkTecoNetworkService] Startup cloud refresh notice: $e');
     }
   }
 
@@ -1261,7 +1282,7 @@ class ZkTecoNetworkService {
       final targetBranch = LocalStorageService.sanitizeBranchId(config.branchId, fallback: 'karachi');
       final data = config.toMap()..['updatedAt'] = FieldValue.serverTimestamp();
 
-      await FirebaseFirestore.instance
+      await CloudDb.instance
           .collection('branches')
           .doc(targetBranch)
           .collection('biometric_devices')
@@ -1271,7 +1292,7 @@ class ZkTecoNetworkService {
 
       // If branch changed, delete from old branch so no duplicate resurrects
       if (oldBranchId != null && oldBranchId.isNotEmpty && oldBranchId != targetBranch) {
-        FirebaseFirestore.instance
+        CloudDb.instance
             .collection('branches')
             .doc(oldBranchId)
             .collection('biometric_devices')
@@ -1605,7 +1626,7 @@ class ZkTecoNetworkService {
 
   /// Fetches historical and recent biometric punches from Cloud Firestore (e.g. pushed by python daemon or other scanners)
   /// and processes them into local attendance records.
-  static Future<int> syncBiometricPunchesFromFirestore({int daysBack = 30, DateTime? specificDate}) async {
+  static Future<int> syncBiometricPunchesFromFirestore({int daysBack = 30, DateTime? specificDate, DateTime? since}) async {
     if (kIsWeb) return 0;
     try {
       debugPrint('[ZkTecoNetworkService] Fetching biometric punches from Cloud Firestore...');
@@ -1618,7 +1639,9 @@ class ZkTecoNetworkService {
             .where('timestamp', isGreaterThanOrEqualTo: startOfDay)
             .where('timestamp', isLessThanOrEqualTo: endOfDay);
       } else {
-        final cutoff = DateTime.now().subtract(Duration(days: daysBack)).toIso8601String();
+        // Incremental when [since] is given: only punches newer than the last sync (each
+        // document read counts against the free daily Firestore quota).
+        final cutoff = (since ?? DateTime.now().subtract(Duration(days: daysBack))).toIso8601String();
         query = query.where('timestamp', isGreaterThanOrEqualTo: cutoff);
       }
 
@@ -1665,7 +1688,7 @@ class ZkTecoNetworkService {
       return processedCount;
     } catch (e) {
       debugPrint('[ZkTecoNetworkService] Error syncing biometric punches from Firestore: $e');
-      return 0;
+      return -1; // failed: callers must not record this as a successful sync
     }
   }
 
@@ -1673,8 +1696,20 @@ class ZkTecoNetworkService {
   static void listenToFirestorePunches() {
     _firestorePunchesSub?.cancel();
     try {
-      // Historical one-time backfill for recent days without holding open snapshots
-      syncBiometricPunchesFromFirestore(daysBack: 7);
+      // Incremental: every app start used to re-read the last 7 days (up to 2,000
+      // documents) — a big share of the free daily read quota. Now: at most once an
+      // hour, and only punches since the last successful sync (10-min overlap).
+      const key = 'zk_punch_cloud_sync_at';
+      final flags = Hive.isBoxOpen('app_flags') ? Hive.box('app_flags') : null;
+      final last = DateTime.tryParse((flags?.get(key) ?? '').toString());
+      final now = DateTime.now();
+      if (last != null && now.difference(last) < const Duration(hours: 1)) return;
+      syncBiometricPunchesFromFirestore(
+        daysBack: 7,
+        since: last?.subtract(const Duration(minutes: 10)),
+      ).then((processed) {
+        if (processed >= 0) flags?.put(key, now.toIso8601String());
+      });
     } catch (e) {
       debugPrint('[ZkTecoNetworkService] Firestore sync notice: $e');
     }
@@ -1739,12 +1774,16 @@ class ZkTecoNetworkService {
             final dedupKey = '${deviceIp}_${pin}_$timeStr';
             if (!isPunchDuplicate(dedupKey)) {
               recordPunchDedupKey(dedupKey);
+              // Downloaded from Firestore: already in the cloud. The stored source
+              // (e.g. 'zkteco') used to make it look local, so every PC re-uploaded it.
               await processIncomingPunch(
                 pin: pin,
                 timestamp: timestamp,
                 deviceIp: deviceIp,
                 deviceSn: deviceSn,
                 source: source,
+                enqueueForSync: false,
+                broadcastLan: false,
               );
             }
           }
@@ -1775,13 +1814,21 @@ class ZkTecoNetworkService {
     _activePollingTimer = Timer.periodic(const Duration(minutes: 5), (_) {
       syncAllDevices();
     });
-    // Also do an immediate first poll
-    syncAllDevices();
+    // First poll after 90 s instead of at boot: by then a client PC has connected to the
+    // LAN server and leaves polling to it (syncAllDevices), instead of every PC downloading
+    // each device's full log while the app is still starting.
+    Timer(const Duration(seconds: 90), syncAllDevices);
   }
 
   /// Manually or periodically triggers UDP hardware polling across all configured devices
   static Future<void> syncAllDevices() async {
+    UiStallMonitor.mark('zkteco: poll devices');
     if (kIsWeb) return;
+    // One poller per LAN. Every PC used to poll every device every 5 min, and each poll
+    // disables the device and downloads its ENTIRE log (parsed on the UI thread), so N PCs
+    // meant N full downloads. A client connected to the LAN server leaves it to the server,
+    // which shares the punches over LAN; a standalone PC (no server) still polls.
+    if (!LanServer.isRunning && RealtimeManager().isConnected) return;
     final devices = getAllDevices();
     for (final device in devices) {
       if (device.ipAddress.isNotEmpty) {
@@ -1899,7 +1946,11 @@ class ZkTecoNetworkService {
 
       // ── Parse attendance records ──
       if (allData.length > 0) {
-        _parseZkAttendanceData(allData.toBytes(), ip, device.serialNumber);
+        // A full device log holds every punch since the device was installed (tens of
+        // thousands of records). Dropping everything older than 24 h happens in a background
+        // isolate; the parser below then only sees the recent records, in the same format.
+        final recent = await compute(keepRecentZkRecords, allData.toBytes());
+        _parseZkAttendanceData(recent, ip, device.serialNumber);
       } else if (!receivedPrepare) {
         debugPrint('[ZkTecoNetworkService] No attendance data from $ip (may be empty or unsupported)');
       }
@@ -1933,6 +1984,9 @@ class ZkTecoNetworkService {
 
         if (employeeId.isEmpty || dateStr.isEmpty) continue;
         if (record['synced'] == true && record['syncStatus'] == 'synced') continue;
+        // Copies received over LAN ('att_…' keys) belong to the PC that recorded the punch;
+        // queueing them here made every PC upload every punch.
+        if (record['receivedViaLan'] == true || key.toString().startsWith('att_')) continue;
 
         try {
           await LocalStorageService.enqueueSync({
@@ -1940,6 +1994,7 @@ class ZkTecoNetworkService {
             'branchId': effectiveBranch,
             'date': dateStr,
             'employeeId': employeeId,
+            'localKey': key,
             'data': record,
           });
           syncedCount++;
@@ -2215,6 +2270,42 @@ class ZkTecoNetworkService {
   }
 
   /// Decodes ZKTeco encoded timestamp (seconds since 2000-01-01 00:00:00)
+  /// Keeps only the records of a downloaded attendance log that [_parseZkAttendanceData]
+  /// would act on (punches within 24 h), in the same text or 40-byte binary layout, so the
+  /// scan of the whole log can run off the UI thread (via `compute`).
+  @visibleForTesting
+  static Uint8List keepRecentZkRecords(Uint8List data) {
+    if (data.isEmpty) return data;
+    bool recent(DateTime t) => DateTime.now().difference(t).inHours.abs() <= 24;
+
+    final textData = utf8.decode(data, allowMalformed: true);
+    if (textData.contains('\t') || textData.contains('\n') || textData.contains(',')) {
+      final kept = <String>[];
+      for (var line in textData.split(RegExp(r'[\r\n]+'))) {
+        line = line.trim();
+        if (line.isEmpty || line.startsWith('table=') || line.startsWith('ATTLOG')) continue;
+        final parts = line.split(RegExp(r'[\t,]+'));
+        if (parts.length < 2) continue;
+        final ts = DateTime.tryParse(parts[1].trim());
+        // An unparseable time is treated as "now" by the parser, so it is kept.
+        if (ts == null || recent(ts)) kept.add(line);
+      }
+      return kept.isEmpty ? Uint8List(0) : Uint8List.fromList(utf8.encode(kept.join('\n')));
+    }
+
+    const recordSize40 = 40;
+    if (data.length < recordSize40) return data; // small payloads are parsed as they are
+    final out = BytesBuilder(copy: false);
+    final count = data.length ~/ recordSize40;
+    for (var i = 0; i < count; i++) {
+      final o = i * recordSize40;
+      if (o + 27 >= data.length) break;
+      final enc = data[o + 24] | (data[o + 25] << 8) | (data[o + 26] << 16) | (data[o + 27] << 24);
+      if (recent(_decodeZkTime(enc))) out.add(Uint8List.sublistView(data, o, o + recordSize40));
+    }
+    return out.takeBytes();
+  }
+
   static DateTime _decodeZkTime(int encoded) {
     final second = encoded % 60;
     encoded ~/= 60;

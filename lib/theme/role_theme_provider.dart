@@ -1,6 +1,7 @@
 // lib/theme/role_theme_provider.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:hive/hive.dart';
 import 'app_theme.dart';
 import '../services/user_theme_service.dart';
@@ -141,13 +142,13 @@ class RoleCard extends StatelessWidget {
         ? [
             // Dark Mode Neumorphic 2.0 dual shadows
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.65),
+              color: SoftPalette.gray900.withValues(alpha: 0.65),
               blurRadius: 18,
               spreadRadius: 1,
               offset: const Offset(6, 8),
             ),
             BoxShadow(
-              color: Colors.white.withValues(alpha: 0.08),
+              color: SoftPalette.gray50.withValues(alpha: 0.08),
               blurRadius: 12,
               spreadRadius: -1,
               offset: const Offset(-4, -4),
@@ -163,19 +164,19 @@ class RoleCard extends StatelessWidget {
         : [
             // Light Mode Neumorphic 2.0 dual shadows (prominent 3D depth)
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.12),
+              color: SoftPalette.gray900.withValues(alpha: 0.12),
               blurRadius: 18,
               spreadRadius: 1,
               offset: const Offset(7, 8),
             ),
             BoxShadow(
-              color: Colors.white.withValues(alpha: 0.95),
+              color: SoftPalette.gray50.withValues(alpha: 0.95),
               blurRadius: 14,
               spreadRadius: -1,
               offset: const Offset(-6, -6),
             ),
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.03),
+              color: SoftPalette.gray900.withValues(alpha: 0.03),
               blurRadius: 4,
               offset: const Offset(0, 2),
             ),

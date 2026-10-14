@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import '../../../theme/app_theme.dart';
 import '../../../theme/role_theme_provider.dart';
 import '../../../services/user_theme_service.dart';
@@ -40,13 +41,13 @@ class _DashboardStatCardState extends State<DashboardStatCard> {
     final String footerText;
 
     if (cleanLabel.contains('TOTAL')) {
-      badgeColor = const Color(0xFF6366F1); // Indigo
+      badgeColor = SoftPalette.indigo500; // Indigo
       footerText = widget.trendText ?? 'All-time volume tracked';
     } else if (cleanLabel.contains('RECEIVED')) {
-      badgeColor = const Color(0xFF10B981); // Emerald Green
+      badgeColor = SoftPalette.emerald350; // Emerald Green
       footerText = widget.trendText ?? 'Successfully received';
     } else {
-      badgeColor = const Color(0xFFF59E0B); // Amber / Orange
+      badgeColor = SoftPalette.amber300; // Amber / Orange
       footerText = widget.trendText ?? 'Awaiting verification';
     }
 
@@ -66,8 +67,8 @@ class _DashboardStatCardState extends State<DashboardStatCard> {
           boxShadow: [
             BoxShadow(
               color: isDark
-                  ? Colors.black.withValues(alpha: _isHovered ? 0.4 : 0.25)
-                  : Colors.black.withValues(alpha: _isHovered ? 0.06 : 0.02),
+                  ? SoftPalette.gray900.withValues(alpha: _isHovered ? 0.4 : 0.25)
+                  : SoftPalette.gray900.withValues(alpha: _isHovered ? 0.06 : 0.02),
               blurRadius: _isHovered ? 14 : 10,
               offset: const Offset(0, 4),
             ),

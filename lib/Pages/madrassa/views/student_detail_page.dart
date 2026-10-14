@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
@@ -81,10 +84,10 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: Colors.amber.withValues(alpha: 0.15),
+                      color: dialogCtx.adapt(SoftPalette.amber200).withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Icon(Icons.undo_rounded, color: Colors.amber.shade800, size: 22),
+                    child: Icon(Icons.undo_rounded, color: dialogCtx.adapt(SoftPalette.orange350), size: 22),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -103,18 +106,18 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                     isUrdu
                         ? 'کیا آپ $studentName کے لیے قاعدہ کی تکمیل منسوخ کرنا چاہتے ہیں؟ موجودہ تختی / سبق منتخب کریں:'
                         : 'Revert accidental Qaida completion for $studentName. Select current lesson to resume from:',
-                    style: ctx.urduStyle(style: const TextStyle(fontSize: 13, color: Colors.black87)),
+                    style: ctx.urduStyle(style: TextStyle(fontSize: 13, color: dialogCtx.adapt(SoftPalette.gray900A87))),
                   ),
                   const SizedBox(height: 16),
                   Text(
                     isUrdu ? 'سبق / تختی:' : 'Qaida Lesson (1–21):',
-                    style: ctx.urduStyle(style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+                    style: ctx.urduStyle(style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: dialogCtx.adapt(SoftPalette.gray350))),
                   ),
                   const SizedBox(height: 6),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.shade300),
+                      border: Border.all(color: dialogCtx.adapt(SoftPalette.gray150)),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: DropdownButtonHideUnderline(
@@ -150,8 +153,8 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                 ),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.amber.shade800,
-                    foregroundColor: Colors.white,
+                    backgroundColor: SoftPalette.orange350,
+                    foregroundColor: SoftPalette.gray50,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
                   onPressed: () => Navigator.pop(ctx, true),
@@ -227,14 +230,14 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
       );
 
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text(
               context.isUrdu
                   ? '$studentName کے لیے قاعدہ تکمیل منسوخ ہو گئی (سبق $selectedLesson)'
                   : 'Qaida completion reverted for $studentName to Lesson $selectedLesson',
             ),
-            backgroundColor: Colors.amber.shade800,
+            backgroundColor: SoftPalette.orange350,
           ),
         );
       }
@@ -250,12 +253,12 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
   Widget _buildAvatarFallback(String? name, {double fontSize = 28}) {
     final initial = name != null && name.isNotEmpty ? name[0].toUpperCase() : '?';
     return Container(
-      color: const Color(0xFF008080).withValues(alpha: 0.15),
+      color: context.adapt(SoftPalette.teal550).withValues(alpha: 0.15),
       alignment: Alignment.center,
       child: Text(
         initial,
         style: TextStyle(
-          color: const Color(0xFF008080),
+          color: context.adapt(SoftPalette.teal550),
           fontSize: fontSize,
           fontWeight: FontWeight.bold,
         ),
@@ -268,23 +271,23 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
-          Icon(icon, size: 18, color: const Color(0xFF008080)),
+          Icon(icon, size: 18, color: context.adapt(SoftPalette.teal550)),
           const SizedBox(width: 12),
           Text(
             label,
             style: TextStyle(
               fontSize: 13,
-              color: Colors.grey.shade600,
+              color: context.adapt(SoftPalette.gray500),
               fontWeight: FontWeight.w500,
             ),
           ),
           const Spacer(),
           Text(
             value,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.bold,
-              color: Color(0xFF1E293B),
+              color: context.adapt(SoftPalette.slate800),
             ),
           ),
         ],
@@ -300,8 +303,8 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
         future: LocalStorageService.ensureBoxOpen(LocalStorageService.madrassaStudentsBox),
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
-            return const Scaffold(
-              body: Center(child: CircularProgressIndicator(color: Color(0xFF00796B))),
+            return Scaffold(
+              body: Center(child: CircularProgressIndicator(color: context.adapt(SoftPalette.teal550))),
             );
           }
           return _buildDetailPageWithBox(context, snapshot.data!, studentId);
@@ -349,10 +352,10 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
         final String? hifzCertificateUrl = _data['hifzCertificateUrl'] ?? _data['hifzCertificateBase64'];
 
         final isDark = UserThemeService.isDarkMode(widget.username);
-        final scaffoldBg = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8F9FD);
-        final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-        final textPrimary = isDark ? Colors.white : const Color(0xFF1E293B);
-        final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
+        final scaffoldBg = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+        final cardBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+        final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.slate800;
+        final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.slate150;
 
         return Scaffold(
           backgroundColor: scaffoldBg,
@@ -383,7 +386,7 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                 role: widget.role,
               ),
               IconButton(
-                icon: const Icon(Icons.edit_note_rounded, color: Color(0xFF008080)),
+                icon: Icon(Icons.edit_note_rounded, color: context.adapt(SoftPalette.teal550)),
                 tooltip: 'Edit Student Details',
                 onPressed: () => showAddStudentDialog(
                   context,
@@ -410,14 +413,14 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                       padding: const EdgeInsets.all(24),
                       decoration: BoxDecoration(
                         gradient: const LinearGradient(
-                          colors: [Color(0xFF006666), Color(0xFF008080)],
+                          colors: [SoftPalette.teal600, SoftPalette.teal550],
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
                         ),
                         borderRadius: BorderRadius.circular(24),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF008080).withValues(alpha: 0.25),
+                            color: SoftPalette.teal550.withValues(alpha: 0.25),
                             blurRadius: 16,
                             offset: const Offset(0, 6),
                           ),
@@ -430,7 +433,7 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                             height: 72,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 2.5),
+                              border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.4), width: 2.5),
                             ),
                             child: ClipOval(
                               child: () {
@@ -467,14 +470,14 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                                   style: const TextStyle(
                                     fontSize: 22,
                                     fontWeight: FontWeight.bold,
-                                    color: Colors.white,
+                                    color: SoftPalette.gray50,
                                   ),
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
                                   'Roll #: $rollNumber • Class: $className',
                                   style: TextStyle(
-                                    color: Colors.white.withValues(alpha: 0.9),
+                                    color: SoftPalette.gray50.withValues(alpha: 0.9),
                                     fontSize: 13,
                                   ),
                                 ),
@@ -482,13 +485,13 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                   decoration: BoxDecoration(
-                                    color: Colors.white.withValues(alpha: 0.2),
+                                    color: SoftPalette.gray50.withValues(alpha: 0.2),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   child: Text(
                                     'Status: ${status.toUpperCase()}',
                                     style: const TextStyle(
-                                      color: Colors.white,
+                                      color: SoftPalette.gray50,
                                       fontWeight: FontWeight.bold,
                                       fontSize: 11,
                                     ),
@@ -532,13 +535,13 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                       decoration: BoxDecoration(
                                         color: isQaidaComp
-                                            ? Colors.green.withValues(alpha: 0.15)
-                                            : Colors.teal.withValues(alpha: 0.15),
+                                            ? context.adapt(SoftPalette.green400).withValues(alpha: 0.15)
+                                            : context.adapt(SoftPalette.teal500).withValues(alpha: 0.15),
                                         borderRadius: BorderRadius.circular(6),
                                         border: Border.all(
                                           color: isQaidaComp
-                                              ? Colors.green.withValues(alpha: 0.4)
-                                              : Colors.teal.withValues(alpha: 0.4),
+                                              ? context.adapt(SoftPalette.green400).withValues(alpha: 0.4)
+                                              : context.adapt(SoftPalette.teal500).withValues(alpha: 0.4),
                                         ),
                                       ),
                                       child: Text(
@@ -546,7 +549,7 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                                         style: TextStyle(
                                           fontSize: 11,
                                           fontWeight: FontWeight.bold,
-                                          color: isQaidaComp ? Colors.green : (isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080)),
+                                          color: isQaidaComp ? context.adapt(SoftPalette.green400) : (isDark ? SoftPalette.teal300 : SoftPalette.teal550),
                                         ),
                                       ),
                                     ),
@@ -557,7 +560,7 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                                   style: TextStyle(
                                     fontSize: 16,
                                     fontWeight: FontWeight.bold,
-                                    color: isQaidaComp ? Colors.green : (isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080)),
+                                    color: isQaidaComp ? context.adapt(SoftPalette.green400) : (isDark ? SoftPalette.teal300 : SoftPalette.teal550),
                                   ),
                                 ),
                               ],
@@ -567,8 +570,8 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                               borderRadius: BorderRadius.circular(6),
                               child: LinearProgressIndicator(
                                 value: isQaidaComp ? 1.0 : (qaidaLesson / 21).clamp(0.0, 1.0),
-                                backgroundColor: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
-                                valueColor: AlwaysStoppedAnimation<Color>(isQaidaComp ? Colors.green : const Color(0xFF008080)),
+                                backgroundColor: isDark ? SoftPalette.slate700 : SoftPalette.slate100,
+                                valueColor: AlwaysStoppedAnimation<Color>(isQaidaComp ? context.adapt(SoftPalette.green400) : context.adapt(SoftPalette.teal550)),
                                 minHeight: 10,
                               ),
                             ),
@@ -580,7 +583,7 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                                   children: [
                                     Text(
                                       'Qaida Status: ${isQaidaComp ? "Completed / مکمل ✅" : "Lesson $qaidaLesson of 21"}',
-                                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                      style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.gray500)),
                                     ),
                                     if (isQaidaComp) ...[
                                       const SizedBox(width: 8),
@@ -590,18 +593,18 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                                         child: Container(
                                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                           decoration: BoxDecoration(
-                                            color: Colors.amber.withValues(alpha: 0.15),
+                                            color: context.adapt(SoftPalette.amber200).withValues(alpha: 0.15),
                                             borderRadius: BorderRadius.circular(4),
-                                            border: Border.all(color: Colors.amber.shade700.withValues(alpha: 0.5)),
+                                            border: Border.all(color: context.adapt(SoftPalette.amber300).withValues(alpha: 0.5)),
                                           ),
                                           child: Row(
                                             mainAxisSize: MainAxisSize.min,
                                             children: [
-                                              Icon(Icons.undo_rounded, size: 11, color: Colors.amber.shade900),
+                                              Icon(Icons.undo_rounded, size: 11, color: context.adapt(SoftPalette.orange350)),
                                               const SizedBox(width: 3),
                                               Text(
                                                 'Revert',
-                                                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.amber.shade900),
+                                                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.orange350)),
                                               ),
                                             ],
                                           ),
@@ -633,7 +636,7 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                                   style: TextStyle(
                                     fontSize: 16,
                                     fontWeight: FontWeight.bold,
-                                    color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080),
+                                    color: isDark ? SoftPalette.teal300 : SoftPalette.teal550,
                                   ),
                                 ),
                               ],
@@ -643,8 +646,8 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                               borderRadius: BorderRadius.circular(6),
                               child: LinearProgressIndicator(
                                 value: (totalLines / maxLines).clamp(0.0, 1.0),
-                                backgroundColor: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
-                                valueColor: const AlwaysStoppedAnimation<Color>(Color(0xFF008080)),
+                                backgroundColor: isDark ? SoftPalette.slate700 : SoftPalette.slate100,
+                                valueColor: AlwaysStoppedAnimation<Color>(context.adapt(SoftPalette.teal550)),
                                 minHeight: 10,
                               ),
                             ),
@@ -654,11 +657,11 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                               children: [
                                 Text(
                                   'Current: $currentLines lines',
-                                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                  style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.gray500)),
                                 ),
                                 Text(
                                   'Prior Hifz: $prevLines lines',
-                                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                  style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.gray500)),
                                 ),
                                 Text(
                                   'Total: $totalLines / $maxLines',
@@ -676,23 +679,23 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                     Container(
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: context.adapt(SoftPalette.gray50),
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                        border: Border.all(color: context.adapt(SoftPalette.slate150)),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Row(
+                          Row(
                             children: [
-                              Icon(Icons.person_outline_rounded, color: Color(0xFF008080)),
+                              Icon(Icons.person_outline_rounded, color: context.adapt(SoftPalette.teal550)),
                               SizedBox(width: 10),
                               Text(
                                 'Student Personal Details',
                                 style: TextStyle(
                                   fontSize: 15,
                                   fontWeight: FontWeight.bold,
-                                  color: Color(0xFF1E293B),
+                                  color: context.adapt(SoftPalette.slate800),
                                 ),
                               ),
                             ],
@@ -746,23 +749,23 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                     Container(
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: context.adapt(SoftPalette.gray50),
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                        border: Border.all(color: context.adapt(SoftPalette.slate150)),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Row(
+                          Row(
                             children: [
-                              Icon(Icons.family_restroom_rounded, color: Color(0xFF008080)),
+                              Icon(Icons.family_restroom_rounded, color: context.adapt(SoftPalette.teal550)),
                               SizedBox(width: 10),
                               Text(
                                 'Guardian / Parent Details',
                                 style: TextStyle(
                                   fontSize: 15,
                                   fontWeight: FontWeight.bold,
-                                  color: Color(0xFF1E293B),
+                                  color: context.adapt(SoftPalette.slate800),
                                 ),
                               ),
                             ],
@@ -793,35 +796,35 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                     Container(
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: context.adapt(SoftPalette.gray50),
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                        border: Border.all(color: context.adapt(SoftPalette.slate150)),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(
                             children: [
-                              const Icon(Icons.folder_shared_outlined, color: Color(0xFF008080)),
+                              Icon(Icons.folder_shared_outlined, color: context.adapt(SoftPalette.teal550)),
                               const SizedBox(width: 10),
-                              const Text(
+                              Text(
                                 'Student & Guardian Documents',
                                 style: TextStyle(
                                   fontSize: 15,
                                   fontWeight: FontWeight.bold,
-                                  color: Color(0xFF1E293B),
+                                  color: context.adapt(SoftPalette.slate800),
                                 ),
                               ),
                               const Spacer(),
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                 decoration: BoxDecoration(
-                                  color: Colors.grey.shade100,
+                                  color: context.adapt(SoftPalette.gray100),
                                   borderRadius: BorderRadius.circular(6),
                                 ),
-                                child: const Text(
+                                child: Text(
                                   'Read Only',
-                                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.grey),
+                                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.gray350)),
                                 ),
                               ),
                             ],

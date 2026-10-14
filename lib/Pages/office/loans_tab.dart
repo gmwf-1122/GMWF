@@ -1,6 +1,7 @@
 // lib/pages/office/loans_tab.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/design_system.dart';
 import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../services/local_storage_service.dart';
@@ -13,13 +14,13 @@ import 'finance_report_helper.dart';
 import 'shared_widgets.dart';
 
 
-const _kAccent = Color(0xFF10B981);
-const _kBg = Color(0xFFF8FAFC);
-const _kBgCard = Colors.white;
-const _kBorder = Color(0xFFE2E8F0);
-const _kTextPrimary = Color(0xFF111827);
-const _kTextSecondary = Color(0xFF6B7280);
-const _kTextTertiary = Color(0xFF9CA3AF);
+const _kAccent = SoftPalette.emerald350;
+const _kBg = SoftPalette.gray50;
+const _kBgCard = SoftPalette.gray50;
+const _kBorder = SoftPalette.slate150;
+const _kTextPrimary = SoftPalette.slate900;
+const _kTextSecondary = SoftPalette.slate550;
+const _kTextTertiary = SoftPalette.slate350;
 
 class LoansTab extends StatefulWidget {
   final String branchId;
@@ -96,7 +97,7 @@ class _LoansTabState extends State<LoansTab> {
     final loanAccess = permissionService.getLoanAccess(widget.userRole);
 
     return Scaffold(
-      backgroundColor: _kBg,
+      backgroundColor: context.adapt(_kBg),
       body: Row(
         children: [
           // Left Sidebar list of loans
@@ -104,7 +105,7 @@ class _LoansTabState extends State<LoansTab> {
             flex: 3,
             child: _buildLoansList(loanAccess),
           ),
-          const VerticalDivider(width: 1, color: _kBorder),
+          VerticalDivider(width: 1, color: context.adapt(_kBorder)),
           // Right detail panel
           Expanded(
             flex: 4,
@@ -144,9 +145,9 @@ class _LoansTabState extends State<LoansTab> {
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: const BoxDecoration(
-        color: Colors.white,
-        border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0))),
+      decoration: BoxDecoration(
+        color: context.adapt(SoftPalette.gray50),
+        border: Border(bottom: BorderSide(color: context.adapt(SoftPalette.slate150))),
       ),
       child: Row(
         children: [
@@ -158,7 +159,7 @@ class _LoansTabState extends State<LoansTab> {
                   Text(
                     'BRANCH',
                     style: TextStyle(
-                      color: _kTextTertiary,
+                      color: context.adapt(_kTextTertiary),
                       fontSize: 9,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 0.5,
@@ -169,18 +170,18 @@ class _LoansTabState extends State<LoansTab> {
                     height: 38,
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     decoration: BoxDecoration(
-                      color: _isBranchScopedUser ? const Color(0xFFECFDF5) : const Color(0xFFF8FAFC),
+                      color: _isBranchScopedUser ? context.adapt(SoftPalette.emerald50) : context.adapt(SoftPalette.gray50),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: _isBranchScopedUser ? const Color(0xFFA7F3D0) : const Color(0xFFE2E8F0)),
+                      border: Border.all(color: _isBranchScopedUser ? context.adapt(SoftPalette.emerald150) : context.adapt(SoftPalette.slate150)),
                     ),
                     child: _isBranchScopedUser ? Row(
                       children: [
-                        const Icon(Icons.lock_rounded, size: 14, color: Color(0xFF059669)),
+                        const Icon(Icons.lock_rounded, size: 14, color: SoftPalette.emerald500),
                         const SizedBox(width: 6),
                         Expanded(
                           child: Text(
                             branchNames[_selectedBranchFilter] ?? _selectedBranchFilter.toUpperCase(),
-                            style: const TextStyle(color: Color(0xFF064E3B), fontSize: 12, fontWeight: FontWeight.bold),
+                            style: TextStyle(color: context.adapt(SoftPalette.emerald700), fontSize: 12, fontWeight: FontWeight.bold),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
@@ -189,8 +190,8 @@ class _LoansTabState extends State<LoansTab> {
                       child: DropdownButton<String>(
                         value: _selectedBranchFilter,
                         isExpanded: true,
-                        icon: const Icon(Icons.arrow_drop_down, color: Color(0xFF6B7280), size: 18),
-                        style: const TextStyle(color: _kTextPrimary, fontSize: 13, fontWeight: FontWeight.w600),
+                        icon: Icon(Icons.arrow_drop_down, color: context.adapt(SoftPalette.slate550), size: 18),
+                        style: TextStyle(color: context.adapt(_kTextPrimary), fontSize: 13, fontWeight: FontWeight.w600),
                         onChanged: (val) {
                           if (val != null) {
                             setState(() => _selectedBranchFilter = val);
@@ -217,7 +218,7 @@ class _LoansTabState extends State<LoansTab> {
                 Text(
                   'DEPARTMENT',
                   style: TextStyle(
-                    color: _kTextTertiary,
+                    color: context.adapt(_kTextTertiary),
                     fontSize: 9,
                     fontWeight: FontWeight.bold,
                     letterSpacing: 0.5,
@@ -228,16 +229,16 @@ class _LoansTabState extends State<LoansTab> {
                   height: 38,
                   padding: const EdgeInsets.symmetric(horizontal: 12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF8FAFC),
+                    color: context.adapt(SoftPalette.gray50),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFE2E8F0)),
+                    border: Border.all(color: context.adapt(SoftPalette.slate150)),
                   ),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<String>(
                       value: safeDeptFilter,
                       isExpanded: true,
-                      icon: const Icon(Icons.arrow_drop_down, color: Color(0xFF6B7280), size: 18),
-                      style: const TextStyle(color: _kTextPrimary, fontSize: 13, fontWeight: FontWeight.w600),
+                      icon: Icon(Icons.arrow_drop_down, color: context.adapt(SoftPalette.slate550), size: 18),
+                      style: TextStyle(color: context.adapt(_kTextPrimary), fontSize: 13, fontWeight: FontWeight.w600),
                       onChanged: (val) {
                         if (val != null) {
                           setState(() => _selectedDeptFilter = val);
@@ -309,7 +310,7 @@ class _LoansTabState extends State<LoansTab> {
                   if (access == FinanceAccess.full || access == FinanceAccess.requestOnly)
                     ElevatedButton.icon(
                       onPressed: () => _showIssueLoanDialog(access),
-                      style: ElevatedButton.styleFrom(backgroundColor: _kAccent, foregroundColor: Colors.white),
+                      style: ElevatedButton.styleFrom(backgroundColor: _kAccent, foregroundColor: SoftPalette.gray50),
                       icon: const Icon(Icons.add, size: 16),
                       label: const Text('Issue Loan', style: TextStyle(fontWeight: FontWeight.bold)),
                     ),
@@ -318,13 +319,13 @@ class _LoansTabState extends State<LoansTab> {
             ],
           ),
         ),
-        const Divider(height: 1, color: _kBorder),
+        Divider(height: 1, color: context.adapt(_kBorder)),
         Expanded(
           child: filtered.isEmpty
-              ? const Center(child: Text('No loans found.', style: TextStyle(color: _kTextTertiary)))
+              ? Center(child: Text('No loans found.', style: TextStyle(color: context.adapt(_kTextTertiary))))
               : ListView.separated(
                   itemCount: filtered.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1, color: _kBorder),
+                  separatorBuilder: (_, __) => Divider(height: 1, color: context.adapt(_kBorder)),
                   itemBuilder: (context, idx) {
                     final loan = filtered[idx];
                     final isSel = _selectedLoan?['id'] == loan['id'];
@@ -335,19 +336,19 @@ class _LoansTabState extends State<LoansTab> {
 
                     return ListTile(
                       tileColor: isClosed
-                          ? const Color(0xFFF1F5F9)
-                          : (isSel ? const Color(0xFFECFDF5) : _kBgCard),
+                          ? context.adapt(SoftPalette.slate100)
+                          : (isSel ? context.adapt(SoftPalette.emerald50) : context.adapt(_kBgCard)),
                       title: Text(
                         loan['employeeName'] ?? 'Unknown Employee',
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
-                          color: isClosed ? _kTextSecondary : _kTextPrimary,
+                          color: isClosed ? context.adapt(_kTextSecondary) : context.adapt(_kTextPrimary),
                           decoration: isClosed ? TextDecoration.lineThrough : null,
                         ),
                       ),
                       subtitle: Text(
                         'Issued: ${DateFormat('yyyy-MM-dd').format(DateTime.parse(loan['dateIssued']))}',
-                        style: TextStyle(color: isClosed ? _kTextTertiary : _kTextSecondary, fontSize: 11),
+                        style: TextStyle(color: isClosed ? context.adapt(_kTextTertiary) : context.adapt(_kTextSecondary), fontSize: 11),
                       ),
                       trailing: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -358,14 +359,14 @@ class _LoansTabState extends State<LoansTab> {
                             style: TextStyle(
                               fontWeight: FontWeight.w700,
                               fontSize: 12,
-                              color: isClosed ? _kTextTertiary : _kTextPrimary,
+                              color: isClosed ? context.adapt(_kTextTertiary) : context.adapt(_kTextPrimary),
                             ),
                           ),
                           const SizedBox(height: 2),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: isClosed ? const Color(0xFFE2E8F0) : const Color(0xFFD1FAE5),
+                              color: isClosed ? context.adapt(SoftPalette.slate150) : context.adapt(SoftPalette.emerald100),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
@@ -373,7 +374,7 @@ class _LoansTabState extends State<LoansTab> {
                               style: TextStyle(
                                 fontSize: 9,
                                 fontWeight: FontWeight.bold,
-                                color: isClosed ? const Color(0xFF64748B) : _kAccent,
+                                color: isClosed ? context.adapt(SoftPalette.slate550) : _kAccent,
                               ),
                             ),
                           ),
@@ -390,13 +391,13 @@ class _LoansTabState extends State<LoansTab> {
 
   Widget _buildLoanDetails(FinanceAccess access) {
     if (_selectedLoan == null) {
-      return const Center(
+      return Center(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.credit_card_rounded, size: 48, color: _kTextTertiary),
+            Icon(Icons.credit_card_rounded, size: 48, color: context.adapt(_kTextTertiary)),
             SizedBox(height: 12),
-            Text('Select a loan to view history and repayments.', style: TextStyle(color: _kTextSecondary)),
+            Text('Select a loan to view history and repayments.', style: TextStyle(color: context.adapt(_kTextSecondary))),
           ],
         ),
       );
@@ -435,17 +436,17 @@ class _LoansTabState extends State<LoansTab> {
               width: double.infinity,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               decoration: BoxDecoration(
-                color: const Color(0xFFF1F5F9),
+                color: context.adapt(SoftPalette.slate100),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFCBD5E1)),
+                border: Border.all(color: context.adapt(SoftPalette.slate200)),
               ),
-              child: const Row(
+              child: Row(
                 children: [
-                  Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 20),
+                  Icon(Icons.check_circle_rounded, color: SoftPalette.emerald350, size: 20),
                   SizedBox(width: 10),
                   Text(
                     '🎉 LOAN FULLY REPAID & CLOSED — Balance is 0 PKR',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF334155)),
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: context.adapt(SoftPalette.slate700)),
                   ),
                 ],
               ),
@@ -465,13 +466,13 @@ class _LoansTabState extends State<LoansTab> {
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.w800,
-                        color: isClosed ? _kTextSecondary : _kTextPrimary,
+                        color: isClosed ? context.adapt(_kTextSecondary) : context.adapt(_kTextPrimary),
                       ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'Repayment Type: ${loan['repaymentType'] == 'fixed' ? 'Fixed (Installments)' : 'Flexible'}',
-                      style: const TextStyle(color: _kTextSecondary, fontSize: 13),
+                      style: TextStyle(color: context.adapt(_kTextSecondary), fontSize: 13),
                     ),
                   ],
                 ),
@@ -493,14 +494,14 @@ class _LoansTabState extends State<LoansTab> {
               if (!isClosed && (access == FinanceAccess.full || access == FinanceAccess.requestOnly)) ...[
                 ElevatedButton.icon(
                   onPressed: () => _showRecordRepaymentDialog(loan, outstandingMinor, access),
-                  style: ElevatedButton.styleFrom(backgroundColor: _kAccent, foregroundColor: Colors.white),
+                  style: ElevatedButton.styleFrom(backgroundColor: _kAccent, foregroundColor: SoftPalette.gray50),
                   icon: const Icon(Icons.payment, size: 16),
                   label: const Text('Record Repayment', style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
                 const SizedBox(width: 8),
                 IconButton(
                   tooltip: 'Manual Close (Write-off)',
-                  icon: const Icon(Icons.cancel_presentation_rounded, color: Colors.redAccent),
+                  icon: const Icon(Icons.cancel_presentation_rounded, color: SoftPalette.red400),
                   onPressed: () => _showWriteOffDialog(loan),
                 ),
               ],
@@ -512,27 +513,27 @@ class _LoansTabState extends State<LoansTab> {
           // Cards Row
           Row(
             children: [
-              _buildMetricCard('Principal', _formatPaisa(pMinor), Colors.blue),
+              _buildMetricCard('Principal', _formatPaisa(pMinor), SoftPalette.blue400),
               const SizedBox(width: 12),
-              _buildMetricCard('Total Paid', _formatPaisa(paidMinor), Colors.green),
+              _buildMetricCard('Total Paid', _formatPaisa(paidMinor), SoftPalette.green400),
               const SizedBox(width: 12),
-              _buildMetricCard('Outstanding', _formatPaisa(outstandingMinor), outstandingMinor > 0 ? Colors.orange : Colors.grey),
+              _buildMetricCard('Outstanding', _formatPaisa(outstandingMinor), outstandingMinor > 0 ? SoftPalette.amber300 : SoftPalette.gray350),
             ],
           ),
           const SizedBox(height: 24),
 
           // Payments Section
-          const Text(
+          Text(
             'Transaction History / Ledger',
-            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: _kTextPrimary),
+            style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: context.adapt(_kTextPrimary)),
           ),
           const SizedBox(height: 12),
           Expanded(
             child: activePayments.isEmpty
-                ? const Center(child: Text('No transactions recorded yet.', style: TextStyle(color: _kTextTertiary)))
+                ? Center(child: Text('No transactions recorded yet.', style: TextStyle(color: context.adapt(_kTextTertiary))))
                 : ListView.separated(
                     itemCount: activePayments.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1, color: _kBorder),
+                    separatorBuilder: (_, __) => Divider(height: 1, color: context.adapt(_kBorder)),
                     itemBuilder: (context, index) {
                       final pay = activePayments[index];
                       final amt = (pay['amountMinor'] as num?)?.toInt() ?? 0;
@@ -543,20 +544,20 @@ class _LoansTabState extends State<LoansTab> {
                       return ListTile(
                         contentPadding: EdgeInsets.zero,
                         leading: CircleAvatar(
-                          backgroundColor: isTopup ? const Color(0xFFFEE2E2) : const Color(0xFFD1FAE5),
-                          child: Icon(isTopup ? Icons.arrow_upward : Icons.arrow_downward, color: isTopup ? Colors.redAccent : _kAccent, size: 18),
+                          backgroundColor: isTopup ? context.adapt(SoftPalette.red150m) : context.adapt(SoftPalette.emerald100),
+                          child: Icon(isTopup ? Icons.arrow_upward : Icons.arrow_downward, color: isTopup ? SoftPalette.red400 : _kAccent, size: 18),
                         ),
                         title: Text(
                           '${isTopup ? "+" : "-"}${_formatPaisa(amt)}',
-                          style: TextStyle(fontWeight: FontWeight.bold, color: isTopup ? Colors.redAccent : _kTextPrimary),
+                          style: TextStyle(fontWeight: FontWeight.bold, color: isTopup ? SoftPalette.red400 : context.adapt(_kTextPrimary)),
                         ),
                         subtitle: Text(
                           '${isTopup ? "Loan issued / Top-up" : "Repayment"} • Recorded by: ${pay['recordedBy']} on ${DateFormat('yyyy-MM-dd HH:mm').format(date)}',
-                          style: const TextStyle(color: _kTextTertiary, fontSize: 11),
+                          style: TextStyle(color: context.adapt(_kTextTertiary), fontSize: 11),
                         ),
                         trailing: (PermissionService().getLedgerVoidAccess(widget.userRole) == FinanceAccess.full)
                             ? TextButton.icon(
-                                style: TextButton.styleFrom(foregroundColor: Colors.red),
+                                style: TextButton.styleFrom(foregroundColor: SoftPalette.red400),
                                 icon: const Icon(Icons.delete_outline, size: 14),
                                 label: const Text('Void', style: TextStyle(fontSize: 11)),
                                 onPressed: () => _showVoidRepaymentDialog(loan, pay),
@@ -576,14 +577,14 @@ class _LoansTabState extends State<LoansTab> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         decoration: BoxDecoration(
-          color: _kBgCard,
-          border: Border.all(color: _kBorder),
+          color: context.adapt(_kBgCard),
+          border: Border.all(color: context.adapt(_kBorder)),
           borderRadius: BorderRadius.circular(12),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(title, style: const TextStyle(fontSize: 11, color: _kTextSecondary, fontWeight: FontWeight.bold)),
+            Text(title, style: TextStyle(fontSize: 11, color: context.adapt(_kTextSecondary), fontWeight: FontWeight.bold)),
             const SizedBox(height: 6),
             Text(
               val,
@@ -612,7 +613,7 @@ class _LoansTabState extends State<LoansTab> {
         return StatefulBuilder(builder: (dialogCtx, setDState) {
           final isFixed = repaymentType == 'fixed';
           return AlertDialog(
-            backgroundColor: _kBgCard,
+            backgroundColor: context.adapt(_kBgCard),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             title: const Text('Issue New Loan / Advance', style: TextStyle(fontWeight: FontWeight.bold)),
             content: SingleChildScrollView(
@@ -662,13 +663,13 @@ class _LoansTabState extends State<LoansTab> {
                           alignment: Alignment.topLeft,
                           child: Material(
                             elevation: 4.0,
-                            color: _kBgCard,
+                            color: context.adapt(_kBgCard),
                             borderRadius: BorderRadius.circular(8),
                             child: Container(
                               width: 418,
                               constraints: const BoxConstraints(maxHeight: 200),
                               decoration: BoxDecoration(
-                                border: Border.all(color: _kBorder),
+                                border: Border.all(color: context.adapt(_kBorder)),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: ListView.builder(
@@ -679,8 +680,8 @@ class _LoansTabState extends State<LoansTab> {
                                   final option = options.elementAt(index);
                                   return ListTile(
                                     dense: true,
-                                    title: Text(option['name']?.toString() ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _kTextPrimary)),
-                                    subtitle: Text('${option['role'] ?? ""} • ${option['branchId'] ?? ""}', style: const TextStyle(fontSize: 11, color: _kTextSecondary)),
+                                    title: Text(option['name']?.toString() ?? '', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: context.adapt(_kTextPrimary))),
+                                    subtitle: Text('${option['role'] ?? ""} • ${option['branchId'] ?? ""}', style: TextStyle(fontSize: 11, color: context.adapt(_kTextSecondary))),
                                     onTap: () => onSelected(option),
                                   );
                                 },
@@ -744,7 +745,7 @@ class _LoansTabState extends State<LoansTab> {
             actions: [
               TextButton(onPressed: () => Navigator.pop(dialogCtx), child: const Text('Cancel')),
               ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: _kAccent, foregroundColor: Colors.white),
+                style: ElevatedButton.styleFrom(backgroundColor: _kAccent, foregroundColor: SoftPalette.gray50),
                 onPressed: () async {
                   if (selectedEmpId == null) {
                     showCustomSnackBar(context, 'Please select an employee.', error: true);
@@ -819,14 +820,14 @@ class _LoansTabState extends State<LoansTab> {
       context: context,
       builder: (ctx) {
         return AlertDialog(
-          backgroundColor: _kBgCard,
+          backgroundColor: context.adapt(_kBgCard),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Text('Record Repayment — ${loan['employeeName']}', style: const TextStyle(fontWeight: FontWeight.bold)),
           content: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Max Outstanding: ${_formatPaisa(maxAmountMinor)}', style: const TextStyle(color: Colors.orange, fontWeight: FontWeight.bold)),
+              Text('Max Outstanding: ${_formatPaisa(maxAmountMinor)}', style: const TextStyle(color: SoftPalette.amber300, fontWeight: FontWeight.bold)),
               const SizedBox(height: 16),
               const Text('Repayment Amount (PKR)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
               const SizedBox(height: 6),
@@ -847,7 +848,7 @@ class _LoansTabState extends State<LoansTab> {
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: _kAccent, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: _kAccent, foregroundColor: SoftPalette.gray50),
               onPressed: () async {
                 final amtMinor = _parsePaisa(amountCtrl.text);
                 if (amtMinor <= 0) {
@@ -908,7 +909,7 @@ class _LoansTabState extends State<LoansTab> {
       context: context,
       builder: (ctx) {
         return AlertDialog(
-          backgroundColor: _kBgCard,
+          backgroundColor: context.adapt(_kBgCard),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Text('Void Repayment Entry', style: TextStyle(fontWeight: FontWeight.bold)),
           content: Column(
@@ -928,7 +929,7 @@ class _LoansTabState extends State<LoansTab> {
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.red400, foregroundColor: SoftPalette.gray50),
               onPressed: () async {
                 final reason = reasonCtrl.text.trim();
                 if (reason.isEmpty) {
@@ -993,7 +994,7 @@ class _LoansTabState extends State<LoansTab> {
       context: context,
       builder: (ctx) {
         return AlertDialog(
-          backgroundColor: _kBgCard,
+          backgroundColor: context.adapt(_kBgCard),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: const Text('Write-off / Close Loan Manually', style: TextStyle(fontWeight: FontWeight.bold)),
           content: Column(
@@ -1013,7 +1014,7 @@ class _LoansTabState extends State<LoansTab> {
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.red400, foregroundColor: SoftPalette.gray50),
               onPressed: () async {
                 final reason = reasonCtrl.text.trim();
                 if (reason.isEmpty) {

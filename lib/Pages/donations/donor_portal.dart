@@ -1,6 +1,8 @@
 // lib/pages/donations/donor_portal.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
@@ -207,7 +209,7 @@ class _DonorPortalState extends State<DonorPortal> {
   }
 
   void _showSnack(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    AppToast.showSnackBar(context, SnackBar(content: Text(msg)));
   }
 
   @override
@@ -236,12 +238,12 @@ class _DonorPortalState extends State<DonorPortal> {
           constraints: const BoxConstraints(maxWidth: 450),
           padding: const EdgeInsets.all(40),
           decoration: BoxDecoration(
-            color: Colors.white.withValues(alpha: 0.05),
+            color: SoftPalette.gray50.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(DS.r2xl),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+            border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.1)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.3),
+                color: SoftPalette.gray900.withValues(alpha: 0.3),
                 blurRadius: 30,
                 offset: const Offset(0, 15),
               ),
@@ -259,11 +261,11 @@ class _DonorPortalState extends State<DonorPortal> {
                 child: const Icon(Icons.volunteer_activism_rounded, color: DonDS.teal, size: 48),
               ),
               const SizedBox(height: 24),
-              Text('GMWF Donor Portal', style: DS.display(color: Colors.white)),
+              Text('GMWF Donor Portal', style: DS.display(color: SoftPalette.gray50)),
               const SizedBox(height: 8),
               Text('Access your donation history and profile', 
                   textAlign: TextAlign.center,
-                  style: DS.body(color: Colors.white.withValues(alpha: 0.6))),
+                  style: DS.body(color: SoftPalette.gray50.withValues(alpha: 0.6))),
               const SizedBox(height: 40),
               _buildTextField(
                 controller: _nameController,
@@ -287,17 +289,17 @@ class _DonorPortalState extends State<DonorPortal> {
                   onPressed: _isLoading ? null : _login,
                   style: ElevatedButton.styleFrom(
                     backgroundColor: DonDS.teal,
-                    foregroundColor: Colors.white,
+                    foregroundColor: SoftPalette.gray50,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(DS.rLg)),
                     elevation: 0,
                   ),
                   child: _isLoading 
-                    ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    ? const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(color: SoftPalette.gray50, strokeWidth: 2))
                     : const Text('Sign In', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
                 ),
               ),
               const SizedBox(height: 24),
-              Text('Secured by GMWF System', style: DS.caption(color: Colors.white.withValues(alpha: 0.4))),
+              Text('Secured by GMWF System', style: DS.caption(color: SoftPalette.gray50.withValues(alpha: 0.4))),
             ],
           ),
         ),
@@ -326,7 +328,7 @@ class _DonorPortalState extends State<DonorPortal> {
                 const SizedBox(height: 40),
                 Center(
                   child: Text('Official GMWF Donor Records', 
-                    style: DS.caption(color: Colors.white.withValues(alpha: 0.2))),
+                    style: DS.caption(color: SoftPalette.gray50.withValues(alpha: 0.2))),
                 ),
               ],
             ),
@@ -344,7 +346,7 @@ class _DonorPortalState extends State<DonorPortal> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('SUMMARY', style: DS.label(color: Colors.white.withValues(alpha: 0.6)).copyWith(letterSpacing: 1.5)),
+        Text('SUMMARY', style: DS.label(color: SoftPalette.gray50.withValues(alpha: 0.6)).copyWith(letterSpacing: 1.5)),
         const SizedBox(height: 16),
         LayoutBuilder(
           builder: (context, constraints) {
@@ -354,18 +356,18 @@ class _DonorPortalState extends State<DonorPortal> {
                   children: [
                     Expanded(child: _buildStatCard('Total Contributed', 'PKR ${NumberFormat('#,###').format(totalAmount)}', Icons.volunteer_activism_rounded, DonDS.teal)),
                     const SizedBox(width: 16),
-                    Expanded(child: _buildStatCard('Donations Count', count.toString(), Icons.history_toggle_off_rounded, Colors.amberAccent)),
+                    Expanded(child: _buildStatCard('Donations Count', count.toString(), Icons.history_toggle_off_rounded, SoftPalette.yellow200)),
                     const SizedBox(width: 16),
-                    Expanded(child: _buildStatCard('Average Donation', 'PKR ${NumberFormat('#,###').format(avg)}', Icons.analytics_rounded, Colors.indigoAccent)),
+                    Expanded(child: _buildStatCard('Average Donation', 'PKR ${NumberFormat('#,###').format(avg)}', Icons.analytics_rounded, SoftPalette.indigo500)),
                   ],
                 )
               : Column(
                   children: [
                     _buildStatCard('Total Contributed', 'PKR ${NumberFormat('#,###').format(totalAmount)}', Icons.volunteer_activism_rounded, DonDS.teal),
                     const SizedBox(height: 12),
-                    _buildStatCard('Donations Count', count.toString(), Icons.history_toggle_off_rounded, Colors.amberAccent),
+                    _buildStatCard('Donations Count', count.toString(), Icons.history_toggle_off_rounded, SoftPalette.yellow200),
                     const SizedBox(height: 12),
-                    _buildStatCard('Average Donation', 'PKR ${NumberFormat('#,###').format(avg)}', Icons.analytics_rounded, Colors.indigoAccent),
+                    _buildStatCard('Average Donation', 'PKR ${NumberFormat('#,###').format(avg)}', Icons.analytics_rounded, SoftPalette.indigo500),
                   ],
                 );
           },
@@ -378,12 +380,12 @@ class _DonorPortalState extends State<DonorPortal> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.03),
+        color: SoftPalette.gray50.withValues(alpha: 0.03),
         borderRadius: BorderRadius.circular(DS.r2xl),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.08)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.1),
+            color: SoftPalette.gray900.withValues(alpha: 0.1),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -405,9 +407,9 @@ class _DonorPortalState extends State<DonorPortal> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: DS.caption(color: Colors.white.withValues(alpha: 0.4))),
+                Text(label, style: DS.caption(color: SoftPalette.gray50.withValues(alpha: 0.4))),
                 const SizedBox(height: 4),
-                Text(value, style: DS.heading(color: Colors.white).copyWith(fontSize: 18, fontFamily: 'DMMono')),
+                Text(value, style: DS.heading(color: SoftPalette.gray50).copyWith(fontSize: 18, fontFamily: 'DMMono')),
               ],
             ),
           ),
@@ -420,8 +422,8 @@ class _DonorPortalState extends State<DonorPortal> {
     return Container(
       padding: const EdgeInsets.fromLTRB(24, 24, 24, 32),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.05),
-        border: Border(bottom: BorderSide(color: Colors.white.withValues(alpha: 0.1))),
+        color: SoftPalette.gray50.withValues(alpha: 0.05),
+        border: Border(bottom: BorderSide(color: SoftPalette.gray50.withValues(alpha: 0.1))),
       ),
       child: Row(
         children: [
@@ -434,7 +436,7 @@ class _DonorPortalState extends State<DonorPortal> {
             ),
             child: Center(
               child: Text(_loggedDonor!.name[0].toUpperCase(), 
-                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
+                  style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: SoftPalette.gray50)),
             ),
           ),
           const SizedBox(width: 16),
@@ -443,15 +445,15 @@ class _DonorPortalState extends State<DonorPortal> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Donor Portal', style: DS.label(color: DonDS.teal).copyWith(fontSize: 10, letterSpacing: 2)),
-                Text(_loggedDonor!.name, style: DS.heading(color: Colors.white).copyWith(fontSize: 22)),
-                Text(_loggedDonor!.phone, style: DS.caption(color: Colors.white.withValues(alpha: 0.4))),
+                Text(_loggedDonor!.name, style: DS.heading(color: SoftPalette.gray50).copyWith(fontSize: 22)),
+                Text(_loggedDonor!.phone, style: DS.caption(color: SoftPalette.gray50.withValues(alpha: 0.4))),
               ],
             ),
           ),
           _buildGlassButton(
             icon: Icons.logout_rounded,
             onTap: () => setState(() => _loggedDonor = null),
-            color: Colors.redAccent,
+            color: SoftPalette.red400,
           ),
         ],
       ),
@@ -476,7 +478,7 @@ class _DonorPortalState extends State<DonorPortal> {
             'Support',
             'Contact our foundation',
             Icons.help_outline_rounded,
-            Colors.indigoAccent,
+            SoftPalette.indigo500,
             () => _showSnack('Support contact: 0331-8525333'),
           ),
         ),
@@ -500,9 +502,9 @@ class _DonorPortalState extends State<DonorPortal> {
           children: [
             Icon(icon, color: color, size: 28),
             const SizedBox(height: 16),
-            Text(title, style: DS.heading(color: Colors.white).copyWith(fontSize: 16)),
+            Text(title, style: DS.heading(color: SoftPalette.gray50).copyWith(fontSize: 16)),
             const SizedBox(height: 4),
-            Text(sub, style: DS.caption(color: Colors.white.withValues(alpha: 0.5))),
+            Text(sub, style: DS.caption(color: SoftPalette.gray50.withValues(alpha: 0.5))),
           ],
         ),
       ),
@@ -518,7 +520,7 @@ class _DonorPortalState extends State<DonorPortal> {
       builder: (ctx) => AlertDialog(
         backgroundColor: DS.navy800,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(DS.rXl)),
-        title: Text('Edit Profile', style: DS.heading(color: Colors.white)),
+        title: Text('Edit Profile', style: DS.heading(color: SoftPalette.gray50)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -536,7 +538,7 @@ class _DonorPortalState extends State<DonorPortal> {
             ),
             const SizedBox(height: 12),
             Text('Updates will be recorded in the audit trail.', 
-                style: DS.caption(color: Colors.white.withValues(alpha: 0.3)).copyWith(fontSize: 10)),
+                style: DS.caption(color: SoftPalette.gray50.withValues(alpha: 0.3)).copyWith(fontSize: 10)),
           ],
         ),
         actions: [
@@ -556,7 +558,7 @@ class _DonorPortalState extends State<DonorPortal> {
     );
   }
 
-  Widget _buildGlassButton({required IconData icon, required VoidCallback onTap, Color color = Colors.white}) {
+  Widget _buildGlassButton({required IconData icon, required VoidCallback onTap, Color color = SoftPalette.gray50}) {
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(12),
@@ -579,7 +581,7 @@ class _DonorPortalState extends State<DonorPortal> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Text('MY DONATIONS', style: DS.label(color: Colors.white.withValues(alpha: 0.6)).copyWith(letterSpacing: 1.5)),
+            Text('MY DONATIONS', style: DS.label(color: SoftPalette.gray50.withValues(alpha: 0.6)).copyWith(letterSpacing: 1.5)),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
@@ -617,18 +619,18 @@ class _DonorPortalState extends State<DonorPortal> {
       padding: const EdgeInsets.all(60),
       width: double.infinity,
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.02),
+        color: SoftPalette.gray50.withValues(alpha: 0.02),
         borderRadius: BorderRadius.circular(DS.rLg),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.05), style: BorderStyle.none),
+        border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.05), style: BorderStyle.none),
       ),
       child: Column(
         children: [
-          Icon(Icons.history_rounded, color: Colors.white.withValues(alpha: 0.05), size: 64),
+          Icon(Icons.history_rounded, color: SoftPalette.gray50.withValues(alpha: 0.05), size: 64),
           const SizedBox(height: 16),
-          Text('No donation history found yet', style: DS.body(color: Colors.white.withValues(alpha: 0.3))),
+          Text('No donation history found yet', style: DS.body(color: SoftPalette.gray50.withValues(alpha: 0.3))),
           const SizedBox(height: 8),
           Text('If you recently donated, please wait for sync.', 
-              style: DS.caption(color: Colors.white.withValues(alpha: 0.15))),
+              style: DS.caption(color: SoftPalette.gray50.withValues(alpha: 0.15))),
         ],
       ),
     );
@@ -638,9 +640,9 @@ class _DonorPortalState extends State<DonorPortal> {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.04),
+        color: SoftPalette.gray50.withValues(alpha: 0.04),
         borderRadius: BorderRadius.circular(DS.rLg),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.08)),
       ),
       child: Column(
         children: [
@@ -659,10 +661,10 @@ class _DonorPortalState extends State<DonorPortal> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(d.category.label, style: DS.heading(color: Colors.white).copyWith(fontSize: 16)),
+                    Text(d.category.label, style: DS.heading(color: SoftPalette.gray50).copyWith(fontSize: 16)),
                     const SizedBox(height: 2),
                     Text(DateFormat('EEEE, MMM dd, yyyy').format(DateTime.parse(d.date)), 
-                        style: DS.caption(color: Colors.white.withValues(alpha: 0.4))),
+                        style: DS.caption(color: SoftPalette.gray50.withValues(alpha: 0.4))),
                   ],
                 ),
               ),
@@ -672,7 +674,7 @@ class _DonorPortalState extends State<DonorPortal> {
           ),
           const Padding(
             padding: EdgeInsets.symmetric(vertical: 16),
-            child: Divider(color: Colors.white10, height: 1),
+            child: Divider(color: SoftPalette.gray50A10, height: 1),
           ),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -690,13 +692,13 @@ class _DonorPortalState extends State<DonorPortal> {
   Widget _buildDetailItem(String label, String value, IconData icon) {
     return Row(
       children: [
-        Icon(icon, size: 12, color: Colors.white.withValues(alpha: 0.3)),
+        Icon(icon, size: 12, color: SoftPalette.gray50.withValues(alpha: 0.3)),
         const SizedBox(width: 6),
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text(label, style: DS.caption(color: Colors.white.withValues(alpha: 0.3)).copyWith(fontSize: 8, letterSpacing: 0.5)),
-            Text(value.toUpperCase(), style: DS.label(color: Colors.white.withValues(alpha: 0.7)).copyWith(fontSize: 10)),
+            Text(label, style: DS.caption(color: SoftPalette.gray50.withValues(alpha: 0.3)).copyWith(fontSize: 8, letterSpacing: 0.5)),
+            Text(value.toUpperCase(), style: DS.label(color: SoftPalette.gray50.withValues(alpha: 0.7)).copyWith(fontSize: 10)),
           ],
         ),
       ],
@@ -711,12 +713,12 @@ class _DonorPortalState extends State<DonorPortal> {
       children: [
         Row(
           children: [
-            Text('HOUSEHOLD DATA', style: DS.label(color: Colors.white.withValues(alpha: 0.6)).copyWith(letterSpacing: 1.5)),
+            Text('HOUSEHOLD DATA', style: DS.label(color: SoftPalette.gray50.withValues(alpha: 0.6)).copyWith(letterSpacing: 1.5)),
             const SizedBox(width: 8),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(color: Colors.indigo.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(4)),
-              child: Text('LINKED ACCOUNTS', style: TextStyle(fontSize: 8, color: Colors.indigo.shade200, fontWeight: FontWeight.bold)),
+              decoration: BoxDecoration(color: SoftPalette.indigo600.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(4)),
+              child: Text('LINKED ACCOUNTS', style: TextStyle(fontSize: 8, color: SoftPalette.indigo350, fontWeight: FontWeight.bold)),
             ),
           ],
         ),
@@ -724,9 +726,9 @@ class _DonorPortalState extends State<DonorPortal> {
         Container(
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
-            color: Colors.indigo.withValues(alpha: 0.05),
+            color: SoftPalette.indigo600.withValues(alpha: 0.05),
             borderRadius: BorderRadius.circular(DS.rLg),
-            border: Border.all(color: Colors.indigo.withValues(alpha: 0.1)),
+            border: Border.all(color: SoftPalette.indigo600.withValues(alpha: 0.1)),
           ),
           child: Column(
             children: _householdMembers.map((m) {
@@ -738,10 +740,10 @@ class _DonorPortalState extends State<DonorPortal> {
                     Container(
                       width: 32, height: 32,
                       decoration: BoxDecoration(
-                        color: isMe ? DonDS.teal.withValues(alpha: 0.1) : Colors.white.withValues(alpha: 0.05),
+                        color: isMe ? DonDS.teal.withValues(alpha: 0.1) : SoftPalette.gray50.withValues(alpha: 0.05),
                         shape: BoxShape.circle,
                       ),
-                      child: Center(child: Text(m.name[0], style: TextStyle(fontSize: 12, color: isMe ? DonDS.teal : Colors.white38, fontWeight: FontWeight.bold))),
+                      child: Center(child: Text(m.name[0], style: TextStyle(fontSize: 12, color: isMe ? DonDS.teal : SoftPalette.gray50A38, fontWeight: FontWeight.bold))),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -750,22 +752,22 @@ class _DonorPortalState extends State<DonorPortal> {
                         children: [
                           Row(
                             children: [
-                              Text(m.name, style: DS.body(color: isMe ? Colors.white : Colors.white70)),
+                              Text(m.name, style: DS.body(color: isMe ? SoftPalette.gray50 : SoftPalette.gray50A70)),
                               if (isMe) ...[
                                 const SizedBox(width: 8),
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                                   decoration: BoxDecoration(color: DonDS.teal, borderRadius: BorderRadius.circular(4)),
-                                  child: const Text('YOU', style: TextStyle(fontSize: 7, color: Colors.white, fontWeight: FontWeight.bold)),
+                                  child: const Text('YOU', style: TextStyle(fontSize: 7, color: SoftPalette.gray50, fontWeight: FontWeight.bold)),
                                 ),
                               ],
                             ],
                           ),
-                          Text(m.phone, style: DS.caption(color: Colors.white.withValues(alpha: 0.2))),
+                          Text(m.phone, style: DS.caption(color: SoftPalette.gray50.withValues(alpha: 0.2))),
                         ],
                       ),
                     ),
-                    Icon(Icons.chevron_right_rounded, size: 16, color: Colors.white.withValues(alpha: 0.1)),
+                    Icon(Icons.chevron_right_rounded, size: 16, color: SoftPalette.gray50.withValues(alpha: 0.1)),
                   ],
                 ),
               );
@@ -786,7 +788,7 @@ class _DonorPortalState extends State<DonorPortal> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(label, style: DS.label(color: Colors.white.withValues(alpha: 0.6))),
+        Text(label, style: DS.label(color: SoftPalette.gray50.withValues(alpha: 0.6))),
         const SizedBox(height: 8),
         TextField(
           controller: controller,
@@ -794,20 +796,20 @@ class _DonorPortalState extends State<DonorPortal> {
           inputFormatters: keyboardType == TextInputType.phone
               ? [FilteringTextInputFormatter.digitsOnly, LengthLimitingTextInputFormatter(11)]
               : null,
-          style: const TextStyle(color: Colors.white),
+          style: const TextStyle(color: SoftPalette.gray50),
           decoration: InputDecoration(
             hintText: hint,
-            hintStyle: TextStyle(color: Colors.white.withValues(alpha: 0.2)),
-            prefixIcon: Icon(icon, color: Colors.white.withValues(alpha: 0.4), size: 20),
+            hintStyle: TextStyle(color: SoftPalette.gray50.withValues(alpha: 0.2)),
+            prefixIcon: Icon(icon, color: SoftPalette.gray50.withValues(alpha: 0.4), size: 20),
             filled: true,
-            fillColor: Colors.white.withValues(alpha: 0.05),
+            fillColor: SoftPalette.gray50.withValues(alpha: 0.05),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(DS.rMd),
-              borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+              borderSide: BorderSide(color: SoftPalette.gray50.withValues(alpha: 0.1)),
             ),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(DS.rMd),
-              borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
+              borderSide: BorderSide(color: SoftPalette.gray50.withValues(alpha: 0.1)),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(DS.rMd),

@@ -7,6 +7,8 @@
 // Imports palette constants from cook_dialog.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../models/stock_item.dart';
 import '../../../widgets/app_feedback.dart';
@@ -46,9 +48,9 @@ void showAddStockDialog(
         padding:
             EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
         child: Container(
-          decoration: const BoxDecoration(
-            color: kCardBg,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          decoration: BoxDecoration(
+            color: ctx.adapt(kCardBg),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
           ),
           padding: const EdgeInsets.fromLTRB(24, 12, 24, 36),
           child: Form(
@@ -91,7 +93,7 @@ void showAddStockDialog(
                     controller: ctrl,
                     focusNode: focus,
                     decoration: kInputDeco(
-                        'Item Name *', Icons.inventory_2_outlined),
+                        'Item Name *', Icons.inventory_2_outlined, ctx2),
                     textCapitalization: TextCapitalization.words,
                     validator: (v) {
                       if (v?.trim().isEmpty ?? true) return 'Required';
@@ -121,10 +123,10 @@ void showAddStockDialog(
                   controller: nameCtrl,
                   readOnly: true,
                   decoration:
-                      kInputDeco('Item Name', Icons.inventory_2_outlined)
+                      kInputDeco('Item Name', Icons.inventory_2_outlined, ctx)
                           .copyWith(
                     filled: true,
-                    fillColor: Colors.grey.shade100,
+                    fillColor: ctx.adapt(SoftPalette.gray100),
                   ),
                 ),
 
@@ -137,7 +139,7 @@ void showAddStockDialog(
                         const TextInputType.numberWithOptions(decimal: true),
                     decoration: kInputDeco(
                         isEdit ? 'Set Quantity' : 'Initial Quantity',
-                        Icons.scale_rounded),
+                        Icons.scale_rounded, ctx),
                     validator: (v) =>
                         (double.tryParse(v!) ?? -1) < 0
                             ? 'Must be ≥ 0'
@@ -148,7 +150,7 @@ void showAddStockDialog(
                 Expanded(
                   child: DropdownButtonFormField<String>(
                     initialValue: unit,
-                    decoration: kInputDeco('Unit', Icons.straighten),
+                    decoration: kInputDeco('Unit', Icons.straighten, ctx),
                     items: units
                         .map((u) => DropdownMenuItem(
                             value: u, child: Text(u)))
@@ -167,8 +169,8 @@ void showAddStockDialog(
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14)),
                     ),
-                    child: const Text('Cancel',
-                        style: TextStyle(color: kTextLight, fontSize: 15)),
+                    child: Text('Cancel',
+                        style: TextStyle(color: ctx.adapt(kTextLight), fontSize: 15)),
                   ),
                 ),
                 const SizedBox(width: 12),
@@ -177,7 +179,7 @@ void showAddStockDialog(
                   child: ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: kInfo,
-                      foregroundColor: Colors.white,
+                      foregroundColor: SoftPalette.gray50,
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14)),
@@ -263,9 +265,9 @@ void showAdjustStockDialog(
       padding:
           EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
       child: Container(
-        decoration: const BoxDecoration(
-          color: kCardBg,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+        decoration: BoxDecoration(
+          color: context.adapt(kCardBg),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
         ),
         padding: const EdgeInsets.fromLTRB(24, 12, 24, 36),
         child: Form(
@@ -292,7 +294,7 @@ void showAdjustStockDialog(
                     style: const TextStyle(
                         fontSize: 20, fontWeight: FontWeight.w900)),
                 Text(item.name,
-                    style: const TextStyle(color: kTextMid, fontSize: 13)),
+                    style: TextStyle(color: context.adapt(kTextMid), fontSize: 13)),
               ]),
             ]),
             const SizedBox(height: 16),
@@ -301,16 +303,16 @@ void showAdjustStockDialog(
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                  color: kSurface, borderRadius: BorderRadius.circular(12)),
+                  color: context.adapt(kSurface), borderRadius: BorderRadius.circular(12)),
               child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                const Text('Current Stock',
-                    style: TextStyle(color: kTextMid, fontSize: 13)),
+                Text('Current Stock',
+                    style: TextStyle(color: context.adapt(kTextMid), fontSize: 13)),
                 Text('${item.quantity} ${item.unit}',
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontWeight: FontWeight.w800,
-                        color: kTextDark,
+                        color: context.adapt(kTextDark),
                         fontSize: 15)),
               ]),
             ),
@@ -321,7 +323,7 @@ void showAdjustStockDialog(
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
               decoration:
-                  kInputDeco('Quantity (${item.unit})', Icons.scale_rounded),
+                  kInputDeco('Quantity (${item.unit})', Icons.scale_rounded, context),
               validator: (v) {
                 final qty = double.tryParse(v ?? '');
                 if (qty == null || qty <= 0) return 'Must be > 0';
@@ -341,8 +343,8 @@ void showAdjustStockDialog(
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14)),
                   ),
-                  child: const Text('Cancel',
-                      style: TextStyle(color: kTextLight, fontSize: 15)),
+                  child: Text('Cancel',
+                      style: TextStyle(color: context.adapt(kTextLight), fontSize: 15)),
                 ),
               ),
               const SizedBox(width: 12),
@@ -351,7 +353,7 @@ void showAdjustStockDialog(
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: actionColor,
-                    foregroundColor: Colors.white,
+                    foregroundColor: SoftPalette.gray50,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14)),

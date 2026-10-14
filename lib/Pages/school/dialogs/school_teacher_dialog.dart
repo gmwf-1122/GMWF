@@ -1,6 +1,8 @@
 // lib/pages/school/dialogs/school_teacher_dialog.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:flutter/services.dart';
 import '../../../widgets/media_upload_tile.dart';
 import '../models/school_teacher.dart';
@@ -109,9 +111,9 @@ class _SchoolTeacherDialogState extends State<SchoolTeacherDialog> {
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(
+        title: Row(
           children: [
-            Icon(Icons.note_add_rounded, color: Color(0xFF1B4965)),
+            Icon(Icons.note_add_rounded, color: context.adapt(SoftPalette.sky700)),
             SizedBox(width: 10),
             Text('Add Faculty Document', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
           ],
@@ -120,9 +122,9 @@ class _SchoolTeacherDialogState extends State<SchoolTeacherDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Enter the document name (e.g., Degree Certificate, Appointment Letter, Experience Certificate):',
-              style: TextStyle(fontSize: 13, color: Color(0xFF64748B)),
+              style: TextStyle(fontSize: 13, color: context.adapt(SoftPalette.slate550)),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -139,7 +141,7 @@ class _SchoolTeacherDialogState extends State<SchoolTeacherDialog> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF1B4965), foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.sky700, foregroundColor: SoftPalette.gray50),
             onPressed: () {
               final text = titleCtrl.text.trim();
               if (text.isNotEmpty) Navigator.pop(ctx, text);
@@ -214,7 +216,7 @@ class _SchoolTeacherDialogState extends State<SchoolTeacherDialog> {
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      backgroundColor: Colors.white,
+      backgroundColor: context.adapt(SoftPalette.gray50),
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 620),
         child: Padding(
@@ -232,18 +234,18 @@ class _SchoolTeacherDialogState extends State<SchoolTeacherDialog> {
                       Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF2D9B83).withValues(alpha: 0.1),
+                          color: SoftPalette.teal500.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(12),
                         ),
-                        child: const Icon(Icons.person_add_alt_1_rounded, color: Color(0xFF2D9B83)),
+                        child: const Icon(Icons.person_add_alt_1_rounded, color: SoftPalette.teal500),
                       ),
                       const SizedBox(width: 12),
                       Text(
                         isEditing ? 'Edit Faculty Profile & Documents' : 'Register New Faculty Member',
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 20,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFF1E293B),
+                          color: context.adapt(SoftPalette.slate800),
                         ),
                       ),
                     ],
@@ -251,9 +253,9 @@ class _SchoolTeacherDialogState extends State<SchoolTeacherDialog> {
                   const Divider(height: 28),
 
                   // SECTION: Faculty Documents
-                  const Text(
+                  Text(
                     'Faculty Profile & Official Credentials',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF475569)),
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate600)),
                   ),
                   const SizedBox(height: 10),
 
@@ -328,7 +330,7 @@ class _SchoolTeacherDialogState extends State<SchoolTeacherDialog> {
                   // Additional Custom Documents List
                   if (_additionalDocuments.isNotEmpty) ...[
                     const SizedBox(height: 12),
-                    const Text('Custom Documents:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF64748B))),
+                    Text('Custom Documents:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate550))),
                     const SizedBox(height: 6),
                     ..._additionalDocuments.asMap().entries.map((entry) {
                       final index = entry.key;
@@ -351,7 +353,7 @@ class _SchoolTeacherDialogState extends State<SchoolTeacherDialog> {
                               ),
                             ),
                             IconButton(
-                              icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 20),
+                              icon: const Icon(Icons.delete_outline_rounded, color: SoftPalette.red400, size: 20),
                               onPressed: () {
                                 setState(() {
                                   _additionalDocuments.removeAt(index);
@@ -369,8 +371,8 @@ class _SchoolTeacherDialogState extends State<SchoolTeacherDialog> {
                     alignment: Alignment.centerLeft,
                     child: OutlinedButton.icon(
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFF2D9B83),
-                        side: const BorderSide(color: Color(0xFF2D9B83)),
+                        foregroundColor: SoftPalette.teal500,
+                        side: const BorderSide(color: SoftPalette.teal500),
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       ),
@@ -555,9 +557,9 @@ class _SchoolTeacherDialogState extends State<SchoolTeacherDialog> {
                   const SizedBox(height: 16),
 
                   // Assigned Grades Checklist
-                  const Text(
+                  Text(
                     'Assigned Classes / Grades',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF475569)),
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: context.adapt(SoftPalette.slate600)),
                   ),
                   const SizedBox(height: 8),
                   Wrap(
@@ -568,10 +570,10 @@ class _SchoolTeacherDialogState extends State<SchoolTeacherDialog> {
                       return FilterChip(
                         label: Text(grade),
                         selected: isSelected,
-                        selectedColor: const Color(0xFF2D9B83).withValues(alpha: 0.2),
-                        checkmarkColor: const Color(0xFF2D9B83),
+                        selectedColor: SoftPalette.teal500.withValues(alpha: 0.2),
+                        checkmarkColor: SoftPalette.teal500,
                         labelStyle: TextStyle(
-                          color: isSelected ? const Color(0xFF047857) : const Color(0xFF475569),
+                          color: isSelected ? context.adapt(SoftPalette.emerald550) : context.adapt(SoftPalette.slate600),
                           fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                         ),
                         onSelected: (selected) {
@@ -600,8 +602,8 @@ class _SchoolTeacherDialogState extends State<SchoolTeacherDialog> {
                       ElevatedButton(
                         onPressed: _isSaving ? null : _saveTeacher,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF2D9B83),
-                          foregroundColor: Colors.white,
+                          backgroundColor: SoftPalette.teal500,
+                          foregroundColor: SoftPalette.gray50,
                           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         ),
@@ -609,7 +611,7 @@ class _SchoolTeacherDialogState extends State<SchoolTeacherDialog> {
                             ? const SizedBox(
                                 width: 20,
                                 height: 20,
-                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                child: CircularProgressIndicator(color: SoftPalette.gray50, strokeWidth: 2),
                               )
                             : Text(isEditing ? 'Save Changes' : 'Register Teacher'),
                       ),

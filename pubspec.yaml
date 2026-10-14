@@ -2,7 +2,7 @@ name: gmwf
 description: "A dispensary management app (offline-first with Firebase)"
 publish_to: 'none'
 
-version: 1.6.1
+version: 1.6.2
 
 environment:
   sdk: ">=3.10.1 <4.0.0"
@@ -37,6 +37,8 @@ dependencies:
   firebase_core: ^4.3.0
   firebase_auth: ^6.1.2
   cloud_firestore: ^6.4.1
+  # FieldValue internals for the REST upload transport (lib/services/cloud/cloud_db.dart)
+  cloud_firestore_platform_interface: any
   firebase_messaging: ^16.2.2
   flutter_local_notifications: ^18.0.1
 

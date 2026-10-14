@@ -1,6 +1,7 @@
 // lib/pages/office/branches_management.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -94,10 +95,10 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: Colors.amber.withValues(alpha: 0.15),
+                      color: context.adapt(SoftPalette.amber200).withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(Icons.security_rounded, color: Colors.amber, size: 22),
+                    child: const Icon(Icons.security_rounded, color: SoftPalette.amber200, size: 22),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
@@ -213,7 +214,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                   label: const Text('Confirm & Authorize'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: t.accent,
-                    foregroundColor: Colors.white,
+                    foregroundColor: SoftPalette.gray50,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                   onPressed: () async {
@@ -350,16 +351,16 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
     if (selectedSessions.isEmpty) selectedSessions = ['morning', 'evening'];
 
     const deptDefinitions = [
-      {'key': 'dispensary',   'label': '🏥 Dispensary',   'color': Color(0xFF0D9488)},
-      {'key': 'dasterkhwaan', 'label': '🍽️ Dasterkhwaan', 'color': Color(0xFFEA580C)},
-      {'key': 'madrassa',     'label': '📖 Madrassa',     'color': Color(0xFF059669)},
-      {'key': 'school',       'label': '🏫 School',       'color': Color(0xFF4F46E5)},
+      {'key': 'dispensary',   'label': '🏥 Dispensary',   'color': SoftPalette.teal500},
+      {'key': 'dasterkhwaan', 'label': '🍽️ Dasterkhwaan', 'color': SoftPalette.orange400},
+      {'key': 'madrassa',     'label': '📖 Madrassa',     'color': SoftPalette.emerald500},
+      {'key': 'school',       'label': '🏫 School',       'color': SoftPalette.indigo550},
     ];
 
     const sessionOptions = [
-      {'key': 'morning', 'label': '☀️ Morning', 'color': Color(0xFFF59E0B)},
-      {'key': 'evening', 'label': '🌅 Evening', 'color': Color(0xFF3B82F6)},
-      {'key': 'night',   'label': '🌙 Night',   'color': Color(0xFF8B5CF6)},
+      {'key': 'morning', 'label': '☀️ Morning', 'color': SoftPalette.amber300},
+      {'key': 'evening', 'label': '🌅 Evening', 'color': SoftPalette.blue500},
+      {'key': 'night',   'label': '🌙 Night',   'color': SoftPalette.violet500},
     ];
 
     final saved = await showDialog<bool>(
@@ -376,10 +377,10 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0284C7).withValues(alpha: 0.15),
+                      color: SoftPalette.sky500.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(Icons.holiday_village_rounded, color: Color(0xFF0284C7), size: 22),
+                    child: const Icon(Icons.holiday_village_rounded, color: SoftPalette.sky500, size: 22),
                   ),
                   const SizedBox(width: 10),
                   Expanded(
@@ -502,8 +503,8 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                   icon: const Icon(Icons.check_circle_rounded, size: 16),
                   label: Text(isEditing ? 'Update Camp' : 'Save Camp'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF0284C7),
-                    foregroundColor: Colors.white,
+                    backgroundColor: SoftPalette.sky500,
+                    foregroundColor: SoftPalette.gray50,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                   onPressed: () {
@@ -569,10 +570,10 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
     );
 
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: Text(isEditing ? '✅ Camp "$campName" updated successfully!' : '✅ Camp "$campName" added to branch "$branchName"!'),
-          backgroundColor: Colors.green,
+          backgroundColor: SoftPalette.green400,
         ),
       );
       setState(() {});
@@ -596,7 +597,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
           children: [
             Icon(
               isClosed ? Icons.published_with_changes_rounded : Icons.archive_rounded,
-              color: isClosed ? Colors.green : Colors.orangeAccent,
+              color: isClosed ? SoftPalette.green400 : SoftPalette.amber300,
             ),
             const SizedBox(width: 10),
             Text('$actionLabel Camp'),
@@ -631,10 +632,10 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: isClosed ? Colors.green : Colors.orange.shade800,
+              backgroundColor: isClosed ? SoftPalette.green400 : SoftPalette.orange400,
             ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('$actionLabel Camp', style: const TextStyle(color: Colors.white)),
+            child: Text('$actionLabel Camp', style: const TextStyle(color: SoftPalette.gray50)),
           ),
         ],
       ),
@@ -665,14 +666,14 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
     );
 
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: Text(
             isClosed
                 ? 'Camp "$campName" reactivated successfully.'
                 : 'Camp "$campName" closed and archived. All historical records preserved.',
           ),
-          backgroundColor: isClosed ? Colors.green : Colors.orange.shade800,
+          backgroundColor: isClosed ? SoftPalette.green400 : SoftPalette.orange400,
         ),
       );
       setState(() {});
@@ -690,7 +691,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: const [
-            Icon(Icons.delete_forever_rounded, color: Colors.redAccent),
+            Icon(Icons.delete_forever_rounded, color: SoftPalette.red400),
             SizedBox(width: 10),
             Text('Remove Camp'),
           ],
@@ -702,9 +703,9 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade700),
+            style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.red500),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Remove Camp', style: TextStyle(color: Colors.white)),
+            child: const Text('Remove Camp', style: TextStyle(color: SoftPalette.gray50)),
           ),
         ],
       ),
@@ -726,8 +727,8 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
     );
 
     if (context.mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Camp "$campName" removed from branch.'), backgroundColor: Colors.redAccent),
+      AppToast.showSnackBar(context, 
+        SnackBar(content: Text('Camp "$campName" removed from branch.'), backgroundColor: SoftPalette.red400),
       );
       setState(() {});
     }
@@ -792,10 +793,10 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                 margin: const EdgeInsets.only(bottom: 12),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF1E293B) : Colors.grey.shade50,
+                  color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                   borderRadius: BorderRadius.circular(14),
                   border: Border.all(
-                    color: enabled ? color.withValues(alpha: 0.4) : Colors.grey.withValues(alpha: 0.2),
+                    color: enabled ? color.withValues(alpha: 0.4) : context.adapt(SoftPalette.gray350).withValues(alpha: 0.2),
                     width: enabled ? 1.5 : 1,
                   ),
                 ),
@@ -807,10 +808,10 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                         Container(
                           padding: const EdgeInsets.all(6),
                           decoration: BoxDecoration(
-                            color: enabled ? color.withValues(alpha: 0.15) : Colors.grey.withValues(alpha: 0.1),
+                            color: enabled ? color.withValues(alpha: 0.15) : SoftPalette.gray350.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(8),
                           ),
-                          child: Icon(icon, color: enabled ? color : Colors.grey, size: 18),
+                          child: Icon(icon, color: enabled ? color : context.adapt(SoftPalette.gray350), size: 18),
                         ),
                         const SizedBox(width: 8),
                         Expanded(
@@ -822,8 +823,8 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                   fontSize: 14,
                                   fontWeight: FontWeight.bold,
                                   color: enabled
-                                      ? (isDark ? Colors.white : Colors.black87)
-                                      : Colors.grey,
+                                      ? (isDark ? SoftPalette.gray50 : SoftPalette.gray900A87)
+                                      : SoftPalette.gray350,
                                 ),
                               ),
                               const SizedBox(width: 6),
@@ -832,7 +833,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                 style: TextStyle(
                                   fontSize: 12,
                                   fontWeight: FontWeight.w600,
-                                  color: enabled ? color : Colors.grey,
+                                  color: enabled ? color : context.adapt(SoftPalette.gray350),
                                 ),
                               ),
                             ],
@@ -871,21 +872,21 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                                 decoration: BoxDecoration(
-                                  color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                                  color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                                   borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+                                  border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.gray150),
                                 ),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text('Open Time (12h)', style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+                                    Text('Open Time (12h)', style: TextStyle(fontSize: 10, color: context.adapt(SoftPalette.gray350))),
                                     const SizedBox(height: 2),
                                     Text(
                                       open,
                                       style: TextStyle(
                                         fontWeight: FontWeight.bold,
                                         fontSize: 13,
-                                        color: isDark ? Colors.white : Colors.black87,
+                                        color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87,
                                       ),
                                     ),
                                   ],
@@ -913,21 +914,21 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                                 decoration: BoxDecoration(
-                                  color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                                  color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                                   borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+                                  border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.gray150),
                                 ),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    Text('Close Time (12h)', style: TextStyle(fontSize: 10, color: Colors.grey.shade500)),
+                                    Text('Close Time (12h)', style: TextStyle(fontSize: 10, color: context.adapt(SoftPalette.gray350))),
                                     const SizedBox(height: 2),
                                     Text(
                                       close,
                                       style: TextStyle(
                                         fontWeight: FontWeight.bold,
                                         fontSize: 13,
-                                        color: isDark ? Colors.white : Colors.black87,
+                                        color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87,
                                       ),
                                     ),
                                   ],
@@ -944,20 +945,20 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
             }
 
             return AlertDialog(
-              backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
+              backgroundColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
               title: Row(
                 children: [
-                  const Icon(Icons.restaurant_rounded, color: Colors.orange, size: 24),
+                  const Icon(Icons.restaurant_rounded, color: SoftPalette.amber300, size: 24),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('Dasterkhwaan Meal Sessions',
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87)),
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87)),
                         Text('Branch: $branchName (12-Hour Format)',
-                            style: TextStyle(fontSize: 12, color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600)),
+                            style: TextStyle(fontSize: 12, color: isDark ? SoftPalette.slate350 : SoftPalette.gray500)),
                       ],
                     ),
                   ),
@@ -975,7 +976,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                         enabled: bfEnabled,
                         open: bfOpen,
                         close: bfClose,
-                        color: Colors.amber.shade700,
+                        color: SoftPalette.amber300,
                         icon: Icons.free_breakfast_rounded,
                         onToggle: (v) => bfEnabled = v,
                         onPicked: (newO, newC) {
@@ -989,7 +990,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                         enabled: lunchEnabled,
                         open: lunchOpen,
                         close: lunchClose,
-                        color: Colors.teal.shade600,
+                        color: SoftPalette.teal500,
                         icon: Icons.lunch_dining_rounded,
                         onToggle: (v) => lunchEnabled = v,
                         onPicked: (newO, newC) {
@@ -1003,7 +1004,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                         enabled: dinEnabled,
                         open: dinOpen,
                         close: dinClose,
-                        color: Colors.indigo.shade600,
+                        color: SoftPalette.indigo600,
                         icon: Icons.dinner_dining_rounded,
                         onToggle: (v) => dinEnabled = v,
                         onPicked: (newO, newC) {
@@ -1023,8 +1024,8 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                 ElevatedButton(
                   onPressed: () => Navigator.pop(ctx, true),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.orange.shade800,
-                    foregroundColor: Colors.white,
+                    backgroundColor: SoftPalette.orange400,
+                    foregroundColor: SoftPalette.gray50,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                   child: const Text('Save Timings'),
@@ -1050,9 +1051,9 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
         dinnerClose: dinClose,
       );
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        AppToast.showSnackBar(context, SnackBar(
           content: Text('✅ Dasterkhwaan session timings saved for $branchName!'),
-          backgroundColor: Colors.green,
+          backgroundColor: SoftPalette.green400,
         ));
       }
       setState(() {});
@@ -1096,10 +1097,10 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                  color: SoftPalette.emerald350.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.phone_in_talk_rounded, color: Color(0xFF10B981), size: 22),
+                child: const Icon(Icons.phone_in_talk_rounded, color: SoftPalette.emerald350, size: 22),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -1123,14 +1124,14 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF10B981).withValues(alpha: 0.08),
+                      color: SoftPalette.emerald350.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.25)),
+                      border: Border.all(color: SoftPalette.emerald350.withValues(alpha: 0.25)),
                     ),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(Icons.info_outline_rounded, color: Color(0xFF10B981), size: 18),
+                        const Icon(Icons.info_outline_rounded, color: SoftPalette.emerald350, size: 18),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -1151,7 +1152,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                     decoration: InputDecoration(
                       hintText: 'e.g. 03333047931',
                       hintStyle: TextStyle(color: t.textTertiary, fontSize: 13),
-                      prefixIcon: const Icon(Icons.verified_rounded, size: 18, color: Color(0xFF10B981)),
+                      prefixIcon: const Icon(Icons.verified_rounded, size: 18, color: SoftPalette.emerald350),
                       filled: true,
                       fillColor: t.bgCardAlt,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -1203,10 +1204,10 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
             ),
             ElevatedButton.icon(
               onPressed: () => Navigator.pop(ctx, true),
-              icon: const Icon(Icons.save_rounded, size: 16, color: Colors.white),
-              label: const Text('Save Contacts', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              icon: const Icon(Icons.save_rounded, size: 16, color: SoftPalette.gray50),
+              label: const Text('Save Contacts', style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold)),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF10B981),
+                backgroundColor: SoftPalette.emerald350,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
             ),
@@ -1251,9 +1252,9 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
 
       branch.addAll(updateMap);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        AppToast.showSnackBar(context, SnackBar(
           content: Text('✅ Contacts updated for $branchName! Verification: $vNum'),
-          backgroundColor: const Color(0xFF10B981),
+          backgroundColor: SoftPalette.emerald350,
         ));
       }
       setState(() {});
@@ -1282,7 +1283,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
           children: [
             Icon(
               isCurrentlyOffboarded ? Icons.published_with_changes_rounded : Icons.archive_rounded,
-              color: isCurrentlyOffboarded ? Colors.green : Colors.orangeAccent,
+              color: isCurrentlyOffboarded ? SoftPalette.green400 : SoftPalette.amber300,
             ),
             const SizedBox(width: 10),
             Text('$actionLabel Branch'),
@@ -1312,10 +1313,10 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: isCurrentlyOffboarded ? Colors.green : Colors.orange.shade800,
+              backgroundColor: isCurrentlyOffboarded ? SoftPalette.green400 : SoftPalette.orange400,
             ),
             onPressed: () => Navigator.pop(ctx, true),
-            child: Text('$actionLabel Branch', style: const TextStyle(color: Colors.white)),
+            child: Text('$actionLabel Branch', style: const TextStyle(color: SoftPalette.gray50)),
           ),
         ],
       ),
@@ -1378,21 +1379,21 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text(
               isCurrentlyOffboarded
                   ? 'Branch "$branchName" reactivated successfully.'
                   : 'Branch "$branchName" offboarded and archived. All historical data preserved.',
             ),
-            backgroundColor: isCurrentlyOffboarded ? Colors.green : Colors.orange.shade800,
+            backgroundColor: isCurrentlyOffboarded ? SoftPalette.green400 : SoftPalette.orange400,
           ),
         );
         setState(() {});
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(content: Text('Failed to update branch status: $e')),
         );
       }
@@ -1411,13 +1412,13 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
         }
       }
       if (!silent && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           const SnackBar(content: Text('Branches refreshed successfully'), duration: Duration(seconds: 2)),
         );
       }
     } catch (e) {
       if (!silent && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(content: Text('Failed to refresh branches: $e'), duration: const Duration(seconds: 2)),
         );
       }
@@ -1582,7 +1583,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                         label: const Text('Register New Branch', style: TextStyle(fontWeight: FontWeight.w800)),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: t.accent,
-                          foregroundColor: Colors.white,
+                          foregroundColor: SoftPalette.gray50,
                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                           elevation: 0,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -1616,11 +1617,11 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
                     children: [
-                      _buildKpiCard('Active Branches', totalActive.toString(), Icons.domain_rounded, Colors.green, t),
-                      _buildKpiCard('Active Camps', totalActiveCamps.toString(), Icons.holiday_village_rounded, const Color(0xFF0284C7), t),
+                      _buildKpiCard('Active Branches', totalActive.toString(), Icons.domain_rounded, SoftPalette.green400, t),
+                      _buildKpiCard('Active Camps', totalActiveCamps.toString(), Icons.holiday_village_rounded, SoftPalette.sky500, t),
                       _buildKpiCard('Active Dispensaries', totalDispensaries.toString(), Icons.local_hospital_rounded, t.accent, t),
-                      _buildKpiCard('Active Dasterkhwaans', totalDasterkhwaans.toString(), Icons.restaurant_rounded, Colors.orange, t),
-                      _buildKpiCard('Offboarded / Closed', '$totalOffboarded ($totalClosedCamps camps)', Icons.archive_rounded, Colors.orange.shade800, t),
+                      _buildKpiCard('Active Dasterkhwaans', totalDasterkhwaans.toString(), Icons.restaurant_rounded, SoftPalette.amber300, t),
+                      _buildKpiCard('Offboarded / Closed', '$totalOffboarded ($totalClosedCamps camps)', Icons.archive_rounded, SoftPalette.orange400, t),
                     ],
                   );
                 }),
@@ -1657,21 +1658,21 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                       avatar: Icon(
                         _showOffboarded ? Icons.archive_rounded : Icons.domain_rounded,
                         size: 16,
-                        color: _showOffboarded ? Colors.orange.shade800 : t.accent,
+                        color: _showOffboarded ? SoftPalette.orange400 : t.accent,
                       ),
                       label: Text(
                         _showOffboarded ? 'Offboarded Branches ($totalOffboarded)' : 'Active Branches ($totalActive)',
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.bold,
-                          color: _showOffboarded ? Colors.orange.shade800 : t.accent,
+                          color: _showOffboarded ? SoftPalette.orange400 : t.accent,
                         ),
                       ),
                       backgroundColor: t.bgCard,
-                      selectedColor: _showOffboarded ? Colors.orange.withValues(alpha: 0.15) : t.accent.withValues(alpha: 0.15),
+                      selectedColor: _showOffboarded ? SoftPalette.amber300.withValues(alpha: 0.15) : t.accent.withValues(alpha: 0.15),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
-                        side: BorderSide(color: _showOffboarded ? Colors.orange.withValues(alpha: 0.4) : t.accent.withValues(alpha: 0.4)),
+                        side: BorderSide(color: _showOffboarded ? SoftPalette.amber300.withValues(alpha: 0.4) : t.accent.withValues(alpha: 0.4)),
                       ),
                       onSelected: (val) => setState(() => _showOffboarded = val),
                     ),
@@ -1739,11 +1740,11 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                           color: isOffboarded ? t.bgCardAlt : t.bgCard,
                           borderRadius: BorderRadius.circular(16),
                           border: Border.all(
-                            color: isOffboarded ? Colors.orange.withValues(alpha: 0.3) : t.bgRule,
+                            color: isOffboarded ? SoftPalette.amber300.withValues(alpha: 0.3) : t.bgRule,
                           ),
                           boxShadow: [
                             BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.04),
+                              color: SoftPalette.gray900.withValues(alpha: 0.04),
                               blurRadius: 10,
                               offset: const Offset(0, 4),
                             ),
@@ -1771,19 +1772,19 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                           begin: Alignment.topLeft,
                                           end: Alignment.bottomRight,
                                           colors: [
-                                            (isOffboarded ? Colors.orange : t.accent).withValues(alpha: 0.2),
-                                            (isOffboarded ? Colors.orange : t.accent).withValues(alpha: 0.05),
+                                            (isOffboarded ? SoftPalette.amber300 : t.accent).withValues(alpha: 0.2),
+                                            (isOffboarded ? SoftPalette.amber300 : t.accent).withValues(alpha: 0.05),
                                           ],
                                         ),
                                         borderRadius: BorderRadius.circular(14),
                                         border: Border.all(
-                                          color: (isOffboarded ? Colors.orange : t.accent).withValues(alpha: 0.3),
+                                          color: (isOffboarded ? SoftPalette.amber300 : t.accent).withValues(alpha: 0.3),
                                           width: 1.2,
                                         ),
                                       ),
                                       child: Icon(
                                         isOffboarded ? Icons.archive_rounded : Icons.domain_rounded,
-                                        color: isOffboarded ? Colors.orange.shade800 : t.accent,
+                                        color: isOffboarded ? SoftPalette.orange400 : t.accent,
                                         size: 26,
                                       ),
                                     ),
@@ -1807,10 +1808,10 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                             Container(
                                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                               decoration: BoxDecoration(
-                                                color: isOffboarded ? Colors.red.withValues(alpha: 0.12) : Colors.green.withValues(alpha: 0.12),
+                                                color: isOffboarded ? SoftPalette.red400.withValues(alpha: 0.12) : SoftPalette.green400.withValues(alpha: 0.12),
                                                 borderRadius: BorderRadius.circular(6),
                                                 border: Border.all(
-                                                  color: isOffboarded ? Colors.red.withValues(alpha: 0.3) : Colors.green.withValues(alpha: 0.3),
+                                                  color: isOffboarded ? SoftPalette.red400.withValues(alpha: 0.3) : SoftPalette.green400.withValues(alpha: 0.3),
                                                 ),
                                               ),
                                               child: Text(
@@ -1818,7 +1819,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                                 style: TextStyle(
                                                   fontSize: 10,
                                                   fontWeight: FontWeight.w800,
-                                                  color: isOffboarded ? Colors.redAccent : Colors.green,
+                                                  color: isOffboarded ? SoftPalette.red400 : SoftPalette.green400,
                                                 ),
                                               ),
                                             ),
@@ -1866,7 +1867,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                       label: const Text('Configure Facilities 🔒', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12.5)),
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: t.accent,
-                                        foregroundColor: Colors.white,
+                                        foregroundColor: SoftPalette.gray50,
                                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                                         elevation: 0,
                                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -1874,11 +1875,11 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                     ),
                                     OutlinedButton.icon(
                                       onPressed: () => _openAddOrEditCampDialog(context, branchId, branchName),
-                                      icon: const Icon(Icons.holiday_village_rounded, size: 16, color: Color(0xFF0284C7)),
-                                      label: const Text('+ Add Camp 🏕️', style: TextStyle(color: Color(0xFF0284C7), fontWeight: FontWeight.w800, fontSize: 12.5)),
+                                      icon: const Icon(Icons.holiday_village_rounded, size: 16, color: SoftPalette.sky500),
+                                      label: const Text('+ Add Camp 🏕️', style: TextStyle(color: SoftPalette.sky500, fontWeight: FontWeight.w800, fontSize: 12.5)),
                                       style: OutlinedButton.styleFrom(
                                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                        side: BorderSide(color: const Color(0xFF0284C7).withValues(alpha: 0.5)),
+                                        side: BorderSide(color: SoftPalette.sky500.withValues(alpha: 0.5)),
                                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                       ),
                                     ),
@@ -1918,7 +1919,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                           value: 'timings',
                                           child: Row(
                                             children: [
-                                              Icon(Icons.access_time_filled_rounded, size: 16, color: Colors.orange),
+                                              Icon(Icons.access_time_filled_rounded, size: 16, color: SoftPalette.amber300),
                                               SizedBox(width: 10),
                                               Text('Dasterkhwaan Timings 🕒'),
                                             ],
@@ -1928,7 +1929,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                           value: 'contacts',
                                           child: Row(
                                             children: [
-                                              Icon(Icons.phone_in_talk_rounded, size: 16, color: Color(0xFF10B981)),
+                                              Icon(Icons.phone_in_talk_rounded, size: 16, color: SoftPalette.emerald350),
                                               SizedBox(width: 10),
                                               Text('Helpline & Complaint Contact 📞'),
                                             ],
@@ -1942,7 +1943,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                                 Icon(
                                                   isOffboarded ? Icons.unarchive_rounded : Icons.archive_rounded,
                                                   size: 16,
-                                                  color: isOffboarded ? Colors.green : Colors.orange.shade800,
+                                                  color: isOffboarded ? SoftPalette.green400 : SoftPalette.orange400,
                                                 ),
                                                 const SizedBox(width: 10),
                                                 Text(isOffboarded ? 'Reactivate Branch 🟢' : 'Offboard & Archive 🔒'),
@@ -1965,13 +1966,13 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                               runSpacing: 8,
                               children: [
                                 _buildBadge('🏥 ${dispList.length} Dispensary', t.accent, t),
-                                _buildBadge('🍽️ ${dastList.length} Dasterkhwaan', Colors.orange, t),
-                                _buildBadge('📖 ${madrList.length} Madrassa', Colors.teal, t),
-                                _buildBadge('🏫 ${schList.length} School', Colors.indigo, t),
+                                _buildBadge('🍽️ ${dastList.length} Dasterkhwaan', SoftPalette.amber300, t),
+                                _buildBadge('📖 ${madrList.length} Madrassa', SoftPalette.teal500, t),
+                                _buildBadge('🏫 ${schList.length} School', SoftPalette.indigo600, t),
                                 if (campsList.isNotEmpty) ...[
-                                  _buildBadge('🏕️ ${campsList.where((c) => c['status'] != 'closed' && c['isClosed'] != true).length} Active Camp(s)', const Color(0xFF0284C7), t),
+                                  _buildBadge('🏕️ ${campsList.where((c) => c['status'] != 'closed' && c['isClosed'] != true).length} Active Camp(s)', SoftPalette.sky500, t),
                                   if (campsList.any((c) => c['status'] == 'closed' || c['isClosed'] == true))
-                                    _buildBadge('🏕️ ${campsList.where((c) => c['status'] == 'closed' || c['isClosed'] == true).length} Closed', Colors.grey, t),
+                                    _buildBadge('🏕️ ${campsList.where((c) => c['status'] == 'closed' || c['isClosed'] == true).length} Closed', SoftPalette.gray350, t),
                                 ],
                               ],
                             ),
@@ -1998,21 +1999,21 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                       color: (() {
                                         final current = branch['allowVitalsToken'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowVitalsToken'] : null) ?? LocalStorageService.isVitalsTokenAllowed(branchId);
                                         final enabled = current == true || current == 'true' || current == 1;
-                                        return enabled ? Colors.teal.withValues(alpha: 0.12) : Colors.grey.withValues(alpha: 0.1);
+                                        return enabled ? SoftPalette.teal500.withValues(alpha: 0.12) : SoftPalette.gray350.withValues(alpha: 0.1);
                                       })(),
                                       borderRadius: BorderRadius.circular(8),
                                       border: Border.all(
                                         color: (() {
                                           final current = branch['allowVitalsToken'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowVitalsToken'] : null) ?? LocalStorageService.isVitalsTokenAllowed(branchId);
                                           final enabled = current == true || current == 'true' || current == 1;
-                                          return enabled ? Colors.teal.withValues(alpha: 0.3) : Colors.grey.withValues(alpha: 0.3);
+                                          return enabled ? SoftPalette.teal500.withValues(alpha: 0.3) : SoftPalette.gray350.withValues(alpha: 0.3);
                                         })(),
                                       ),
                                     ),
                                     child: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Icon(Icons.confirmation_number_rounded, size: 14, color: Colors.teal),
+                                        Icon(Icons.confirmation_number_rounded, size: 14, color: SoftPalette.teal500),
                                         const SizedBox(width: 5),
                                         Text(
                                           (() {
@@ -2042,21 +2043,21 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                       color: (() {
                                         final current = branch['allowDonationBox'] ?? branch['donationBoxAllowed'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowDonationBox'] ?? branch['sessionsConfig']['donationBoxAllowed'] : null) ?? LocalStorageService.isDonationBoxAllowed(branchId);
                                         final enabled = current == true || current == 'true' || current == 1;
-                                        return enabled ? Colors.green.withValues(alpha: 0.12) : Colors.red.withValues(alpha: 0.1);
+                                        return enabled ? SoftPalette.green400.withValues(alpha: 0.12) : SoftPalette.red400.withValues(alpha: 0.1);
                                       })(),
                                       borderRadius: BorderRadius.circular(8),
                                       border: Border.all(
                                         color: (() {
                                           final current = branch['allowDonationBox'] ?? branch['donationBoxAllowed'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['allowDonationBox'] ?? branch['sessionsConfig']['donationBoxAllowed'] : null) ?? LocalStorageService.isDonationBoxAllowed(branchId);
                                           final enabled = current == true || current == 'true' || current == 1;
-                                          return enabled ? Colors.green.withValues(alpha: 0.3) : Colors.red.withValues(alpha: 0.3);
+                                          return enabled ? SoftPalette.green400.withValues(alpha: 0.3) : SoftPalette.red400.withValues(alpha: 0.3);
                                         })(),
                                       ),
                                     ),
                                     child: Row(
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
-                                        Icon(Icons.volunteer_activism_rounded, size: 14, color: Colors.green),
+                                        Icon(Icons.volunteer_activism_rounded, size: 14, color: SoftPalette.green400),
                                         const SizedBox(width: 5),
                                         Text(
                                           (() {
@@ -2091,19 +2092,19 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                     if (isNazra) {
                                       return _buildBadge(
                                         '📖 Only Nazra System (صرف ناظرہ)',
-                                        const Color(0xFF0D9488),
+                                        SoftPalette.teal500,
                                         t,
                                       );
                                     } else if (isHifz) {
                                       return _buildBadge(
                                         '🕋 Only Hifz Campus (صرف حفظ)',
-                                        const Color(0xFF7C3AED),
+                                        SoftPalette.violet550,
                                         t,
                                       );
                                     } else {
                                       return _buildBadge(
                                         '📖 & 🕋 Both Hifz & Nazra (حفظ و ناظرہ)',
-                                        const Color(0xFF0F766E),
+                                        SoftPalette.teal550,
                                         t,
                                       );
                                     }
@@ -2113,7 +2114,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                       final feeEnabled = branch['madrassaFeeEnabled'] ?? (branch['sessionsConfig'] is Map ? branch['sessionsConfig']['madrassaFeeEnabled'] : null) ?? LocalStorageService.isMadrassaFeeEnabled(branchId);
                                       return _buildBadge(
                                         feeEnabled ? '💰 Madrassa: FEES ACTIVE 🟢' : '💰 Madrassa: FREE (NO FEES) 🟡',
-                                        feeEnabled ? Colors.green : Colors.amber.shade800,
+                                        feeEnabled ? SoftPalette.green400 : SoftPalette.orange350,
                                         t,
                                       );
                                     })(),
@@ -2122,7 +2123,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                     final labels = sessions.map((s) => s == 'morning' ? '☀️ Morning' : (s == 'evening' ? '🌅 Evening' : '🌙 Night')).join(' • ');
                                     return _buildBadge(
                                       '🕒 ${sessions.length} Shift${sessions.length > 1 ? "s" : ""}: ${labels.isNotEmpty ? labels : "Morning"}',
-                                      const Color(0xFF0F766E),
+                                      SoftPalette.teal550,
                                       t,
                                     );
                                   })(),
@@ -2138,9 +2139,9 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                 runSpacing: 6,
                                 children: [
                                   ...dispList.map((d) => _buildDetailChip(d, Icons.local_hospital_outlined, t.accent, t)),
-                                  ...dastList.map((d) => _buildDetailChip(d, Icons.restaurant_rounded, Colors.orange, t)),
-                                  ...madrList.map((d) => _buildDetailChip(d, Icons.menu_book_rounded, Colors.teal, t)),
-                                  ...schList.map((d)  => _buildDetailChip(d, Icons.school_rounded, Colors.indigo, t)),
+                                  ...dastList.map((d) => _buildDetailChip(d, Icons.restaurant_rounded, SoftPalette.amber300, t)),
+                                  ...madrList.map((d) => _buildDetailChip(d, Icons.menu_book_rounded, SoftPalette.teal500, t)),
+                                  ...schList.map((d)  => _buildDetailChip(d, Icons.school_rounded, SoftPalette.indigo600, t)),
                                 ],
                               ),
                             ],
@@ -2152,16 +2153,16 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                 width: double.infinity,
                                 padding: const EdgeInsets.all(14),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF0284C7).withValues(alpha: 0.04),
+                                  color: SoftPalette.sky500.withValues(alpha: 0.04),
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: const Color(0xFF0284C7).withValues(alpha: 0.22)),
+                                  border: Border.all(color: SoftPalette.sky500.withValues(alpha: 0.22)),
                                 ),
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
                                     Row(
                                       children: [
-                                        const Icon(Icons.holiday_village_rounded, size: 18, color: Color(0xFF0284C7)),
+                                        const Icon(Icons.holiday_village_rounded, size: 18, color: SoftPalette.sky500),
                                         const SizedBox(width: 8),
                                         Text(
                                           '🏕️ Camps & Field Sub-Locations (${campsList.length})',
@@ -2174,8 +2175,8 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                         const Spacer(),
                                         TextButton.icon(
                                           onPressed: () => _openAddOrEditCampDialog(context, branchId, branchName),
-                                          icon: const Icon(Icons.add_rounded, size: 15, color: Color(0xFF0284C7)),
-                                          label: const Text('Add Camp', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0284C7))),
+                                          icon: const Icon(Icons.add_rounded, size: 15, color: SoftPalette.sky500),
+                                          label: const Text('Add Camp', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: SoftPalette.sky500)),
                                         ),
                                       ],
                                     ),
@@ -2195,13 +2196,13 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                                           decoration: BoxDecoration(
                                             color: isCampClosed
-                                                ? (Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1E293B) : Colors.grey.shade100)
+                                                ? (Theme.of(context).brightness == Brightness.dark ? SoftPalette.slate800 : SoftPalette.gray100)
                                                 : t.bgCard,
                                             borderRadius: BorderRadius.circular(10),
                                             border: Border.all(
                                               color: isCampClosed
-                                                  ? Colors.grey.withValues(alpha: 0.4)
-                                                  : const Color(0xFF0284C7).withValues(alpha: 0.3),
+                                                  ? context.adapt(SoftPalette.gray350).withValues(alpha: 0.4)
+                                                  : SoftPalette.sky500.withValues(alpha: 0.3),
                                             ),
                                           ),
                                           child: Column(
@@ -2214,7 +2215,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                                   Icon(
                                                     isCampClosed ? Icons.archive_outlined : Icons.holiday_village_outlined,
                                                     size: 16,
-                                                    color: isCampClosed ? Colors.grey : const Color(0xFF0284C7),
+                                                    color: isCampClosed ? context.adapt(SoftPalette.gray350) : SoftPalette.sky500,
                                                   ),
                                                   const SizedBox(width: 6),
                                                   Text(
@@ -2231,8 +2232,8 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                                     decoration: BoxDecoration(
                                                       color: isCampClosed
-                                                          ? Colors.red.withValues(alpha: 0.1)
-                                                          : Colors.green.withValues(alpha: 0.1),
+                                                          ? SoftPalette.red400.withValues(alpha: 0.1)
+                                                          : SoftPalette.green400.withValues(alpha: 0.1),
                                                       borderRadius: BorderRadius.circular(4),
                                                     ),
                                                     child: Text(
@@ -2240,7 +2241,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                                       style: TextStyle(
                                                         fontSize: 9,
                                                         fontWeight: FontWeight.bold,
-                                                        color: isCampClosed ? Colors.redAccent : Colors.green,
+                                                        color: isCampClosed ? SoftPalette.red400 : SoftPalette.green400,
                                                       ),
                                                     ),
                                                   ),
@@ -2263,7 +2264,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                                       child: Icon(
                                                         isCampClosed ? Icons.published_with_changes_rounded : Icons.lock_outline_rounded,
                                                         size: 15,
-                                                        color: isCampClosed ? Colors.green : Colors.orangeAccent,
+                                                        color: isCampClosed ? SoftPalette.green400 : SoftPalette.amber300,
                                                       ),
                                                     ),
                                                   ),
@@ -2273,7 +2274,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                                     borderRadius: BorderRadius.circular(6),
                                                     child: const Padding(
                                                       padding: EdgeInsets.all(4.0),
-                                                      child: Icon(Icons.delete_outline_rounded, size: 15, color: Colors.redAccent),
+                                                      child: Icon(Icons.delete_outline_rounded, size: 15, color: SoftPalette.red400),
                                                     ),
                                                   ),
                                                 ],
@@ -2287,14 +2288,14 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                                   if (depts.contains('dispensary'))
                                                     _buildCampDeptBadge('Dispensary 🏥', t.accent),
                                                   if (depts.contains('dasterkhwaan'))
-                                                    _buildCampDeptBadge('Dasterkhwaan 🍽️', Colors.orange),
+                                                    _buildCampDeptBadge('Dasterkhwaan 🍽️', SoftPalette.amber300),
                                                   if (depts.contains('madrassa'))
-                                                    _buildCampDeptBadge('Madrassa 📖', Colors.teal),
+                                                    _buildCampDeptBadge('Madrassa 📖', SoftPalette.teal500),
                                                   if (depts.contains('school'))
-                                                    _buildCampDeptBadge('School 🏫', Colors.indigo),
+                                                    _buildCampDeptBadge('School 🏫', SoftPalette.indigo600),
                                                   ...sessions.map((s) => _buildCampDeptBadge(
                                                     s == 'morning' ? '☀️ Morning' : (s == 'evening' ? '🌅 Evening' : '🌙 Night'),
-                                                    Colors.blueGrey,
+                                                    SoftPalette.slate500,
                                                   )),
                                                 ],
                                               ),
@@ -2302,7 +2303,7 @@ class _BranchesManagementPageState extends State<BranchesManagementPage> {
                                                 const SizedBox(height: 4),
                                                 Text(
                                                   'Closure note: ${camp['closureReason']}',
-                                                  style: const TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: Colors.grey),
+                                                  style: TextStyle(fontSize: 11, fontStyle: FontStyle.italic, color: context.adapt(SoftPalette.gray350)),
                                                 ),
                                               ],
                                             ],

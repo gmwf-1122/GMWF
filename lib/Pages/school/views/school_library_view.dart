@@ -1,6 +1,8 @@
 // lib/pages/school/views/school_library_view.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
@@ -92,7 +94,7 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             title: Row(
               children: [
-                const Icon(Icons.local_library_rounded, color: Color(0xFF1B4965)),
+                const Icon(Icons.local_library_rounded, color: SoftPalette.sky700),
                 const SizedBox(width: 10),
                 Text(bookToEdit != null ? 'Edit Library Book' : 'Add New Book to Catalog'),
               ],
@@ -140,8 +142,8 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
               TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF1B4965),
-                  foregroundColor: Colors.white,
+                  backgroundColor: SoftPalette.sky700,
+                  foregroundColor: SoftPalette.gray50,
                 ),
                 onPressed: () async {
                   if (titleCtrl.text.trim().isEmpty) return;
@@ -208,7 +210,7 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             title: Row(
               children: [
-                const Icon(Icons.output_rounded, color: Color(0xFF2D9B83)),
+                const Icon(Icons.output_rounded, color: SoftPalette.teal500),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -295,8 +297,8 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
               TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2D9B83),
-                  foregroundColor: Colors.white,
+                  backgroundColor: SoftPalette.teal500,
+                  foregroundColor: SoftPalette.gray50,
                 ),
                 onPressed: () async {
                   final name = borrowerNameCtrl.text.trim();
@@ -305,7 +307,7 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
 
                   if (name.isEmpty) return;
                   if (borrowerType == 'Outsider' && (idNum.isEmpty || phone.isEmpty)) {
-                    ScaffoldMessenger.of(ctx).showSnackBar(
+                    AppToast.showSnackBar(ctx, 
                       const SnackBar(content: Text('Outsider borrowers require valid CNIC and Phone Number!')),
                     );
                     return;
@@ -373,7 +375,7 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             title: Row(
               children: const [
-                Icon(Icons.assignment_return_rounded, color: Color(0xFF2D9B83)),
+                Icon(Icons.assignment_return_rounded, color: SoftPalette.teal500),
                 SizedBox(width: 10),
                 Text('Mark Book as Returned'),
               ],
@@ -390,7 +392,7 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
                   const SizedBox(height: 4),
                   Text(
                     'Borrower: ${loan['borrowerName']} (${loan['borrowerType'] ?? "Guest"})',
-                    style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
+                    style: TextStyle(color: SoftPalette.gray550, fontSize: 13),
                   ),
                   const SizedBox(height: 16),
                   const Text('Manual Return Date *', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
@@ -409,20 +411,20 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF1F5F9),
+                        color: SoftPalette.slate100,
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.grey.shade300),
+                        border: Border.all(color: SoftPalette.gray150),
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.calendar_today_rounded, size: 18, color: Color(0xFF2D9B83)),
+                          const Icon(Icons.calendar_today_rounded, size: 18, color: SoftPalette.teal500),
                           const SizedBox(width: 10),
                           Text(
                             DateFormat('EEEE, dd MMM yyyy').format(returnDate),
-                            style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+                            style: const TextStyle(fontWeight: FontWeight.bold, color: SoftPalette.slate800),
                           ),
                           const Spacer(),
-                          const Text('Change', style: TextStyle(color: Color(0xFF2D9B83), fontWeight: FontWeight.bold)),
+                          const Text('Change', style: TextStyle(color: SoftPalette.teal500, fontWeight: FontWeight.bold)),
                         ],
                       ),
                     ),
@@ -442,8 +444,8 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
               TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF2D9B83),
-                  foregroundColor: Colors.white,
+                  backgroundColor: SoftPalette.teal500,
+                  foregroundColor: SoftPalette.gray50,
                 ),
                 onPressed: () => Navigator.pop(ctx, true),
                 child: const Text('Confirm Return'),
@@ -498,23 +500,23 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
           return const Scaffold(
-            backgroundColor: Color(0xFFF8FAFC),
-            body: Center(child: CircularProgressIndicator(color: Color(0xFF1B4965))),
+            backgroundColor: SoftPalette.gray50,
+            body: Center(child: CircularProgressIndicator(color: SoftPalette.sky700)),
           );
         }
 
         return DefaultTabController(
           length: 2,
           child: Scaffold(
-            backgroundColor: const Color(0xFFF8FAFC),
+            backgroundColor: SoftPalette.gray50,
             appBar: PreferredSize(
               preferredSize: const Size.fromHeight(48),
               child: Container(
-                color: Colors.white,
+                color: SoftPalette.gray50,
                 child: const TabBar(
-                  indicatorColor: Color(0xFF1B4965),
-                  labelColor: Color(0xFF1B4965),
-                  unselectedLabelColor: Color(0xFF64748B),
+                  indicatorColor: SoftPalette.sky700,
+                  labelColor: SoftPalette.sky700,
+                  unselectedLabelColor: SoftPalette.slate550,
                   labelStyle: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                   tabs: [
                     Tab(text: 'Book Catalog & Inventory', icon: Icon(Icons.menu_book_rounded, size: 18)),
@@ -541,7 +543,7 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
         // Catalog Toolbar
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          color: Colors.white,
+          color: SoftPalette.gray50,
           child: LayoutBuilder(
             builder: (context, constraints) {
               final isNarrow = constraints.maxWidth < 650;
@@ -553,9 +555,9 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
                       onChanged: (_) => setState(() {}),
                       decoration: InputDecoration(
                         hintText: 'Search books by title, author, or ISBN...',
-                        prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF1B4965), size: 20),
+                        prefixIcon: const Icon(Icons.search_rounded, color: SoftPalette.sky700, size: 20),
                         filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
+                        fillColor: SoftPalette.gray50,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
                           borderSide: BorderSide.none,
@@ -570,7 +572,7 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF1F5F9),
+                              color: SoftPalette.slate100,
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: DropdownButtonHideUnderline(
@@ -595,7 +597,7 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
                             label: const Text('Add Book', style: TextStyle(fontSize: 12)),
                             style: ElevatedButton.styleFrom(
                               backgroundColor: SchoolTheme.primary,
-                              foregroundColor: Colors.white,
+                              foregroundColor: SoftPalette.gray50,
                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                             ),
@@ -617,7 +619,7 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
                         hintText: 'Search books by title, author, or ISBN...',
                         prefixIcon: const Icon(Icons.search_rounded, color: SchoolTheme.primary),
                         filled: true,
-                        fillColor: const Color(0xFFF8FAFC),
+                        fillColor: SoftPalette.gray50,
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(10),
                           borderSide: BorderSide.none,
@@ -631,7 +633,7 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF1F5F9),
+                        color: SoftPalette.slate100,
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: DropdownButton<String>(
@@ -653,7 +655,7 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
                       label: const Text('Add Book', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: SchoolTheme.primary,
-                        foregroundColor: Colors.white,
+                        foregroundColor: SoftPalette.gray50,
                         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
@@ -698,16 +700,16 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.menu_book_rounded, size: 64, color: Colors.grey.shade300),
+                      Icon(Icons.menu_book_rounded, size: 64, color: SoftPalette.gray150),
                       const SizedBox(height: 12),
                       const Text(
                         'No books found in Library Catalog',
-                        style: TextStyle(color: Colors.grey, fontSize: 16, fontWeight: FontWeight.bold),
+                        style: TextStyle(color: SoftPalette.gray350, fontSize: 16, fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 6),
                       const Text(
                         'Click "+ Add Book" to add books to your school library.',
-                        style: TextStyle(color: Colors.grey),
+                        style: TextStyle(color: SoftPalette.gray350),
                       ),
                     ],
                   ),
@@ -726,15 +728,15 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
                   return Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: SoftPalette.gray50,
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.grey.shade200),
+                      border: Border.all(color: SoftPalette.gray100),
                     ),
                     child: Row(
                       children: [
                         CircleAvatar(
-                          backgroundColor: const Color(0xFF1B4965).withValues(alpha: 0.1),
-                          child: const Icon(Icons.book_rounded, color: Color(0xFF1B4965)),
+                          backgroundColor: SoftPalette.sky700.withValues(alpha: 0.1),
+                          child: const Icon(Icons.book_rounded, color: SoftPalette.sky700),
                         ),
                         const SizedBox(width: 16),
                         Expanded(
@@ -749,7 +751,7 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
                               const SizedBox(height: 2),
                               Text(
                                 'By ${book['author']} • ${book['category']}',
-                                style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                                style: TextStyle(color: SoftPalette.gray500, fontSize: 13),
                               ),
                             ],
                           ),
@@ -758,14 +760,14 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                           decoration: BoxDecoration(
                             color: available > 0
-                                ? const Color(0xFF2D9B83).withValues(alpha: 0.1)
-                                : const Color(0xFFDC4A4A).withValues(alpha: 0.1),
+                                ? SoftPalette.teal500.withValues(alpha: 0.1)
+                                : SoftPalette.red500.withValues(alpha: 0.1),
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Text(
                             'Available: $available / $total',
                             style: TextStyle(
-                              color: available > 0 ? const Color(0xFF2D9B83) : const Color(0xFFDC4A4A),
+                              color: available > 0 ? SoftPalette.teal500 : SoftPalette.red500,
                               fontWeight: FontWeight.bold,
                               fontSize: 12,
                             ),
@@ -777,12 +779,12 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
                           icon: const Icon(Icons.output_rounded, size: 16),
                           label: const Text('Issue Book'),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF2D9B83),
-                            foregroundColor: Colors.white,
+                            backgroundColor: SoftPalette.teal500,
+                            foregroundColor: SoftPalette.gray50,
                           ),
                         ),
                         IconButton(
-                          icon: const Icon(Icons.edit_rounded, color: Colors.grey),
+                          icon: const Icon(Icons.edit_rounded, color: SoftPalette.gray350),
                           onPressed: () => _openAddBookDialog(book),
                         ),
                       ],
@@ -803,7 +805,7 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
         // Loans Toolbar
         Container(
           padding: const EdgeInsets.all(16),
-          color: Colors.white,
+          color: SoftPalette.gray50,
           child: Row(
             children: [
               Expanded(
@@ -812,9 +814,9 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
                   onChanged: (_) => setState(() {}),
                   decoration: InputDecoration(
                     hintText: 'Search loans by borrower name, book title, CNIC, or Roll No...',
-                    prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF2D9B83)),
+                    prefixIcon: const Icon(Icons.search_rounded, color: SoftPalette.teal500),
                     filled: true,
-                    fillColor: const Color(0xFFF8FAFC),
+                    fillColor: SoftPalette.gray50,
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
                       borderSide: BorderSide.none,
@@ -828,7 +830,7 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF1F5F9),
+                    color: SoftPalette.slate100,
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: DropdownButton<String>(
@@ -881,16 +883,16 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.assignment_turned_in_rounded, size: 64, color: Colors.grey.shade300),
+                      Icon(Icons.assignment_turned_in_rounded, size: 64, color: SoftPalette.gray150),
                       const SizedBox(height: 12),
                       const Text(
                         'No book loan records found',
-                        style: TextStyle(color: Colors.grey, fontSize: 16, fontWeight: FontWeight.bold),
+                        style: TextStyle(color: SoftPalette.gray350, fontSize: 16, fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 4),
                       const Text(
                         'Issued books to Students, Teachers, or Outsiders will appear here.',
-                        style: TextStyle(color: Colors.grey),
+                        style: TextStyle(color: SoftPalette.gray350),
                       ),
                     ],
                   ),
@@ -911,15 +913,15 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
                   if (dueDateStr.isNotEmpty) dueDate = DateTime.tryParse(dueDateStr);
                   final isOverdue = isBorrowed && dueDate != null && DateTime.now().isAfter(dueDate);
 
-                  Color badgeColor = isBorrowed ? const Color(0xFFD4940A) : const Color(0xFF2D9B83);
-                  if (isOverdue) badgeColor = const Color(0xFFDC4A4A);
+                  Color badgeColor = isBorrowed ? SoftPalette.amber350 : SoftPalette.teal500;
+                  if (isOverdue) badgeColor = SoftPalette.red500;
 
                   return Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: SoftPalette.gray50,
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.grey.shade200),
+                      border: Border.all(color: SoftPalette.gray100),
                     ),
                     child: Row(
                       children: [
@@ -943,12 +945,12 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
                               const SizedBox(height: 2),
                               Text(
                                 'Borrower: ${loan['borrowerName']} (${loan['borrowerType'] ?? "Guest"}) • ID/CNIC: ${loan['borrowerId'] ?? "N/A"}',
-                                style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
+                                style: TextStyle(color: SoftPalette.gray550, fontSize: 13),
                               ),
                               if ((loan['borrowerPhone'] ?? '').isNotEmpty)
                                 Text(
                                   'Phone: ${loan['borrowerPhone']}',
-                                  style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                                  style: TextStyle(color: SoftPalette.gray500, fontSize: 12),
                                 ),
                             ],
                           ),
@@ -976,10 +978,10 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
                                         : 'Returned'),
                                 style: TextStyle(
                                   color: isOverdue
-                                      ? Colors.red
+                                      ? SoftPalette.red400
                                       : isBorrowed
-                                          ? Colors.grey.shade600
-                                          : const Color(0xFF2D9B83),
+                                          ? SoftPalette.gray500
+                                          : SoftPalette.teal500,
                                   fontWeight: isBorrowed ? FontWeight.normal : FontWeight.bold,
                                   fontSize: 12,
                                 ),
@@ -993,8 +995,8 @@ class _SchoolLibraryViewState extends State<SchoolLibraryView> {
                             icon: const Icon(Icons.check_circle_outline, size: 16),
                             label: const Text('Mark Returned'),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF2D9B83),
-                              foregroundColor: Colors.white,
+                              backgroundColor: SoftPalette.teal500,
+                              foregroundColor: SoftPalette.gray50,
                             ),
                           ),
                       ],

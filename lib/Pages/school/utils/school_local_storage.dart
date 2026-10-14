@@ -1,5 +1,6 @@
 // lib/pages/school/utils/school_local_storage.dart
 
+import 'package:gmwf/services/cloud/cloud_db.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -323,7 +324,7 @@ class SchoolLocalStorage {
     await cacheStudent(branchId, studentId, cleanData);
 
     try {
-      final docRef = FirebaseFirestore.instance
+      final docRef = CloudDb.instance
           .collection('branches')
           .doc(branchId)
           .collection('school_students')
@@ -360,7 +361,7 @@ class SchoolLocalStorage {
     await cacheTeacher(branchId, teacherId, cleanData);
 
     try {
-      final docRef = FirebaseFirestore.instance
+      final docRef = CloudDb.instance
           .collection('branches')
           .doc(branchId)
           .collection('school_teachers')
@@ -396,7 +397,7 @@ class SchoolLocalStorage {
     await cacheBook(branchId, bookId, cleanData);
 
     try {
-      final docRef = FirebaseFirestore.instance
+      final docRef = CloudDb.instance
           .collection('branches')
           .doc(branchId)
           .collection('school_books')
@@ -432,7 +433,7 @@ class SchoolLocalStorage {
     await cacheBookLoan(branchId, loanId, cleanData);
 
     try {
-      final docRef = FirebaseFirestore.instance
+      final docRef = CloudDb.instance
           .collection('branches')
           .doc(branchId)
           .collection('school_book_loans')
@@ -474,7 +475,7 @@ class SchoolLocalStorage {
     await cacheLog(branchId, dateKey, logData);
 
     try {
-      final docRef = FirebaseFirestore.instance
+      final docRef = CloudDb.instance
           .collection('branches')
           .doc(branchId)
           .collection('school_attendance')
@@ -526,7 +527,7 @@ class SchoolLocalStorage {
     await box.flush();
 
     try {
-      final docRef = FirebaseFirestore.instance
+      final docRef = CloudDb.instance
           .collection('branches')
           .doc(branchId)
           .collection('school_teacher_attendance')
@@ -669,7 +670,7 @@ class SchoolLocalStorage {
     await box.put(key, entry);
 
     try {
-      await FirebaseFirestore.instance
+      await CloudDb.instance
           .collection('branches')
           .doc(branchId)
           .collection('school_audit_logs')
@@ -677,6 +678,13 @@ class SchoolLocalStorage {
           .set(entry);
     } catch (e) {
       debugPrint('[SchoolLocalStorage] Cloud audit log save failed: $e');
+      // Not lost: the upload queue sends it once Firestore accepts writes again.
+      await LocalStorageService.enqueueSync({
+        'action': 'set',
+        'collection': 'branches/$branchId/school_audit_logs',
+        'docId': auditId,
+        'data': entry,
+      });
     }
   }
 
@@ -711,7 +719,7 @@ class SchoolLocalStorage {
     await box.put(key, dataToSave);
 
     try {
-      await FirebaseFirestore.instance
+      await CloudDb.instance
           .collection('branches')
           .doc(branchId)
           .collection('school_grades')
@@ -767,7 +775,7 @@ class SchoolLocalStorage {
     await box.put(key, dataToSave);
 
     try {
-      await FirebaseFirestore.instance
+      await CloudDb.instance
           .collection('branches')
           .doc(branchId)
           .collection('school_fees')
@@ -868,7 +876,7 @@ class SchoolLocalStorage {
     }
 
     try {
-      await FirebaseFirestore.instance
+      await CloudDb.instance
           .collection('branches')
           .doc(branchId)
           .collection('school_homerooms')
@@ -876,6 +884,13 @@ class SchoolLocalStorage {
           .set(assignmentData, SetOptions(merge: true));
     } catch (e) {
       debugPrint('[SchoolLocalStorage] Homeroom cloud save error: $e');
+      // Not lost: the upload queue sends it once Firestore accepts writes again.
+      await LocalStorageService.enqueueSync({
+        'action': 'set',
+        'collection': 'branches/$branchId/school_homerooms',
+        'docId': classKey,
+        'data': assignmentData,
+      });
     }
 
     await logAudit(

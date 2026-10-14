@@ -1,9 +1,12 @@
 // lib/main.dart
 import 'dart:async';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/components/app_toast.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -47,6 +50,7 @@ import 'services/sync_service.dart';
 import 'widgets/self_healing_error_boundary.dart';
 import 'widgets/blurred_dialog_observer.dart';
 import 'utils/ui_stall_monitor.dart';
+import 'widgets/busy_status_host.dart';
 import 'constants/navigator_key.dart';
 
 class TimestampAdapter extends TypeAdapter<Timestamp> {
@@ -180,6 +184,12 @@ void _installGlobalErrorHandlers() {
 
 Future<void> main() async {
   WidgetsBinding widgetsBinding = WidgetsFlutterBinding.ensureInitialized();
+  // Release builds have no console to read: the ~1,600 debugPrint calls only fed Flutter's
+  // throttled print queue (timers and string work on the UI thread). What matters at a
+  // clinic is written to gmwf_sync.log / gmwf_perf.log / gmwf_crash.log instead.
+  if (kReleaseMode) {
+    debugPrint = (String? message, {int? wrapWidth}) {};
+  }
   // Native splash screens only exist on Android & iOS.
   // Calling preserve on Desktop causes widgetsBinding.deferFirstFrame() to block
   // rasterization, turning the desktop window into a frozen white box.
@@ -208,7 +218,8 @@ Future<void> main() async {
   await SentryFlutter.init(
     (options) {
       options.dsn = 'https://1decf155927c0b93fcbc40447bb21a12@o4511376159014912.ingest.de.sentry.io/4511376169631824';
-      options.tracesSampleRate = 1.0;
+      // 5% of transactions: tracing every one cost CPU and network on every navigation.
+      options.tracesSampleRate = 0.05;
       options.environment = 'production';
     },
     appRunner: () async {
@@ -262,7 +273,7 @@ Future<void> main() async {
         AuthService.onSignOutCallback = AuthHomeWrapper.clearSession;
 
         // Load dynamic version from pubspec via package_info (max 400ms)
-        await AutoUpdateService.getAppVersion().timeout(const Duration(milliseconds: 400), onTimeout: () => '1.6.1');
+        await AutoUpdateService.getAppVersion().timeout(const Duration(milliseconds: 400), onTimeout: () => '1.6.2');
         unawaited(CloudMessagingService().initialize().catchError((e) {
           debugPrint('[Init] CloudMessagingService init warning: $e');
         }));
@@ -303,30 +314,31 @@ Future<void> main() async {
 
 Future<void> _runBackgroundCleanups() async {
   try {
-    // 💡 Defer background cleanups until after the initial UI has painted and user is seated.
-    // This completely eliminates the startup freeze / 'Not Responding' hang on Windows.
-    await Future.delayed(const Duration(seconds: 8));
+    // 💡 Defer background cleanups until 30 seconds after launch.
+    // This ensures login, initial screen painting, navigation, and animations complete
+    // with zero main-thread contention, eliminating the "(Not Responding)" startup hang.
+    await Future.delayed(const Duration(seconds: 30));
 
     await FinanceV2Migration.runMigration();
-    await Future.delayed(const Duration(milliseconds: 100));
+    await Future.delayed(const Duration(milliseconds: 300));
 
     await LocalStorageService.forceDeduplicatePatients();
-    await Future.delayed(const Duration(milliseconds: 100));
+    await Future.delayed(const Duration(milliseconds: 300));
 
     await LocalStorageService.repairMisassignedShiftSessions();
-    await Future.delayed(const Duration(milliseconds: 100));
+    await Future.delayed(const Duration(milliseconds: 300));
 
     await LocalStorageService.repairAndSanitizeLocalAccounts();
-    await Future.delayed(const Duration(milliseconds: 100));
+    await Future.delayed(const Duration(milliseconds: 300));
 
     await LocalStorageService.purgePhantomUnknownTokens();
-    await Future.delayed(const Duration(milliseconds: 100));
+    await Future.delayed(const Duration(milliseconds: 300));
 
     await LocalStorageService.healAndRestorePatientCnics();
-    await Future.delayed(const Duration(milliseconds: 100));
+    await Future.delayed(const Duration(milliseconds: 300));
 
     await LocalStorageService.purgeBloatedSyncQueue();
-    await Future.delayed(const Duration(milliseconds: 100));
+    await Future.delayed(const Duration(milliseconds: 300));
 
     if (Hive.isBoxOpen(DonationsLocalStorage.donationsBox)) {
       final box = Hive.box(DonationsLocalStorage.donationsBox);
@@ -483,49 +495,53 @@ class _MyAppState extends State<MyApp> {
       useMaterial3: true,
       brightness: brightness,
       fontFamily: fontFamily,
+      // Semantic eye-comfort colours for every screen: context.comfort.<role>.
+      extensions: [isDark ? GComfortColors.dark : GComfortColors.light],
       colorScheme: ColorScheme.fromSeed(
         seedColor: seedColor,
         primary: seedColor,
         secondary: AppColors.navy,
+        // Soft palette error colour instead of Material's saturated default red.
+        error: isDark ? SoftPalette.red350 : SoftPalette.red550,
         brightness: brightness,
       ),
-      scaffoldBackgroundColor: isDark ? const Color(0xFF090C10) : const Color(0xFFEAEFF5),
+      scaffoldBackgroundColor: isDark ? SoftPalette.slate900 : SoftPalette.slate100,
       cardTheme: CardThemeData(
         elevation: 0,
-        color: isDark ? const Color(0xFF161B22) : Colors.white,
+        color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(cardRadius),
         ),
       ),
       dialogTheme: DialogThemeData(
-        backgroundColor: isDark ? const Color(0xFF161B22) : Colors.white,
+        backgroundColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(cardRadius),
         ),
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: isDark ? const Color(0xFF21262D) : Colors.white,
+        fillColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(cardRadius),
-          borderSide: BorderSide(color: isDark ? const Color(0xFF30363D) : AppColors.gray200, width: 1.5),
+          borderSide: BorderSide(color: isDark ? SoftPalette.slate750 : AppColors.gray200, width: 1.5),
         ),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(cardRadius),
-          borderSide: BorderSide(color: isDark ? const Color(0xFF30363D) : AppColors.gray200, width: 1.5),
+          borderSide: BorderSide(color: isDark ? SoftPalette.slate750 : AppColors.gray200, width: 1.5),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(cardRadius),
           borderSide: BorderSide(color: seedColor, width: 2.0),
         ),
-        labelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: isDark ? const Color(0xFF8B949E) : AppColors.gray600),
-        hintStyle: TextStyle(fontSize: 14, color: isDark ? const Color(0xFF6E7681) : AppColors.gray400),
+        labelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.slate400 : AppColors.gray600),
+        hintStyle: TextStyle(fontSize: 14, color: isDark ? SoftPalette.slate500 : AppColors.gray400),
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
           backgroundColor: seedColor,
-          foregroundColor: Colors.white,
+          foregroundColor: SoftPalette.gray50,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(cardRadius)),
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
           textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
@@ -545,7 +561,7 @@ class _MyAppState extends State<MyApp> {
       ),
       snackBarTheme: SnackBarThemeData(
         contentTextStyle: const TextStyle(
-          color: Colors.white,
+          color: SoftPalette.gray50,
           fontSize: 13.5,
           fontWeight: FontWeight.w600,
         ),
@@ -587,6 +603,10 @@ class _MyAppState extends State<MyApp> {
                     '/home': (context) => const AuthHomeWrapper(),
                     '/login': (context) => const LoginPage(),
                   },
+                  builder: (context, child) => Stack(
+                    fit: StackFit.expand,
+                    children: [child ?? const SizedBox.shrink(), const BusyStatusHost(), const AppToastHost()],
+                  ),
                   home: const AuthHomeWrapper(),
                 )
               : ValueListenableBuilder(
@@ -651,6 +671,8 @@ class _MyAppState extends State<MyApp> {
                             const SingleActivator(LogicalKeyboardKey.keyR, control: true, shift: true): () {
                               AppRestartController.refreshApp();
                             },
+                            // Preview every notification style (works on any screen).
+                            const SingleActivator(LogicalKeyboardKey.keyT, control: true, shift: true): AppToast.demo,
                             const SingleActivator(LogicalKeyboardKey.keyR, control: true): () {
                               AppRestartController.refreshApp();
                             },
@@ -664,7 +686,16 @@ class _MyAppState extends State<MyApp> {
                               data: appMediaQuery,
                               child: Directionality(
                                 textDirection: appDirection,
-                                child: child ?? const SizedBox.shrink(),
+                                // App-wide toasts sit above every route and dialog.
+                                child: Stack(
+                                  fit: StackFit.expand,
+                                  children: [
+                                    child ?? const SizedBox.shrink(),
+                                    // "What is the app doing" status, so busy moments are explained.
+                                    const BusyStatusHost(),
+                                    const AppToastHost(),
+                                  ],
+                                ),
                               ),
                             ),
                           ),
@@ -672,7 +703,7 @@ class _MyAppState extends State<MyApp> {
 
                         if (!kIsWeb && Platform.isWindows && !Platform.environment.containsKey('FLUTTER_TEST')) {
                           return Material(
-                            color: isDarkMode ? const Color(0xFF090C10) : const Color(0xFFEAEFF5),
+                            color: isDarkMode ? SoftPalette.slate900 : SoftPalette.slate100,
                             child: Column(
                               children: [
                                 const CustomTitleBar(),

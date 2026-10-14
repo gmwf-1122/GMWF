@@ -1,5 +1,6 @@
 // lib/pages/support_page.dart
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 import '../theme/app_theme.dart';
@@ -93,13 +94,12 @@ class _SupportPageState extends State<SupportPage> {
   Future<void> _submitBugReport(BuildContext context, RoleThemeData t) async {
     final text = _bugController.text.trim();
     if (text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please write a description of the issue first."), backgroundColor: Colors.red),
+      AppToast.showSnackBar(context, 
+        const SnackBar(content: Text("Please write a description of the issue first."), backgroundColor: SoftPalette.red400),
       );
       return;
     }
 
-    final messenger = ScaffoldMessenger.of(context);
     setState(() => _submittingBug = true);
 
     try {
@@ -111,17 +111,17 @@ class _SupportPageState extends State<SupportPage> {
 
       if (mounted) {
         _bugController.clear();
-        messenger.showSnackBar(
+        AppToast.fromSnackBar(
           const SnackBar(
             content: Text("✅ Bug report submitted to developer dashboard. Thank you!"),
-            backgroundColor: Colors.green,
+            backgroundColor: SoftPalette.green400,
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        messenger.showSnackBar(
-          SnackBar(content: Text("Failed to submit report: $e"), backgroundColor: Colors.red),
+        AppToast.fromSnackBar(
+          SnackBar(content: Text("Failed to submit report: $e"), backgroundColor: SoftPalette.red400),
         );
       }
     } finally {
@@ -168,15 +168,15 @@ class _SupportPageState extends State<SupportPage> {
   Color _getResourceColor(String key) {
     switch (key) {
       case 'book':
-        return Colors.pink.shade600;
+        return SoftPalette.red500;
       case 'video':
-        return Colors.purple.shade600;
+        return SoftPalette.purple550;
       case 'history':
-        return Colors.amber.shade700;
+        return SoftPalette.amber300;
       case 'privacy':
-        return Colors.teal.shade600;
+        return SoftPalette.teal500;
       default:
-        return Colors.grey;
+        return SoftPalette.gray350;
     }
   }
 
@@ -343,11 +343,11 @@ class _SupportPageState extends State<SupportPage> {
                   Container(
                     padding: const EdgeInsets.all(24),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFC2185B), // Brand Pink Banner
+                      color: SoftPalette.pink550, // Brand Pink Banner
                       borderRadius: BorderRadius.circular(24),
                       boxShadow: [
                         BoxShadow(
-                          color: const Color(0xFFC2185B).withValues(alpha: 0.25),
+                          color: SoftPalette.pink550.withValues(alpha: 0.25),
                           blurRadius: 20,
                           offset: const Offset(0, 8),
                         ),
@@ -359,10 +359,10 @@ class _SupportPageState extends State<SupportPage> {
                         Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.15),
+                            color: SoftPalette.gray50.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(16),
                           ),
-                          child: const Icon(Icons.volunteer_activism_rounded, color: Colors.white, size: 36),
+                          child: const Icon(Icons.volunteer_activism_rounded, color: SoftPalette.gray50, size: 36),
                         ),
                         const SizedBox(width: 20),
                         Expanded(
@@ -371,18 +371,18 @@ class _SupportPageState extends State<SupportPage> {
                             children: [
                               const Text(
                                 "About GMWF",
-                                style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900),
+                                style: TextStyle(color: SoftPalette.gray50, fontSize: 20, fontWeight: FontWeight.w900),
                               ),
                               const SizedBox(height: 8),
                               Text(
                                 "Gulzar Madina Welfare Foundation — providing free medical assistance and social welfare services to those in need.",
-                                style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 13, height: 1.4, fontWeight: FontWeight.w500),
+                                style: TextStyle(color: SoftPalette.gray50.withValues(alpha: 0.9), fontSize: 13, height: 1.4, fontWeight: FontWeight.w500),
                               ),
                               const SizedBox(height: 14),
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.15),
+                                  color: SoftPalette.gray50.withValues(alpha: 0.15),
                                   borderRadius: BorderRadius.circular(20),
                                 ),
                                 child: Row(
@@ -391,12 +391,12 @@ class _SupportPageState extends State<SupportPage> {
                                     Container(
                                       width: 8,
                                       height: 8,
-                                      decoration: const BoxDecoration(color: Colors.greenAccent, shape: BoxShape.circle),
+                                      decoration: const BoxDecoration(color: SoftPalette.emerald200, shape: BoxShape.circle),
                                     ),
                                     const SizedBox(width: 8),
                                     const Text(
                                       "All systems operational",
-                                      style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
+                                      style: TextStyle(color: SoftPalette.gray50, fontSize: 11, fontWeight: FontWeight.w700),
                                     ),
                                   ],
                                 ),
@@ -433,7 +433,7 @@ class _SupportPageState extends State<SupportPage> {
                           icon: Icons.chat_bubble_outline_rounded,
                           title: "WhatsApp support",
                           subtitle: "+92 331 8525333",
-                          iconColor: Colors.green,
+                          iconColor: SoftPalette.green400,
                           replyTime: "~ 2 hr reply",
                           onTap: () => _launchURL("https://wa.me/923318525333"),
                         ),
@@ -443,7 +443,7 @@ class _SupportPageState extends State<SupportPage> {
                           icon: Icons.alternate_email_rounded,
                           title: "Email support",
                           subtitle: "gulzarmadina@gmail.com",
-                          iconColor: Colors.blue,
+                          iconColor: SoftPalette.blue400,
                           replyTime: "~ 1 day reply",
                           onTap: () => _launchURL("mailto:gulzarmadina@gmail.com"),
                         ),
@@ -604,10 +604,10 @@ class _SupportPageState extends State<SupportPage> {
                             Container(
                               padding: const EdgeInsets.all(8),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFC2185B).withValues(alpha: 0.1),
+                                color: context.adapt(SoftPalette.pink550).withValues(alpha: 0.1),
                                 shape: BoxShape.circle,
                               ),
-                              child: const Icon(Icons.bug_report_outlined, color: Color(0xFFC2185B), size: 20),
+                              child: Icon(Icons.bug_report_outlined, color: context.adapt(SoftPalette.pink550), size: 20),
                             ),
                             const SizedBox(width: 12),
                             Expanded(
@@ -653,8 +653,8 @@ class _SupportPageState extends State<SupportPage> {
                             ElevatedButton(
                               onPressed: _submittingBug ? null : () => _submitBugReport(context, t),
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFFC2185B),
-                                foregroundColor: Colors.white,
+                                backgroundColor: SoftPalette.pink550,
+                                foregroundColor: SoftPalette.gray50,
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                               ),
@@ -662,7 +662,7 @@ class _SupportPageState extends State<SupportPage> {
                                   ? const SizedBox(
                                       width: 18,
                                       height: 18,
-                                      child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                      child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50),
                                     )
                                   : const Text("Send report"),
                             ),

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -129,14 +130,14 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
     final logsAsync = ref.watch(madrassaAllLogsProvider(widget.branchId));
 
     return studentsAsync.when(
-      loading: () => const Center(
-        child: CircularProgressIndicator(color: Color(0xFF4C4DDC)),
+      loading: () => Center(
+        child: CircularProgressIndicator(color: context.adapt(SoftPalette.indigo550)),
       ),
       error: (e, st) => Center(child: Text('Error loading students: $e')),
       data: (students) {
         return logsAsync.when(
-          loading: () => const Center(
-            child: CircularProgressIndicator(color: Color(0xFF4C4DDC)),
+          loading: () => Center(
+            child: CircularProgressIndicator(color: context.adapt(SoftPalette.indigo550)),
           ),
           error: (e, st) => Center(child: Text('Error loading logs: $e')),
           data: (allLogs) {
@@ -201,7 +202,7 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
               valueListenable: UserThemeService.listenable(widget.username),
               builder: (context, _, __) {
                 final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.username);
-                final scaffoldBg = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8F9FD);
+                final scaffoldBg = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
 
                 return Scaffold(
                   backgroundColor: scaffoldBg,
@@ -237,8 +238,8 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
       'Monthly': 'ماہانہ',
       'Overall': 'مجموعی',
     };
-    final textPrimary = isDark ? Colors.white : const Color(0xFF111827);
-    final textMuted = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+    final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.slate900;
+    final textMuted = isDark ? SoftPalette.slate350 : SoftPalette.slate550;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -256,7 +257,7 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
         final selector = Container(
           padding: const EdgeInsets.all(4),
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+            color: isDark ? SoftPalette.slate800 : SoftPalette.slate150,
             borderRadius: BorderRadius.circular(12),
           ),
           child: Row(
@@ -271,13 +272,13 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   decoration: BoxDecoration(
                     color: isSelected
-                        ? (isDark ? const Color(0xFF0D9488) : Colors.white)
+                        ? (isDark ? SoftPalette.teal500 : SoftPalette.gray50)
                         : Colors.transparent,
                     borderRadius: BorderRadius.circular(8),
                     boxShadow: isSelected
                         ? [
                             BoxShadow(
-                              color: Colors.black.withOpacity(0.05),
+                              color: SoftPalette.gray900.withOpacity(0.05),
                               blurRadius: 4,
                               offset: const Offset(0, 2),
                             )
@@ -290,7 +291,7 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
                       fontSize: 12,
                       fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
                       color: isSelected
-                          ? (isDark ? Colors.white : const Color(0xFF4C4DDC))
+                          ? (isDark ? SoftPalette.gray50 : SoftPalette.indigo550)
                           : textMuted,
                     ),
                   ),
@@ -337,14 +338,14 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
           title: context.isUrdu ? 'بہترین کارکردگی (ٹاپ 5)' : 'Top Performers (Best 5)',
           students: topPerformers,
           isGood: true,
-          gradient: const [Color(0xFF0D9488), Color(0xFF0F766E)],
+          gradient: const [SoftPalette.teal500, SoftPalette.teal550],
         );
 
         final worstCard = _buildInsightsCard(
           title: context.isUrdu ? 'توجہ طلب طالب علم (آخری 5)' : 'Needs Attention (Worst 5)',
           students: struggling,
           isGood: false,
-          gradient: const [Color(0xFFE11D48), Color(0xFFBE123C)],
+          gradient: const [SoftPalette.red500, SoftPalette.red550],
         );
 
         if (isMobile) {
@@ -398,7 +399,7 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
             children: [
               Icon(
                 isGood ? Icons.stars_rounded : Icons.warning_amber_rounded,
-                color: Colors.white,
+                color: SoftPalette.gray50,
                 size: 20,
               ),
               const SizedBox(width: 8),
@@ -407,7 +408,7 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
                 style: GoogleFonts.plusJakartaSans(
                   fontSize: 14,
                   fontWeight: FontWeight.w800,
-                  color: Colors.white,
+                  color: SoftPalette.gray50,
                 ),
               ),
             ],
@@ -419,7 +420,7 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
               child: Center(
                 child: Text(
                   context.isUrdu ? 'کوئی ڈیٹا موجود نہیں' : 'No data available',
-                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                  style: const TextStyle(color: SoftPalette.gray50A70, fontSize: 12),
                 ),
               ),
             )
@@ -441,14 +442,14 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
                             width: 22,
                             height: 22,
                             decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.2),
+                              color: SoftPalette.gray50.withOpacity(0.2),
                               shape: BoxShape.circle,
                             ),
                             child: Center(
                               child: Text(
                                 '${idx + 1}',
                                 style: const TextStyle(
-                                  color: Colors.white,
+                                  color: SoftPalette.gray50,
                                   fontSize: 11,
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -462,7 +463,7 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
                               style: GoogleFonts.plusJakartaSans(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w700,
-                                color: Colors.white,
+                                color: SoftPalette.gray50,
                               ),
                               overflow: TextOverflow.ellipsis,
                             ),
@@ -473,7 +474,7 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.25),
+                        color: SoftPalette.gray50.withOpacity(0.25),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
@@ -481,7 +482,7 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
                         style: GoogleFonts.plusJakartaSans(
                           fontSize: 11,
                           fontWeight: FontWeight.w800,
-                          color: Colors.white,
+                          color: SoftPalette.gray50,
                         ),
                       ),
                     ),
@@ -495,10 +496,10 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
   }
 
   Widget _buildSearchAndFilters(bool isDark) {
-    final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
-    final textPrimary = isDark ? Colors.white : const Color(0xFF1E293B);
-    final textMuted = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+    final cardBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.slate150;
+    final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.slate800;
+    final textMuted = isDark ? SoftPalette.slate350 : SoftPalette.slate550;
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -542,8 +543,8 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
           title: context.isUrdu ? 'بہترین ترقی (> $goodThreshold لائنیں)' : 'Good Progress (> $goodThreshold Lines)',
           count: good.length,
           students: good,
-          indicatorColor: const Color(0xFF10B981),
-          lightTint: isDark ? const Color(0xFF10B981).withValues(alpha: 0.18) : const Color(0xFFECFDF5),
+          indicatorColor: context.adapt(SoftPalette.emerald350),
+          lightTint: isDark ? SoftPalette.emerald350.withValues(alpha: 0.18) : SoftPalette.emerald50,
           isDark: isDark,
         ),
         const SizedBox(height: 20),
@@ -551,8 +552,8 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
           title: context.isUrdu ? 'اوسط ترقی ($badThreshold سے $goodThreshold لائنیں)' : 'Average Progress ($badThreshold - $goodThreshold Lines)',
           count: avg.length,
           students: avg,
-          indicatorColor: const Color(0xFFF59E0B),
-          lightTint: isDark ? const Color(0xFFF59E0B).withValues(alpha: 0.18) : const Color(0xFFFFFBEB),
+          indicatorColor: context.adapt(SoftPalette.amber300),
+          lightTint: isDark ? SoftPalette.amber300.withValues(alpha: 0.18) : SoftPalette.yellow50m,
           isDark: isDark,
         ),
         const SizedBox(height: 20),
@@ -560,8 +561,8 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
           title: context.isUrdu ? 'کمزور ترقی (< $badThreshold لائنیں)' : 'Slow Progress (< $badThreshold Lines)',
           count: bad.length,
           students: bad,
-          indicatorColor: const Color(0xFFEF4444),
-          lightTint: isDark ? const Color(0xFFEF4444).withValues(alpha: 0.18) : const Color(0xFFFEF2F2),
+          indicatorColor: context.adapt(SoftPalette.red400),
+          lightTint: isDark ? SoftPalette.red400.withValues(alpha: 0.18) : SoftPalette.red100t,
           isDark: isDark,
         ),
       ],
@@ -576,10 +577,10 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
     required Color lightTint,
     required bool isDark,
   }) {
-    final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
-    final textPrimary = isDark ? Colors.white : const Color(0xFF1E293B);
-    final textMuted = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+    final cardBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.slate150;
+    final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.slate800;
+    final textMuted = isDark ? SoftPalette.slate350 : SoftPalette.slate550;
 
     return Container(
       decoration: BoxDecoration(
@@ -661,7 +662,7 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
                           children: [
                             CircleAvatar(
                               radius: 18,
-                              backgroundColor: isDark ? const Color(0xFF334155) : const Color(0xFFEEF2F6),
+                              backgroundColor: isDark ? SoftPalette.slate700 : SoftPalette.slate100,
                               child: Text(
                                 (std['rollNumber']?.toString() ?? '#').substring(0, 1),
                                 style: TextStyle(

@@ -2,6 +2,7 @@
 
 import 'package:collection/collection.dart';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/design_system.dart';
 import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../theme/role_theme_provider.dart';
@@ -53,7 +54,7 @@ class _EmployeeDetailPageState extends State<EmployeeDetailPage> with SingleTick
     );
     if (result == true && mounted) {
       setState(() {});
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(content: Text('${emp['name'] ?? 'Employee'} has been offboarded.')),
       );
     }
@@ -196,12 +197,12 @@ class _EmployeeDetailPageState extends State<EmployeeDetailPage> with SingleTick
               ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: t.accent,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 ),
                 icon: isTransferring
-                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50))
                     : const Icon(Icons.swap_horiz_rounded, size: 16),
                 label: Text(isTransferring ? 'Transferring...' : 'Confirm Transfer', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
                 onPressed: isTransferring || targetBranchId == currentBranchId
@@ -218,13 +219,13 @@ class _EmployeeDetailPageState extends State<EmployeeDetailPage> with SingleTick
                           );
                           if (mounted) setState(() {});
                           if (dlgCtx.mounted) Navigator.pop(dlgCtx);
-                          ScaffoldMessenger.of(context).showSnackBar(
+                          AppToast.showSnackBar(context, 
                             SnackBar(content: Text('✅ $empName transferred to $targetBranchId successfully!')),
                           );
                         } catch (e) {
                           setDlgState(() => isTransferring = false);
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Transfer failed: $e'), backgroundColor: Colors.red),
+                          AppToast.showSnackBar(context, 
+                            SnackBar(content: Text('Transfer failed: $e'), backgroundColor: SoftPalette.red400),
                           );
                         }
                       },
@@ -317,19 +318,19 @@ class _EmployeeDetailPageState extends State<EmployeeDetailPage> with SingleTick
                 ),
 
                 IconButton(
-                  icon: const Icon(Icons.swap_horiz_rounded, color: Colors.amber),
+                  icon: const Icon(Icons.swap_horiz_rounded, color: SoftPalette.amber200),
                   tooltip: 'Transfer Branch',
                   onPressed: () => _showTransferBranchDialog(context, emp),
                 ),
 
                 IconButton(
-                  icon: const Icon(Icons.person_off_outlined, color: Colors.redAccent),
+                  icon: const Icon(Icons.person_off_outlined, color: SoftPalette.red400),
                   tooltip: 'Offboard Employee',
                   onPressed: () => _showOffboardDialog(context, emp),
                 ),
               ],
               IconButton(
-                icon: const Icon(Icons.medical_services_outlined, color: Colors.teal),
+                icon: const Icon(Icons.medical_services_outlined, color: SoftPalette.teal500),
                 tooltip: 'Medical History',
                 onPressed: () => StaffPatientLinkService.openStaffMedicalHistory(
                   context,
@@ -409,6 +410,7 @@ class _EmployeeDetailPageState extends State<EmployeeDetailPage> with SingleTick
       child: Row(
         children: [
           buildInitialsAvatar(
+            context: context,
             name: name,
             theme: t,
             radius: 28,
@@ -565,12 +567,12 @@ class _EmployeeDetailPageState extends State<EmployeeDetailPage> with SingleTick
             childAspectRatio: 1.6,
             physics: const NeverScrollableScrollPhysics(),
             children: [
-              _buildAttendanceMetric('Total Days', '$daysInMonth', Colors.blue, t),
-              _buildAttendanceMetric('Present', present.toStringAsFixed(1).replaceAll('.0', ''), Colors.green, t),
-              _buildAttendanceMetric('Late Days', lateDays.toStringAsFixed(1).replaceAll('.0', ''), Colors.amber, t),
-              _buildAttendanceMetric('Absent Days', absent.toStringAsFixed(1).replaceAll('.0', ''), Colors.redAccent, t),
-              _buildAttendanceMetric('Paid Leaves', paidLeaves.toStringAsFixed(1).replaceAll('.0', ''), Colors.teal, t),
-              _buildAttendanceMetric('Unpaid Leaves', unpaidLeaves.toStringAsFixed(1).replaceAll('.0', ''), Colors.purple, t),
+              _buildAttendanceMetric('Total Days', '$daysInMonth', SoftPalette.blue400, t),
+              _buildAttendanceMetric('Present', present.toStringAsFixed(1).replaceAll('.0', ''), SoftPalette.green400, t),
+              _buildAttendanceMetric('Late Days', lateDays.toStringAsFixed(1).replaceAll('.0', ''), SoftPalette.amber200, t),
+              _buildAttendanceMetric('Absent Days', absent.toStringAsFixed(1).replaceAll('.0', ''), SoftPalette.red400, t),
+              _buildAttendanceMetric('Paid Leaves', paidLeaves.toStringAsFixed(1).replaceAll('.0', ''), SoftPalette.teal500, t),
+              _buildAttendanceMetric('Unpaid Leaves', unpaidLeaves.toStringAsFixed(1).replaceAll('.0', ''), SoftPalette.purple550, t),
             ],
           ),
           const SizedBox(height: 20),
@@ -620,7 +622,7 @@ class _EmployeeDetailPageState extends State<EmployeeDetailPage> with SingleTick
                   alignment: Alignment.center,
                   padding: const EdgeInsets.symmetric(vertical: 6),
                   decoration: BoxDecoration(
-                    color: isSun ? Colors.grey.withValues(alpha: 0.08) : Colors.transparent,
+                    color: isSun ? SoftPalette.gray350.withValues(alpha: 0.08) : Colors.transparent,
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
@@ -628,7 +630,7 @@ class _EmployeeDetailPageState extends State<EmployeeDetailPage> with SingleTick
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
-                      color: isSun ? Colors.grey[700] : t.textSecondary,
+                      color: isSun ? context.adapt(SoftPalette.gray550) : t.textSecondary,
                     ),
                   ),
                 ),
@@ -670,34 +672,34 @@ class _EmployeeDetailPageState extends State<EmployeeDetailPage> with SingleTick
               String badge = '—';
 
               if (status == 'present') {
-                cellBg = const Color(0xFFECFDF5);
-                borderColor = const Color(0xFFA7F3D0);
-                textColor = const Color(0xFF065F46);
+                cellBg = context.adapt(SoftPalette.emerald50);
+                borderColor = context.adapt(SoftPalette.emerald150);
+                textColor = context.adapt(SoftPalette.emerald600);
                 badge = '✓ Present';
               } else if (status == 'late') {
-                cellBg = const Color(0xFFFFFBEB);
-                borderColor = const Color(0xFFFDE68A);
-                textColor = const Color(0xFF92400E);
+                cellBg = context.adapt(SoftPalette.yellow50m);
+                borderColor = context.adapt(SoftPalette.yellow150);
+                textColor = context.adapt(SoftPalette.orange600);
                 badge = '⏱ Late';
               } else if (status == 'leave') {
-                cellBg = const Color(0xFFEFF6FF);
-                borderColor = const Color(0xFFBFDBFE);
-                textColor = const Color(0xFF1E40AF);
+                cellBg = context.adapt(SoftPalette.slate100);
+                borderColor = context.adapt(SoftPalette.slate200);
+                textColor = context.adapt(SoftPalette.blue600);
                 badge = '🏖 Leave';
               } else if (status == 'holiday') {
-                cellBg = const Color(0xFFFAF5FF);
-                borderColor = const Color(0xFFE9D5FF);
-                textColor = const Color(0xFF6B21A8);
+                cellBg = context.adapt(SoftPalette.purple50t);
+                borderColor = context.adapt(SoftPalette.purple150);
+                textColor = context.adapt(SoftPalette.violet600);
                 badge = '🎉 Holiday';
               } else if (status == 'off') {
-                cellBg = const Color(0xFFF1F5F9);
-                borderColor = const Color(0xFFE2E8F0);
-                textColor = const Color(0xFF475569);
+                cellBg = context.adapt(SoftPalette.slate100);
+                borderColor = context.adapt(SoftPalette.slate150);
+                textColor = context.adapt(SoftPalette.slate600);
                 badge = 'Off Day';
               } else if (status == 'absent') {
-                cellBg = const Color(0xFFFEF2F2);
-                borderColor = const Color(0xFFFECACA);
-                textColor = const Color(0xFF991B1B);
+                cellBg = context.adapt(SoftPalette.red100t);
+                borderColor = context.adapt(SoftPalette.red200);
+                textColor = context.adapt(SoftPalette.red600);
                 badge = '✕ Absent';
               }
 
@@ -733,7 +735,7 @@ class _EmployeeDetailPageState extends State<EmployeeDetailPage> with SingleTick
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text('$day', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: status == 'off' ? Colors.grey : t.textPrimary)),
+                          Text('$day', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: status == 'off' ? context.adapt(SoftPalette.gray350) : t.textPrimary)),
                           Text(badge, style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: textColor)),
                         ],
                       ),
@@ -748,7 +750,7 @@ class _EmployeeDetailPageState extends State<EmployeeDetailPage> with SingleTick
                       else if (note != null && note.isNotEmpty)
                         Text(
                           note,
-                          style: const TextStyle(fontSize: 7.5, fontStyle: FontStyle.italic, color: Colors.grey),
+                          style: TextStyle(fontSize: 7.5, fontStyle: FontStyle.italic, color: context.adapt(SoftPalette.gray350)),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -762,17 +764,17 @@ class _EmployeeDetailPageState extends State<EmployeeDetailPage> with SingleTick
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              _buildLegend(const Color(0xFF10B981), 'Present', t),
+              _buildLegend(SoftPalette.emerald350, 'Present', t),
               const SizedBox(width: 12),
-              _buildLegend(const Color(0xFFF59E0B), 'Late', t),
+              _buildLegend(SoftPalette.amber300, 'Late', t),
               const SizedBox(width: 12),
-              _buildLegend(const Color(0xFF3B82F6), 'Leave', t),
+              _buildLegend(SoftPalette.blue500, 'Leave', t),
               const SizedBox(width: 12),
-              _buildLegend(const Color(0xFFA855F7), 'Holiday', t),
+              _buildLegend(SoftPalette.violet400, 'Holiday', t),
               const SizedBox(width: 12),
-              _buildLegend(const Color(0xFF64748B), 'Off Day', t),
+              _buildLegend(SoftPalette.slate550, 'Off Day', t),
               const SizedBox(width: 12),
-              _buildLegend(const Color(0xFFEF4444), 'Absent', t),
+              _buildLegend(SoftPalette.red400, 'Absent', t),
             ],
           ),
         ],
@@ -802,13 +804,13 @@ class _EmployeeDetailPageState extends State<EmployeeDetailPage> with SingleTick
         children: [
           Text('Leave Quota & Usage (${DateTime.now().year})', style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: t.textPrimary)),
           const SizedBox(height: 12),
-          _buildLeaveRow('Casual Leaves', usage['casual'] ?? 0.0, 10.0, Colors.blue, t),
+          _buildLeaveRow('Casual Leaves', usage['casual'] ?? 0.0, 10.0, SoftPalette.blue400, t),
           const SizedBox(height: 10),
-          _buildLeaveRow('Sick Leaves', usage['sick'] ?? 0.0, 8.0, Colors.orange, t),
+          _buildLeaveRow('Sick Leaves', usage['sick'] ?? 0.0, 8.0, SoftPalette.amber300, t),
           const SizedBox(height: 10),
-          _buildLeaveRow('Annual Leaves', usage['annual'] ?? 0.0, 14.0, Colors.green, t),
+          _buildLeaveRow('Annual Leaves', usage['annual'] ?? 0.0, 14.0, SoftPalette.green400, t),
           const SizedBox(height: 10),
-          _buildLeaveRow('Unpaid Leaves', usage['unpaid'] ?? 0.0, 0.0, Colors.purple, t),
+          _buildLeaveRow('Unpaid Leaves', usage['unpaid'] ?? 0.0, 0.0, SoftPalette.purple550, t),
         ],
       ),
     );

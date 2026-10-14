@@ -1,6 +1,9 @@
 // lib/widgets/clock_skew_warning_banner.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:intl/intl.dart';
 import 'package:gmwf/services/camp_session_service.dart';
 
@@ -28,29 +31,29 @@ class _ClockSkewWarningBannerState extends State<ClockSkewWarningBanner> {
       barrierDismissible: true,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
-        backgroundColor: Colors.white,
+        backgroundColor: context.adapt(SoftPalette.gray50),
         titlePadding: const EdgeInsets.fromLTRB(24, 24, 24, 12),
         contentPadding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
         actionsPadding: const EdgeInsets.fromLTRB(16, 16, 24, 20),
         title: Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: const Color(0xFFFEF2F2),
+            color: context.adapt(SoftPalette.red100t),
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: const Color(0xFFFECACA)),
+            border: Border.all(color: context.adapt(SoftPalette.red200)),
           ),
           child: Row(
             children: [
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: const BoxDecoration(
-                  color: Color(0xFFEF4444),
+                  color: SoftPalette.red400,
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 24),
+                child: const Icon(Icons.warning_amber_rounded, color: SoftPalette.gray50, size: 24),
               ),
               const SizedBox(width: 14),
-              const Expanded(
+              Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -59,14 +62,14 @@ class _ClockSkewWarningBannerState extends State<ClockSkewWarningBanner> {
                       style: TextStyle(
                         fontWeight: FontWeight.w900,
                         fontSize: 16.5,
-                        color: Color(0xFF991B1B),
+                        color: context.adapt(SoftPalette.red600),
                         letterSpacing: -0.2,
                       ),
                     ),
                     SizedBox(height: 2),
                     Text(
                       'Please verify your Windows date and time',
-                      style: TextStyle(fontSize: 12, color: Color(0xFFB91C1C), fontWeight: FontWeight.w500),
+                      style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.red550), fontWeight: FontWeight.w500),
                     ),
                   ],
                 ),
@@ -80,29 +83,29 @@ class _ClockSkewWarningBannerState extends State<ClockSkewWarningBanner> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'Your computer\'s system clock does not match the real internet/server time. '
                 'This causes tokens to be assigned to the wrong shift (e.g. morning instead of evening). '
                 'The app has automatically calibrated internal timestamps, but you can also re-align existing tokens below.',
-                style: TextStyle(fontSize: 13.5, height: 1.45, color: Color(0xFF334155)),
+                style: TextStyle(fontSize: 13.5, height: 1.45, color: context.adapt(SoftPalette.slate700)),
               ),
               const SizedBox(height: 16),
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF8FAFC),
+                  color: context.adapt(SoftPalette.gray50),
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                  border: Border.all(color: context.adapt(SoftPalette.slate150)),
                 ),
                 child: Column(
                   children: [
-                    _infoRow('🖥️ Computer Local Clock:', localTimeStr, const Color(0xFFDC2626), isBold: true),
+                    _infoRow('🖥️ Computer Local Clock:', localTimeStr, SoftPalette.red500, isBold: true),
                     const Divider(height: 18),
-                    _infoRow('🌐 Authoritative Internet Time:', serverTimeStr, const Color(0xFF059669), isBold: true),
+                    _infoRow('🌐 Authoritative Internet Time:', serverTimeStr, SoftPalette.emerald500, isBold: true),
                     const Divider(height: 18),
-                    _infoRow('⏱️ Clock Drift Offset:', info.formattedOffset, const Color(0xFFD97706)),
+                    _infoRow('⏱️ Clock Drift Offset:', info.formattedOffset, SoftPalette.orange400),
                     const Divider(height: 18),
-                    _infoRow('🎯 Active Clinical Shift:', '${info.authoritativeSession.toUpperCase()} SHIFT', const Color(0xFF0F6C5A), isBold: true),
+                    _infoRow('🎯 Active Clinical Shift:', '${info.authoritativeSession.toUpperCase()} SHIFT', context.adapt(SoftPalette.teal600), isBold: true),
                   ],
                 ),
               ),
@@ -110,18 +113,18 @@ class _ClockSkewWarningBannerState extends State<ClockSkewWarningBanner> {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFEFF6FF),
+                  color: context.adapt(SoftPalette.slate100),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFFBFDBFE)),
+                  border: Border.all(color: context.adapt(SoftPalette.slate200)),
                 ),
-                child: const Row(
+                child: Row(
                   children: [
-                    Icon(Icons.lightbulb_outline_rounded, color: Color(0xFF2563EB), size: 20),
+                    Icon(Icons.lightbulb_outline_rounded, color: context.adapt(SoftPalette.blue550), size: 20),
                     SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         'Tip: Set your Windows Time to "Set time automatically" in Windows Settings so your PC clock stays accurate.',
-                        style: TextStyle(fontSize: 11.5, color: Color(0xFF1E40AF), fontWeight: FontWeight.w500),
+                        style: TextStyle(fontSize: 11.5, color: context.adapt(SoftPalette.blue600), fontWeight: FontWeight.w500),
                       ),
                     ),
                   ],
@@ -136,7 +139,7 @@ class _ClockSkewWarningBannerState extends State<ClockSkewWarningBanner> {
               Navigator.pop(ctx);
               setState(() => _dismissed = true);
             },
-            child: const Text('Dismiss', style: TextStyle(color: Color(0xFF64748B), fontWeight: FontWeight.w600)),
+            child: Text('Dismiss', style: TextStyle(color: context.adapt(SoftPalette.slate550), fontWeight: FontWeight.w600)),
           ),
           if (widget.branchId != null && widget.branchId!.isNotEmpty) ...[
             ElevatedButton.icon(
@@ -147,10 +150,10 @@ class _ClockSkewWarningBannerState extends State<ClockSkewWarningBanner> {
                 );
                 if (ctx.mounted) {
                   Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  AppToast.showSnackBar(context, 
                     SnackBar(
                       content: Text('✅ Successfully aligned $count token(s) into current active shift!'),
-                      backgroundColor: const Color(0xFF059669),
+                      backgroundColor: SoftPalette.emerald500,
                       duration: const Duration(seconds: 3),
                     ),
                   );
@@ -159,8 +162,8 @@ class _ClockSkewWarningBannerState extends State<ClockSkewWarningBanner> {
               icon: const Icon(Icons.auto_fix_high_rounded, size: 16),
               label: const Text('Realign Tokens to Active Shift'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF0F6C5A),
-                foregroundColor: Colors.white,
+                backgroundColor: SoftPalette.teal600,
+                foregroundColor: SoftPalette.gray50,
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
@@ -172,10 +175,10 @@ class _ClockSkewWarningBannerState extends State<ClockSkewWarningBanner> {
                 );
                 if (ctx.mounted) {
                   Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  AppToast.showSnackBar(context, 
                     SnackBar(
                       content: Text('🔄 Successfully restored $count token(s) back to original dates!'),
-                      backgroundColor: const Color(0xFF0284C7),
+                      backgroundColor: SoftPalette.sky500,
                       duration: const Duration(seconds: 4),
                     ),
                   );
@@ -184,7 +187,7 @@ class _ClockSkewWarningBannerState extends State<ClockSkewWarningBanner> {
               icon: const Icon(Icons.history_rounded, size: 16),
               label: const Text('Undo / Restore Original Dates'),
               style: TextButton.styleFrom(
-                foregroundColor: const Color(0xFFDC2626),
+                foregroundColor: SoftPalette.red500,
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
               ),
             ),
@@ -195,10 +198,10 @@ class _ClockSkewWarningBannerState extends State<ClockSkewWarningBanner> {
               if (ctx.mounted) {
                 Navigator.pop(ctx);
                 if (syncTime != null) {
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  AppToast.showSnackBar(context, 
                     SnackBar(
                       content: Text('🌐 Internet Date & Time synced: ${DateFormat('hh:mm:ss a (dd MMM yyyy)').format(syncTime)}'),
-                      backgroundColor: const Color(0xFF0F6C5A),
+                      backgroundColor: SoftPalette.teal600,
                     ),
                   );
                 } else {
@@ -208,8 +211,8 @@ class _ClockSkewWarningBannerState extends State<ClockSkewWarningBanner> {
             },
             icon: const Icon(Icons.sync_rounded, size: 16),
             style: OutlinedButton.styleFrom(
-              foregroundColor: const Color(0xFF0F6C5A),
-              side: const BorderSide(color: Color(0xFF0F6C5A)),
+              foregroundColor: context.adapt(SoftPalette.teal600),
+              side: BorderSide(color: context.adapt(SoftPalette.teal600)),
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
@@ -224,7 +227,7 @@ class _ClockSkewWarningBannerState extends State<ClockSkewWarningBanner> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF475569))),
+        Text(label, style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.slate600))),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
@@ -261,11 +264,11 @@ class _ClockSkewWarningBannerState extends State<ClockSkewWarningBanner> {
           margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
           decoration: BoxDecoration(
-            color: const Color(0xFFFFFBEB),
+            color: context.adapt(SoftPalette.yellow50m),
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: const Color(0xFFF59E0B), width: 1.2),
+            border: Border.all(color: context.adapt(SoftPalette.amber300), width: 1.2),
             boxShadow: const [
-              BoxShadow(color: Color(0x14D97706), blurRadius: 8, offset: Offset(0, 2)),
+              BoxShadow(color: SoftPalette.orange400A8, blurRadius: 8, offset: Offset(0, 2)),
             ],
           ),
           child: Row(
@@ -273,10 +276,10 @@ class _ClockSkewWarningBannerState extends State<ClockSkewWarningBanner> {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF59E0B).withValues(alpha: 0.15),
+                  color: context.adapt(SoftPalette.amber300).withValues(alpha: 0.15),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.access_time_filled_rounded, color: Color(0xFFD97706), size: 20),
+                child: Icon(Icons.access_time_filled_rounded, color: context.adapt(SoftPalette.orange400), size: 20),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -286,20 +289,20 @@ class _ClockSkewWarningBannerState extends State<ClockSkewWarningBanner> {
                   children: [
                     Row(
                       children: [
-                        const Text(
+                        Text(
                           'System Clock Drift Detected (Auto-Corrected)',
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF92400E)),
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: context.adapt(SoftPalette.orange600)),
                         ),
                         const SizedBox(width: 8),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF0F6C5A),
+                            color: SoftPalette.teal600,
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
                             '$shiftName SHIFT ACTIVE',
-                            style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                            style: const TextStyle(color: SoftPalette.gray50, fontSize: 10, fontWeight: FontWeight.bold),
                           ),
                         ),
                       ],
@@ -307,7 +310,7 @@ class _ClockSkewWarningBannerState extends State<ClockSkewWarningBanner> {
                     const SizedBox(height: 2),
                     Text(
                       'PC time is $localFmt (${info.formattedOffset}). App is automatically calibrated to true server time: $serverFmt.',
-                      style: TextStyle(fontSize: 12, color: Colors.amber.shade900),
+                      style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.orange350)),
                     ),
                   ],
                 ),
@@ -317,12 +320,12 @@ class _ClockSkewWarningBannerState extends State<ClockSkewWarningBanner> {
                 onPressed: () => _showDetailsDialog(context, info),
                 style: TextButton.styleFrom(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  foregroundColor: const Color(0xFF92400E),
+                  foregroundColor: context.adapt(SoftPalette.orange600),
                 ),
                 child: const Text('Details', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
               ),
               IconButton(
-                icon: const Icon(Icons.close, size: 16, color: Color(0xFFB45309)),
+                icon: Icon(Icons.close, size: 16, color: context.adapt(SoftPalette.orange500)),
                 onPressed: () => setState(() => _dismissed = true),
                 tooltip: 'Dismiss',
                 padding: EdgeInsets.zero,

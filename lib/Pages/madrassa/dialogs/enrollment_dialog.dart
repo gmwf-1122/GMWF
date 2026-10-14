@@ -1,5 +1,7 @@
 // Imports
 import 'dart:async';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -132,12 +134,12 @@ void showAddStudentDialog(
   final rollCtrl = TextEditingController(text: studentData?['rollNumber']);
   final studentCnicCtrl = TextEditingController(text: studentData?['studentCnic']);
   final initialPin = isEdit
-      ? (ZkTecoNetworkService.getCredentialByEntityId(studentId)?.biometricPin ?? studentData?['biometricPin']?.toString() ?? '')
+      ? (studentData?['biometricPin']?.toString() ?? studentData?['pin']?.toString() ?? ZkTecoNetworkService.getCredentialByEntityId(studentId)?.biometricPin ?? '')
       : '';
   final pinCtrl = TextEditingController(text: initialPin);
   final guardianNameCtrl = TextEditingController(text: studentData?['guardianName']);
   final guardianCnicCtrl = TextEditingController(text: studentData?['guardianCnic']);
-  final contactCtrl = TextEditingController(text: studentData?['contactPhone']);
+  final contactCtrl = TextEditingController(text: studentData?['contactPhone'] ?? studentData?['phone']);
   final gUsernameCtrl = TextEditingController();
   final gPassCtrl = TextEditingController();
   final prevMadrassaCtrl = TextEditingController(text: studentData?['prevMadrassaName']);
@@ -292,7 +294,7 @@ void showAddStudentDialog(
                     ),
                   ),
                   ListTile(
-                    leading: const Icon(Icons.camera_alt_outlined, color: Color(0xFF008080)),
+                    leading: Icon(Icons.camera_alt_outlined, color: ctx.adapt(SoftPalette.teal550)),
                     title: Text(
                       context.isUrdu ? 'کیمرہ سے تصویر لیں' : 'Take Photo with Camera',
                       style: context.urduStyle(),
@@ -300,7 +302,7 @@ void showAddStudentDialog(
                     onTap: () => Navigator.pop(ctx, ImageSource.camera),
                   ),
                   ListTile(
-                    leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF008080)),
+                    leading: Icon(Icons.photo_library_outlined, color: ctx.adapt(SoftPalette.teal550)),
                     title: Text(
                       context.isUrdu ? 'گیلری سے منتخب کریں' : 'Choose from Gallery',
                       style: context.urduStyle(),
@@ -399,8 +401,8 @@ void showAddStudentDialog(
         }
 
         final isDark = UserThemeService.isDarkMode(username);
-        final dialogBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-        final textPrimary = isDark ? Colors.white : const Color(0xFF1E293B);
+        final dialogBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+        final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.slate800;
 
         return AlertDialog(
           backgroundColor: dialogBg,
@@ -420,7 +422,7 @@ void showAddStudentDialog(
                     onTap: pickStudentImage,
                     child: CircleAvatar(
                       radius: 44,
-                      backgroundColor: const Color(0xFF008080).withValues(alpha: 0.08),
+                      backgroundColor: context.adapt(SoftPalette.teal550).withValues(alpha: 0.08),
                       child: (studentPhotoBase64 != null && studentPhotoBase64!.trim().isNotEmpty)
                           ? ClipOval(
                               child: studentPhotoBase64!.startsWith('http')
@@ -429,7 +431,7 @@ void showAddStudentDialog(
                                       width: 88,
                                       height: 88,
                                       fit: BoxFit.cover,
-                                      errorBuilder: (_, __, ___) => const Icon(Icons.camera_alt, size: 28, color: Color(0xFF008080)),
+                                      errorBuilder: (_, __, ___) => Icon(Icons.camera_alt, size: 28, color: context.adapt(SoftPalette.teal550)),
                                     )
                                   : (ImageUploadService.decodeBase64ToBytes(studentPhotoBase64) != null
                                       ? Image.memory(
@@ -437,19 +439,19 @@ void showAddStudentDialog(
                                           width: 88,
                                           height: 88,
                                           fit: BoxFit.cover,
-                                          errorBuilder: (_, __, ___) => const Icon(Icons.camera_alt, size: 28, color: Color(0xFF008080)),
+                                          errorBuilder: (_, __, ___) => Icon(Icons.camera_alt, size: 28, color: context.adapt(SoftPalette.teal550)),
                                         )
-                                      : const Icon(Icons.camera_alt, size: 28, color: Color(0xFF008080))),
+                                      : Icon(Icons.camera_alt, size: 28, color: context.adapt(SoftPalette.teal550))),
                             )
                           : Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                const Icon(Icons.camera_alt_outlined, size: 26, color: Color(0xFF008080)),
+                                Icon(Icons.camera_alt_outlined, size: 26, color: context.adapt(SoftPalette.teal550)),
                                 const SizedBox(height: 2),
                                 Text(
                                   context.isUrdu ? 'تصویر شامل کریں' : 'Add Photo',
                                   style: context.urduStyle(
-                                    style: const TextStyle(fontSize: 10, color: Color(0xFF008080), fontWeight: FontWeight.bold),
+                                    style: TextStyle(fontSize: 10, color: context.adapt(SoftPalette.teal550), fontWeight: FontWeight.bold),
                                   ),
                                 ),
                               ],
@@ -459,22 +461,22 @@ void showAddStudentDialog(
                 ),
                 const SizedBox(height: 16),
                 
-                sectionLabel(context.l.studentInformation),
+                sectionLabel(context.l.studentInformation, context),
                 const SizedBox(height: 10),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF008080).withValues(alpha: 0.08),
+                    color: context.adapt(SoftPalette.teal550).withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFF008080).withValues(alpha: 0.25)),
+                    border: Border.all(color: context.adapt(SoftPalette.teal550).withValues(alpha: 0.25)),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.location_on_rounded, color: Color(0xFF008080), size: 18),
+                      Icon(Icons.location_on_rounded, color: context.adapt(SoftPalette.teal550), size: 18),
                       const SizedBox(width: 8),
                       Text(
                         '${context.isUrdu ? 'کیمپس / برانچ: ' : 'Target Branch: '} ${effectiveBranch.toUpperCase()}',
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF008080)),
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.teal550)),
                       ),
                     ],
                   ),
@@ -484,13 +486,13 @@ void showAddStudentDialog(
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                      color: context.adapt(SoftPalette.teal500).withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFF0D9488).withValues(alpha: 0.3)),
+                      border: Border.all(color: context.adapt(SoftPalette.teal500).withValues(alpha: 0.3)),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.menu_book_rounded, color: Color(0xFF0D9488), size: 18),
+                        Icon(Icons.menu_book_rounded, color: context.adapt(SoftPalette.teal500), size: 18),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -498,7 +500,7 @@ void showAddStudentDialog(
                                 ? 'صرف ناظرہ سسٹم: اس شاخ میں صرف حاضری اور سبق ریکارڈ ہوگا۔ فیس، یونیفارم اور سبقی/منزل غیر فعال ہیں۔'
                                 : 'Only Nazra System: Attendance and Sabak are tracked. Fees, Uniform, and Sabqi/Manzil are disabled.',
                             style: context.urduStyle(
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0D9488)),
+                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.teal500)),
                             ),
                           ),
                         ),
@@ -510,13 +512,13 @@ void showAddStudentDialog(
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0F766E).withValues(alpha: 0.08),
+                      color: context.adapt(SoftPalette.teal550).withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFF0F766E).withValues(alpha: 0.25)),
+                      border: Border.all(color: context.adapt(SoftPalette.teal550).withValues(alpha: 0.25)),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.auto_stories_rounded, color: Color(0xFF0F766E), size: 18),
+                        Icon(Icons.auto_stories_rounded, color: context.adapt(SoftPalette.teal550), size: 18),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -524,7 +526,7 @@ void showAddStudentDialog(
                                 ? 'مشترکہ کیمپس: اس شاخ میں حفظ اور ناظرہ دونوں موجود ہیں۔ نیچے طالب علم کی کلاس منتخب کریں۔'
                                 : 'Dual Program Campus: This branch offers both Hifz and Nazra. Select the student\'s program below.',
                             style: context.urduStyle(
-                              style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
+                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.teal550)),
                             ),
                           ),
                         ),
@@ -540,7 +542,7 @@ void showAddStudentDialog(
                     Text(
                       context.isUrdu ? 'کلاس / پروگرام کی قسم (Program)' : 'Enrolled Program / Class',
                       style: context.urduStyle(
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF475569)),
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate600)),
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -549,18 +551,18 @@ void showAddStudentDialog(
                         width: double.infinity,
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                          color: context.adapt(SoftPalette.teal500).withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: const Color(0xFF0D9488).withValues(alpha: 0.3)),
+                          border: Border.all(color: context.adapt(SoftPalette.teal500).withValues(alpha: 0.3)),
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.menu_book_rounded, color: Color(0xFF0D9488), size: 18),
+                            Icon(Icons.menu_book_rounded, color: context.adapt(SoftPalette.teal500), size: 18),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 context.isUrdu ? 'صرف ناظرہ سسٹم (اس برانچ میں تمام طلبہ ناظرہ پڑھتے ہیں)' : 'Only Nazra System (Branch locked to Nazra only)',
-                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0F766E)),
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.teal550)),
                               ),
                             ),
                           ],
@@ -571,18 +573,18 @@ void showAddStudentDialog(
                         width: double.infinity,
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF7C3AED).withValues(alpha: 0.1),
+                          color: context.adapt(SoftPalette.violet550).withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: const Color(0xFF7C3AED).withValues(alpha: 0.3)),
+                          border: Border.all(color: context.adapt(SoftPalette.violet550).withValues(alpha: 0.3)),
                         ),
                         child: Row(
                           children: [
-                            const Icon(Icons.mosque_rounded, color: Color(0xFF7C3AED), size: 18),
+                            Icon(Icons.mosque_rounded, color: context.adapt(SoftPalette.violet550), size: 18),
                             const SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 context.isUrdu ? 'صرف حفظ سسٹم (اس برانچ میں تمام طلبہ حفظ قرآن پڑھتے ہیں)' : 'Only Hifz System (Branch locked to Hifz only)',
-                                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF7C3AED)),
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.violet550)),
                               ),
                             ),
                           ],
@@ -601,10 +603,10 @@ void showAddStudentDialog(
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 8),
                                     decoration: BoxDecoration(
-                                      color: selectedProgram == 'nazra' ? const Color(0xFF0D9488).withValues(alpha: 0.12) : Colors.transparent,
+                                      color: selectedProgram == 'nazra' ? context.adapt(SoftPalette.teal500).withValues(alpha: 0.12) : Colors.transparent,
                                       borderRadius: BorderRadius.circular(10),
                                       border: Border.all(
-                                        color: selectedProgram == 'nazra' ? const Color(0xFF0D9488) : Colors.grey.shade300,
+                                        color: selectedProgram == 'nazra' ? context.adapt(SoftPalette.teal500) : context.adapt(SoftPalette.gray150),
                                         width: selectedProgram == 'nazra' ? 1.8 : 1,
                                       ),
                                     ),
@@ -614,7 +616,7 @@ void showAddStudentDialog(
                                         Icon(
                                           selectedProgram == 'nazra' ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
                                           size: 16,
-                                          color: selectedProgram == 'nazra' ? const Color(0xFF0D9488) : Colors.grey,
+                                          color: selectedProgram == 'nazra' ? context.adapt(SoftPalette.teal500) : context.adapt(SoftPalette.gray350),
                                         ),
                                         const SizedBox(width: 6),
                                         Text(
@@ -622,7 +624,7 @@ void showAddStudentDialog(
                                           style: TextStyle(
                                             fontSize: 12.5,
                                             fontWeight: FontWeight.bold,
-                                            color: selectedProgram == 'nazra' ? const Color(0xFF0D9488) : Colors.black87,
+                                            color: selectedProgram == 'nazra' ? context.adapt(SoftPalette.teal500) : context.adapt(SoftPalette.gray900A87),
                                           ),
                                         ),
                                       ],
@@ -638,10 +640,10 @@ void showAddStudentDialog(
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 8),
                                     decoration: BoxDecoration(
-                                      color: selectedProgram == 'hifz' ? const Color(0xFF7C3AED).withValues(alpha: 0.12) : Colors.transparent,
+                                      color: selectedProgram == 'hifz' ? context.adapt(SoftPalette.violet550).withValues(alpha: 0.12) : Colors.transparent,
                                       borderRadius: BorderRadius.circular(10),
                                       border: Border.all(
-                                        color: selectedProgram == 'hifz' ? const Color(0xFF7C3AED) : Colors.grey.shade300,
+                                        color: selectedProgram == 'hifz' ? context.adapt(SoftPalette.violet550) : context.adapt(SoftPalette.gray150),
                                         width: selectedProgram == 'hifz' ? 1.8 : 1,
                                       ),
                                     ),
@@ -651,7 +653,7 @@ void showAddStudentDialog(
                                         Icon(
                                           selectedProgram == 'hifz' ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
                                           size: 16,
-                                          color: selectedProgram == 'hifz' ? const Color(0xFF7C3AED) : Colors.grey,
+                                          color: selectedProgram == 'hifz' ? context.adapt(SoftPalette.violet550) : context.adapt(SoftPalette.gray350),
                                         ),
                                         const SizedBox(width: 6),
                                         Text(
@@ -659,7 +661,7 @@ void showAddStudentDialog(
                                           style: TextStyle(
                                             fontSize: 12.5,
                                             fontWeight: FontWeight.bold,
-                                            color: selectedProgram == 'hifz' ? const Color(0xFF7C3AED) : Colors.black87,
+                                            color: selectedProgram == 'hifz' ? context.adapt(SoftPalette.violet550) : context.adapt(SoftPalette.gray900A87),
                                           ),
                                         ),
                                       ],
@@ -674,7 +676,7 @@ void showAddStudentDialog(
                             context.isUrdu
                                 ? 'یہ شاخ ناظرہ اور حفظ دونوں پیش کرتی ہے۔ طالب علم کا متعلقہ پروگرام منتخب کریں۔'
                                 : 'This branch offers both programs. Select where this student fits in.',
-                            style: const TextStyle(fontSize: 10.5, color: Color(0xFF64748B)),
+                            style: TextStyle(fontSize: 10.5, color: context.adapt(SoftPalette.slate550)),
                           ),
                         ],
                       ),
@@ -690,7 +692,7 @@ void showAddStudentDialog(
                         Text(
                           context.isUrdu ? 'طالب علم کی جنس (Gender)' : 'Student Gender',
                           style: context.urduStyle(
-                            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF475569)),
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate600)),
                           ),
                         ),
                         if (selectedProgram == 'nazra') ...[
@@ -698,12 +700,12 @@ void showAddStudentDialog(
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF0D9488).withValues(alpha: 0.12),
+                              color: context.adapt(SoftPalette.teal500).withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(4),
                             ),
-                            child: const Text(
+                            child: Text(
                               'NAZRA ENROLLMENT',
-                              style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF0D9488)),
+                              style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.teal500)),
                             ),
                           ),
                         ],
@@ -719,10 +721,10 @@ void showAddStudentDialog(
                             child: Container(
                               padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 8),
                               decoration: BoxDecoration(
-                                color: gender == 'male' ? const Color(0xFF0284C7).withValues(alpha: 0.12) : Colors.transparent,
+                                color: gender == 'male' ? context.adapt(SoftPalette.sky500).withValues(alpha: 0.12) : Colors.transparent,
                                 borderRadius: BorderRadius.circular(10),
                                 border: Border.all(
-                                  color: gender == 'male' ? const Color(0xFF0284C7) : Colors.grey.shade300,
+                                  color: gender == 'male' ? context.adapt(SoftPalette.sky500) : context.adapt(SoftPalette.gray150),
                                   width: gender == 'male' ? 1.8 : 1,
                                 ),
                               ),
@@ -732,7 +734,7 @@ void showAddStudentDialog(
                                   Icon(
                                     gender == 'male' ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
                                     size: 16,
-                                    color: gender == 'male' ? const Color(0xFF0284C7) : Colors.grey,
+                                    color: gender == 'male' ? context.adapt(SoftPalette.sky500) : context.adapt(SoftPalette.gray350),
                                   ),
                                   const SizedBox(width: 6),
                                   Text(
@@ -740,7 +742,7 @@ void showAddStudentDialog(
                                     style: TextStyle(
                                       fontSize: 12.5,
                                       fontWeight: FontWeight.bold,
-                                      color: gender == 'male' ? const Color(0xFF0284C7) : Colors.black87,
+                                      color: gender == 'male' ? context.adapt(SoftPalette.sky500) : context.adapt(SoftPalette.gray900A87),
                                     ),
                                   ),
                                 ],
@@ -756,10 +758,10 @@ void showAddStudentDialog(
                             child: Container(
                               padding: const EdgeInsets.symmetric(vertical: 9, horizontal: 8),
                               decoration: BoxDecoration(
-                                color: gender == 'female' ? const Color(0xFFEC4899).withValues(alpha: 0.12) : Colors.transparent,
+                                color: gender == 'female' ? context.adapt(SoftPalette.pink400).withValues(alpha: 0.12) : Colors.transparent,
                                 borderRadius: BorderRadius.circular(10),
                                 border: Border.all(
-                                  color: gender == 'female' ? const Color(0xFFEC4899) : Colors.grey.shade300,
+                                  color: gender == 'female' ? context.adapt(SoftPalette.pink400) : context.adapt(SoftPalette.gray150),
                                   width: gender == 'female' ? 1.8 : 1,
                                 ),
                               ),
@@ -769,7 +771,7 @@ void showAddStudentDialog(
                                   Icon(
                                     gender == 'female' ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
                                     size: 16,
-                                    color: gender == 'female' ? const Color(0xFFEC4899) : Colors.grey,
+                                    color: gender == 'female' ? context.adapt(SoftPalette.pink400) : context.adapt(SoftPalette.gray350),
                                   ),
                                   const SizedBox(width: 6),
                                   Text(
@@ -777,7 +779,7 @@ void showAddStudentDialog(
                                     style: TextStyle(
                                       fontSize: 12.5,
                                       fontWeight: FontWeight.bold,
-                                      color: gender == 'female' ? const Color(0xFFEC4899) : Colors.black87,
+                                      color: gender == 'female' ? context.adapt(SoftPalette.pink400) : context.adapt(SoftPalette.gray900A87),
                                     ),
                                   ),
                                 ],
@@ -797,7 +799,7 @@ void showAddStudentDialog(
                     Text(
                       context.isUrdu ? 'شفٹ / سیشن کے اوقات (Shift)' : 'Class Session / Shift',
                       style: context.urduStyle(
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF475569)),
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate600)),
                       ),
                     ),
                     const SizedBox(height: 6),
@@ -815,20 +817,20 @@ void showAddStudentDialog(
                                 ? (context.isUrdu ? 'شام کا سیشن' : 'Evening Shift')
                                 : (context.isUrdu ? 'رات کا سیشن' : 'Night Shift'));
                         final color = s == 'morning'
-                            ? const Color(0xFFF59E0B)
-                            : (s == 'evening' ? const Color(0xFFEA580C) : const Color(0xFF6366F1));
+                            ? SoftPalette.amber300
+                            : (s == 'evening' ? SoftPalette.orange400 : SoftPalette.indigo500);
 
                         return ChoiceChip(
                           selected: isSelected,
-                          avatar: Icon(icon, size: 14, color: isSelected ? Colors.white : color),
+                          avatar: Icon(icon, size: 14, color: isSelected ? SoftPalette.gray50 : color),
                           label: Text(label),
                           labelStyle: TextStyle(
                             fontSize: 11.5,
                             fontWeight: FontWeight.bold,
-                            color: isSelected ? Colors.white : Colors.black87,
+                            color: isSelected ? SoftPalette.gray50 : context.adapt(SoftPalette.gray900A87),
                           ),
                           selectedColor: color,
-                          backgroundColor: Colors.grey.shade100,
+                          backgroundColor: context.adapt(SoftPalette.gray100),
                           onSelected: (val) {
                             if (val) setDs(() => selectedSession = s);
                           },
@@ -909,18 +911,18 @@ void showAddStudentDialog(
                   const SizedBox(height: 12),
                   Container(
                     decoration: BoxDecoration(
-                      color: qaidaCompleted ? const Color(0xFF10B981).withValues(alpha: 0.08) : Colors.transparent,
+                      color: qaidaCompleted ? context.adapt(SoftPalette.emerald350).withValues(alpha: 0.08) : Colors.transparent,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: qaidaCompleted ? const Color(0xFF10B981).withValues(alpha: 0.3) : Colors.grey.shade300),
+                      border: Border.all(color: qaidaCompleted ? context.adapt(SoftPalette.emerald350).withValues(alpha: 0.3) : context.adapt(SoftPalette.gray150)),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         SwitchListTile(
-                          activeColor: const Color(0xFF10B981),
+                          activeColor: context.adapt(SoftPalette.emerald350),
                           secondary: Icon(
                             qaidaCompleted ? Icons.check_circle_rounded : Icons.menu_book_rounded,
-                            color: qaidaCompleted ? const Color(0xFF10B981) : Colors.grey,
+                            color: qaidaCompleted ? context.adapt(SoftPalette.emerald350) : context.adapt(SoftPalette.gray350),
                           ),
                           title: Text(
                             context.isUrdu ? 'قاعدہ مکمل ہو چکا ہے؟' : 'Qaida Completed?',
@@ -928,7 +930,7 @@ void showAddStudentDialog(
                           ),
                           subtitle: Text(
                             context.isUrdu ? 'اگر طالب علم نے نورانی قاعدہ مکمل کر لیا ہے تو اسے آن کریں۔' : 'Enable if student has already completed Noorani Qaida.',
-                            style: const TextStyle(fontSize: 11, color: Colors.grey),
+                            style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.gray350)),
                           ),
                           value: qaidaCompleted,
                           onChanged: (v) => setDs(() => qaidaCompleted = v),
@@ -945,12 +947,12 @@ void showAddStudentDialog(
                                     children: [
                                       Text(
                                         context.isUrdu ? 'موجودہ قاعدہ سبق / تختی:' : 'Current Qaida Lesson:',
-                                        style: context.urduStyle(style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0F766E))),
+                                        style: context.urduStyle(style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.teal550))),
                                       ),
                                       const SizedBox(height: 2),
                                       Text(
                                         context.isUrdu ? 'تختی نمبر ۱ تا ۲۱ منتخب کریں' : 'Lesson 1 to 21',
-                                        style: const TextStyle(fontSize: 11, color: Colors.grey),
+                                        style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.gray350)),
                                       ),
                                     ],
                                   ),
@@ -958,9 +960,9 @@ void showAddStudentDialog(
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 10),
                                   decoration: BoxDecoration(
-                                    border: Border.all(color: const Color(0xFF0D9488).withValues(alpha: 0.4)),
+                                    border: Border.all(color: context.adapt(SoftPalette.teal500).withValues(alpha: 0.4)),
                                     borderRadius: BorderRadius.circular(8),
-                                    color: Colors.white,
+                                    color: context.adapt(SoftPalette.gray50),
                                   ),
                                   child: DropdownButtonHideUnderline(
                                     child: DropdownButton<String>(
@@ -1007,11 +1009,11 @@ void showAddStudentDialog(
                   ],
                 ],
                 const SizedBox(height: 20),
-                sectionLabel(context.l.guardianInformation),
+                sectionLabel(context.l.guardianInformation, context),
                 const SizedBox(height: 4),
                 Text(
                   context.t('Optional — leave blank if not applicable'),
-                  style: const TextStyle(fontSize: 11, color: Colors.grey, fontStyle: FontStyle.italic),
+                  style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.gray350), fontStyle: FontStyle.italic),
                 ),
                 const SizedBox(height: 10),
                 
@@ -1126,12 +1128,12 @@ void showAddStudentDialog(
                     padding: const EdgeInsets.only(top: 8),
                     child: Row(
                       children: [
-                        const Icon(Icons.check_circle, color: Colors.green, size: 16),
+                        Icon(Icons.check_circle, color: context.adapt(SoftPalette.green400), size: 16),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             'Existing Guardian Found: ${foundGuardian!['name']} (fields below are editable)',
-                            style: const TextStyle(color: Colors.green, fontSize: 12, fontWeight: FontWeight.bold),
+                            style: TextStyle(color: context.adapt(SoftPalette.green400), fontSize: 12, fontWeight: FontWeight.bold),
                           ),
                         ),
                       ],
@@ -1163,7 +1165,7 @@ void showAddStudentDialog(
                 ),
                 
                 const SizedBox(height: 16),
-                sectionLabel('Student & Guardian Documents'),
+                sectionLabel('Student & Guardian Documents', context),
                 const SizedBox(height: 10),
                 MediaUploadTile(
                   label: 'Guardian CNIC Document',
@@ -1197,21 +1199,21 @@ void showAddStudentDialog(
                     width: double.infinity,
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.green.shade50,
+                      color: context.adapt(SoftPalette.green100m),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.green.shade200),
+                      border: Border.all(color: context.adapt(SoftPalette.green300)),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
                           children: [
-                            Icon(Icons.check_circle_rounded, color: Colors.green.shade700, size: 20),
+                            Icon(Icons.check_circle_rounded, color: context.adapt(SoftPalette.green500), size: 20),
                             const SizedBox(width: 8),
                             Text(
                               context.t('Parent Account Exists & Linked (via CNIC)'),
                               style: TextStyle(
-                                color: Colors.green.shade800,
+                                color: context.adapt(SoftPalette.green550),
                                 fontWeight: FontWeight.bold,
                                 fontSize: 13,
                               ),
@@ -1221,13 +1223,13 @@ void showAddStudentDialog(
                         const SizedBox(height: 6),
                         Text(
                           '${context.t('Username')}: ${foundGuardian!['username']}',
-                          style: TextStyle(color: Colors.green.shade900, fontSize: 12, fontWeight: FontWeight.w600),
+                          style: TextStyle(color: context.adapt(SoftPalette.green600), fontSize: 12, fontWeight: FontWeight.w600),
                         ),
                       ],
                     ),
                   ),
                   const SizedBox(height: 12),
-                  sectionLabel('Parent Account Details'),
+                  sectionLabel('Parent Account Details', context),
                   const SizedBox(height: 10),
                   buildTf(
                     gUsernameCtrl,
@@ -1261,7 +1263,7 @@ void showAddStudentDialog(
                     ),
                     subtitle: Text(
                       context.t('Warning: Overriding will update login credentials for all children linked to this parent.'),
-                      style: TextStyle(fontSize: 11, color: Colors.red.shade700),
+                      style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.red500)),
                     ),
                     value: overrideGuardianCredentials,
                     onChanged: (v) => setDs(() => overrideGuardianCredentials = v ?? false),
@@ -1273,7 +1275,7 @@ void showAddStudentDialog(
                     title: Text(context.l.createLinkAccount, style: context.urduStyle(style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold))),
                     subtitle: Text(context.l.createLinkSubtitle, style: const TextStyle(fontSize: 11)),
                     value: linkAccount,
-                    activeThumbColor: const Color(0xFF4F46E5),
+                    activeThumbColor: context.adapt(SoftPalette.indigo550),
                     onChanged: (v) => setDs(() => linkAccount = v),
                   ),
                   if (linkAccount) ...[
@@ -1302,22 +1304,22 @@ void showAddStudentDialog(
                         width: double.infinity,
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: Colors.amber.shade50,
+                          color: context.adapt(SoftPalette.yellow50),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.amber.shade200),
+                          border: Border.all(color: context.adapt(SoftPalette.yellow150)),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Row(
                               children: [
-                                Icon(Icons.warning_amber_rounded, color: Colors.amber.shade800, size: 20),
+                                Icon(Icons.warning_amber_rounded, color: context.adapt(SoftPalette.orange350), size: 20),
                                 const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
                                     context.t('Account Exists: Username registered to ${usernameMatchedGuardian!['name']}.'),
                                     style: TextStyle(
-                                      color: Colors.amber.shade900,
+                                      color: context.adapt(SoftPalette.orange350),
                                       fontWeight: FontWeight.bold,
                                       fontSize: 12,
                                     ),
@@ -1328,7 +1330,7 @@ void showAddStudentDialog(
                             const SizedBox(height: 4),
                             Text(
                               context.t('Enrolling will automatically link this student to their existing family portal.'),
-                              style: TextStyle(color: Colors.amber.shade800, fontSize: 11),
+                              style: TextStyle(color: context.adapt(SoftPalette.orange350), fontSize: 11),
                             ),
                           ],
                         ),
@@ -1337,11 +1339,11 @@ void showAddStudentDialog(
                       const SizedBox(height: 6),
                       Row(
                         children: [
-                          const Icon(Icons.check_circle, color: Colors.green, size: 16),
+                          Icon(Icons.check_circle, color: context.adapt(SoftPalette.green400), size: 16),
                           const SizedBox(width: 6),
                           Text(
                             context.t('New Parent Account will be created'),
-                            style: const TextStyle(color: Colors.green, fontSize: 11, fontWeight: FontWeight.bold),
+                            style: TextStyle(color: context.adapt(SoftPalette.green400), fontSize: 11, fontWeight: FontWeight.bold),
                           ),
                         ],
                       ),
@@ -1512,16 +1514,16 @@ void showAddStudentDialog(
                       unawaited(SyncService().triggerUpload());
 
                       try {
-                        await FirebaseFirestore.instance
+                        unawaited(FirebaseFirestore.instance
                             .collection('users')
                             .doc(gUid)
-                            .set(gUpdates, SetOptions(merge: true));
-                        await FirebaseFirestore.instance
+                            .set(gUpdates, SetOptions(merge: true)).catchError((_) {}));
+                        unawaited(FirebaseFirestore.instance
                             .collection('branches')
                             .doc(effectiveBranch)
                             .collection('users')
                             .doc(gUid)
-                            .set(gUpdates, SetOptions(merge: true));
+                            .set(gUpdates, SetOptions(merge: true)).catchError((_) {}));
                       } catch (_) {}
                     } else if (usernameMatchedGuardian != null) {
                       gUid = usernameMatchedGuardian!['uid'];
@@ -1560,16 +1562,16 @@ void showAddStudentDialog(
                       unawaited(SyncService().triggerUpload());
 
                       try {
-                        await FirebaseFirestore.instance
+                        unawaited(FirebaseFirestore.instance
                             .collection('users')
                             .doc(gUid)
-                            .set(gUpdates, SetOptions(merge: true));
-                        await FirebaseFirestore.instance
+                            .set(gUpdates, SetOptions(merge: true)).catchError((_) {}));
+                        unawaited(FirebaseFirestore.instance
                             .collection('branches')
                             .doc(effectiveBranch)
                             .collection('users')
                             .doc(gUid)
-                            .set(gUpdates, SetOptions(merge: true));
+                            .set(gUpdates, SetOptions(merge: true)).catchError((_) {}));
                       } catch (_) {}
                     } else if (linkAccount) {
                       final usernameInput = gUsernameCtrl.text.trim().toLowerCase();
@@ -1650,16 +1652,16 @@ void showAddStudentDialog(
                       unawaited(SyncService().triggerUpload(force: true));
 
                       try {
-                        await FirebaseFirestore.instance
+                        unawaited(FirebaseFirestore.instance
                             .collection('users')
                             .doc(gUid)
-                            .set(gUpdates, SetOptions(merge: true));
-                        await FirebaseFirestore.instance
+                            .set(gUpdates, SetOptions(merge: true)).catchError((_) {}));
+                        unawaited(FirebaseFirestore.instance
                             .collection('branches')
                             .doc(effectiveBranch)
                             .collection('users')
                             .doc(gUid)
-                            .set(gUpdates, SetOptions(merge: true));
+                            .set(gUpdates, SetOptions(merge: true)).catchError((_) {}));
                       } catch (_) {}
                     }
                   }
@@ -1709,6 +1711,7 @@ void showAddStudentDialog(
                     branchId: effectiveBranch,
                     studentId: isEdit ? studentId : '',
                     data: {
+                      if (studentData != null) ...studentData,
                       ...finalData,
                       'branchId': effectiveBranch,
                       'status': studentData?['status'] ?? 'active',
@@ -1792,20 +1795,20 @@ void showAddStudentDialog(
                             unawaited(SyncService().triggerUpload());
 
                             try {
-                              await FirebaseFirestore.instance
+                              unawaited(FirebaseFirestore.instance
                                   .collection('users')
                                   .doc(gUid)
                                   .set({
                                     'studentIds': studentIds,
                                     'branchId': effectiveBranch,
                                     'role': 'Madrassa Guardian',
-                                  }, SetOptions(merge: true));
-                              await FirebaseFirestore.instance
+                                  }, SetOptions(merge: true)).catchError((_) {}));
+                              unawaited(FirebaseFirestore.instance
                                   .collection('branches')
                                   .doc(effectiveBranch)
                                   .collection('users')
                                   .doc(gUid)
-                                  .set(map, SetOptions(merge: true));
+                                  .set(map, SetOptions(merge: true)).catchError((_) {}));
                             } catch (_) {}
                             break;
                           }
@@ -1843,15 +1846,15 @@ void showAddStudentDialog(
                 }
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF4F46E5),
-                foregroundColor: Colors.white,
+                backgroundColor: SoftPalette.indigo550,
+                foregroundColor: SoftPalette.gray50,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
               child: isSaving
-                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50))
                   : Text(
                       isEdit ? context.l.save : context.l.enrollAndLink,
-                      style: context.urduStyle(style: const TextStyle(color: Colors.white)),
+                      style: context.urduStyle(style: const TextStyle(color: SoftPalette.gray50)),
                     ),
             ),
           ],

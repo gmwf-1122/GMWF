@@ -1,6 +1,7 @@
 // lib/pages/office/attendance_tab.dart
 
 import 'dart:async';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
@@ -131,19 +132,19 @@ class _AttendanceTabState extends State<AttendanceTab> {
             ? RoleThemeData(
                 roleLabel: tOriginal.roleLabel,
                 isDarkCanvas: true,
-                bg: const Color(0xFF0F172A),
-                bgCard: const Color(0xFF1E293B),
-                bgCardAlt: const Color(0xFF162032),
-                bgRule: const Color(0xFF334155),
-                accent: const Color(0xFF10B981),
-                accentLight: const Color(0xFF34D399),
-                accentMuted: const Color(0xFF064E3B).withValues(alpha: 0.3),
-                accentGradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
-                glassTint: const Color(0x1A10B981),
-                textPrimary: const Color(0xFFF8FAFC),
-                textSecondary: const Color(0xFF94A3B8),
-                textTertiary: const Color(0xFF64748B),
-                danger: const Color(0xFFEF4444),
+                bg: SoftPalette.slate900,
+                bgCard: SoftPalette.slate800,
+                bgCardAlt: SoftPalette.slate900,
+                bgRule: SoftPalette.slate700,
+                accent: SoftPalette.emerald350,
+                accentLight: SoftPalette.emerald300,
+                accentMuted: SoftPalette.emerald700.withValues(alpha: 0.3),
+                accentGradient: const LinearGradient(colors: [SoftPalette.emerald350, SoftPalette.emerald500]),
+                glassTint: SoftPalette.emerald350A10,
+                textPrimary: SoftPalette.gray50,
+                textSecondary: SoftPalette.slate350,
+                textTertiary: SoftPalette.slate550,
+                danger: SoftPalette.red400,
                 zakat: tOriginal.zakat,
                 nonZakat: tOriginal.nonZakat,
                 gmwf: tOriginal.gmwf,
@@ -158,19 +159,19 @@ class _AttendanceTabState extends State<AttendanceTab> {
             : RoleThemeData(
                 roleLabel: tOriginal.roleLabel,
                 isDarkCanvas: false,
-                bg: const Color(0xFFFBFDFF),
-                bgCard: Colors.white,
-                bgCardAlt: const Color(0xFFF6F9F8),
-                bgRule: const Color(0xFFF1F5F9),
-                accent: const Color(0xFF0F9A7A),
-                accentLight: const Color(0xFF4CB79A),
-                accentMuted: const Color(0xFFE8F6F0),
-                accentGradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
-                glassTint: const Color(0x1A10B981),
-                textPrimary: const Color(0xFF111827),
-                textSecondary: const Color(0xFF6B7280),
-                textTertiary: const Color(0xFF9CA3AF),
-                danger: const Color(0xFFEF4444),
+                bg: SoftPalette.gray50,
+                bgCard: SoftPalette.gray50,
+                bgCardAlt: SoftPalette.gray50,
+                bgRule: SoftPalette.slate100,
+                accent: SoftPalette.emerald500,
+                accentLight: SoftPalette.emerald350,
+                accentMuted: SoftPalette.emerald100m,
+                accentGradient: const LinearGradient(colors: [SoftPalette.emerald350, SoftPalette.emerald500]),
+                glassTint: SoftPalette.emerald350A10,
+                textPrimary: SoftPalette.slate900,
+                textSecondary: SoftPalette.slate550,
+                textTertiary: SoftPalette.slate350,
+                danger: SoftPalette.red400,
                 zakat: tOriginal.zakat,
                 nonZakat: tOriginal.nonZakat,
                 gmwf: tOriginal.gmwf,
@@ -266,7 +267,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
                             onPressed: widget.onAddEmployee,
                             style: ElevatedButton.styleFrom(
                               backgroundColor: t.accent,
-                              foregroundColor: Colors.white,
+                              foregroundColor: SoftPalette.gray50,
                               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                             ),
@@ -489,22 +490,22 @@ class _AttendanceTabState extends State<AttendanceTab> {
                               children: [
                                 Container(
                                   padding: const EdgeInsets.all(14),
-                                  decoration: const BoxDecoration(color: Color(0xFFF1F5F9), shape: BoxShape.circle),
-                                  child: const Icon(Icons.search_off_rounded, size: 36, color: Color(0xFF64748B)),
+                                  decoration: BoxDecoration(color: context.adapt(SoftPalette.slate100), shape: BoxShape.circle),
+                                  child: Icon(Icons.search_off_rounded, size: 36, color: context.adapt(SoftPalette.slate550)),
                                 ),
                                 const SizedBox(height: 12),
                                 Text(
                                   _searchQuery.isNotEmpty
                                       ? 'No staff found matching "$_searchQuery"'
                                       : 'No employees found with status "${_statusFilter.toUpperCase()}"',
-                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+                                  style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate800)),
                                 ),
                                 const SizedBox(height: 6),
                                 Text(
                                   _searchQuery.isNotEmpty
                                       ? 'Check spelling or search by PIN number, role, or department.'
                                       : 'Try selecting a different status filter.',
-                                  style: const TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                                  style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.slate550)),
                                 ),
                                 const SizedBox(height: 14),
                                 OutlinedButton.icon(
@@ -518,8 +519,8 @@ class _AttendanceTabState extends State<AttendanceTab> {
                                   icon: const Icon(Icons.clear_all_rounded, size: 15),
                                   label: const Text('Reset All Filters'),
                                   style: OutlinedButton.styleFrom(
-                                    foregroundColor: const Color(0xFF0F766E),
-                                    side: const BorderSide(color: Color(0xFF0F766E)),
+                                    foregroundColor: SoftPalette.teal550,
+                                    side: const BorderSide(color: SoftPalette.teal550),
                                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                   ),
                                 ),
@@ -644,20 +645,20 @@ class _AttendanceTabState extends State<AttendanceTab> {
           margin: const EdgeInsets.fromLTRB(14, 10, 14, 4),
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: const Color(0xFFFFFBEB), // Calm soft amber
+            color: context.adapt(SoftPalette.yellow50m), // Calm soft amber
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: const Color(0xFFFDE68A), width: 1),
+            border: Border.all(color: context.adapt(SoftPalette.yellow150), width: 1),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
-                  const Icon(Icons.info_outline_rounded, color: Color(0xFFD97706), size: 18),
+                  const Icon(Icons.info_outline_rounded, color: SoftPalette.orange400, size: 18),
                   const SizedBox(width: 8),
                   Text(
                     'Cross-Branch Punch Approvals (${pendingList.length} Pending HQ Decision)',
-                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFF92400E)),
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.orange600)),
                   ),
                 ],
               ),
@@ -675,16 +676,16 @@ class _AttendanceTabState extends State<AttendanceTab> {
                   margin: const EdgeInsets.only(bottom: 6),
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: context.adapt(SoftPalette.gray50),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFFFDE68A)),
+                    border: Border.all(color: context.adapt(SoftPalette.yellow150)),
                   ),
                   child: Row(
                     children: [
                       Expanded(
                         child: Text(
                           '$name ($empBranch) punched at $punchBranch @ $timeStr',
-                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF1E293B)),
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.slate800)),
                         ),
                       ),
                       const SizedBox(width: 8),
@@ -695,18 +696,18 @@ class _AttendanceTabState extends State<AttendanceTab> {
                             reviewerName: 'HQ Manager',
                           );
                           if (context.mounted && ok) {
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            AppToast.showSnackBar(context, 
                               SnackBar(
                                 content: Text('✅ Approved $name (Marked Present)'),
-                                backgroundColor: const Color(0xFF0F766E),
+                                backgroundColor: SoftPalette.teal550,
                               ),
                             );
                             setState(() {});
                           }
                         },
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF0F766E),
-                          foregroundColor: Colors.white,
+                          backgroundColor: SoftPalette.teal550,
+                          foregroundColor: SoftPalette.gray50,
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                           textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
@@ -722,18 +723,18 @@ class _AttendanceTabState extends State<AttendanceTab> {
                             reviewerName: 'HQ Manager',
                           );
                           if (context.mounted && ok) {
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            AppToast.showSnackBar(context, 
                               SnackBar(
                                 content: Text('❌ Rejected $name (Kept Absent)'),
-                                backgroundColor: const Color(0xFFEF4444),
+                                backgroundColor: SoftPalette.red400,
                               ),
                             );
                             setState(() {});
                           }
                         },
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFFEF4444),
-                          side: const BorderSide(color: Color(0xFFFECACA)),
+                          foregroundColor: SoftPalette.red400,
+                          side: BorderSide(color: context.adapt(SoftPalette.red200)),
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                           textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
@@ -768,22 +769,22 @@ class _AttendanceTabState extends State<AttendanceTab> {
           margin: const EdgeInsets.fromLTRB(14, 6, 14, 4),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
-            color: const Color(0xFFFEF2F2),
+            color: context.adapt(SoftPalette.red100t),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: const Color(0xFFFECACA), width: 1),
+            border: Border.all(color: context.adapt(SoftPalette.red200), width: 1),
             boxShadow: [
-              BoxShadow(color: Colors.red.withOpacity(0.04), blurRadius: 6, offset: const Offset(0, 2)),
+              BoxShadow(color: SoftPalette.red400.withOpacity(0.04), blurRadius: 6, offset: const Offset(0, 2)),
             ],
           ),
           child: Row(
             children: [
               Container(
                 padding: const EdgeInsets.all(8),
-                decoration: const BoxDecoration(
-                  color: Color(0xFFFEE2E2),
+                decoration: BoxDecoration(
+                  color: context.adapt(SoftPalette.red150m),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.fingerprint_rounded, color: Color(0xFFEF4444), size: 20),
+                child: const Icon(Icons.fingerprint_rounded, color: SoftPalette.red400, size: 20),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -792,12 +793,12 @@ class _AttendanceTabState extends State<AttendanceTab> {
                   children: [
                     Text(
                       '${unmappedList.length} Unmapped Biometric Scans Detected (PINs: ${uniquePins.join(", ")})',
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFF991B1B)),
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.red600)),
                     ),
                     const SizedBox(height: 2),
-                    const Text(
+                    Text(
                       'Biometric punches occurred on hardware for unregistered PINs. Click "Assign PINs" to map them to your staff.',
-                      style: TextStyle(fontSize: 11.5, color: Color(0xFF7F1D1D)),
+                      style: TextStyle(fontSize: 11.5, color: context.adapt(SoftPalette.red700)),
                     ),
                   ],
                 ),
@@ -808,8 +809,8 @@ class _AttendanceTabState extends State<AttendanceTab> {
                 icon: const Icon(Icons.person_add_alt_1_rounded, size: 15),
                 label: const Text('Assign PINs'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFDC2626),
-                  foregroundColor: Colors.white,
+                  backgroundColor: SoftPalette.red500,
+                  foregroundColor: SoftPalette.gray50,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   textStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -822,10 +823,10 @@ class _AttendanceTabState extends State<AttendanceTab> {
                   final assigned = await ZkTecoNetworkService.bulkAutoAssignBiometricPins();
                   final remapped = await ZkTecoNetworkService.processPendingUnmappedPunches();
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    AppToast.showSnackBar(context, 
                       SnackBar(
                         content: Text('✅ Auto-assigned $assigned PINs and routed $remapped punches!'),
-                        backgroundColor: const Color(0xFF0F766E),
+                        backgroundColor: SoftPalette.teal550,
                       ),
                     );
                     setState(() {});
@@ -834,8 +835,8 @@ class _AttendanceTabState extends State<AttendanceTab> {
                 icon: const Icon(Icons.auto_fix_high_rounded, size: 14),
                 label: const Text('Auto-Route'),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF991B1B),
-                  side: const BorderSide(color: Color(0xFFFCA5A5)),
+                  foregroundColor: context.adapt(SoftPalette.red600),
+                  side: const BorderSide(color: SoftPalette.red300),
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   textStyle: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -902,10 +903,10 @@ class _AttendanceTabState extends State<AttendanceTab> {
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFFDC2626),
+                                  color: SoftPalette.red500,
                                   borderRadius: BorderRadius.circular(6),
                                 ),
-                                child: Text('PIN $pin', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                                child: Text('PIN $pin', style: const TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 12)),
                               ),
                               const SizedBox(width: 8),
                               Text('$punchCount scan(s) • Latest @ $timeLabel', style: TextStyle(fontSize: 12, color: t.textSecondary, fontWeight: FontWeight.w500)),
@@ -990,7 +991,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
                 }
                 if (ctx.mounted) Navigator.pop(ctx);
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  AppToast.showSnackBar(context, 
                     SnackBar(
                       content: Text('✅ Assigned $count PIN(s) and applied punches! Staff marked Present.'),
                       backgroundColor: t.accent,
@@ -1003,7 +1004,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
               label: const Text('Save & Apply Scans'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: t.accent,
-                foregroundColor: Colors.white,
+                foregroundColor: SoftPalette.gray50,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
             ),
@@ -1098,7 +1099,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
               }
 
               if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                AppToast.showSnackBar(context, 
                   SnackBar(
                     content: Text('✅ PIN $newPin assigned to $empName! Remapped $remapped previous punch(es).'),
                     backgroundColor: t.accent,
@@ -1111,7 +1112,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
             label: const Text('Save PIN'),
             style: ElevatedButton.styleFrom(
               backgroundColor: t.accent,
-              foregroundColor: Colors.white,
+              foregroundColor: SoftPalette.gray50,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
           ),
@@ -1290,11 +1291,11 @@ class _AttendanceTabState extends State<AttendanceTab> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF1F5F9),
+                    color: context.adapt(SoftPalette.slate100),
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: const Color(0xFFCBD5E1)),
+                    border: Border.all(color: context.adapt(SoftPalette.slate200)),
                   ),
-                  child: const Text('Today', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: Color(0xFF334155))),
+                  child: Text('Today', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.slate700))),
                 ),
               ),
             ],
@@ -1308,9 +1309,9 @@ class _AttendanceTabState extends State<AttendanceTab> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
                   decoration: BoxDecoration(
-                    color: _isSyncing ? const Color(0xFFEFF6FF) : const Color(0xFFECFDF5),
+                    color: _isSyncing ? context.adapt(SoftPalette.slate100) : context.adapt(SoftPalette.emerald50),
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: _isSyncing ? const Color(0xFFBFDBFE) : const Color(0xFFA7F3D0), width: 0.8),
+                    border: Border.all(color: _isSyncing ? context.adapt(SoftPalette.slate200) : context.adapt(SoftPalette.emerald150), width: 0.8),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -1319,16 +1320,16 @@ class _AttendanceTabState extends State<AttendanceTab> {
                           ? const SizedBox(
                               width: 12,
                               height: 12,
-                              child: CircularProgressIndicator(strokeWidth: 1.5, color: Color(0xFF2563EB)),
+                              child: CircularProgressIndicator(strokeWidth: 1.5, color: SoftPalette.blue550),
                             )
-                          : const Icon(Icons.sync_rounded, size: 14, color: Color(0xFF059669)),
+                          : const Icon(Icons.sync_rounded, size: 14, color: SoftPalette.emerald500),
                       const SizedBox(width: 5),
                       Text(
                         _isSyncing ? 'Syncing...' : 'Sync Punches',
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
-                          color: _isSyncing ? const Color(0xFF1D4ED8) : const Color(0xFF065F46),
+                          color: _isSyncing ? SoftPalette.blue550 : context.adapt(SoftPalette.emerald600),
                         ),
                       ),
                     ],
@@ -1360,7 +1361,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
               label: const Text('Add Employee'),
               style: ElevatedButton.styleFrom(
                 backgroundColor: t.accent,
-                foregroundColor: Colors.white,
+                foregroundColor: SoftPalette.gray50,
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 textStyle: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -1469,7 +1470,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
         color: t.bgCard,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: t.bgRule),
-        boxShadow: const [BoxShadow(color: Color(0x04000000), blurRadius: 4, offset: Offset(0, 1))],
+        boxShadow: const [BoxShadow(color: SoftPalette.gray900A2, blurRadius: 4, offset: Offset(0, 1))],
       ),
       child: LayoutBuilder(builder: (ctx, constraints) {
         final isNarrow = GBreakpoint.isMobileC(constraints);
@@ -1479,15 +1480,15 @@ class _AttendanceTabState extends State<AttendanceTab> {
           runSpacing: 6,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            _statPill('All Staff', '$total', isDark ? const Color(0xFF60A5FA) : const Color(0xFF2563EB), t.bgCardAlt, t.bgRule, t, isDark, filterKey: 'all'),
-            _statPill('Present', '$p', const Color(0xFF10B981), const Color(0xFF10B981).withValues(alpha: 0.12), const Color(0xFF10B981).withValues(alpha: 0.35), t, isDark, filterKey: 'present'),
+            _statPill('All Staff', '$total', isDark ? SoftPalette.blue350 : SoftPalette.blue550, t.bgCardAlt, t.bgRule, t, isDark, filterKey: 'all'),
+            _statPill('Present', '$p', SoftPalette.emerald350, SoftPalette.emerald350.withValues(alpha: 0.12), SoftPalette.emerald350.withValues(alpha: 0.35), t, isDark, filterKey: 'present'),
             if (lat > 0)
-              _statPill('Late', '$lat', const Color(0xFFF59E0B), const Color(0xFFF59E0B).withValues(alpha: 0.12), const Color(0xFFF59E0B).withValues(alpha: 0.35), t, isDark, filterKey: 'late'),
+              _statPill('Late', '$lat', SoftPalette.amber300, SoftPalette.amber300.withValues(alpha: 0.12), SoftPalette.amber300.withValues(alpha: 0.35), t, isDark, filterKey: 'late'),
             if (lv > 0)
-              _statPill('Leave', '$lv', const Color(0xFF3B82F6), const Color(0xFF3B82F6).withValues(alpha: 0.12), const Color(0xFF3B82F6).withValues(alpha: 0.35), t, isDark, filterKey: 'leave'),
-            _statPill('Absent', '$a', const Color(0xFFEF4444), const Color(0xFFEF4444).withValues(alpha: 0.12), const Color(0xFFEF4444).withValues(alpha: 0.35), t, isDark, filterKey: 'absent'),
+              _statPill('Leave', '$lv', SoftPalette.blue500, SoftPalette.blue500.withValues(alpha: 0.12), SoftPalette.blue500.withValues(alpha: 0.35), t, isDark, filterKey: 'leave'),
+            _statPill('Absent', '$a', SoftPalette.red400, SoftPalette.red400.withValues(alpha: 0.12), SoftPalette.red400.withValues(alpha: 0.35), t, isDark, filterKey: 'absent'),
             if (hol > 0)
-              _statPill('Holiday', '$hol', const Color(0xFF8B5CF6), const Color(0xFF8B5CF6).withValues(alpha: 0.12), const Color(0xFF8B5CF6).withValues(alpha: 0.35), t, isDark, filterKey: 'holiday'),
+              _statPill('Holiday', '$hol', SoftPalette.violet500, SoftPalette.violet500.withValues(alpha: 0.12), SoftPalette.violet500.withValues(alpha: 0.35), t, isDark, filterKey: 'holiday'),
             if (_searchQuery.isNotEmpty)
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
@@ -1514,7 +1515,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
           label: const Text('Mark All Present'),
           style: ElevatedButton.styleFrom(
             backgroundColor: t.accent,
-            foregroundColor: Colors.white,
+            foregroundColor: SoftPalette.gray50,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
             textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -1558,15 +1559,15 @@ class _AttendanceTabState extends State<AttendanceTab> {
     final isAll = filterKey == 'all';
 
     final Color labelColor = isSelected
-        ? (isAll ? (isDark ? const Color(0xFF93C5FD) : const Color(0xFF1D4ED8)) : themeColor)
+        ? (isAll ? (isDark ? SoftPalette.blue300 : SoftPalette.blue550) : themeColor)
         : (isAll ? t.textSecondary : themeColor.withValues(alpha: 0.9));
 
     final Color badgeBg = isSelected
-        ? (isAll ? (isDark ? const Color(0xFF3B82F6).withValues(alpha: 0.35) : const Color(0xFFDBEAFE)) : themeColor.withValues(alpha: 0.25))
-        : (isAll ? (isDark ? const Color(0xFF334155).withValues(alpha: 0.6) : const Color(0xFFE2E8F0)) : themeColor.withValues(alpha: 0.15));
+        ? (isAll ? (isDark ? SoftPalette.blue500.withValues(alpha: 0.35) : SoftPalette.slate150) : themeColor.withValues(alpha: 0.25))
+        : (isAll ? (isDark ? SoftPalette.slate700.withValues(alpha: 0.6) : SoftPalette.slate150) : themeColor.withValues(alpha: 0.15));
 
     final Color badgeTextColor = isSelected
-        ? (isAll ? (isDark ? Colors.white : const Color(0xFF1E40AF)) : (isDark ? Colors.white : themeColor))
+        ? (isAll ? (isDark ? SoftPalette.gray50 : SoftPalette.blue600) : (isDark ? SoftPalette.gray50 : themeColor))
         : (isAll ? t.textPrimary : themeColor);
 
     return InkWell(
@@ -1646,10 +1647,10 @@ class _AttendanceTabState extends State<AttendanceTab> {
 
     if (mounted) {
       setState(() {});
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: Text('✅ Marked $count employees as Present'),
-          backgroundColor: const Color(0xFF0F766E),
+          backgroundColor: SoftPalette.teal550,
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -1744,9 +1745,9 @@ class _AttendanceTabState extends State<AttendanceTab> {
                             margin: const EdgeInsets.only(left: 6),
                             padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                             decoration: BoxDecoration(
-                              color: currentPin.isNotEmpty ? const Color(0xFF3B82F6).withValues(alpha: 0.12) : const Color(0xFFEF4444).withValues(alpha: 0.12),
+                              color: currentPin.isNotEmpty ? SoftPalette.blue500.withValues(alpha: 0.12) : SoftPalette.red400.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(4),
-                              border: Border.all(color: currentPin.isNotEmpty ? const Color(0xFF3B82F6).withValues(alpha: 0.35) : const Color(0xFFEF4444).withValues(alpha: 0.35)),
+                              border: Border.all(color: currentPin.isNotEmpty ? SoftPalette.blue500.withValues(alpha: 0.35) : SoftPalette.red400.withValues(alpha: 0.35)),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
@@ -1756,11 +1757,11 @@ class _AttendanceTabState extends State<AttendanceTab> {
                                   style: TextStyle(
                                     fontSize: 9.5,
                                     fontWeight: FontWeight.bold,
-                                    color: currentPin.isNotEmpty ? const Color(0xFF2563EB) : const Color(0xFFDC2626),
+                                    color: currentPin.isNotEmpty ? SoftPalette.blue550 : SoftPalette.red500,
                                   ),
                                 ),
                                 const SizedBox(width: 2),
-                                Icon(Icons.edit, size: 8, color: currentPin.isNotEmpty ? const Color(0xFF2563EB) : const Color(0xFFDC2626)),
+                                Icon(Icons.edit, size: 8, color: currentPin.isNotEmpty ? SoftPalette.blue550 : SoftPalette.red500),
                               ],
                             ),
                           ),
@@ -1795,8 +1796,8 @@ class _AttendanceTabState extends State<AttendanceTab> {
 
                 final isHaji = sBranch.toLowerCase().contains('haji');
                 final badgeColor = isHaji
-                    ? const Color(0xFF6366F1) // Indigo for Haji Camp
-                    : (isMorning ? const Color(0xFF059669) : const Color(0xFF0284C7)); // Emerald for Saddar/Morning, Sky for Evening
+                    ? SoftPalette.indigo500 // Indigo for Haji Camp
+                    : (isMorning ? SoftPalette.emerald500 : SoftPalette.sky500); // Emerald for Saddar/Morning, Sky for Evening
 
                 return Padding(
                   padding: const EdgeInsets.only(right: 6),
@@ -1865,18 +1866,18 @@ class _AttendanceTabState extends State<AttendanceTab> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                    color: SoftPalette.emerald350.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.35), width: 0.8),
+                    border: Border.all(color: SoftPalette.emerald350.withValues(alpha: 0.35), width: 0.8),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.login_rounded, size: 10, color: Color(0xFF059669)),
+                      const Icon(Icons.login_rounded, size: 10, color: SoftPalette.emerald500),
                       const SizedBox(width: 4),
                       Text(
                         checkIn != null && checkIn.isNotEmpty ? checkIn : '--:--',
-                        style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF059669)),
+                        style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: SoftPalette.emerald500),
                       ),
                     ],
                   ),
@@ -2007,9 +2008,9 @@ class _AttendanceTabState extends State<AttendanceTab> {
                                 margin: const EdgeInsets.only(left: 6),
                                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                                 decoration: BoxDecoration(
-                                  color: currentPin.isNotEmpty ? const Color(0xFF3B82F6).withValues(alpha: 0.12) : const Color(0xFFEF4444).withValues(alpha: 0.12),
+                                  color: currentPin.isNotEmpty ? SoftPalette.blue500.withValues(alpha: 0.12) : SoftPalette.red400.withValues(alpha: 0.12),
                                   borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(color: currentPin.isNotEmpty ? const Color(0xFF3B82F6).withValues(alpha: 0.35) : const Color(0xFFEF4444).withValues(alpha: 0.35)),
+                                  border: Border.all(color: currentPin.isNotEmpty ? SoftPalette.blue500.withValues(alpha: 0.35) : SoftPalette.red400.withValues(alpha: 0.35)),
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
@@ -2019,11 +2020,11 @@ class _AttendanceTabState extends State<AttendanceTab> {
                                       style: TextStyle(
                                         fontSize: 9.5,
                                         fontWeight: FontWeight.bold,
-                                        color: currentPin.isNotEmpty ? const Color(0xFF2563EB) : const Color(0xFFDC2626),
+                                        color: currentPin.isNotEmpty ? SoftPalette.blue550 : SoftPalette.red500,
                                       ),
                                     ),
                                     const SizedBox(width: 2),
-                                    Icon(Icons.edit, size: 8, color: currentPin.isNotEmpty ? const Color(0xFF2563EB) : const Color(0xFFDC2626)),
+                                    Icon(Icons.edit, size: 8, color: currentPin.isNotEmpty ? SoftPalette.blue550 : SoftPalette.red500),
                                   ],
                                 ),
                               ),
@@ -2065,8 +2066,8 @@ class _AttendanceTabState extends State<AttendanceTab> {
 
                   final isHaji = sBranch.toLowerCase().contains('haji');
                   final badgeColor = isHaji
-                      ? const Color(0xFF6366F1) // Indigo for Haji Camp
-                      : (isMorning ? const Color(0xFF059669) : const Color(0xFF0284C7)); // Emerald for Saddar/Morning, Sky for Evening
+                      ? SoftPalette.indigo500 // Indigo for Haji Camp
+                      : (isMorning ? SoftPalette.emerald500 : SoftPalette.sky500); // Emerald for Saddar/Morning, Sky for Evening
 
                   return Container(
                     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
@@ -2120,9 +2121,9 @@ class _AttendanceTabState extends State<AttendanceTab> {
             ] else ...[
               Row(
                 children: [
-                  const Icon(Icons.login_rounded, size: 12, color: Color(0xFF059669)),
+                  const Icon(Icons.login_rounded, size: 12, color: SoftPalette.emerald500),
                   const SizedBox(width: 4),
-                  Text('In: ${checkIn ?? "--:--"}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF059669))),
+                  Text('In: ${checkIn ?? "--:--"}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: SoftPalette.emerald500)),
                   const SizedBox(width: 14),
                   Icon(Icons.logout_rounded, size: 12, color: t.textSecondary),
                   const SizedBox(width: 4),
@@ -2149,46 +2150,46 @@ class _AttendanceTabState extends State<AttendanceTab> {
 
     switch (status) {
       case 'present':
-        bg = const Color(0xFF10B981).withValues(alpha: 0.12);
-        border = const Color(0xFF10B981).withValues(alpha: 0.35);
-        text = const Color(0xFF059669);
+        bg = SoftPalette.emerald350.withValues(alpha: 0.12);
+        border = SoftPalette.emerald350.withValues(alpha: 0.35);
+        text = SoftPalette.emerald500;
         icon = Icons.check_circle_rounded;
         label = 'Present';
         break;
       case 'late':
-        bg = const Color(0xFFF59E0B).withValues(alpha: 0.12);
-        border = const Color(0xFFF59E0B).withValues(alpha: 0.35);
-        text = const Color(0xFFD97706);
+        bg = SoftPalette.amber300.withValues(alpha: 0.12);
+        border = SoftPalette.amber300.withValues(alpha: 0.35);
+        text = SoftPalette.orange400;
         icon = Icons.schedule_rounded;
         label = 'Late';
         break;
       case 'leave':
-        bg = const Color(0xFF3B82F6).withValues(alpha: 0.12);
-        border = const Color(0xFF3B82F6).withValues(alpha: 0.35);
-        text = const Color(0xFF2563EB);
+        bg = SoftPalette.blue500.withValues(alpha: 0.12);
+        border = SoftPalette.blue500.withValues(alpha: 0.35);
+        text = SoftPalette.blue550;
         icon = Icons.event_busy_rounded;
         final lType = (record['leaveType']?.toString() ?? 'Sick').toUpperCase();
         label = 'Leave ($lType)';
         break;
       case 'half_day':
-        bg = const Color(0xFF14B8A6).withValues(alpha: 0.12);
-        border = const Color(0xFF14B8A6).withValues(alpha: 0.35);
-        text = const Color(0xFF0D9488);
+        bg = SoftPalette.teal350.withValues(alpha: 0.12);
+        border = SoftPalette.teal350.withValues(alpha: 0.35);
+        text = SoftPalette.teal500;
         icon = Icons.timelapse_rounded;
         label = 'Half Day';
         break;
       case 'holiday':
-        bg = const Color(0xFF8B5CF6).withValues(alpha: 0.12);
-        border = const Color(0xFF8B5CF6).withValues(alpha: 0.35);
-        text = const Color(0xFF7C3AED);
+        bg = SoftPalette.violet500.withValues(alpha: 0.12);
+        border = SoftPalette.violet500.withValues(alpha: 0.35);
+        text = SoftPalette.violet550;
         icon = Icons.celebration_rounded;
         label = 'Holiday';
         break;
       case 'absent':
       default:
-        bg = const Color(0xFFEF4444).withValues(alpha: 0.12);
-        border = const Color(0xFFEF4444).withValues(alpha: 0.35);
-        text = const Color(0xFFDC2626);
+        bg = SoftPalette.red400.withValues(alpha: 0.12);
+        border = SoftPalette.red400.withValues(alpha: 0.35);
+        text = SoftPalette.red500;
         icon = Icons.cancel_outlined;
         label = 'Absent';
         break;
@@ -2223,11 +2224,11 @@ class _AttendanceTabState extends State<AttendanceTab> {
         await _saveRecordInstantly(empId, record);
       },
       itemBuilder: (ctx) => [
-        _buildPopupMenuItem('present', 'Present (Full Day)', Icons.check_circle_rounded, const Color(0xFF059669), const Color(0xFF10B981).withValues(alpha: 0.12)),
-        _buildPopupMenuItem('late', 'Late Arrival', Icons.schedule_rounded, const Color(0xFFD97706), const Color(0xFFF59E0B).withValues(alpha: 0.12)),
-        _buildPopupMenuItem('leave', 'On Approved Leave', Icons.event_busy_rounded, const Color(0xFF2563EB), const Color(0xFF3B82F6).withValues(alpha: 0.12)),
-        _buildPopupMenuItem('half_day', 'Half Day', Icons.timelapse_rounded, const Color(0xFF0D9488), const Color(0xFF14B8A6).withValues(alpha: 0.12)),
-        _buildPopupMenuItem('absent', 'Mark Absent', Icons.cancel_outlined, const Color(0xFFDC2626), const Color(0xFFEF4444).withValues(alpha: 0.12)),
+        _buildPopupMenuItem('present', 'Present (Full Day)', Icons.check_circle_rounded, SoftPalette.emerald500, SoftPalette.emerald350.withValues(alpha: 0.12)),
+        _buildPopupMenuItem('late', 'Late Arrival', Icons.schedule_rounded, SoftPalette.orange400, SoftPalette.amber300.withValues(alpha: 0.12)),
+        _buildPopupMenuItem('leave', 'On Approved Leave', Icons.event_busy_rounded, SoftPalette.blue550, SoftPalette.blue500.withValues(alpha: 0.12)),
+        _buildPopupMenuItem('half_day', 'Half Day', Icons.timelapse_rounded, SoftPalette.teal500, SoftPalette.teal350.withValues(alpha: 0.12)),
+        _buildPopupMenuItem('absent', 'Mark Absent', Icons.cancel_outlined, SoftPalette.red500, SoftPalette.red400.withValues(alpha: 0.12)),
       ],
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
@@ -2297,7 +2298,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.bold,
-                color: isFull ? Colors.white : t.textSecondary,
+                color: isFull ? SoftPalette.gray50 : t.textSecondary,
               ),
             ),
           ),
@@ -2333,7 +2334,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: TextStyle(color: t.textSecondary))),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: t.accent, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: t.accent, foregroundColor: SoftPalette.gray50),
             onPressed: () async {
               record['note'] = ctrl.text.trim();
               Navigator.pop(ctx);
@@ -2395,7 +2396,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
                       label: const Text('Edit Profile'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: t.accent,
-                        foregroundColor: Colors.white,
+                        foregroundColor: SoftPalette.gray50,
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         textStyle: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -2459,7 +2460,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
     final employees = FinanceLocalStorage.getEmployees(widget.branchId).where((e) => e['isActive'] == true).toList();
     
     if (employees.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No active employees available.')));
+      AppToast.showSnackBar(context, const SnackBar(content: Text('No active employees available.')));
       return;
     }
 
@@ -2632,7 +2633,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
               actions: [
                 TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: TextStyle(color: t.textSecondary))),
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: t.accent, foregroundColor: Colors.white),
+                  style: ElevatedButton.styleFrom(backgroundColor: t.accent, foregroundColor: SoftPalette.gray50),
                   onPressed: () async {
                     int count = 0;
                     var curr = DateTime(startDate.year, startDate.month, startDate.day);

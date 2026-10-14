@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:google_fonts/google_fonts.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -190,16 +191,16 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
         final msg = isHQOrAdmin
             ? 'Sync Complete: $count donations saved permanently to local storage.'
             : 'Sync Complete: $count of your collected donations saved locally.';
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Row(
               children: [
-                const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+                const Icon(Icons.check_circle_rounded, color: SoftPalette.gray50, size: 18),
                 const SizedBox(width: 8),
                 Expanded(child: Text(msg)),
               ],
             ),
-            backgroundColor: const Color(0xFF10B981),
+            backgroundColor: SoftPalette.emerald350,
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
           ),
@@ -207,10 +208,10 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('Sync error: $e'),
-            backgroundColor: Colors.redAccent,
+            backgroundColor: SoftPalette.red400,
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -364,14 +365,14 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                   const SizedBox(height: 12),
                   if (widget.branchId == 'all') _buildBranchSummary(),
                   const SizedBox(height: 8),
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.symmetric(horizontal: 4),
                     child: Text(
                       'TRANSACTIONS',
                       style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w900,
-                        color: AppColors.gray400,
+                        color: context.adapt(AppColors.gray400),
                         letterSpacing: 1.2,
                       ),
                     ),
@@ -491,21 +492,21 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                   child: Container(
                     padding: const EdgeInsets.all(20),
                     decoration: BoxDecoration(
-                      color: Colors.amber.shade50,
+                      color: context.adapt(SoftPalette.yellow50),
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.amber.shade300),
+                      border: Border.all(color: context.adapt(SoftPalette.yellow200)),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
                           children: [
-                            Icon(isIndexError ? Icons.sync_problem_rounded : Icons.cloud_off_rounded, color: Colors.amber.shade900, size: 22),
+                            Icon(isIndexError ? Icons.sync_problem_rounded : Icons.cloud_off_rounded, color: context.adapt(SoftPalette.orange350), size: 22),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Text(
                                 isIndexError ? 'Consolidated Cloud Index Synchronizing' : 'Cloud Sync Notice',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.amber.shade900),
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: context.adapt(SoftPalette.orange350)),
                               ),
                             ),
                           ],
@@ -515,7 +516,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                           isIndexError
                               ? 'The multi-branch consolidated query index is being established in Firebase. Local offline donations are displayed safely.'
                               : 'Unable to connect to cloud database: $err. Showing local offline data.',
-                          style: TextStyle(fontSize: 12.5, color: Colors.amber.shade900),
+                          style: TextStyle(fontSize: 12.5, color: context.adapt(SoftPalette.orange350)),
                         ),
                         const SizedBox(height: 12),
                         ElevatedButton.icon(
@@ -525,8 +526,8 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                           icon: const Icon(Icons.refresh_rounded, size: 16),
                           label: const Text('Retry Connection'),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.amber.shade800,
-                            foregroundColor: Colors.white,
+                            backgroundColor: SoftPalette.orange350,
+                            foregroundColor: SoftPalette.gray50,
                             elevation: 0,
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -651,7 +652,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
 
   void _runExport(String type, List<DonationRecord> list) {
     if (list.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
           const SnackBar(content: Text('No data found for the selected range')));
       return;
     }
@@ -721,9 +722,9 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
       final file = File(outputFile);
       await file.writeAsBytes(bytes);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        AppToast.showSnackBar(context, SnackBar(
             content: Text('Report saved to: $outputFile'),
-            backgroundColor: Colors.green));
+            backgroundColor: SoftPalette.green400));
       }
     }
   }
@@ -763,9 +764,9 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          AppToast.showSnackBar(context, SnackBar(
             content: Text('Invalid JSON file format: $e'),
-            backgroundColor: Colors.redAccent,
+            backgroundColor: SoftPalette.red400,
           ));
         }
         return;
@@ -1197,18 +1198,18 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          AppToast.showSnackBar(context, SnackBar(
             content: Text('Error parsing Excel file: $e'),
-            backgroundColor: Colors.redAccent,
+            backgroundColor: SoftPalette.red400,
           ));
         }
         return;
       }
     } else {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        AppToast.showSnackBar(context, const SnackBar(
           content: Text('Unsupported file format. Please upload a JSON or Excel file.'),
-          backgroundColor: Colors.redAccent,
+          backgroundColor: SoftPalette.red400,
         ));
       }
       return;
@@ -1217,9 +1218,9 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
     final total = recordsList.length;
     if (total == 0) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        AppToast.showSnackBar(context, const SnackBar(
           content: Text('No records found in selected JSON/Excel file.'),
-          backgroundColor: Colors.orangeAccent,
+          backgroundColor: SoftPalette.amber300,
         ));
       }
       return;
@@ -1273,13 +1274,13 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 16,
                             fontWeight: FontWeight.w800,
-                            color: AppColors.gray900,
+                            color: context.adapt(AppColors.gray900),
                           ),
                         ),
                         const SizedBox(height: 12),
                         LinearProgressIndicator(
                           value: total > 0 ? (imported + skipped) / total : 0,
-                          backgroundColor: AppColors.gray100,
+                          backgroundColor: context.adapt(AppColors.gray100),
                           color: AppColors.primary,
                         ),
                         const SizedBox(height: 16),
@@ -1288,7 +1289,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 13,
                             fontWeight: FontWeight.w700,
-                            color: AppColors.gray700,
+                            color: context.adapt(AppColors.gray700),
                           ),
                         ),
                         const SizedBox(height: 8),
@@ -1297,7 +1298,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 11,
                             fontWeight: FontWeight.w500,
-                            color: AppColors.gray400,
+                            color: context.adapt(AppColors.gray400),
                           ),
                           textAlign: TextAlign.center,
                         ),
@@ -1307,10 +1308,10 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                             importCancelled = true;
                             Navigator.of(dialogCtx).pop();
                           },
-                          icon: const Icon(Icons.cancel_outlined, color: Colors.red, size: 16),
-                          label: const Text('Cancel Import', style: TextStyle(color: Colors.red, fontSize: 13, fontWeight: FontWeight.bold)),
+                          icon: const Icon(Icons.cancel_outlined, color: SoftPalette.red400, size: 16),
+                          label: const Text('Cancel Import', style: TextStyle(color: SoftPalette.red400, fontSize: 13, fontWeight: FontWeight.bold)),
                           style: OutlinedButton.styleFrom(
-                            side: const BorderSide(color: Colors.red),
+                            side: const BorderSide(color: SoftPalette.red400),
                             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           ),
@@ -1395,9 +1396,9 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
     } finally {
       if (mounted) {
         Navigator.of(context, rootNavigator: true).pop(); // Dismiss progress dialog safely
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        AppToast.showSnackBar(context, SnackBar(
           content: Text('Import complete! Processed $total records: $imported new, $skipped updated/overwritten in $targetBranchName branch.'),
-          backgroundColor: Colors.green,
+          backgroundColor: SoftPalette.green400,
         ));
         setState(() {
           _initStream();
@@ -1425,9 +1426,9 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                     style: const TextStyle(
                         fontWeight: FontWeight.w700, fontSize: 15)),
                 const SizedBox(height: 8),
-                const Text('Communicating with Firestore...',
+                Text('Communicating with Firestore...',
                     style: TextStyle(
-                        color: AppColors.gray500, fontSize: 13)),
+                        color: ctx.adapt(AppColors.gray500), fontSize: 13)),
               ],
             ),
           ),
@@ -1466,33 +1467,33 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                   _statusFilter = 'All';
                 });
                 widget.onCatChanged(DonationCategory.all);
-              }, const Color(0xFF6366F1), t),
+              }, SoftPalette.indigo500, t),
               const SizedBox(width: 8),
               _buildStageTabPill("Received", receivedCount, _statusFilter == 'Received', () {
                 setState(() {
                   _statusFilter = 'Received';
                 });
-              }, const Color(0xFF10B981), t),
+              }, SoftPalette.emerald350, t),
               const SizedBox(width: 8),
               _buildStageTabPill("Pending", pendingCount, _statusFilter == 'Pending', () {
                 setState(() {
                   _statusFilter = 'Pending';
                 });
-              }, const Color(0xFFF59E0B), t),
+              }, SoftPalette.amber300, t),
               const SizedBox(width: 8),
               _buildStageTabPill("GMWF Projects", gmwfCount, widget.selectedCategory == DonationCategory.gmwf, () {
                 widget.onCatChanged(DonationCategory.gmwf);
-              }, const Color(0xFF3B82F6), t),
+              }, SoftPalette.blue500, t),
               const SizedBox(width: 8),
               _buildStageTabPill("Jamia / Masjid", jamiaCount, widget.selectedCategory == DonationCategory.jamia, () {
                 widget.onCatChanged(DonationCategory.jamia);
-              }, const Color(0xFF8B5CF6), t),
+              }, SoftPalette.violet500, t),
               const SizedBox(width: 8),
               _buildStageTabPill("Donation Boxes", boxCount, _searchCtrl.text.toLowerCase() == 'box', () {
                 setState(() {
                   _searchCtrl.text = _searchCtrl.text.toLowerCase() == 'box' ? '' : 'Box';
                 });
-              }, const Color(0xFF0D9488), t),
+              }, SoftPalette.teal500, t),
             ],
           ),
         );
@@ -1513,7 +1514,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                     BoxShadow(
                       color: _searchHasFocus
                           ? t.accent.withValues(alpha: 0.08)
-                          : Colors.black.withValues(alpha: 0.02),
+                          : SoftPalette.gray900.withValues(alpha: 0.02),
                       blurRadius: _searchHasFocus ? 12 : 6,
                       offset: const Offset(0, 2),
                     ),
@@ -1738,14 +1739,14 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
         ),
         child: Row(
           children: [
-            Icon(icon, size: 20, color: isActive ? AppColors.primary : AppColors.gray500),
+            Icon(icon, size: 20, color: isActive ? AppColors.primary : context.adapt(AppColors.gray500)),
             const SizedBox(width: 14),
             Expanded(
               child: Text(label,
                   style: TextStyle(
                       fontSize: 15,
                       fontWeight: isActive ? FontWeight.w800 : FontWeight.w600,
-                      color: isActive ? AppColors.primary : AppColors.gray800)),
+                      color: isActive ? AppColors.primary : context.adapt(AppColors.gray800))),
             ),
             if (isActive)
               const Icon(Icons.check_rounded, size: 18, color: AppColors.primary),
@@ -1946,7 +1947,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                 Navigator.pop(ctx);
               },
               child:
-                  const Text('Reset', style: TextStyle(color: Colors.redAccent)),
+                  const Text('Reset', style: TextStyle(color: SoftPalette.red400)),
             ),
             ElevatedButton(
               onPressed: () {
@@ -1955,7 +1956,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
               },
               style: ElevatedButton.styleFrom(
                   backgroundColor: t.accent,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
               child: const Text('Apply', style: TextStyle(fontWeight: FontWeight.bold)),
             ),
@@ -2052,8 +2053,8 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
-        border: Border.all(color: AppColors.gray200),
+        color: context.adapt(SoftPalette.gray50),
+        border: Border.all(color: context.adapt(AppColors.gray200)),
         borderRadius: BorderRadius.circular(8),
       ),
       child: DropdownButtonHideUnderline(
@@ -2061,7 +2062,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
           value: safeValue,
           isExpanded: true,
           icon: const Icon(Icons.arrow_drop_down_rounded),
-          style: const TextStyle(fontSize: 14, color: AppColors.gray900),
+          style: TextStyle(fontSize: 14, color: context.adapt(AppColors.gray900)),
           onChanged: onChanged,
           items: List.generate(
               items.length,
@@ -2098,13 +2099,13 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Padding(
+          Padding(
             padding: EdgeInsets.symmetric(horizontal: 4),
             child: Text('BRANCH PERFORMANCE SUMMARY',
                 style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w900,
-                    color: AppColors.gray400,
+                    color: context.adapt(AppColors.gray400),
                     letterSpacing: 1.2)),
           ),
           const SizedBox(height: 16),
@@ -2121,11 +2122,11 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                   margin: EdgeInsets.only(right: 16, left: index == 0 ? 4 : 0),
                   padding: const EdgeInsets.all(20),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: context.adapt(SoftPalette.gray50),
                     borderRadius: BorderRadius.circular(24),
-                    border: Border.all(color: AppColors.gray200),
+                    border: Border.all(color: context.adapt(AppColors.gray200)),
                     boxShadow: [
-                      BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 15, offset: const Offset(0, 5)),
+                      BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.03), blurRadius: 15, offset: const Offset(0, 5)),
                     ],
                   ),
                   child: Column(
@@ -2141,7 +2142,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                           const SizedBox(width: 12),
                           Expanded(
                             child: Text(entry.key.toUpperCase(),
-                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: AppColors.gray900),
+                                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w900, color: context.adapt(AppColors.gray900)),
                                 overflow: TextOverflow.ellipsis),
                           ),
                         ],
@@ -2149,14 +2150,14 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                       const Spacer(),
                       _SummaryRow(label: 'Received', value: data.received, color: AppColors.primary, isBold: true),
                       const SizedBox(height: 10),
-                      _SummaryRow(label: 'Pending', value: data.pending, color: Colors.orange, isBold: false),
-                      const Divider(height: 24, color: AppColors.gray100),
+                      _SummaryRow(label: 'Pending', value: data.pending, color: SoftPalette.amber300, isBold: false),
+                      Divider(height: 24, color: context.adapt(AppColors.gray100)),
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text('${data.count} entries', style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: AppColors.gray400)),
+                          Text('${data.count} entries', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: context.adapt(AppColors.gray400))),
                           Text('PKR ${NumberFormat('#,###').format(data.received + data.pending)}', 
-                              style: GoogleFonts.dmMono(fontSize: 11, fontWeight: FontWeight.w900, color: AppColors.gray900)),
+                              style: GoogleFonts.dmMono(fontSize: 11, fontWeight: FontWeight.w900, color: context.adapt(AppColors.gray900))),
                         ],
                       ),
                     ],
@@ -2174,12 +2175,12 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: const TextStyle(fontSize: 11, color: AppColors.gray500, fontWeight: FontWeight.w500)),
+        Text(label, style: TextStyle(fontSize: 11, color: context.adapt(AppColors.gray500), fontWeight: FontWeight.w500)),
         Text('PKR ${NumberFormat('#,###').format(value)}', 
             style: GoogleFonts.dmMono(
               fontSize: 12, 
               fontWeight: isBold ? FontWeight.w900 : FontWeight.w700, 
-              color: isBold ? color : AppColors.gray700,
+              color: isBold ? color : context.adapt(AppColors.gray700),
             )),
       ],
     );
@@ -2284,17 +2285,17 @@ class _ExportDialogState extends State<_ExportDialog> {
 
   @override
   Widget build(BuildContext context) {
-    const excelColor = Color(0xFF217346);
-    const pdfColor = Color(0xFFC62828);
+    const excelColor = SoftPalette.emerald550;
+    const pdfColor = SoftPalette.red550;
 
     return Container(
       constraints: const BoxConstraints(maxWidth: 480),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.adapt(SoftPalette.gray50),
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withValues(alpha: 0.15),
+              color: SoftPalette.gray900.withValues(alpha: 0.15),
               blurRadius: 40,
               offset: const Offset(0, 12)),
         ],
@@ -2306,12 +2307,12 @@ class _ExportDialogState extends State<_ExportDialog> {
           // ── Header ──────────────────────────────────────────────────────────
           Container(
             padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
-            decoration: const BoxDecoration(
-              color: Color(0xFFF8FAFC),
+            decoration: BoxDecoration(
+              color: context.adapt(SoftPalette.gray50),
               borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
               border: Border(
                   bottom:
-                      BorderSide(color: Color(0xFFE2E8F0))),
+                      BorderSide(color: context.adapt(SoftPalette.slate150))),
             ),
             child: Row(
               children: [
@@ -2336,29 +2337,29 @@ class _ExportDialogState extends State<_ExportDialog> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text('Export Report',
+                      Text('Export Report',
                           style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.w900,
-                              color: Color(0xFF0F172A),
+                              color: context.adapt(SoftPalette.slate900),
                               letterSpacing: -0.4)),
                       const SizedBox(height: 2),
                       Text(
                         _selectedType == 'EXCEL'
                             ? 'Exports as .xlsx spreadsheet'
                             : 'Exports as printable PDF',
-                        style: const TextStyle(
-                            fontSize: 12, color: Color(0xFF64748B)),
+                        style: TextStyle(
+                            fontSize: 12, color: context.adapt(SoftPalette.slate550)),
                       ),
                     ],
                   ),
                 ),
                 IconButton(
                   onPressed: () => Navigator.pop(context),
-                  icon: const Icon(Icons.close_rounded,
-                      color: Color(0xFF94A3B8), size: 20),
+                  icon: Icon(Icons.close_rounded,
+                      color: context.adapt(SoftPalette.slate350), size: 20),
                   style: IconButton.styleFrom(
-                    backgroundColor: const Color(0xFFE2E8F0),
+                    backgroundColor: context.adapt(SoftPalette.slate150),
                     padding: const EdgeInsets.all(6),
                     minimumSize: const Size(32, 32),
                   ),
@@ -2373,17 +2374,17 @@ class _ExportDialogState extends State<_ExportDialog> {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 // ── Format toggle ──────────────────────────────────────────
-                const Text('FORMAT',
+                Text('FORMAT',
                     style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w800,
-                        color: Color(0xFF94A3B8),
+                        color: context.adapt(SoftPalette.slate350),
                         letterSpacing: 1.2)),
                 const SizedBox(height: 10),
                 Container(
                   padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFF1F5F9),
+                    color: context.adapt(SoftPalette.slate100),
                     borderRadius: BorderRadius.circular(14),
                   ),
                   child: Row(
@@ -2410,11 +2411,11 @@ class _ExportDialogState extends State<_ExportDialog> {
                 const SizedBox(height: 20),
 
                 // ── Date range options ─────────────────────────────────────
-                const Text('DATE RANGE',
+                Text('DATE RANGE',
                     style: TextStyle(
                         fontSize: 10,
                         fontWeight: FontWeight.w800,
-                        color: Color(0xFF94A3B8),
+                        color: context.adapt(SoftPalette.slate350),
                         letterSpacing: 1.2)),
                 const SizedBox(height: 10),
                 GridView.count(
@@ -2450,12 +2451,12 @@ class _ExportDialogState extends State<_ExportDialog> {
           duration: const Duration(milliseconds: 180),
           padding: const EdgeInsets.symmetric(vertical: 10),
           decoration: BoxDecoration(
-            color: isSelected ? Colors.white : Colors.transparent,
+            color: isSelected ? context.adapt(SoftPalette.gray50) : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
             boxShadow: isSelected
                 ? [
                     BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.06),
+                        color: SoftPalette.gray900.withValues(alpha: 0.06),
                         blurRadius: 8,
                         offset: const Offset(0, 2)),
                   ]
@@ -2466,14 +2467,14 @@ class _ExportDialogState extends State<_ExportDialog> {
             children: [
               Icon(icon,
                   size: 16,
-                  color: isSelected ? color : const Color(0xFF94A3B8)),
+                  color: isSelected ? color : context.adapt(SoftPalette.slate350)),
               const SizedBox(width: 7),
               Text(
                 label,
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
-                  color: isSelected ? color : const Color(0xFF94A3B8),
+                  color: isSelected ? color : context.adapt(SoftPalette.slate350),
                 ),
               ),
             ],
@@ -2485,7 +2486,7 @@ class _ExportDialogState extends State<_ExportDialog> {
 
   Widget _rangeCard(_RangeOption opt) {
     final activeColor =
-        _selectedType == 'EXCEL' ? const Color(0xFF217346) : const Color(0xFFC62828);
+        _selectedType == 'EXCEL' ? SoftPalette.emerald550 : SoftPalette.red550;
 
     return Material(
       color: Colors.transparent,
@@ -2496,9 +2497,9 @@ class _ExportDialogState extends State<_ExportDialog> {
           duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            color: const Color(0xFFF8FAFC),
+            color: context.adapt(SoftPalette.gray50),
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFFE2E8F0)),
+            border: Border.all(color: context.adapt(SoftPalette.slate150)),
           ),
           child: Row(
             children: [
@@ -2517,20 +2518,20 @@ class _ExportDialogState extends State<_ExportDialog> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     Text(opt.label,
-                        style: const TextStyle(
+                        style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w700,
-                            color: Color(0xFF1E293B))),
+                            color: context.adapt(SoftPalette.slate800))),
                     Text(opt.sublabel,
-                        style: const TextStyle(
-                            fontSize: 10, color: Color(0xFF94A3B8)),
+                        style: TextStyle(
+                            fontSize: 10, color: context.adapt(SoftPalette.slate350)),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis),
                   ],
                 ),
               ),
-              const Icon(Icons.arrow_forward_ios_rounded,
-                  size: 11, color: Color(0xFFCBD5E1)),
+              Icon(Icons.arrow_forward_ios_rounded,
+                  size: 11, color: context.adapt(SoftPalette.slate200)),
             ],
           ),
         ),
@@ -2595,12 +2596,12 @@ class _HeaderActionButtonState extends State<_HeaderActionButton> {
             decoration: BoxDecoration(
               color: hasFilters || isActive
                   ? AppColors.primary.withValues(alpha: _isHovered ? 0.10 : 0.06)
-                  : (_isHovered ? AppColors.gray50 : Colors.white),
+                  : (_isHovered ? context.adapt(AppColors.gray50) : context.adapt(SoftPalette.gray50)),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
                 color: hasFilters || isActive
                     ? AppColors.primary
-                    : (_isHovered ? AppColors.gray300 : const Color(0x0A000000)),
+                    : (_isHovered ? context.adapt(AppColors.gray300) : context.adapt(SoftPalette.gray900A4)),
                 width: hasFilters || isActive || _isHovered ? 1.5 : 1.0,
               ),
               boxShadow: [
@@ -2612,7 +2613,7 @@ class _HeaderActionButtonState extends State<_HeaderActionButton> {
                   )
                 else
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: _isHovered ? 0.04 : 0.02),
+                    color: SoftPalette.gray900.withValues(alpha: _isHovered ? 0.04 : 0.02),
                     blurRadius: _isHovered ? 10 : 6,
                     offset: _isHovered ? const Offset(0, 4) : const Offset(0, 2),
                   ),

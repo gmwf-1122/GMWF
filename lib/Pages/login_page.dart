@@ -1,15 +1,17 @@
 // lib/pages/login_page.dart
 import '../utils/ui_stall_monitor.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/components/decorative_image.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:hive/hive.dart';
-import 'package:another_flushbar/flushbar.dart';
+import 'package:gmwf/design/components/flushbar_compat.dart';
 
 import '../services/local_storage_service.dart';
 import '../services/offline_auth_service.dart';
@@ -37,6 +39,8 @@ class _LoginPageState extends State<LoginPage> {
   final _passwordFocus             = FocusNode();
 
   bool _loading         = false;
+  /// Plain-words description of the current sign-in step, shown on the button.
+  String _loginStep     = 'Signing in';
   bool _obscurePassword = true;
   bool _loginHover      = false;
   bool _isOnline        = true;
@@ -62,13 +66,15 @@ class _LoginPageState extends State<LoginPage> {
             : 800;
 
         // Pre-cache background images with responsive decode size for instant mobile rendering
-        precacheImage(
-          ResizeImage(
-            const AssetImage('assets/images/2.webp'),
-            width: targetDecodeWidth,
-          ),
-          context,
-        );
+        if (GDecor.patternsEnabled) {
+          precacheImage(
+            ResizeImage(
+              const AssetImage('assets/images/2.webp'),
+              width: targetDecodeWidth,
+            ),
+            context,
+          );
+        }
         precacheImage(const AssetImage('assets/logo/gmwf-1.webp'), context);
         UpdateDialogWidget.showUpdateDialogIfNeeded(context);
       }
@@ -193,13 +199,13 @@ class _LoginPageState extends State<LoginPage> {
       if (online) {
         Flushbar(
           message: "Connected to internet! Switched to Online Mode.",
-          backgroundColor: Colors.green.shade700,
+          backgroundColor: SoftPalette.green500,
           duration: const Duration(seconds: 3),
         ).show(context);
       } else {
         Flushbar(
           message: "No internet connection detected. Remaining in Offline Mode.",
-          backgroundColor: Colors.orange.shade800,
+          backgroundColor: SoftPalette.orange400,
           duration: const Duration(seconds: 3),
         ).show(context);
       }
@@ -221,9 +227,16 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  /// Record a sign-in step for diagnostics and show it on the button.
+  void _setLoginStep(String crumb, String label) {
+    UiStallMonitor.mark(crumb);
+    if (mounted) setState(() => _loginStep = label);
+  }
+
   // ── Main login entry point ────────────────────────────────────────────────
   Future<void> _login() async {
     UiStallMonitor.mark('login: _login started');
+    _loginStep = 'Signing in';
     RoleSimulatorService.reset();
 
     final input    = _usernameOrEmailController.text.trim();
@@ -245,7 +258,16 @@ class _LoginPageState extends State<LoginPage> {
     if (mounted) setState(() => _loading = true);
 
     try {
+      // ── Local-first: credentials saved on this device → open the app instantly ──
+      // Checking the device costs a few milliseconds; the online path below costs several
+      // seconds (internet probe + dozens of Firestore queries + Firebase sign-in). Firebase
+      // sign-in still happens, in the background, and HomeRouter's live revocation listener
+      // still logs the user out if an admin disables the account.
+      _setLoginStep('login: checking saved credentials', 'Checking saved account');
+      if (await _tryLocalFirstLogin(input, password)) return;
+
       // Always verify real internet status first on click before defaulting to offline
+      _setLoginStep('login: checking internet', 'Checking connection');
       final liveOnline = await _hasRealInternet();
       if (liveOnline != _isOnline && mounted) {
         setState(() => _isOnline = liveOnline);
@@ -255,6 +277,7 @@ class _LoginPageState extends State<LoginPage> {
       // ── Pure offline path ──────────────────────────────────────────────────
       if (!_isOnline && !liveOnline) {
         debugPrint('[LoginPage] OFFLINE MODE — attempting offline login');
+        _setLoginStep('login: offline sign-in', 'Signing in offline');
         final ok = await _attemptOfflineLogin(input, password);
         if (!ok && mounted) {
           _showError("Offline login failed. Please connect to the internet and log in once first.");
@@ -265,8 +288,19 @@ class _LoginPageState extends State<LoginPage> {
       // ── Online path ────────────────────────────────────────────────────────
       debugPrint('[LoginPage] ONLINE MODE — Authenticating via Firestore & Firebase Auth');
 
-      // 1. Resolve user profile and actual email by searching BOTH places in Firestore (Root /users and Branch /branches/{b}/users)
-      Map<String, dynamic>? firestoreUserDoc = await _findUserInBothPlaces(input);
+      // 1. Resolve user profile and actual email. If this device already knows the account's
+      //    email (from a previous login or the users download), use it and skip the cloud-wide
+      //    search (~40 Firestore queries across root + every branch).
+      final localHint = _findLocalUserExact(input);
+      final hintEmail = (localHint?['email'] ?? '').toString().trim();
+      Map<String, dynamic>? firestoreUserDoc;
+      if (hintEmail.contains('@')) {
+        firestoreUserDoc = Map<String, dynamic>.from(localHint!);
+      } else {
+        _setLoginStep('login: finding user in Firestore', 'Finding your account');
+        firestoreUserDoc = await _findUserInBothPlaces(input, knownOnline: true);
+      }
+      _setLoginStep('login: Firebase sign-in', 'Verifying password');
       String email = '';
 
       if (firestoreUserDoc != null && firestoreUserDoc['email'] != null && (firestoreUserDoc['email'] as String).isNotEmpty) {
@@ -320,7 +354,9 @@ class _LoginPageState extends State<LoginPage> {
         final user = cred.user!;
         debugPrint('[LoginPage] Firebase sign-in OK — fetching fresh user data from Firestore');
 
+        _setLoginStep('login: loading user profile', 'Loading your profile');
         Map<String, dynamic>? userData = await _fetchUserDataFromFirestore(user, input, preloadedDoc: firestoreUserDoc);
+        _setLoginStep('login: profile loaded, opening app', 'Opening the app');
         final initialRole = userData != null ? _resolveRoleFromMap(userData) : '';
         final hasInitialValidRole = initialRole.isNotEmpty && initialRole != 'unknown' && initialRole != 'unassigned';
 
@@ -517,7 +553,7 @@ class _LoginPageState extends State<LoginPage> {
         if (mounted) {
           Flushbar(
             message: "Welcome back, ${activeUser['username'] ?? activeUser['name'] ?? input}!",
-            backgroundColor: Colors.green.shade700,
+            backgroundColor: SoftPalette.green500,
             duration: const Duration(seconds: 2),
           ).show(context);
           _navigateToHome(user, activeUser);
@@ -768,7 +804,7 @@ class _LoginPageState extends State<LoginPage> {
       if (mounted) {
         Flushbar(
           message: "Welcome back, ${fsUser['username'] ?? fsUser['name'] ?? input}!",
-          backgroundColor: Colors.green.shade700,
+          backgroundColor: SoftPalette.green500,
           duration: const Duration(seconds: 2),
         ).show(context);
         _navigateToHomeOffline(fsUser);
@@ -881,6 +917,113 @@ class _LoginPageState extends State<LoginPage> {
     }
   }
 
+  // ── Local-first login ─────────────────────────────────────────────────────
+
+  /// Exact match on email / username / uid in the local users box. An email-prefix match
+  /// ("ali" → "ali@khi.com") only counts when it is unambiguous across branches.
+  Map<String, dynamic>? _findLocalUserExact(String input) {
+    final t = input.trim().toLowerCase();
+    if (t.isEmpty || !Hive.isBoxOpen(LocalStorageService.usersBox)) return null;
+    final prefixMatches = <Map<String, dynamic>>[];
+    for (final v in Hive.box(LocalStorageService.usersBox).values) {
+      if (v is! Map) continue;
+      final status = (v['status'] ?? v['accountStatus'] ?? '').toString().toLowerCase();
+      if (v['isDeleted'] == true || status == 'deleted') continue;
+      final email = (v['email'] ?? '').toString().toLowerCase().trim();
+      final username = (v['username'] ?? '').toString().toLowerCase().trim();
+      final usernameLower = (v['usernameLower'] ?? '').toString().toLowerCase().trim();
+      final uid = (v['uid'] ?? v['id'] ?? '').toString().toLowerCase().trim();
+      if (email == t || username == t || usernameLower == t || uid == t) {
+        return Map<String, dynamic>.from(v);
+      }
+      if (email.contains('@') && email.split('@').first == t) {
+        prefixMatches.add(Map<String, dynamic>.from(v));
+      }
+    }
+    return prefixMatches.length == 1 ? prefixMatches.first : null;
+  }
+
+  /// Signs in instantly from credentials stored on this device by a previous successful
+  /// login. Returns false (→ normal online flow) when there is no stored match, or when the
+  /// stored profile is unusable/revoked so the server can make the authoritative decision.
+  Future<bool> _tryLocalFirstLogin(String input, String password) async {
+    Map<String, dynamic>? stored;
+    try {
+      stored = await OfflineAuthService.verifyOfflineCredentials(
+        usernameOrEmail: input.toLowerCase(),
+        password: password,
+      );
+    } catch (e) {
+      debugPrint('[LoginPage] Local-first check skipped: $e');
+      return false;
+    }
+    if (stored == null) return false;
+
+    final userData = Map<String, dynamic>.from(stored);
+    final role = _resolveRoleFromMap(userData);
+    if (role.isEmpty || role == 'unknown' || role == 'unassigned') return false;
+
+    final status = (userData['status'] ?? userData['accountStatus'] ?? 'active').toString().toLowerCase().trim();
+    const blocked = {'deleted', 'corrupted', 'inactive', 'suspended', 'terminated', 'resigned', 'retired', 'offboarded', 'revoked'};
+    if (userData['isDeleted'] == true ||
+        userData['isActive'] == false ||
+        userData['isCorruptedOrOrphanAuth'] == true ||
+        blocked.contains(status)) {
+      return false;
+    }
+
+    userData['role'] = role;
+    debugPrint('[LoginPage] ⚡ Local-first sign-in OK for $input (role=$role) — Firebase sign-in continues in background');
+    _setLoginStep('login: local sign-in ok, opening app', 'Opening the app');
+    unawaited(_completeFirebaseSignInInBackground(userData, password));
+
+    if (mounted) {
+      Flushbar(
+        message: "Welcome back, ${userData['username'] ?? userData['name'] ?? input}!",
+        backgroundColor: SoftPalette.green500,
+        duration: const Duration(seconds: 2),
+      ).show(context);
+      _navigateToHomeOffline(userData);
+    }
+    return true;
+  }
+
+  /// After a local-first sign-in, establish the Firebase session (needed for cloud sync)
+  /// without making the user wait. Runs after the login page is gone, so it must not touch
+  /// widget state.
+  Future<void> _completeFirebaseSignInInBackground(Map<String, dynamic> userData, String password) async {
+    final email = (userData['email'] ?? '').toString().trim().toLowerCase();
+    if (!email.contains('@')) return;
+    final current = FirebaseAuth.instance.currentUser;
+    if (current != null && (current.email ?? '').toLowerCase() == email) return;
+
+    // Let the home screen build its first frames before doing network work.
+    await Future.delayed(const Duration(seconds: 2));
+    try {
+      final cred = await FirebaseAuth.instance
+          .signInWithEmailAndPassword(email: email, password: password)
+          .timeout(const Duration(seconds: 20));
+      final uid = cred.user?.uid;
+      debugPrint('[LoginPage] ✅ Background Firebase sign-in complete for $email');
+      if (uid != null) {
+        final nowTs = FieldValue.serverTimestamp();
+        FirebaseFirestore.instance.collection('users').doc(uid).set({
+          'lastLoginAt': nowTs,
+          'lastOnlineAt': nowTs,
+        }, SetOptions(merge: true)).timeout(const Duration(seconds: 6)).catchError((_) {});
+        unawaited(DeviceInfoService.recordUserSession(userId: uid, email: email).catchError((_) {}));
+      }
+    } on FirebaseAuthException catch (e) {
+      debugPrint('[LoginPage] Background Firebase sign-in failed (${e.code}) — app continues on local session');
+      if (e.code == 'user-disabled') {
+        // Account disabled on the server: stop allowing instant local sign-in for it.
+        await OfflineAuthService.clearCredentialsForUser(email);
+      }
+    } catch (e) {
+      debugPrint('[LoginPage] Background Firebase sign-in notice: $e');
+    }
+  }
+
   // ── Offline login ─────────────────────────────────────────────────────────
   Future<bool> _attemptOfflineLogin(String input, String password) async {
     try {
@@ -935,7 +1078,7 @@ class _LoginPageState extends State<LoginPage> {
       if (mounted) {
         Flushbar(
           message: "Welcome back, ${userData['username']}! (Offline Mode)",
-          backgroundColor: Colors.orange.shade700,
+          backgroundColor: SoftPalette.orange350,
           duration: const Duration(seconds: 2),
         ).show(context);
         _navigateToHomeOffline(userData);
@@ -1035,7 +1178,7 @@ class _LoginPageState extends State<LoginPage> {
             if (mounted) {
               Flushbar(
                 message: "Welcome back, ${u['username'] ?? u['name'] ?? input}!",
-                backgroundColor: Colors.green.shade700,
+                backgroundColor: SoftPalette.green500,
                 duration: const Duration(seconds: 2),
               ).show(context);
               _navigateToHomeOffline(u);
@@ -1068,7 +1211,7 @@ class _LoginPageState extends State<LoginPage> {
     if (mounted) {
       Flushbar(
         message: "Logged in as Master Administrator (Offline Access)",
-        backgroundColor: const Color(0xFF059669),
+        backgroundColor: SoftPalette.emerald500,
         duration: const Duration(seconds: 2),
       ).show(context);
       _navigateToHomeOffline(masterUser);
@@ -1601,7 +1744,11 @@ class _LoginPageState extends State<LoginPage> {
         }
       }
 
-      final results = await Future.wait(parallelQueries).timeout(const Duration(seconds: 8));
+      // Per-query cap: a slow/hanging query is dropped instead of discarding every answer
+      // that already arrived (the old 8 s cap on the whole batch threw all results away).
+      final results = await Future.wait(parallelQueries.map(
+        (q) => q.timeout(const Duration(seconds: 4), onTimeout: () => null),
+      ));
       final validDocs = results.whereType<Map<String, dynamic>>().toList();
       if (validDocs.isNotEmpty) {
         final isAnyDel = validDocs.any((d) => d['isDeleted'] == true || (d['status'] ?? '').toString().toLowerCase().trim() == 'deleted');
@@ -1891,7 +2038,7 @@ class _LoginPageState extends State<LoginPage> {
   /// Searches BOTH places in Firestore (Root /users collection AND Branch subcollections /branches/{branchId}/users),
   /// as well as local Hive cache and sync queue.
   /// Merges all matching records so role, permissions, credentials, and branch mappings are never lost.
-  Future<Map<String, dynamic>?> _findUserInBothPlaces(String input) async {
+  Future<Map<String, dynamic>?> _findUserInBothPlaces(String input, {bool knownOnline = false}) async {
     final trimmed = input.trim();
     final lower = trimmed.toLowerCase();
     if (lower.isEmpty) return null;
@@ -1922,7 +2069,7 @@ class _LoginPageState extends State<LoginPage> {
 
     // 1. If online, query Firestore FIRST across Root and all Branch subcollections in parallel
     try {
-      final isOnline = await _hasRealInternet();
+      final isOnline = knownOnline || await _hasRealInternet();
       if (isOnline) {
         final checkBranches = _getAllBranchIds();
         final cloudQueries = <Future<List<Map<String, dynamic>>>>[
@@ -2243,7 +2390,9 @@ class _LoginPageState extends State<LoginPage> {
           }).catchError((_) => <Map<String, dynamic>>[]),
         ];
 
-        final nestedResults = await Future.wait(cloudQueries).timeout(const Duration(seconds: 8));
+        final nestedResults = await Future.wait(cloudQueries.map(
+          (q) => q.timeout(const Duration(seconds: 4), onTimeout: () => <Map<String, dynamic>>[]),
+        ));
         final List<Map<String, dynamic>> allFoundDocs = [];
         for (final list in nestedResults) {
           allFoundDocs.addAll(list);
@@ -2451,7 +2600,7 @@ class _LoginPageState extends State<LoginPage> {
     if (!mounted) return;
     Flushbar(
       message: msg,
-      backgroundColor: Colors.red.shade700,
+      backgroundColor: SoftPalette.red500,
       duration: const Duration(seconds: 5),
     ).show(context);
   }
@@ -2467,7 +2616,7 @@ class _LoginPageState extends State<LoginPage> {
     final cacheW = isDesktopScreen ? 800 : (patternW * dpr).toInt().clamp(240, 500);
 
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF031611) : const Color(0xFFEFF6F0),
+      backgroundColor: isDark ? SoftPalette.teal900 : SoftPalette.green100t,
       resizeToAvoidBottomInset: true,
       body: Stack(
         children: [
@@ -2479,7 +2628,7 @@ class _LoginPageState extends State<LoginPage> {
             width: patternW,
             child: Opacity(
               opacity: isDark ? 0.35 : 0.22,
-              child: Image.asset(
+              child: GDecorativeImage.asset(
                 'assets/images/2.webp',
                 fit: BoxFit.fitHeight,
                 alignment: Alignment.topLeft,
@@ -2496,8 +2645,8 @@ class _LoginPageState extends State<LoginPage> {
             child: CustomPaint(
               painter: IslamicPatternPainter(
                 color: isDark
-                    ? const Color(0xFF10B981).withValues(alpha: 0.04)
-                    : const Color(0xFF059669).withValues(alpha: 0.03),
+                    ? SoftPalette.emerald350.withValues(alpha: 0.04)
+                    : SoftPalette.emerald500.withValues(alpha: 0.03),
               ),
             ),
           ),
@@ -2512,8 +2661,8 @@ class _LoginPageState extends State<LoginPage> {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: isDark
-                    ? const Color(0xFF10B981).withValues(alpha: 0.12)
-                    : const Color(0xFF059669).withValues(alpha: 0.08),
+                    ? SoftPalette.emerald350.withValues(alpha: 0.12)
+                    : SoftPalette.emerald500.withValues(alpha: 0.08),
               ),
             ),
           ),
@@ -2526,8 +2675,8 @@ class _LoginPageState extends State<LoginPage> {
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
                 color: isDark
-                    ? const Color(0xFF047857).withValues(alpha: 0.15)
-                    : const Color(0xFF10B981).withValues(alpha: 0.08),
+                    ? SoftPalette.emerald550.withValues(alpha: 0.15)
+                    : SoftPalette.emerald350.withValues(alpha: 0.08),
               ),
             ),
           ),
@@ -2571,9 +2720,9 @@ class _LoginPageState extends State<LoginPage> {
 
   // ── Desktop 2-Column Layout ───────────────────────────────────────────────
   Widget _buildDesktopLayout(BuildContext context, bool isDark) {
-    final titleMain = isDark ? Colors.white : const Color(0xFF064E3B);
-    final titleAccent = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
-    final subtitleColor = isDark ? const Color(0xFF94A3B8) : const Color(0xFF374151);
+    final titleMain = isDark ? SoftPalette.gray50 : SoftPalette.emerald700;
+    final titleAccent = isDark ? SoftPalette.emerald300 : SoftPalette.emerald500;
+    final subtitleColor = isDark ? SoftPalette.slate350 : SoftPalette.slate700;
 
     return Row(
       crossAxisAlignment: CrossAxisAlignment.center,
@@ -2615,7 +2764,7 @@ class _LoginPageState extends State<LoginPage> {
                     borderRadius: BorderRadius.circular(1),
                     gradient: LinearGradient(
                       colors: [
-                        isDark ? const Color(0xFF10B981) : const Color(0xFF059669),
+                        isDark ? SoftPalette.emerald350 : SoftPalette.emerald500,
                         Colors.transparent,
                       ],
                     ),
@@ -2647,10 +2796,10 @@ class _LoginPageState extends State<LoginPage> {
 
   // ── Mobile Single-Column Layout ───────────────────────────────────────────
   Widget _buildMobileLayout(BuildContext context, bool isDark) {
-    final titleMain = isDark ? Colors.white : const Color(0xFF064E3B);
-    final titleAccent = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
-    final subtitleColor = isDark ? const Color(0xFF94A3B8) : const Color(0xFF4B5563);
-    final badgeColor = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
+    final titleMain = isDark ? SoftPalette.gray50 : SoftPalette.emerald700;
+    final titleAccent = isDark ? SoftPalette.emerald300 : SoftPalette.emerald500;
+    final subtitleColor = isDark ? SoftPalette.slate350 : SoftPalette.slate600;
+    final badgeColor = isDark ? SoftPalette.emerald300 : SoftPalette.emerald500;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
@@ -2702,31 +2851,31 @@ class _LoginPageState extends State<LoginPage> {
   // ── Form Glass Card ───────────────────────────────────────────────────────
   Widget _buildFormCard(BuildContext context, {required bool showHeader, required bool isDark}) {
     final cardBg = isDark
-        ? const Color(0xFF041C16).withValues(alpha: 0.95)
-        : Colors.white;
+        ? SoftPalette.teal900.withValues(alpha: 0.95)
+        : SoftPalette.gray50;
     final cardBorder = isDark
-        ? const Color(0xFF10B981).withValues(alpha: 0.3)
-        : Colors.white;
+        ? SoftPalette.emerald350.withValues(alpha: 0.3)
+        : SoftPalette.gray50;
     final cardShadow = isDark
-        ? const Color(0xFF000000).withValues(alpha: 0.4)
-        : const Color(0xFF047857).withValues(alpha: 0.08);
-    final badgeColor = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
-    final badgeDivider = isDark ? const Color(0xFF047857) : const Color(0xFFA7F3D0);
-    final titleMain = isDark ? Colors.white : const Color(0xFF064E3B);
-    final titleAccent = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
-    final subtitleColor = isDark ? const Color(0xFF94A3B8) : const Color(0xFF4B5563);
+        ? SoftPalette.gray900.withValues(alpha: 0.4)
+        : SoftPalette.emerald550.withValues(alpha: 0.08);
+    final badgeColor = isDark ? SoftPalette.emerald300 : SoftPalette.emerald500;
+    final badgeDivider = isDark ? SoftPalette.emerald550 : SoftPalette.emerald150;
+    final titleMain = isDark ? SoftPalette.gray50 : SoftPalette.emerald700;
+    final titleAccent = isDark ? SoftPalette.emerald300 : SoftPalette.emerald500;
+    final subtitleColor = isDark ? SoftPalette.slate350 : SoftPalette.slate600;
 
-    final inputLabelColor = isDark ? const Color(0xFFA7F3D0) : const Color(0xFF064E3B);
-    final inputFill = isDark ? const Color(0xFF02140F) : const Color(0xFFF8FAFC);
-    final inputBorder = isDark ? const Color(0xFF0D382B) : const Color(0xFFE2E8F0);
-    final inputFocusBorder = isDark ? const Color(0xFF10B981) : const Color(0xFF059669);
-    final inputTextColor = isDark ? Colors.white : const Color(0xFF0F172A);
-    final inputHintColor = isDark ? const Color(0xFF475569) : const Color(0xFF94A3B8);
-    final inputIconColor = isDark ? const Color(0xFF10B981) : const Color(0xFF059669);
+    final inputLabelColor = isDark ? SoftPalette.emerald150 : SoftPalette.emerald700;
+    final inputFill = isDark ? SoftPalette.teal900 : SoftPalette.gray50;
+    final inputBorder = isDark ? SoftPalette.emerald750 : SoftPalette.slate150;
+    final inputFocusBorder = isDark ? SoftPalette.emerald350 : SoftPalette.emerald500;
+    final inputTextColor = isDark ? SoftPalette.gray50 : SoftPalette.slate900;
+    final inputHintColor = isDark ? SoftPalette.slate600 : SoftPalette.slate350;
+    final inputIconColor = isDark ? SoftPalette.emerald350 : SoftPalette.emerald500;
 
     final btnGradientColors = isDark
-        ? [const Color(0xFF10B981), const Color(0xFF059669)]
-        : [const Color(0xFF059669), const Color(0xFF047857)];
+        ? [SoftPalette.emerald350, SoftPalette.emerald500]
+        : [SoftPalette.emerald500, SoftPalette.emerald550];
 
     return Container(
       padding: EdgeInsets.symmetric(
@@ -2806,18 +2955,18 @@ class _LoginPageState extends State<LoginPage> {
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               margin: const EdgeInsets.only(bottom: 14),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF451A03).withValues(alpha: 0.6) : Colors.orange.shade50,
+                color: isDark ? SoftPalette.orange800.withValues(alpha: 0.6) : SoftPalette.amber100m,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.orange.shade400),
+                border: Border.all(color: SoftPalette.amber300),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.warning_amber_rounded, size: 16, color: Colors.orange.shade800),
+                  Icon(Icons.warning_amber_rounded, size: 16, color: SoftPalette.orange400),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       "OFFLINE MODE ACTIVE",
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.orange.shade900),
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: SoftPalette.orange400),
                     ),
                   ),
                   InkWell(
@@ -2884,7 +3033,7 @@ class _LoginPageState extends State<LoginPage> {
               suffixIcon: IconButton(
                 icon: Icon(
                   _obscurePassword ? Icons.visibility_off_outlined : Icons.visibility_outlined,
-                  color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+                  color: isDark ? SoftPalette.slate550 : SoftPalette.slate350,
                   size: 18,
                 ),
                 onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
@@ -2936,20 +3085,38 @@ class _LoginPageState extends State<LoginPage> {
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 child: _loading
-                    ? const SizedBox(
-                        height: 22,
-                        width: 22,
-                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5),
+                    ? Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const SizedBox(
+                            height: 18,
+                            width: 18,
+                            child: CircularProgressIndicator(color: SoftPalette.gray50, strokeWidth: 2.4),
+                          ),
+                          const SizedBox(width: 12),
+                          Flexible(
+                            child: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 200),
+                              child: Text(
+                                '$_loginStep…',
+                                key: ValueKey(_loginStep),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(fontSize: 14.5, fontWeight: FontWeight.w600, color: SoftPalette.gray50),
+                              ),
+                            ),
+                          ),
+                        ],
                       )
                     : Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: const [
                           Text(
                             "Sign In",
-                            style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.bold, color: Colors.white),
+                            style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.bold, color: SoftPalette.gray50),
                           ),
                           SizedBox(width: 6),
-                          Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 18),
+                          Icon(Icons.arrow_forward_rounded, color: SoftPalette.gray50, size: 18),
                         ],
                       ),
               ),
@@ -2997,7 +3164,7 @@ class _LoginPageState extends State<LoginPage> {
               "GMWF Management Platform  •  v${AutoUpdateService.resolvedVersion}",
               style: TextStyle(
                 fontSize: 11,
-                color: isDark ? const Color(0xFF475569) : const Color(0xFF64748B),
+                color: isDark ? SoftPalette.slate600 : SoftPalette.slate550,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -3014,21 +3181,21 @@ class _LoginPageState extends State<LoginPage> {
         final confirm = await showDialog<bool>(
           context: context,
           builder: (dialogCtx) => AlertDialog(
-            backgroundColor: const Color(0xFF041C16),
-            title: const Text("Clear Saved Login?", style: TextStyle(color: Colors.white)),
+            backgroundColor: SoftPalette.teal900,
+            title: const Text("Clear Saved Login?", style: TextStyle(color: SoftPalette.gray50)),
             content: const Text(
               "This will remove cached credentials and allow a fresh sign-in.",
-              style: TextStyle(color: Color(0xFF94A3B8)),
+              style: TextStyle(color: SoftPalette.slate350),
             ),
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(dialogCtx, false),
-                child: const Text("Cancel", style: TextStyle(color: Color(0xFF94A3B8))),
+                child: const Text("Cancel", style: TextStyle(color: SoftPalette.slate350)),
               ),
               ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF10B981)),
+                style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.emerald350),
                 onPressed: () => Navigator.pop(dialogCtx, true),
-                child: const Text("Clear", style: TextStyle(color: Colors.white)),
+                child: const Text("Clear", style: TextStyle(color: SoftPalette.gray50)),
               ),
             ],
           ),
@@ -3047,7 +3214,7 @@ class _LoginPageState extends State<LoginPage> {
           _passwordController.clear();
           Flushbar(
             message: targetUser.isNotEmpty ? "Saved login for '$targetUser' cleared." : "Saved login session cleared.",
-            backgroundColor: Colors.orange.shade700,
+            backgroundColor: SoftPalette.orange350,
             duration: const Duration(seconds: 3),
           ).show(context);
         }
@@ -3061,7 +3228,7 @@ class _LoginPageState extends State<LoginPage> {
           errorBuilder: (_, _, _) => const Icon(
             Icons.local_pharmacy_rounded,
             size: 80,
-            color: Color(0xFF10B981),
+            color: SoftPalette.emerald350,
           ),
         ),
       ),
@@ -3070,10 +3237,10 @@ class _LoginPageState extends State<LoginPage> {
 
   // ── Feature Item Pill ─────────────────────────────────────────────────────
   Widget _buildFeatureItem(IconData icon, String title, bool isDark) {
-    final bg = isDark ? const Color(0xFF041C16) : Colors.white;
-    final border = isDark ? const Color(0xFF0D382B) : const Color(0xFFA7F3D0);
-    final iconColor = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
-    final textColor = isDark ? const Color(0xFF94A3B8) : const Color(0xFF1F2937);
+    final bg = isDark ? SoftPalette.teal900 : SoftPalette.gray50;
+    final border = isDark ? SoftPalette.emerald750 : SoftPalette.emerald150;
+    final iconColor = isDark ? SoftPalette.emerald300 : SoftPalette.emerald500;
+    final textColor = isDark ? SoftPalette.slate350 : SoftPalette.slate800;
 
     return Column(
       children: [
@@ -3087,7 +3254,7 @@ class _LoginPageState extends State<LoginPage> {
                 ? null
                 : [
                     BoxShadow(
-                      color: const Color(0xFF059669).withValues(alpha: 0.08),
+                      color: SoftPalette.emerald500.withValues(alpha: 0.08),
                       blurRadius: 8,
                       offset: const Offset(0, 2),
                     ),
@@ -3115,11 +3282,11 @@ class _LoginPageState extends State<LoginPage> {
     ];
 
     final bg = isDark
-        ? const Color(0xFF02100C).withValues(alpha: 0.95)
-        : const Color(0xFFEFF6F0).withValues(alpha: 0.95);
-    final border = isDark ? const Color(0xFF0D382B) : const Color(0xFFD1E7D7);
-    final iconColor = isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
-    final textColor = isDark ? const Color(0xFF94A3B8) : const Color(0xFF064E3B);
+        ? SoftPalette.teal900.withValues(alpha: 0.95)
+        : SoftPalette.green100t.withValues(alpha: 0.95);
+    final border = isDark ? SoftPalette.emerald750 : SoftPalette.emerald150m;
+    final iconColor = isDark ? SoftPalette.emerald300 : SoftPalette.emerald500;
+    final textColor = isDark ? SoftPalette.slate350 : SoftPalette.emerald700;
 
     return Container(
       width: double.infinity,
@@ -3134,7 +3301,7 @@ class _LoginPageState extends State<LoginPage> {
           children: List.generate(items.length * 2 - 1, (index) {
             if (index.isOdd) {
               return VerticalDivider(
-                color: isDark ? const Color(0xFF0D382B) : const Color(0xFFD1E7D7),
+                color: isDark ? SoftPalette.emerald750 : SoftPalette.emerald150m,
                 width: 1,
                 thickness: 1,
                 indent: 2,
@@ -3176,7 +3343,7 @@ class _LoginPageState extends State<LoginPage> {
 // ── Islamic Geometric Pattern Custom Painter ─────────────────────────────────
 class IslamicPatternPainter extends CustomPainter {
   final Color color;
-  IslamicPatternPainter({this.color = const Color(0x0F10B981)});
+  IslamicPatternPainter({this.color = SoftPalette.emerald350A6});
 
   @override
   void paint(Canvas canvas, Size size) {

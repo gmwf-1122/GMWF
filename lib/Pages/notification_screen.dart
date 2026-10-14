@@ -1,6 +1,9 @@
 // lib/pages/notification_screen.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:uuid/uuid.dart';
 import 'package:intl/intl.dart' hide TextDirection;
@@ -149,7 +152,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
         }
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           const SnackBar(content: Text('All notifications marked as read.')),
         );
       }
@@ -182,8 +185,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.red400,
+              foregroundColor: SoftPalette.gray50,
             ),
             onPressed: () => Navigator.of(ctx).pop(true),
             child: const Text('Clear All'),
@@ -197,7 +200,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
         final box = Hive.box(LocalStorageService.notificationsBox);
         await box.clear();
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          AppToast.showSnackBar(context, 
             const SnackBar(content: Text('All notifications cleared.')),
           );
         }
@@ -260,7 +263,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
       builder: (_) => AlertDialog(
         title: const Row(
           children: [
-            Icon(Icons.send_rounded, color: Color(0xFF0D9488)),
+            Icon(Icons.send_rounded, color: SoftPalette.teal500),
             SizedBox(width: 8),
             Text('Send Targeted Notification'),
           ],
@@ -310,8 +313,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
           ElevatedButton(
             onPressed: _sendNotification,
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF0D9488),
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.teal500,
+              foregroundColor: SoftPalette.gray50,
             ),
             child: const Text('Send Alert'),
           ),
@@ -330,7 +333,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
       builder: (ctx) => AlertDialog(
         title: const Row(
           children: [
-            Icon(Icons.campaign_rounded, color: Colors.amber),
+            Icon(Icons.campaign_rounded, color: SoftPalette.amber200),
             SizedBox(width: 8),
             Text('Broadcast Holiday Alert'),
           ],
@@ -341,7 +344,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
             children: [
               const Text(
                 'This will broadcast an instant push notification to ALL guardians across the branch.',
-                style: TextStyle(fontSize: 12, color: Colors.grey),
+                style: TextStyle(fontSize: 12, color: SoftPalette.gray350),
               ),
               const SizedBox(height: 16),
               TextField(
@@ -380,8 +383,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
             icon: const Icon(Icons.send_rounded, size: 18),
             label: const Text('Broadcast Now'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF059669),
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.emerald500,
+              foregroundColor: SoftPalette.gray50,
             ),
             onPressed: () async {
               final title = holidayTitleCtrl.text.trim();
@@ -389,7 +392,6 @@ class _NotificationScreenState extends State<NotificationScreen> {
               final date = holidayDateCtrl.text.trim();
               if (msg.isEmpty) return;
 
-              final messenger = ScaffoldMessenger.of(context);
               final nav = Navigator.of(ctx);
 
               await CloudMessagingService().broadcastHolidayAnnouncement(
@@ -401,10 +403,10 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
               if (mounted) {
                 nav.pop();
-                messenger.showSnackBar(
+                AppToast.fromSnackBar(
                   const SnackBar(
                     content: Text('🎉 Holiday Announcement broadcasted to all guardians!'),
-                    backgroundColor: Color(0xFF059669),
+                    backgroundColor: SoftPalette.emerald500,
                   ),
                 );
               }
@@ -430,7 +432,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
             children: [
               const Row(
                 children: [
-                  Icon(Icons.notifications_active, color: Color(0xFF0D9488)),
+                  Icon(Icons.notifications_active, color: SoftPalette.teal500),
                   SizedBox(width: 8),
                   Text(
                     'Test Notification Triggers',
@@ -440,9 +442,9 @@ class _NotificationScreenState extends State<NotificationScreen> {
               ),
               const SizedBox(height: 12),
               ListTile(
-                leading: const CircleAvatar(
-                  backgroundColor: Color(0xFFFEF3C7),
-                  child: Icon(Icons.volunteer_activism, color: Color(0xFFD97706)),
+                leading: CircleAvatar(
+                  backgroundColor: context.adapt(SoftPalette.yellow100),
+                  child: Icon(Icons.volunteer_activism, color: SoftPalette.orange400),
                 ),
                 title: const Text('Pending Donation Verification Alert'),
                 subtitle: const Text('Simulate cashier/finance notification (routes to Donations)'),
@@ -458,9 +460,9 @@ class _NotificationScreenState extends State<NotificationScreen> {
                 },
               ),
               ListTile(
-                leading: const CircleAvatar(
-                  backgroundColor: Color(0xFFE0F2FE),
-                  child: Icon(Icons.system_update, color: Color(0xFF0284C7)),
+                leading: CircleAvatar(
+                  backgroundColor: context.adapt(SoftPalette.slate100),
+                  child: Icon(Icons.system_update, color: SoftPalette.sky500),
                 ),
                 title: const Text('App Update Notification'),
                 subtitle: const Text('Simulate version release notification (opens updater)'),
@@ -473,9 +475,9 @@ class _NotificationScreenState extends State<NotificationScreen> {
                 },
               ),
               ListTile(
-                leading: const CircleAvatar(
-                  backgroundColor: Color(0xFFDCFCE7),
-                  child: Icon(Icons.payment, color: Color(0xFF16A34A)),
+                leading: CircleAvatar(
+                  backgroundColor: context.adapt(SoftPalette.emerald100),
+                  child: Icon(Icons.payment, color: SoftPalette.green400),
                 ),
                 title: const Text('Student Fee Payment Alert'),
                 subtitle: const Text('Simulate fee receipt for guardian (routes to ledger)'),
@@ -512,7 +514,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
               padding: const EdgeInsets.all(2),
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.white.withAlpha(20),
+                color: SoftPalette.gray50.withAlpha(20),
               ),
               child: Image.asset(
                 kAppLogoAsset,
@@ -527,13 +529,13 @@ class _NotificationScreenState extends State<NotificationScreen> {
         actions: [
           IconButton(
             tooltip: 'Test Notification System',
-            icon: const Icon(Icons.notifications_active_outlined, color: Colors.amber),
+            icon: const Icon(Icons.notifications_active_outlined, color: SoftPalette.amber200),
             onPressed: _showTestNotificationPicker,
           ),
           if (widget.role == 'admin' || widget.role == 'supervisor' || widget.role == 'chairman')
             IconButton(
               tooltip: 'Broadcast Holiday Announcement',
-              icon: const Icon(Icons.campaign_outlined, color: Colors.greenAccent),
+              icon: const Icon(Icons.campaign_outlined, color: SoftPalette.emerald200),
               onPressed: _showHolidayBroadcastDialog,
             ),
           IconButton(
@@ -553,8 +555,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
               onPressed: _showSendDialog,
               icon: const Icon(Icons.send_rounded),
               label: const Text('Send Alert'),
-              backgroundColor: const Color(0xFF0D9488),
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.teal500,
+              foregroundColor: SoftPalette.gray50,
             )
           : null,
       body: FutureBuilder(
@@ -608,7 +610,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                   // Filter and Search Header
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                    color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                    color: isDark ? SoftPalette.slate800 : SoftPalette.slate100,
                     child: Row(
                       children: [
                         Expanded(
@@ -632,7 +634,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                 borderSide: BorderSide.none,
                               ),
                               filled: true,
-                              fillColor: isDark ? const Color(0xFF334155) : Colors.white,
+                              fillColor: isDark ? SoftPalette.slate700 : SoftPalette.gray50,
                             ),
                             onChanged: (val) => setState(() => _searchQuery = val.trim().toLowerCase()),
                           ),
@@ -660,13 +662,13 @@ class _NotificationScreenState extends State<NotificationScreen> {
                             child: Column(
                               mainAxisAlignment: MainAxisAlignment.center,
                               children: [
-                                Icon(Icons.notifications_none_outlined, size: 64, color: Colors.grey.shade400),
+                                Icon(Icons.notifications_none_outlined, size: 64, color: SoftPalette.gray300),
                                 const SizedBox(height: 12),
                                 Text(
                                   _filterStatus == 'unread'
                                       ? 'No unread notifications'
                                       : 'No notifications yet',
-                                  style: TextStyle(color: Colors.grey.shade600, fontSize: 16),
+                                  style: TextStyle(color: context.adapt(SoftPalette.gray500), fontSize: 16),
                                 ),
                               ],
                             ),
@@ -696,10 +698,10 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                   alignment: Alignment.centerRight,
                                   padding: const EdgeInsets.symmetric(horizontal: 20),
                                   decoration: BoxDecoration(
-                                    color: Colors.red.shade400,
+                                    color: SoftPalette.red400,
                                     borderRadius: BorderRadius.circular(12),
                                   ),
-                                  child: const Icon(Icons.delete, color: Colors.white),
+                                  child: const Icon(Icons.delete, color: SoftPalette.gray50),
                                 ),
                                 onDismissed: (_) => _deleteNotification(id),
                                 child: Card(
@@ -707,13 +709,13 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(12),
                                     side: BorderSide(
-                                      color: seen ? Colors.transparent : const Color(0xFF0D9488).withAlpha(120),
+                                      color: seen ? Colors.transparent : SoftPalette.teal500.withAlpha(120),
                                       width: 1.5,
                                     ),
                                   ),
                                   color: seen
-                                      ? (isDark ? const Color(0xFF1E293B) : Colors.white)
-                                      : (isDark ? const Color(0xFF064E3B).withAlpha(60) : const Color(0xFFF0FDF4)),
+                                      ? (isDark ? SoftPalette.slate800 : SoftPalette.gray50)
+                                      : (isDark ? SoftPalette.emerald700.withAlpha(60) : SoftPalette.emerald50m),
                                   child: InkWell(
                                     borderRadius: BorderRadius.circular(12),
                                     onTap: () {
@@ -737,8 +739,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                                 decoration: BoxDecoration(
                                                   shape: BoxShape.circle,
                                                   color: seen
-                                                      ? (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0))
-                                                      : const Color(0xFF0D9488),
+                                                      ? (isDark ? SoftPalette.slate700 : SoftPalette.slate150)
+                                                      : SoftPalette.teal500,
                                                 ),
                                                 padding: const EdgeInsets.all(4),
                                                 child: Image.asset(
@@ -747,7 +749,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                                   errorBuilder: (context, error, stackTrace) => Icon(
                                                     _getNotificationIcon(item['type'] ?? item['category']),
                                                     size: 18,
-                                                    color: seen ? Colors.grey : Colors.white,
+                                                    color: seen ? SoftPalette.gray350 : SoftPalette.gray50,
                                                   ),
                                                 ),
                                               ),
@@ -761,7 +763,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                                         const Text(
                                                           kAppTitle,
                                                           style: TextStyle(
-                                                            color: Color(0xFF0D9488),
+                                                            color: SoftPalette.teal500,
                                                             fontSize: 11,
                                                             fontWeight: FontWeight.bold,
                                                           ),
@@ -770,7 +772,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                                         Container(
                                                           padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                                                           decoration: BoxDecoration(
-                                                            color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                                                            color: isDark ? SoftPalette.slate700 : SoftPalette.slate150,
                                                             borderRadius: BorderRadius.circular(4),
                                                           ),
                                                           child: Text(
@@ -778,7 +780,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                                             style: TextStyle(
                                                               fontSize: 9,
                                                               fontWeight: FontWeight.w600,
-                                                              color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+                                                              color: isDark ? SoftPalette.slate200 : SoftPalette.slate600,
                                                             ),
                                                           ),
                                                         ),
@@ -790,7 +792,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                                       style: TextStyle(
                                                         fontWeight: seen ? FontWeight.w600 : FontWeight.bold,
                                                         fontSize: 14.5,
-                                                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                                        color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                                                       ),
                                                     ),
                                                     if (timeDisplay.isNotEmpty) ...[
@@ -799,7 +801,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                                         timeDisplay,
                                                         style: TextStyle(
                                                           fontSize: 11,
-                                                          color: Colors.grey.shade500,
+                                                          color: SoftPalette.gray350,
                                                         ),
                                                       ),
                                                     ],
@@ -812,7 +814,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                                   height: 10,
                                                   margin: const EdgeInsets.only(top: 4, left: 4),
                                                   decoration: const BoxDecoration(
-                                                    color: Color(0xFF0D9488),
+                                                    color: SoftPalette.teal500,
                                                     shape: BoxShape.circle,
                                                   ),
                                                 ),
@@ -825,7 +827,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                               body.toString(),
                                               style: TextStyle(
                                                 fontSize: 13,
-                                                color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155),
+                                                color: isDark ? SoftPalette.slate200 : SoftPalette.slate700,
                                               ),
                                             ),
                                           ),
@@ -852,24 +854,24 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                                         Container(
                                                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                                           decoration: BoxDecoration(
-                                                            color: Colors.green.withValues(alpha: 0.15),
+                                                            color: SoftPalette.green400.withValues(alpha: 0.15),
                                                             borderRadius: BorderRadius.circular(8),
-                                                            border: Border.all(color: Colors.green.withValues(alpha: 0.4)),
+                                                            border: Border.all(color: SoftPalette.green400.withValues(alpha: 0.4)),
                                                           ),
                                                           child: const Row(
                                                             mainAxisSize: MainAxisSize.min,
                                                             children: [
-                                                              Icon(Icons.check_circle_rounded, size: 14, color: Colors.green),
+                                                              Icon(Icons.check_circle_rounded, size: 14, color: SoftPalette.green400),
                                                               SizedBox(width: 4),
-                                                              Text('Access Allowed', style: TextStyle(color: Colors.green, fontSize: 11, fontWeight: FontWeight.bold)),
+                                                              Text('Access Allowed', style: TextStyle(color: SoftPalette.green400, fontSize: 11, fontWeight: FontWeight.bold)),
                                                             ],
                                                           ),
                                                         ),
                                                       ] else ...[
                                                         ElevatedButton.icon(
                                                           style: ElevatedButton.styleFrom(
-                                                            backgroundColor: const Color(0xFF10B981),
-                                                            foregroundColor: Colors.white,
+                                                            backgroundColor: SoftPalette.emerald350,
+                                                            foregroundColor: SoftPalette.gray50,
                                                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                                                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                                             elevation: 0,
@@ -890,7 +892,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
                                                   child: TextButton.icon(
                                                     style: TextButton.styleFrom(
                                                       visualDensity: VisualDensity.compact,
-                                                      foregroundColor: const Color(0xFF0D9488),
+                                                      foregroundColor: SoftPalette.teal500,
                                                     ),
                                                     icon: const Icon(Icons.arrow_forward_rounded, size: 16),
                                                     label: const Text('Open Details'),
@@ -935,7 +937,7 @@ class _NotificationScreenState extends State<NotificationScreen> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Row(
           children: [
-            Icon(Icons.check_circle_rounded, color: Colors.green),
+            Icon(Icons.check_circle_rounded, color: SoftPalette.green400),
             SizedBox(width: 8),
             Text('Allow App Access'),
           ],
@@ -948,8 +950,8 @@ class _NotificationScreenState extends State<NotificationScreen> {
             icon: const Icon(Icons.lock_open_rounded, size: 16),
             label: const Text('Allow & Restore'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.green400,
+              foregroundColor: SoftPalette.gray50,
             ),
           ),
         ],
@@ -1044,10 +1046,10 @@ class _NotificationScreenState extends State<NotificationScreen> {
 
     if (mounted) {
       setState(() {});
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: Text('✅ Access allowed and restored for $name'),
-          backgroundColor: Colors.green,
+          backgroundColor: SoftPalette.green400,
         ),
       );
     }

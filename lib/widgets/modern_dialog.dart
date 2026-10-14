@@ -1,5 +1,6 @@
 // lib/widgets/modern_dialog.dart
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import '../constants/colors.dart';
 
 /// A modern, customizable dialog template with sleek aesthetics,
@@ -47,7 +48,7 @@ class AppModernDialog extends StatelessWidget {
       context: context,
       barrierDismissible: barrierDismissible,
       barrierLabel: MaterialLocalizations.of(context).modalBarrierDismissLabel,
-      barrierColor: Colors.black45,
+      barrierColor: SoftPalette.gray900A45,
       transitionDuration: const Duration(milliseconds: 260),
       transitionBuilder: (ctx, anim, secondaryAnim, child) {
         final curved = CurvedAnimation(parent: anim, curve: Curves.easeOutCubic);
@@ -86,15 +87,15 @@ class AppModernDialog extends StatelessWidget {
         constraints: BoxConstraints(maxWidth: maxWidth),
         margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF161B22) : Colors.white,
+          color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: isDark ? const Color(0xFF30363D) : const Color(0xFFE2E8F0),
+            color: isDark ? SoftPalette.slate750 : SoftPalette.slate150,
             width: 1.2,
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.45 : 0.14),
+              color: SoftPalette.gray900.withValues(alpha: isDark ? 0.45 : 0.14),
               blurRadius: 36,
               offset: const Offset(0, 16),
             ),
@@ -139,7 +140,7 @@ class AppModernDialog extends StatelessWidget {
                             style: TextStyle(
                               fontSize: 18,
                               fontWeight: FontWeight.w700,
-                              color: isDark ? Colors.white : AppColors.gray900,
+                              color: isDark ? SoftPalette.gray50 : AppColors.gray900,
                               letterSpacing: -0.3,
                             ),
                           ),
@@ -149,7 +150,7 @@ class AppModernDialog extends StatelessWidget {
                               subtitle!,
                               style: TextStyle(
                                 fontSize: 13,
-                                color: isDark ? const Color(0xFF8B949E) : AppColors.gray600,
+                                color: isDark ? SoftPalette.slate400 : AppColors.gray600,
                                 height: 1.35,
                               ),
                             ),
@@ -160,8 +161,8 @@ class AppModernDialog extends StatelessWidget {
                     if (showCloseButton)
                       IconButton(
                         icon: const Icon(Icons.close_rounded, size: 20),
-                        color: isDark ? const Color(0xFF8B949E) : AppColors.gray400,
-                        hoverColor: isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.05),
+                        color: isDark ? SoftPalette.slate400 : AppColors.gray400,
+                        hoverColor: isDark ? SoftPalette.gray50A10 : SoftPalette.gray900.withValues(alpha: 0.05),
                         splashRadius: 18,
                         onPressed: onClose ?? () => Navigator.of(context).maybePop(),
                       ),
@@ -183,12 +184,12 @@ class AppModernDialog extends StatelessWidget {
                   padding: const EdgeInsets.fromLTRB(24, 14, 24, 18),
                   decoration: BoxDecoration(
                     color: isDark
-                        ? const Color(0xFF0D1117).withValues(alpha: 0.5)
-                        : const Color(0xFFF8FAFC),
+                        ? SoftPalette.slate900.withValues(alpha: 0.5)
+                        : SoftPalette.gray50,
                     borderRadius: const BorderRadius.vertical(bottom: Radius.circular(20)),
                     border: Border(
                       top: BorderSide(
-                        color: isDark ? const Color(0xFF21262D) : const Color(0xFFEDF2F7),
+                        color: isDark ? SoftPalette.slate800 : SoftPalette.slate100,
                         width: 1,
                       ),
                     ),

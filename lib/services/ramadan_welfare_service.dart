@@ -3,7 +3,6 @@
 import 'dart:math';
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uuid/uuid.dart';
 import '../utils/cnic_parser_util.dart';
 import 'local_storage_service.dart';
@@ -113,17 +112,8 @@ class RamadanWelfareService {
       'data': data,
     });
 
-    // 3. Direct Firestore push if online
-    try {
-      FirebaseFirestore.instance
-          .collection('branches')
-          .doc(branchId)
-          .collection('ramadan_registrations')
-          .doc(id)
-          .set(data, SetOptions(merge: true));
-    } catch (e) {
-      debugPrint('[RamadanWelfareService] Firestore background save error: $e');
-    }
+    // The queued item uploads it (within seconds when online). The extra direct write was
+    // a second write of the same document that sat in the SDK's hidden queue when offline.
 
     return data;
   }
@@ -210,19 +200,7 @@ class RamadanWelfareService {
         'data': winner,
       });
 
-      // Update Firestore
-      try {
-        FirebaseFirestore.instance
-            .collection('branches')
-            .doc(winner['branchId'] ?? 'global')
-            .collection('ramadan_registrations')
-            .doc(winner['id'])
-            .update({
-          'isWinner': true,
-          'winTimestamp': now.toIso8601String(),
-          'winPassNo': passNo,
-        });
-      } catch (_) {}
+      // The queued item uploads the winner fields (merged into the registration document).
 
       winners.add(winner);
     }

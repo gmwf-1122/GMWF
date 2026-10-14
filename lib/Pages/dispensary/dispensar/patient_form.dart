@@ -1,5 +1,6 @@
 // lib/pages/dispensary/dispensar/patient_form.dart
 
+import 'package:gmwf/services/cloud/cloud_db.dart';
 import 'dart:async';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
@@ -7,13 +8,14 @@ import 'package:printing/printing.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:another_flushbar/flushbar.dart';
+import 'package:gmwf/design/components/flushbar_compat.dart';
 import 'package:intl/intl.dart';
 import 'dart:ui' as ui;
 import 'package:gmwf/services/local_storage_service.dart';
 import 'package:gmwf/services/camp_session_service.dart';
 import 'package:gmwf/services/master_proforma_service.dart';
 import 'package:gmwf/services/sync_service.dart';
+import 'package:gmwf/services/dispensary_preferences_service.dart';
 import 'patient_form_helper.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
@@ -29,12 +31,14 @@ class PatientForm extends StatefulWidget {
   final Map<String, dynamic> queueEntry;
   final VoidCallback? onDispensed;
   final String? dispenserName;
+  final bool isCompactPreview;
   const PatientForm({
     super.key,
     required this.branchId,
     required this.queueEntry,
     this.onDispensed,
     this.dispenserName,
+    this.isCompactPreview = false,
   });
   @override
   State<PatientForm> createState() => _PatientFormState();
@@ -225,6 +229,7 @@ class _PatientFormState extends State<PatientForm> {
   @override
   void dispose() {
     _realtimeSub?.cancel();
+    _stockWatch?.cancel();
     super.dispose();
   }
 
@@ -513,8 +518,8 @@ class _PatientFormState extends State<PatientForm> {
   // ─── Print & Share Options ────────────────────────────────────────────────
   Future<void> _showPrintOptionsSheet() async {
     if (!_hasPrintableContent) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text('Nothing to print'), backgroundColor: Colors.orange));
+      AppToast.showSnackBar(context, const SnackBar(
+          content: Text('Nothing to print'), backgroundColor: SoftPalette.amber300));
       return;
     }
     showModalBottomSheet(
@@ -853,6 +858,23 @@ class _PatientFormState extends State<PatientForm> {
     }
 
     return allDeductedBatches;
+  }
+
+  // Build-time copy of the syringe list. Scanning the whole stock box on every
+  // setState was costly; it is recomputed only when the stock box changes (or the
+  // camp context does). The dispense path still reads fresh stock.
+  List<Map<String, dynamic>>? _syringeCache;
+  String _syringeCacheKey = '';
+  StreamSubscription<BoxEvent>? _stockWatch;
+
+  List<Map<String, dynamic>> _syringeItemsForBuild() {
+    final key = '${widget.queueEntry['campId']}|${widget.queueEntry['dispensaryId']}|'
+        '${_data['campId']}|${_data['dispensaryId']}|${CampSessionService.getActiveCamp(widget.branchId)}';
+    final cached = _syringeCache;
+    if (cached != null && key == _syringeCacheKey) return cached;
+    _stockWatch ??= Hive.box(LocalStorageService.stockBox).watch().listen((_) => _syringeCache = null);
+    _syringeCacheKey = key;
+    return _syringeCache = _getAvailableSyringeStockItems();
   }
 
   List<Map<String, dynamic>> _getAvailableSyringeStockItems() {
@@ -1338,7 +1360,7 @@ class _PatientFormState extends State<PatientForm> {
         builder: (ctx) => AlertDialog(
           title: Row(
             children: const [
-              Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 28),
+              Icon(Icons.warning_amber_rounded, color: SoftPalette.amber300, size: 28),
               SizedBox(width: 8),
               Text('Insufficient Stock'),
             ],
@@ -1352,14 +1374,14 @@ class _PatientFormState extends State<PatientForm> {
                 const SizedBox(height: 12),
                 ...insufficientMeds.map((med) => Padding(
                   padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Text('• $med', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red)),
+                  child: Text('• $med', style: const TextStyle(fontWeight: FontWeight.bold, color: SoftPalette.red400)),
                 )),
                 const SizedBox(height: 16),
-                const Text(
+                Text(
                   'Choose how to handle this patient:\n'
                   '• Put On Hold: Moves patient to On-Hold section so queue can continue.\n'
                   '• Dispense Available: Dispenses remaining stock and proceeds.',
-                  style: TextStyle(fontSize: 13, color: Colors.grey),
+                  style: TextStyle(fontSize: 13, color: ctx.adapt(SoftPalette.gray350)),
                 ),
               ],
             ),
@@ -1371,15 +1393,15 @@ class _PatientFormState extends State<PatientForm> {
             ),
             ElevatedButton.icon(
               onPressed: () => Navigator.pop(ctx, 'hold'),
-              icon: const Icon(Icons.pause_circle_outline, color: Colors.white, size: 18),
+              icon: const Icon(Icons.pause_circle_outline, color: SoftPalette.gray50, size: 18),
               label: const Text('Put On Hold'),
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.orange.shade800),
+              style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.orange400),
             ),
             ElevatedButton.icon(
               onPressed: () => Navigator.pop(ctx, 'dispense_available'),
-              icon: const Icon(Icons.check_circle_outline, color: Colors.white, size: 18),
+              icon: const Icon(Icons.check_circle_outline, color: SoftPalette.gray50, size: 18),
               label: const Text('Dispense Available'),
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF00695C)),
+              style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.teal600),
             ),
           ],
         ),
@@ -1392,7 +1414,7 @@ class _PatientFormState extends State<PatientForm> {
           if (mounted) {
             Flushbar(
               message: 'Patient #$serial moved to On-Hold list',
-              backgroundColor: Colors.orange.shade800,
+              backgroundColor: SoftPalette.orange400,
               duration: const Duration(seconds: 3),
             ).show(context);
           }
@@ -1424,7 +1446,7 @@ class _PatientFormState extends State<PatientForm> {
             onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: t.accent,
-              foregroundColor: Colors.white,
+              foregroundColor: SoftPalette.gray50,
             ),
             child: const Text('Dispense'),
           ),
@@ -1577,11 +1599,11 @@ class _PatientFormState extends State<PatientForm> {
           _isDispensing = false;
         });
         try {
-          ScaffoldMessenger.maybeOf(context)?.showSnackBar(SnackBar(
+          AppToast.showSnackBar(context, SnackBar(
               content: Text(days > 1
                   ? 'Dispensed $days-day supply successfully'
                   : 'Dispensed successfully'),
-              backgroundColor: Colors.green));
+              backgroundColor: SoftPalette.green400));
         } catch (_) {}
       }
       widget.onDispensed?.call();
@@ -1640,7 +1662,7 @@ class _PatientFormState extends State<PatientForm> {
           // When connected, the LAN server handles cloud sync from the dispense_completed event.
           if (!RealtimeManager().isConnected) {
             try {
-              final branchRef = FirebaseFirestore.instance
+              final branchRef = CloudDb.instance
                   .collection('branches').doc(widget.branchId);
               await branchRef.collection('serials').doc(campDocKey)
                   .collection(queueType).doc(upperSerial)
@@ -1683,8 +1705,8 @@ class _PatientFormState extends State<PatientForm> {
       if (mounted) {
         setState(() => _isDispensing = false);
         try {
-          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-              SnackBar(content: Text('Failed to dispense: $e'), backgroundColor: Colors.red));
+          AppToast.showSnackBar(context, 
+              SnackBar(content: Text('Failed to dispense: $e'), backgroundColor: SoftPalette.red400));
         } catch (_) {}
       }
     }
@@ -1700,16 +1722,16 @@ class _PatientFormState extends State<PatientForm> {
         Container(
           padding: const EdgeInsets.all(6),
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF134E4A) : t.accent.withValues(alpha: 0.1),
+            color: isDark ? SoftPalette.teal700 : t.accent.withValues(alpha: 0.1),
             borderRadius: BorderRadius.circular(8),
           ),
-          child: Icon(icon, color: isDark ? const Color(0xFF2DD4BF) : t.accent, size: isMobile ? 15 : 18),
+          child: Icon(icon, color: isDark ? SoftPalette.teal300 : t.accent, size: isMobile ? 15 : 18),
         ),
         const SizedBox(width: 10),
         Text(
           title, 
           style: TextStyle(
-            color: isDark ? const Color(0xFFF1F5F9) : t.textPrimary,
+            color: isDark ? SoftPalette.slate100 : t.textPrimary,
             fontWeight: FontWeight.w800,
             fontSize: isMobile ? 15 : 17,
             letterSpacing: 0.2,
@@ -1727,28 +1749,28 @@ class _PatientFormState extends State<PatientForm> {
     Color color;
     if (t.contains('cap') || n.startsWith('cap')) {
       icon = FontAwesomeIcons.capsules;
-      color = const Color(0xFFF59E0B); // Amber / Orange
+      color = SoftPalette.amber300; // Amber / Orange
     } else if (t.contains('inj') || t.contains('drip') || t.contains('infusion') || n.startsWith('inj')) {
       icon = FontAwesomeIcons.syringe;
-      color = const Color(0xFFEF4444); // Crimson / Red
+      color = SoftPalette.red400; // Crimson / Red
     } else if (t.contains('syp') || t.contains('syrup') || t.contains('susp') || n.startsWith('syp')) {
       icon = FontAwesomeIcons.bottleDroplet;
-      color = const Color(0xFF10B981); // Emerald Green
+      color = SoftPalette.emerald350; // Emerald Green
     } else if (t.contains('drop') || n.startsWith('drop')) {
       icon = FontAwesomeIcons.eyeDropper;
-      color = const Color(0xFF06B6D4); // Cyan
+      color = SoftPalette.cyan350; // Cyan
     } else if (t.contains('cream') || t.contains('oint') || t.contains('gel')) {
       icon = Icons.sanitizer_rounded;
-      color = const Color(0xFFEC4899); // Pink
+      color = SoftPalette.pink400; // Pink
     } else if (t.contains('inhal') || t.contains('resp') || n.contains('inhal')) {
       icon = FontAwesomeIcons.lungs;
-      color = const Color(0xFF8B5CF6); // Purple
+      color = SoftPalette.violet500; // Purple
     } else if (t.contains('tab') || n.startsWith('tab')) {
       icon = FontAwesomeIcons.tablets;
-      color = const Color(0xFF3B82F6); // Blue
+      color = SoftPalette.blue500; // Blue
     } else {
       icon = Icons.medication_rounded;
-      color = const Color(0xFF0D9488); // Teal
+      color = SoftPalette.teal500; // Teal
     }
 
     return Container(
@@ -1763,6 +1785,30 @@ class _PatientFormState extends State<PatientForm> {
   }
 
   Widget _linedList(List items, RoleThemeData t, {bool isLab = false, bool isMobile = false}) {
+    if (items.isEmpty) return const SizedBox.shrink();
+    if (isLab || !Hive.isBoxOpen('app_settings')) {
+      return _linedListBody(items, t, isLab: isLab, isMobile: isMobile, showUrduTiming: true);
+    }
+    // User preference (Urdu text vs 1+1+1) applies on every screen and updates live.
+    return ValueListenableBuilder<Box>(
+      valueListenable: DispensaryPreferencesService.showUrduTimingListenable(),
+      builder: (context, box, _) => _linedListBody(
+        items,
+        t,
+        isLab: isLab,
+        isMobile: isMobile,
+        showUrduTiming: DispensaryPreferencesService.isShowUrduTiming(),
+      ),
+    );
+  }
+
+  Widget _linedListBody(
+    List items,
+    RoleThemeData t, {
+    bool isLab = false,
+    bool isMobile = false,
+    required bool showUrduTiming,
+  }) {
     if (items.isEmpty) return const SizedBox.shrink();
     if (isLab) {
       return Column(
@@ -1823,9 +1869,9 @@ class _PatientFormState extends State<PatientForm> {
             vertical: isMobile ? 10 : 12,
           ),
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+            color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+            border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -1847,7 +1893,7 @@ class _PatientFormState extends State<PatientForm> {
                                 text: TextSpan(
                                   style: TextStyle(
                                     fontFamily: 'Roboto',
-                                    color: isDark ? Colors.white : t.textPrimary,
+                                    color: isDark ? SoftPalette.gray50 : t.textPrimary,
                                   ),
                                   children: [
                                     TextSpan(
@@ -1863,7 +1909,7 @@ class _PatientFormState extends State<PatientForm> {
                                         style: TextStyle(
                                           fontWeight: FontWeight.w500,
                                           fontSize: isMobile ? 12 : 13.5,
-                                          color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                          color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
                                         ),
                                       ),
                                   ],
@@ -1874,7 +1920,7 @@ class _PatientFormState extends State<PatientForm> {
                                 Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(Icons.biotech_rounded, size: 12, color: isDark ? const Color(0xFF2DD4BF) : t.accent),
+                                    Icon(Icons.biotech_rounded, size: 12, color: isDark ? SoftPalette.teal300 : t.accent),
                                     const SizedBox(width: 3),
                                     Flexible(
                                       child: Text(
@@ -1882,7 +1928,7 @@ class _PatientFormState extends State<PatientForm> {
                                         style: TextStyle(
                                           fontSize: isMobile ? 11 : 12,
                                           fontStyle: FontStyle.italic,
-                                          color: isDark ? const Color(0xFF2DD4BF) : t.accent,
+                                          color: isDark ? SoftPalette.teal300 : t.accent,
                                           fontWeight: FontWeight.w500,
                                         ),
                                         overflow: TextOverflow.ellipsis,
@@ -1903,20 +1949,20 @@ class _PatientFormState extends State<PatientForm> {
                     style: TextStyle(
                       fontSize: isMobile ? 12 : 13.5,
                       fontWeight: FontWeight.w600,
-                      color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                      color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
                     ),
                   ),
                 ],
               ),
-              if (fullUrdu.isNotEmpty) ...[
+              if (showUrduTiming && fullUrdu.isNotEmpty) ...[
                 const SizedBox(height: 8),
                 Container(
                   width: double.infinity,
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF14532D).withValues(alpha: 0.35) : const Color(0xFFDCFCE7),
+                    color: isDark ? SoftPalette.green700.withValues(alpha: 0.35) : SoftPalette.emerald100,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: isDark ? const Color(0xFF166534) : const Color(0xFFBBF7D0)),
+                    border: Border.all(color: isDark ? SoftPalette.green600 : SoftPalette.emerald150),
                   ),
                   child: Text(
                     fullUrdu,
@@ -1926,7 +1972,33 @@ class _PatientFormState extends State<PatientForm> {
                       fontFamily: 'Jameel Noori Nastaleeq',
                       fontSize: isMobile ? 15 : 17,
                       fontWeight: FontWeight.w700,
-                      color: isDark ? const Color(0xFF86EFAC) : const Color(0xFF166534),
+                      color: isDark ? SoftPalette.emerald200 : SoftPalette.green600,
+                    ),
+                  ),
+                ),
+              ] else if (!showUrduTiming) ...[
+                const SizedBox(height: 8),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: isDark ? SoftPalette.sky700.withValues(alpha: 0.25) : SoftPalette.blue500A10,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: isDark ? SoftPalette.sky600.withValues(alpha: 0.35) : SoftPalette.blue200),
+                  ),
+                  child: Text(
+                    [
+                      PatientFormHelper.buildCompactEnglishTiming(item),
+                      if (PatientFormHelper.getMealEnglish(item['meal']?.toString() ?? '').isNotEmpty)
+                        '(${PatientFormHelper.getMealEnglish(item['meal']?.toString() ?? '')})',
+                    ].join(' '),
+                    textAlign: TextAlign.left,
+                    style: TextStyle(
+                      fontFamily: 'Roboto',
+                      fontSize: isMobile ? 13.5 : 15,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: 0.4,
+                      color: isDark ? SoftPalette.sky200 : SoftPalette.blue550,
                     ),
                   ),
                 ),
@@ -1991,9 +2063,9 @@ class _PatientFormState extends State<PatientForm> {
         Container(
           padding: EdgeInsets.symmetric(horizontal: isMobile ? 12 : 16, vertical: isMobile ? 10 : 12),
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+            color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+            border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
           ),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -2003,7 +2075,7 @@ class _PatientFormState extends State<PatientForm> {
                 style: TextStyle(
                   fontSize: isMobile ? 12 : 13.5,
                   fontWeight: FontWeight.w500,
-                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                  color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
                 ),
               ),
               Text(
@@ -2022,13 +2094,13 @@ class _PatientFormState extends State<PatientForm> {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF451A03) : Colors.orange.shade50,
+              color: isDark ? SoftPalette.orange800 : SoftPalette.amber100m,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: isDark ? const Color(0xFFD97706) : Colors.orange.shade300, width: 1.5),
+              border: Border.all(color: isDark ? SoftPalette.orange400 : SoftPalette.amber300, width: 1.5),
             ),
             child: Row(
               children: [
-                Icon(Icons.payments_rounded, color: isDark ? const Color(0xFFFBBF24) : Colors.orange.shade900, size: 24),
+                Icon(Icons.payments_rounded, color: isDark ? SoftPalette.amber200 : SoftPalette.orange400, size: 24),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -2037,14 +2109,14 @@ class _PatientFormState extends State<PatientForm> {
                       Text(
                         'REFUND REQUIRED: Rs. $refundAmt',
                         style: TextStyle(
-                          color: isDark ? const Color(0xFFFBBF24) : Colors.orange.shade900,
+                          color: isDark ? SoftPalette.amber200 : SoftPalette.orange400,
                           fontWeight: FontWeight.bold,
                           fontSize: isMobile ? 12 : 14,
                         ),
                       ),
                       Text(
                         'Patient paid for $suggested days but got $prescribed days.',
-                        style: TextStyle(color: isDark ? const Color(0xFFFDE68A) : Colors.orange.shade800, fontSize: 11),
+                        style: TextStyle(color: isDark ? SoftPalette.yellow150 : SoftPalette.orange400, fontSize: 11),
                       ),
                     ],
                   ),
@@ -2058,13 +2130,13 @@ class _PatientFormState extends State<PatientForm> {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF450A0A) : Colors.red.shade50,
+              color: isDark ? SoftPalette.red800 : SoftPalette.pink100m,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: isDark ? const Color(0xFFEF4444) : Colors.red.shade300, width: 1.5),
+              border: Border.all(color: isDark ? SoftPalette.red400 : SoftPalette.red400, width: 1.5),
             ),
             child: Row(
               children: [
-                Icon(Icons.warning_amber_rounded, color: isDark ? const Color(0xFFF87171) : Colors.red.shade900, size: 24),
+                Icon(Icons.warning_amber_rounded, color: isDark ? SoftPalette.red350 : SoftPalette.red550, size: 24),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -2073,14 +2145,14 @@ class _PatientFormState extends State<PatientForm> {
                       Text(
                         'EXTRA PAYMENT NEEDED: Rs. $extraAmt',
                         style: TextStyle(
-                          color: isDark ? const Color(0xFFF87171) : Colors.red.shade900,
+                          color: isDark ? SoftPalette.red350 : SoftPalette.red550,
                           fontWeight: FontWeight.bold,
                           fontSize: isMobile ? 12 : 14,
                         ),
                       ),
                       Text(
                         'Patient paid for $suggested days but got $prescribed days.',
-                        style: TextStyle(color: isDark ? const Color(0xFFFECACA) : Colors.red.shade800, fontSize: 11),
+                        style: TextStyle(color: isDark ? SoftPalette.red200 : SoftPalette.red550, fontSize: 11),
                       ),
                     ],
                   ),
@@ -2122,16 +2194,16 @@ class _PatientFormState extends State<PatientForm> {
                 vertical: isMobile ? 8 : 10,
               ),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+                color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                 borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
                     isPhysio ? Icons.spa_rounded : Icons.science_outlined,
-                    color: isDark ? const Color(0xFF2DD4BF) : t.accent,
+                    color: isDark ? SoftPalette.teal300 : t.accent,
                     size: 16,
                   ),
                   const SizedBox(width: 8),
@@ -2178,7 +2250,7 @@ class _PatientFormState extends State<PatientForm> {
     final autoCount = _getAutoSyringeCount(allPrescriptions).clamp(0, 3);
     if (autoCount == 0) return const SizedBox.shrink();
     final effectiveCount = (_selectedSyringeCount ?? autoCount).clamp(0, 3);
-    final availableSyringes = _getAvailableSyringeStockItems();
+    final availableSyringes = _syringeItemsForBuild();
     if (_selectedSyringeHiveKey == null && availableSyringes.isNotEmpty) {
       _selectedSyringeHiveKey = availableSyringes.first['hiveKey'];
     }
@@ -2187,9 +2259,9 @@ class _PatientFormState extends State<PatientForm> {
       margin: EdgeInsets.only(top: isMobile ? 12 : 16),
       padding: EdgeInsets.all(isMobile ? 12 : 16),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF134E4A).withValues(alpha: 0.3) : t.accent.withValues(alpha: 0.08),
+        color: isDark ? SoftPalette.teal700.withValues(alpha: 0.3) : t.accent.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: isDark ? const Color(0xFF2DD4BF).withValues(alpha: 0.4) : t.accent.withValues(alpha: 0.2)),
+        border: Border.all(color: isDark ? SoftPalette.teal300.withValues(alpha: 0.4) : t.accent.withValues(alpha: 0.2)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2199,10 +2271,10 @@ class _PatientFormState extends State<PatientForm> {
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF134E4A) : t.accent.withValues(alpha: 0.15),
+                  color: isDark ? SoftPalette.teal700 : t.accent.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(Icons.vaccines_rounded, color: isDark ? const Color(0xFF2DD4BF) : t.accent, size: isMobile ? 22 : 26),
+                child: Icon(Icons.vaccines_rounded, color: isDark ? SoftPalette.teal300 : t.accent, size: isMobile ? 22 : 26),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -2234,15 +2306,15 @@ class _PatientFormState extends State<PatientForm> {
                         ? () => setState(() => _selectedSyringeCount = (effectiveCount - 1).clamp(0, 3))
                         : null,
                     icon: const Icon(Icons.remove_circle_outline),
-                    color: isDark ? const Color(0xFF2DD4BF) : t.accent,
+                    color: isDark ? SoftPalette.teal300 : t.accent,
                     iconSize: isMobile ? 24 : 28,
                   ),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                      color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: isDark ? const Color(0xFF2DD4BF) : t.accent.withValues(alpha: 0.4)),
+                      border: Border.all(color: isDark ? SoftPalette.teal300 : t.accent.withValues(alpha: 0.4)),
                     ),
                     child: Text(
                       '$effectiveCount',
@@ -2258,7 +2330,7 @@ class _PatientFormState extends State<PatientForm> {
                         ? () => setState(() => _selectedSyringeCount = (effectiveCount + 1).clamp(0, 3))
                         : null,
                     icon: const Icon(Icons.add_circle_outline),
-                    color: isDark ? const Color(0xFF2DD4BF) : t.accent,
+                    color: isDark ? SoftPalette.teal300 : t.accent,
                     iconSize: isMobile ? 24 : 28,
                   ),
                 ],
@@ -2272,17 +2344,17 @@ class _PatientFormState extends State<PatientForm> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF450A0A) : Colors.red.shade50,
+                color: isDark ? SoftPalette.red800 : SoftPalette.pink100m,
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: isDark ? Colors.red.shade800 : Colors.red.shade200),
+                border: Border.all(color: isDark ? SoftPalette.red550 : SoftPalette.red300),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.warning_amber_rounded, size: 16, color: Colors.red.shade600),
+                  Icon(Icons.warning_amber_rounded, size: 16, color: SoftPalette.red500),
                   const SizedBox(width: 6),
                   Text(
                     'No Syringes in Stock in local inventory',
-                    style: TextStyle(fontSize: 11.5, color: isDark ? Colors.red.shade200 : Colors.red.shade800, fontWeight: FontWeight.w600),
+                    style: TextStyle(fontSize: 11.5, color: isDark ? SoftPalette.red300 : SoftPalette.red550, fontWeight: FontWeight.w600),
                   ),
                 ],
               ),
@@ -2325,13 +2397,13 @@ class _PatientFormState extends State<PatientForm> {
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
                       color: isSelected
-                          ? (isDark ? const Color(0xFF0D9488) : t.accent)
-                          : (isDark ? const Color(0xFF0F172A) : Colors.white),
+                          ? (isDark ? SoftPalette.teal500 : t.accent)
+                          : (isDark ? SoftPalette.slate900 : SoftPalette.gray50),
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(
                         color: isSelected
-                            ? (isDark ? const Color(0xFF2DD4BF) : t.accent)
-                            : (isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+                            ? (isDark ? SoftPalette.teal300 : t.accent)
+                            : (isDark ? SoftPalette.slate700 : SoftPalette.gray150),
                         width: isSelected ? 1.6 : 1.0,
                       ),
                       boxShadow: isSelected
@@ -2350,7 +2422,7 @@ class _PatientFormState extends State<PatientForm> {
                         Icon(
                           Icons.colorize_rounded,
                           size: 14,
-                          color: isSelected ? Colors.white : (isDark ? const Color(0xFF2DD4BF) : t.accent),
+                          color: isSelected ? SoftPalette.gray50 : (isDark ? SoftPalette.teal300 : t.accent),
                         ),
                         const SizedBox(width: 6),
                         Text(
@@ -2358,7 +2430,7 @@ class _PatientFormState extends State<PatientForm> {
                           style: TextStyle(
                             fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
                             fontSize: isMobile ? 12 : 13,
-                            color: isSelected ? Colors.white : t.textPrimary,
+                            color: isSelected ? SoftPalette.gray50 : t.textPrimary,
                           ),
                         ),
                         const SizedBox(width: 6),
@@ -2366,8 +2438,8 @@ class _PatientFormState extends State<PatientForm> {
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
                           decoration: BoxDecoration(
                             color: isSelected
-                                ? Colors.white.withValues(alpha: 0.25)
-                                : (isDark ? const Color(0xFF334155) : Colors.grey.shade200),
+                                ? SoftPalette.gray50.withValues(alpha: 0.25)
+                                : (isDark ? SoftPalette.slate700 : SoftPalette.gray100),
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
@@ -2375,7 +2447,7 @@ class _PatientFormState extends State<PatientForm> {
                             style: TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
-                              color: isSelected ? Colors.white : (isDark ? Colors.white70 : Colors.grey.shade700),
+                              color: isSelected ? SoftPalette.gray50 : (isDark ? SoftPalette.gray50A70 : SoftPalette.gray550),
                             ),
                           ),
                         ),
@@ -2401,19 +2473,19 @@ class _PatientFormState extends State<PatientForm> {
       margin: EdgeInsets.only(top: isMobile ? 8 : 12),
       padding: EdgeInsets.all(isMobile ? 12 : 16),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF14532D).withValues(alpha: 0.3) : const Color(0xFFE8F5E9),
+        color: isDark ? SoftPalette.green700.withValues(alpha: 0.3) : SoftPalette.green100m,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: isDark ? const Color(0xFF4ADE80).withValues(alpha: 0.4) : const Color(0xFFA5D6A7)),
+        border: Border.all(color: isDark ? SoftPalette.green300.withValues(alpha: 0.4) : SoftPalette.green300),
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF14532D) : const Color(0xFFC8E6C9),
+              color: isDark ? SoftPalette.green700 : SoftPalette.green200,
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(Icons.pin_outlined, color: isDark ? const Color(0xFF4ADE80) : const Color(0xFF2E7D32), size: isMobile ? 22 : 26),
+            child: Icon(Icons.pin_outlined, color: isDark ? SoftPalette.green300 : SoftPalette.green550, size: isMobile ? 22 : 26),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -2445,15 +2517,15 @@ class _PatientFormState extends State<PatientForm> {
                     ? () => setState(() => _selectedNeedleCount = (effectiveCount - 1).clamp(0, 3))
                     : null,
                 icon: const Icon(Icons.remove_circle_outline),
-                color: isDark ? const Color(0xFF4ADE80) : const Color(0xFF2E7D32),
+                color: isDark ? SoftPalette.green300 : SoftPalette.green550,
                 iconSize: isMobile ? 24 : 28,
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                  color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: isDark ? const Color(0xFF4ADE80) : const Color(0xFFA5D6A7)),
+                  border: Border.all(color: isDark ? SoftPalette.green300 : SoftPalette.green300),
                 ),
                 child: Text(
                   '$effectiveCount',
@@ -2469,7 +2541,7 @@ class _PatientFormState extends State<PatientForm> {
                     ? () => setState(() => _selectedNeedleCount = (effectiveCount + 1).clamp(0, 3))
                     : null,
                 icon: const Icon(Icons.add_circle_outline),
-                color: isDark ? const Color(0xFF4ADE80) : const Color(0xFF2E7D32),
+                color: isDark ? SoftPalette.green300 : SoftPalette.green550,
                 iconSize: isMobile ? 24 : 28,
               ),
             ],
@@ -2506,7 +2578,7 @@ class _PatientFormState extends State<PatientForm> {
                     fontFamily: 'Jameel Noori Nastaleeq',
                     fontSize: 22,
                     fontWeight: FontWeight.bold,
-                    color: Colors.white,
+                    color: SoftPalette.gray50,
                   ),
                 ),
                 Text(
@@ -2514,7 +2586,7 @@ class _PatientFormState extends State<PatientForm> {
                   style: TextStyle(
                     fontSize: isMobile ? 12 : 16,
                     fontWeight: FontWeight.w900,
-                    color: Colors.white,
+                    color: SoftPalette.gray50,
                     letterSpacing: 0.3,
                   ),
                   textAlign: TextAlign.center,
@@ -2526,7 +2598,7 @@ class _PatientFormState extends State<PatientForm> {
                   style: TextStyle(
                     fontSize: isMobile ? 10 : 12,
                     fontWeight: FontWeight.w600,
-                    color: Colors.white.withValues(alpha: 0.85),
+                    color: SoftPalette.gray50.withValues(alpha: 0.85),
                   ),
                 ),
               ],
@@ -2560,7 +2632,7 @@ class _PatientFormState extends State<PatientForm> {
           style: TextStyle(
             fontSize: isMobile ? 11 : 13,
             fontWeight: FontWeight.w700,
-            color: Colors.white,
+            color: SoftPalette.gray50,
           ),
         ),
       ),
@@ -2662,7 +2734,7 @@ class _PatientFormState extends State<PatientForm> {
       final phone = _getPatientPhone();
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text(phone != null && phone.isNotEmpty
                 ? 'Generating & attaching PDF for patient phone ($phone)...'
@@ -2690,18 +2762,18 @@ class _PatientFormState extends State<PatientForm> {
       );
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           const SnackBar(
             content: Text('📋 WhatsApp opened & PDF copied to clipboard! Press Ctrl+V in WhatsApp to attach.'),
-            backgroundColor: Color(0xFF00695C),
+            backgroundColor: SoftPalette.teal600,
             duration: Duration(seconds: 4),
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to share PDF: $e'), backgroundColor: Colors.red),
+        AppToast.showSnackBar(context, 
+          SnackBar(content: Text('Failed to share PDF: $e'), backgroundColor: SoftPalette.red400),
         );
       }
     }
@@ -2807,7 +2879,7 @@ class _PatientFormState extends State<PatientForm> {
       final age = ageVal != 'N/A' ? '$ageVal Years' : 'N/A';
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           const SnackBar(
             content: Text('Generating Prescription Report...'),
             duration: Duration(seconds: 2),
@@ -2842,8 +2914,8 @@ class _PatientFormState extends State<PatientForm> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to generate report: $e'), backgroundColor: Colors.red),
+        AppToast.showSnackBar(context, 
+          SnackBar(content: Text('Failed to generate report: $e'), backgroundColor: SoftPalette.red400),
         );
       }
     }
@@ -2867,7 +2939,7 @@ class _PatientFormState extends State<PatientForm> {
         height: 54,
         decoration: BoxDecoration(
           gradient: !_isDispensed && !_isDispensing ? t.accentGradient : null,
-          color: _isDispensed || _isDispensing ? Colors.grey.shade400 : null,
+          color: _isDispensed || _isDispensing ? SoftPalette.gray300 : null,
           borderRadius: BorderRadius.circular(27),
           boxShadow: _isDispensed || _isDispensing
               ? []
@@ -2885,15 +2957,15 @@ class _PatientFormState extends State<PatientForm> {
               ? const SizedBox(
                   width: 18,
                   height: 18,
-                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                  child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50),
                 )
-              : const Icon(Icons.check_circle, color: Colors.white, size: 20),
+              : const Icon(Icons.check_circle, color: SoftPalette.gray50, size: 20),
           label: Text(
             dispenseLabel,
             style: TextStyle(
               fontSize: isMobile ? 12 : 14,
               fontWeight: FontWeight.w800,
-              color: Colors.white,
+              color: SoftPalette.gray50,
               letterSpacing: 0.3,
             ),
           ),
@@ -2909,11 +2981,11 @@ class _PatientFormState extends State<PatientForm> {
     final reportBtn = Container(
       height: 54,
       decoration: BoxDecoration(
-        color: const Color(0xFFB91C1C),
+        color: SoftPalette.red550,
         borderRadius: BorderRadius.circular(27),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFFB91C1C).withValues(alpha: 0.3),
+            color: SoftPalette.red550.withValues(alpha: 0.3),
             blurRadius: 12,
             offset: const Offset(0, 5),
           )
@@ -2921,13 +2993,13 @@ class _PatientFormState extends State<PatientForm> {
       ),
       child: ElevatedButton.icon(
         onPressed: _handleDownloadPdf,
-        icon: const Icon(Icons.picture_as_pdf_rounded, color: Colors.white, size: 20),
+        icon: const Icon(Icons.picture_as_pdf_rounded, color: SoftPalette.gray50, size: 20),
         label: Text(
           'Report',
           style: TextStyle(
             fontSize: isMobile ? 13 : 15,
             fontWeight: FontWeight.w800,
-            color: Colors.white,
+            color: SoftPalette.gray50,
             letterSpacing: 0.5,
           ),
         ),
@@ -2943,29 +3015,28 @@ class _PatientFormState extends State<PatientForm> {
       left: 0,
       right: 0,
       bottom: 0,
-      child: ClipRRect(
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
-          child: Container(
-            padding: EdgeInsets.symmetric(
-              horizontal: isMobile ? 16 : 28,
-              vertical: isMobile ? 12 : 18,
+      // Solid bar (no BackdropFilter blur): the blur re-rendered on every frame while
+      // scrolling/typing, which is costly on the clinics' low-end PCs.
+      child: RepaintBoundary(
+        child: Container(
+          padding: EdgeInsets.symmetric(
+            horizontal: isMobile ? 16 : 28,
+            vertical: isMobile ? 12 : 18,
+          ),
+          decoration: BoxDecoration(
+            color: _isDark ? SoftPalette.slate900 : SoftPalette.gray50,
+            border: Border(
+              top: BorderSide(color: _isDark ? SoftPalette.slate700 : t.bgRule.withValues(alpha: 0.5), width: 1.5),
             ),
-            decoration: BoxDecoration(
-              color: _isDark ? const Color(0xFF0F172A).withValues(alpha: 0.95) : Colors.white.withValues(alpha: 0.85),
-              border: Border(
-                top: BorderSide(color: _isDark ? const Color(0xFF334155) : t.bgRule.withValues(alpha: 0.5), width: 1.5),
-              ),
-            ),
-            child: SafeArea(
-              top: false,
-              child: Row(
-                children: [
-                  Expanded(flex: 6, child: dispenseBtn),
-                  const SizedBox(width: 12),
-                  Expanded(flex: 4, child: reportBtn),
-                ],
-              ),
+          ),
+          child: SafeArea(
+            top: false,
+            child: Row(
+              children: [
+                Expanded(flex: 6, child: dispenseBtn),
+                const SizedBox(width: 12),
+                Expanded(flex: 4, child: reportBtn),
+              ],
             ),
           ),
         ),
@@ -3032,7 +3103,7 @@ class _PatientFormState extends State<PatientForm> {
           title: 'Blood pressure',
           value: primaryBp,
           subValue: subBp,
-          color: primaryBp != '—' ? const Color(0xFFDC2626) : (isDark ? Colors.white54 : Colors.grey),
+          color: primaryBp != '—' ? SoftPalette.red500 : (isDark ? SoftPalette.gray50A54 : SoftPalette.gray350),
           isDark: isDark,
           isMobile: isMobile,
         ),
@@ -3043,7 +3114,7 @@ class _PatientFormState extends State<PatientForm> {
           title: 'Weight',
           value: primaryWeight,
           subValue: subWeight,
-          color: primaryWeight != '—' ? const Color(0xFF2563EB) : (isDark ? Colors.white54 : Colors.grey),
+          color: primaryWeight != '—' ? SoftPalette.blue550 : (isDark ? SoftPalette.gray50A54 : SoftPalette.gray350),
           isDark: isDark,
           isMobile: isMobile,
         ),
@@ -3054,7 +3125,7 @@ class _PatientFormState extends State<PatientForm> {
           title: 'Blood sugar',
           value: primarySugar,
           subValue: subSugar,
-          color: primarySugar != '—' ? const Color(0xFF0D9488) : (isDark ? Colors.white54 : Colors.grey),
+          color: primarySugar != '—' ? SoftPalette.teal500 : (isDark ? SoftPalette.gray50A54 : SoftPalette.gray350),
           isDark: isDark,
           isMobile: isMobile,
         ),
@@ -3066,7 +3137,7 @@ class _PatientFormState extends State<PatientForm> {
             title: 'Temperature',
             value: primaryTemp,
             subValue: subTemp,
-            color: primaryTemp != '—' ? const Color(0xFFD97706) : (isDark ? Colors.white54 : Colors.grey),
+            color: primaryTemp != '—' ? SoftPalette.orange400 : (isDark ? SoftPalette.gray50A54 : SoftPalette.gray350),
             isDark: isDark,
             isMobile: isMobile,
           ),
@@ -3094,9 +3165,9 @@ class _PatientFormState extends State<PatientForm> {
     return Container(
       padding: EdgeInsets.symmetric(horizontal: 6, vertical: isMobile ? 10 : 12),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+        color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+        border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
       ),
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -3109,7 +3180,7 @@ class _PatientFormState extends State<PatientForm> {
             style: TextStyle(
               fontSize: isMobile ? 11 : 12.5,
               fontWeight: FontWeight.w500,
-              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+              color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
             ),
           ),
           const SizedBox(height: 4),
@@ -3130,7 +3201,7 @@ class _PatientFormState extends State<PatientForm> {
               style: TextStyle(
                 fontSize: isMobile ? 9.5 : 10.5,
                 fontWeight: FontWeight.w500,
-                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
               ),
             ),
           ],
@@ -3195,7 +3266,7 @@ class _PatientFormState extends State<PatientForm> {
               Text(
                 'CNIC  $cnic',
                 style: TextStyle(
-                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                  color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
                   fontSize: isMobile ? 12 : 14,
                   fontWeight: FontWeight.w500,
                 ),
@@ -3209,14 +3280,14 @@ class _PatientFormState extends State<PatientForm> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+                color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
               ),
               child: Text(
                 serial,
                 style: TextStyle(
-                  color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+                  color: isDark ? SoftPalette.slate200 : SoftPalette.slate600,
                   fontWeight: FontWeight.w600,
                   fontSize: isMobile ? 12 : 13.5,
                 ),
@@ -3227,7 +3298,7 @@ class _PatientFormState extends State<PatientForm> {
               Text(
                 genderAgeText,
                 style: TextStyle(
-                  color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF334155),
+                  color: isDark ? SoftPalette.slate150 : SoftPalette.slate700,
                   fontWeight: FontWeight.w700,
                   fontSize: isMobile ? 13 : 15,
                 ),
@@ -3251,24 +3322,24 @@ class _PatientFormState extends State<PatientForm> {
             margin: const EdgeInsets.only(top: 16),
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: const Color(0xFFF5F3FF),
+              color: context.adapt(SoftPalette.violet100m),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFFDDD6FE)),
+              border: Border.all(color: context.adapt(SoftPalette.violet200)),
             ),
             child: Row(
               children: [
-                const Icon(Icons.health_and_safety_rounded, color: Color(0xFF7C3AED), size: 28),
+                Icon(Icons.health_and_safety_rounded, color: context.adapt(SoftPalette.violet550), size: 28),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: const [
+                    children: [
                       Text(
                         'Vitals Inspection Token',
                         style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFF5B21B6),
+                          color: context.adapt(SoftPalette.violet600),
                         ),
                       ),
                       SizedBox(height: 2),
@@ -3276,7 +3347,7 @@ class _PatientFormState extends State<PatientForm> {
                         'This patient arrived for vitals inspection only. No medicines are prescribed.',
                         style: TextStyle(
                           fontSize: 12,
-                          color: Color(0xFF6D28D9),
+                          color: context.adapt(SoftPalette.violet550),
                         ),
                       ),
                     ],
@@ -3334,7 +3405,7 @@ class _PatientFormState extends State<PatientForm> {
     );
 
     return Container(
-      color: isDark ? const Color(0xFF0F172A) : Colors.white,
+      color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
       padding: EdgeInsets.all(basePadding),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3365,55 +3436,55 @@ class _PatientFormState extends State<PatientForm> {
     final t = isDark
         ? const RoleThemeData(
             roleLabel:             'CLINICAL',
-            bg:                    Color(0xFF0F172A),
-            bgCard:                Color(0xFF1E293B),
-            bgCardAlt:             Color(0xFF334155),
-            bgRule:                Color(0xFF475569),
-            accent:                Color(0xFF0D9488),
-            accentLight:           Color(0xFF14B8A6),
-            accentMuted:           Color(0xFF0F766E),
-            accentGradient:        LinearGradient(colors: [Color(0xFF0F766E), Color(0xFF14B8A6)]),
-            glassTint:             Color(0x3300695C),
-            textPrimary:           Color(0xFFF8FAFC),
-            textSecondary:         Color(0xFFCBD5E1),
-            textTertiary:          Color(0xFF94A3B8),
-            danger:                Color(0xFFEF4444),
-            zakat:                 Color(0xFF22C55E),
-            nonZakat:              Color(0xFF3B82F6),
-            gmwf:                  Color(0xFFF97316),
-            cardFillTokens:        Color(0xFF0F766E),
-            cardFillPrescriptions: Color(0xFF115E59),
-            cardFillDispensary:    Color(0xFF134E4A),
-            chartBar1:             Color(0xFF0D9488),
-            chartBar2:             Color(0xFF22C55E),
-            chartBar3:             Color(0xFF3B82F6),
-            chartGrid:             Color(0xFF334155),
+            bg:                    SoftPalette.slate900,
+            bgCard:                SoftPalette.slate800,
+            bgCardAlt:             SoftPalette.slate700,
+            bgRule:                SoftPalette.slate600,
+            accent:                SoftPalette.teal500,
+            accentLight:           SoftPalette.teal350,
+            accentMuted:           SoftPalette.teal550,
+            accentGradient:        LinearGradient(colors: [SoftPalette.teal550, SoftPalette.teal350]),
+            glassTint:             SoftPalette.teal600A20,
+            textPrimary:           SoftPalette.gray50,
+            textSecondary:         SoftPalette.slate200,
+            textTertiary:          SoftPalette.slate350,
+            danger:                SoftPalette.red400,
+            zakat:                 SoftPalette.green350,
+            nonZakat:              SoftPalette.blue500,
+            gmwf:                  SoftPalette.orange350,
+            cardFillTokens:        SoftPalette.teal550,
+            cardFillPrescriptions: SoftPalette.teal600,
+            cardFillDispensary:    SoftPalette.teal700,
+            chartBar1:             SoftPalette.teal500,
+            chartBar2:             SoftPalette.green350,
+            chartBar3:             SoftPalette.blue500,
+            chartGrid:             SoftPalette.slate700,
           )
         : const RoleThemeData(
             roleLabel:             'CLINICAL',
-            bg:                    Color(0xFFF2FBF9),
-            bgCard:                Color(0xFFFFFFFF),
-            bgCardAlt:             Color(0xFFE6F7F4),
-            bgRule:                Color(0xFFCBECE6),
-            accent:                Color(0xFF00695C),
-            accentLight:           Color(0xFF0D9488),
-            accentMuted:           Color(0xFFE0F2F1),
-            accentGradient:        LinearGradient(colors: [Color(0xFF00695C), Color(0xFF0D9488)]),
-            glassTint:             Color(0x1A00695C),
-            textPrimary:           Color(0xFF002521),
-            textSecondary:         Color(0xFF004D43),
-            textTertiary:          Color(0xFF4DB6A7),
-            danger:                Color(0xFFB91C1C),
-            zakat:                 Color(0xFF2E7D32),
-            nonZakat:              Color(0xFF1565C0),
-            gmwf:                  Color(0xFFE65100),
-            cardFillTokens:        Color(0xFF00695C),
-            cardFillPrescriptions: Color(0xFF004D43),
-            cardFillDispensary:    Color(0xFF00332C),
-            chartBar1:             Color(0xFF00695C),
-            chartBar2:             Color(0xFF2E7D32),
-            chartBar3:             Color(0xFF1565C0),
-            chartGrid:             Color(0xFFCBECE6),
+            bg:                    SoftPalette.teal50t,
+            bgCard:                SoftPalette.gray50,
+            bgCardAlt:             SoftPalette.teal100m,
+            bgRule:                SoftPalette.teal150,
+            accent:                SoftPalette.teal600,
+            accentLight:           SoftPalette.teal500,
+            accentMuted:           SoftPalette.teal100m,
+            accentGradient:        LinearGradient(colors: [SoftPalette.teal600, SoftPalette.teal500]),
+            glassTint:             SoftPalette.teal600A10,
+            textPrimary:           SoftPalette.teal900,
+            textSecondary:         SoftPalette.teal700,
+            textTertiary:          SoftPalette.teal350,
+            danger:                SoftPalette.red550,
+            zakat:                 SoftPalette.green550,
+            nonZakat:              SoftPalette.blue550,
+            gmwf:                  SoftPalette.orange400,
+            cardFillTokens:        SoftPalette.teal600,
+            cardFillPrescriptions: SoftPalette.teal700,
+            cardFillDispensary:    SoftPalette.teal800,
+            chartBar1:             SoftPalette.teal600,
+            chartBar2:             SoftPalette.green550,
+            chartBar3:             SoftPalette.blue550,
+            chartGrid:             SoftPalette.teal150,
           );
 
     if (_isLoadingPrescription) {
@@ -3421,32 +3492,42 @@ class _PatientFormState extends State<PatientForm> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center, 
           children: [
-            CircularProgressIndicator(color: t.accent),
-            const SizedBox(height: 16),
-            Text('Loading prescription...', style: TextStyle(color: t.accent, fontWeight: FontWeight.bold)),
+            SizedBox(
+              width: widget.isCompactPreview ? 24 : 36,
+              height: widget.isCompactPreview ? 24 : 36,
+              child: CircularProgressIndicator(color: t.accent, strokeWidth: 2.5),
+            ),
+            const SizedBox(height: 12),
+            Text('Loading prescription...', style: TextStyle(color: t.accent, fontWeight: FontWeight.bold, fontSize: widget.isCompactPreview ? 12 : 14)),
           ],
         ),
       );
     }
     if (_data.isEmpty) {
       return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-        Icon(Icons.hourglass_empty, size: 80, color: isDark ? const Color(0xFF94A3B8) : Colors.grey),
-        const SizedBox(height: 16),
+        Icon(Icons.hourglass_empty, size: widget.isCompactPreview ? 44 : 80, color: isDark ? SoftPalette.slate350 : SoftPalette.gray350),
+        const SizedBox(height: 12),
         Text('No prescription found yet',
-            style: TextStyle(color: isDark ? const Color(0xFFCBD5E1) : Colors.grey, fontSize: 18)),
-        const SizedBox(height: 16),
+            style: TextStyle(color: isDark ? SoftPalette.slate200 : SoftPalette.gray350, fontSize: widget.isCompactPreview ? 13 : 18)),
+        const SizedBox(height: 12),
         ElevatedButton.icon(
-          onPressed: _loadPrescription, icon: const Icon(Icons.refresh),
+          onPressed: _loadPrescription, icon: const Icon(Icons.refresh, size: 16),
           label: const Text('Retry'),
           style: ElevatedButton.styleFrom(
             backgroundColor: t.accent,
-            foregroundColor: Colors.white,
+            foregroundColor: SoftPalette.gray50,
+            visualDensity: widget.isCompactPreview ? VisualDensity.compact : VisualDensity.standard,
           )),
       ]));
     }
+
+    if (widget.isCompactPreview) {
+      return _buildCompactPreview(t, isDark: isDark);
+    }
+
     final bottomBarHeight = 76.0;
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.grey[50],
+      backgroundColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
       body: Stack(children: [
         SingleChildScrollView(
           physics: const BouncingScrollPhysics(),
@@ -3456,12 +3537,12 @@ class _PatientFormState extends State<PatientForm> {
           child: Center(child: Container(
             constraints: isMobile ? const BoxConstraints() : const BoxConstraints(maxWidth: 950),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1E293B) : Colors.white,
+              color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
               borderRadius: BorderRadius.circular(isMobile ? 12 : 16),
-              border: Border.all(color: isDark ? const Color(0xFF334155) : Colors.grey.shade200),
+              border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.gray100),
               boxShadow: [
                 BoxShadow(
-                  color: isDark ? Colors.black26 : Colors.black.withValues(alpha: 0.04), 
+                  color: isDark ? SoftPalette.gray900A26 : SoftPalette.gray900.withValues(alpha: 0.04), 
                   blurRadius: 10, 
                   offset: const Offset(0, 4),
                 )
@@ -3477,6 +3558,1067 @@ class _PatientFormState extends State<PatientForm> {
         ),
         _buildActionBar(t, isMobile: isMobile),
       ]),
+    );
+  }
+
+  // ─── Compact Preview Layout for All-In-One Desk ─────────────────────────────
+  Widget _buildCompactPreview(RoleThemeData t, {required bool isDark}) {
+    final prescriptions = _getPrescriptionsList();
+    final labTests = _getLabResultsList();
+    final diagnosis = _getDiagnosisText();
+    final rawVitals = widget.queueEntry['vitals'] ?? _data['vitals'];
+    final vitals = (rawVitals is Map) ? Map<String, dynamic>.from(rawVitals) : <String, dynamic>{};
+    final isVitalsOnly = widget.queueEntry['isVitalsOnly'] == true ||
+        widget.queueEntry['vitalsOnly'] == true ||
+        _data['isVitalsOnly'] == true ||
+        _data['vitalsOnly'] == true;
+
+    final inventoryMeds = prescriptions.where((m) => PatientFormHelper.isInventoryMed(m) && !PatientFormHelper.isInjectable(m)).toList();
+    final inventoryInjectables = prescriptions.where((m) => PatientFormHelper.isInventoryMed(m) && PatientFormHelper.isInjectable(m)).toList();
+    final customMeds = prescriptions.where((m) => !PatientFormHelper.isInventoryMed(m) && !PatientFormHelper.isInjectable(m)).toList();
+    final customInjectables = prescriptions.where((m) => !PatientFormHelper.isInventoryMed(m) && PatientFormHelper.isInjectable(m)).toList();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildCompactPatientAndVitalsHeader(vitals, t, isDark, isVitalsOnly),
+                _buildCompactDurationAndDiagnosis(labTests, diagnosis, t, isDark),
+                if (inventoryMeds.isNotEmpty) ...[
+                  _buildCompactSectionTitle('Inventory Medicines', inventoryMeds.length, Icons.medication_rounded, t, isDark),
+                  _buildCompactMedicinesList(inventoryMeds, t, isDark),
+                ],
+                if (inventoryInjectables.isNotEmpty) ...[
+                  _buildCompactSectionTitle('Inventory Injectables', inventoryInjectables.length, Icons.vaccines_rounded, t, isDark),
+                  _buildCompactMedicinesList(inventoryInjectables, t, isDark),
+                ],
+                if (customMeds.isNotEmpty) ...[
+                  _buildCompactSectionTitle('Custom Medicines', customMeds.length, Icons.medication_liquid_rounded, t, isDark),
+                  _buildCompactMedicinesList(customMeds, t, isDark),
+                ],
+                if (customInjectables.isNotEmpty) ...[
+                  _buildCompactSectionTitle('Custom Injectables', customInjectables.length, Icons.vaccines_rounded, t, isDark),
+                  _buildCompactMedicinesList(customInjectables, t, isDark),
+                ],
+                if (inventoryInjectables.isNotEmpty || customInjectables.isNotEmpty) ...[
+                  _buildSyringeSelectionCard(prescriptions, t, isMobile: true),
+                  _buildNeedleSelectionCard(prescriptions, t, isMobile: true),
+                ],
+                if (prescriptions.isEmpty && !isVitalsOnly)
+                  Container(
+                    margin: const EdgeInsets.only(top: 8),
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.info_outline_rounded, size: 17, color: isDark ? SoftPalette.slate350 : SoftPalette.slate550),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'No medicines prescribed for this visit.',
+                            style: TextStyle(
+                              fontSize: 12.5,
+                              fontWeight: FontWeight.w600,
+                              color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+        _buildCompactActionBar(t, isDark),
+      ],
+    );
+  }
+
+  Widget _buildCompactPatientAndVitalsHeader(
+    Map<String, dynamic> vitals,
+    RoleThemeData t,
+    bool isDark,
+    bool isVitalsOnly,
+  ) {
+    final patientName = _getResolvedPatientName();
+    final cnic = _getResolvedCnic();
+    final genderStr = _resolveGender();
+    final ageVal = _resolveAge();
+    final ageDisplay = ageVal != 'N/A' ? '$ageVal yrs' : '';
+    final genderAgeText = [if (genderStr != 'N/A') genderStr, if (ageDisplay.isNotEmpty) ageDisplay].join(', ');
+    final phone = _getPatientPhone();
+    final queueType = _resolvedQueueType;
+
+    Color qColor;
+    Color qBg;
+    String qLabel;
+    if (queueType == 'gmwf') {
+      qColor = SoftPalette.orange400;
+      qBg = SoftPalette.orange100m;
+      qLabel = 'GMWF';
+    } else if (queueType == 'non-zakat') {
+      qColor = SoftPalette.blue550;
+      qBg = SoftPalette.blue500A10;
+      qLabel = 'Non-Zakat';
+    } else {
+      qColor = SoftPalette.green550;
+      qBg = SoftPalette.green100m;
+      qLabel = 'Zakat';
+    }
+
+    // Vitals extraction:
+    final recVitals = (vitals['receptionistVitals'] is Map)
+        ? Map<String, dynamic>.from(vitals['receptionistVitals'])
+        : <String, dynamic>{};
+    final docVitals = (vitals['doctorVitals'] is Map)
+        ? Map<String, dynamic>.from(vitals['doctorVitals'])
+        : (_data['doctorVitals'] is Map
+            ? Map<String, dynamic>.from(_data['doctorVitals'])
+            : (widget.queueEntry['doctorVitals'] is Map
+                ? Map<String, dynamic>.from(widget.queueEntry['doctorVitals'])
+                : <String, dynamic>{}));
+    final hasDocUpdate = docVitals.isNotEmpty;
+
+    String cleanVal(dynamic v) {
+      if (v == null) return '';
+      final s = v.toString().trim();
+      if (s == 'N/A' || s == 'null') return '';
+      return s;
+    }
+
+    final docBp = cleanVal(docVitals['bp'] ?? (hasDocUpdate ? vitals['bp'] : null));
+    final recBp = cleanVal(recVitals['bp'] ?? (!hasDocUpdate ? vitals['bp'] : null));
+    final primaryBp = docBp.isNotEmpty ? docBp : (recBp.isNotEmpty ? recBp : '—');
+    final subBp = (hasDocUpdate && recBp.isNotEmpty && recBp != docBp) ? 'Rec: $recBp' : null;
+
+    final docWeightRaw = cleanVal(docVitals['weight'] ?? (hasDocUpdate ? vitals['weight'] : null));
+    final recWeightRaw = cleanVal(recVitals['weight'] ?? (!hasDocUpdate ? vitals['weight'] : null));
+    final primaryWeight = docWeightRaw.isNotEmpty ? '$docWeightRaw kg' : (recWeightRaw.isNotEmpty ? '$recWeightRaw kg' : '—');
+    final subWeight = (hasDocUpdate && recWeightRaw.isNotEmpty && recWeightRaw != docWeightRaw) ? 'Rec: $recWeightRaw kg' : null;
+
+    final docSugarRaw = cleanVal(docVitals['sugar'] ?? (hasDocUpdate ? vitals['sugar'] : null));
+    final recSugarRaw = cleanVal(recVitals['sugar'] ?? (!hasDocUpdate ? vitals['sugar'] : null));
+    final primarySugar = docSugarRaw.isNotEmpty ? '$docSugarRaw mg/dL' : (recSugarRaw.isNotEmpty ? '$recSugarRaw mg/dL' : '—');
+    final subSugar = (hasDocUpdate && recSugarRaw.isNotEmpty && recSugarRaw != docSugarRaw) ? 'Rec: $recSugarRaw' : null;
+
+    final docTempRaw = cleanVal(docVitals['temp'] ?? (hasDocUpdate ? vitals['temp'] : null));
+    final recTempRaw = cleanVal(recVitals['temp'] ?? (!hasDocUpdate ? vitals['temp'] : null));
+    final primaryTemp = docTempRaw.isNotEmpty ? '$docTempRaw °C' : (recTempRaw.isNotEmpty ? '$recTempRaw °C' : '—');
+    final subTemp = (hasDocUpdate && recTempRaw.isNotEmpty && recTempRaw != docTempRaw) ? 'Rec: $recTempRaw °C' : null;
+
+    Widget vitalCell({
+      required String label,
+      required String value,
+      String? subValue,
+      required Color color,
+      required IconData icon,
+    }) {
+      final hasVal = value != '—';
+      return Expanded(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+          decoration: BoxDecoration(
+            color: isDark ? SoftPalette.slate700.withValues(alpha: 0.5) : SoftPalette.gray100,
+            borderRadius: BorderRadius.circular(6),
+            border: Border.all(color: isDark ? SoftPalette.slate600 : SoftPalette.slate150),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 11, color: isDark ? SoftPalette.slate350 : SoftPalette.slate550),
+                  const SizedBox(width: 3),
+                  Text(
+                    label,
+                    style: TextStyle(
+                      fontSize: 10.5,
+                      fontWeight: FontWeight.w700,
+                      color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(width: 4),
+              Flexible(
+                child: Text(
+                  value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12.5,
+                    fontWeight: FontWeight.w800,
+                    color: hasVal ? color : (isDark ? SoftPalette.slate400 : SoftPalette.gray350),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.center,
+            children: [
+              // ── Left Side: Patient Details ──
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: 26,
+                          height: 26,
+                          decoration: BoxDecoration(
+                            color: isDark ? SoftPalette.teal700 : SoftPalette.teal100m,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Center(
+                            child: Icon(
+                              Icons.person_rounded,
+                              size: 15,
+                              color: isDark ? SoftPalette.teal200 : SoftPalette.teal600,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 7),
+                        Expanded(
+                          child: Text(
+                            patientName,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 15.5,
+                              fontWeight: FontWeight.w800,
+                              color: t.textPrimary,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 5),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: isDark ? qColor.withValues(alpha: 0.2) : qBg,
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(color: qColor.withValues(alpha: isDark ? 0.45 : 0.3)),
+                          ),
+                          child: Text(
+                            qLabel,
+                            style: TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: qColor,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'CNIC $cnic',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 11.5,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
+                      ),
+                    ),
+                    const SizedBox(height: 2.5),
+                    Row(
+                      children: [
+                        if (genderAgeText.isNotEmpty)
+                          Text(
+                            genderAgeText,
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w700,
+                              color: isDark ? SoftPalette.slate200 : SoftPalette.slate700,
+                            ),
+                          ),
+                        if (phone != null && phone.isNotEmpty) ...[
+                          Text(
+                            ' · ',
+                            style: TextStyle(fontSize: 11, color: isDark ? SoftPalette.slate350 : SoftPalette.slate550),
+                          ),
+                          Expanded(
+                            child: Text(
+                              phone,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                                color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+
+              const SizedBox(width: 8),
+              Container(
+                width: 1,
+                height: 56,
+                color: isDark ? SoftPalette.slate700 : SoftPalette.slate150,
+              ),
+              const SizedBox(width: 8),
+
+              // ── Right Side: Vitals 2x2 Grid ──
+              SizedBox(
+                width: 205,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        vitalCell(
+                          label: 'BP',
+                          value: primaryBp,
+                          subValue: subBp,
+                          color: SoftPalette.red500,
+                          icon: Icons.favorite_rounded,
+                        ),
+                        const SizedBox(width: 4),
+                        vitalCell(
+                          label: 'Temp',
+                          value: primaryTemp,
+                          subValue: subTemp,
+                          color: SoftPalette.orange400,
+                          icon: Icons.thermostat_rounded,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        vitalCell(
+                          label: 'Wt',
+                          value: primaryWeight,
+                          subValue: subWeight,
+                          color: SoftPalette.blue550,
+                          icon: Icons.scale_rounded,
+                        ),
+                        const SizedBox(width: 4),
+                        vitalCell(
+                          label: 'Sugar',
+                          value: primarySugar,
+                          subValue: subSugar,
+                          color: SoftPalette.teal500,
+                          icon: Icons.water_drop_rounded,
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+
+          if (isVitalsOnly) ...[
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4.5),
+              decoration: BoxDecoration(
+                color: context.adapt(SoftPalette.violet100m),
+                borderRadius: BorderRadius.circular(6),
+                border: Border.all(color: context.adapt(SoftPalette.violet200)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.health_and_safety_rounded, color: context.adapt(SoftPalette.violet550), size: 14),
+                  const SizedBox(width: 6),
+                  Expanded(
+                    child: Text(
+                      'Vitals Inspection Token · No medicines prescribed',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: context.adapt(SoftPalette.violet600),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCompactDurationAndDiagnosis(
+    List labTests,
+    String diagnosis,
+    RoleThemeData t,
+    bool isDark,
+  ) {
+    final prescribed = _daysOfMedicine;
+    final suggested = _suggestedDays;
+    final queueType = _resolvedQueueType;
+
+    final prices = _isKarachi
+        ? const {'zakat': 20, 'non-zakat': 20, 'gmwf': 0}
+        : const {'zakat': 20, 'non-zakat': 100, 'gmwf': 0};
+    final rate = prices[queueType] ?? 0;
+
+    final refundDays = suggested - prescribed;
+    final extraDays = prescribed - suggested;
+    final refundAmt = refundDays > 0 ? refundDays * rate : 0;
+    final extraAmt = extraDays > 0 ? extraDays * rate : 0;
+
+    final isPhysio = _data['isPhysiotherapist'] == true ||
+        _data['isPhysiotherapy'] == true ||
+        _data['department']?.toString().toLowerCase().contains('physio') == true ||
+        _data['dpt']?.toString().toLowerCase().contains('physio') == true ||
+        labTests.any((item) {
+          final name = (item['name'] ?? '').toString().toLowerCase();
+          return name.contains('therapy') ||
+              name.contains('tens') ||
+              name.contains('traction') ||
+              name.contains('swd') ||
+              name.contains('exercise') ||
+              name.contains('diathermy') ||
+              name.contains('pack') ||
+              name.contains('massage') ||
+              name.contains('ultrasound');
+        });
+
+    return Container(
+      margin: const EdgeInsets.only(top: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.calendar_today_rounded, size: 13, color: isDark ? SoftPalette.teal300 : t.accent),
+              const SizedBox(width: 5),
+              Text(
+                'Duration: $prescribed / $suggested d',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: t.textPrimary,
+                ),
+              ),
+              if (refundAmt > 0) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: isDark ? SoftPalette.orange800 : SoftPalette.amber100m,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: isDark ? SoftPalette.orange400 : SoftPalette.amber300),
+                  ),
+                  child: Text(
+                    'Refund: Rs. $refundAmt',
+                    style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: isDark ? SoftPalette.amber200 : SoftPalette.orange400),
+                  ),
+                ),
+              ] else if (extraAmt > 0) ...[
+                const SizedBox(width: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: isDark ? SoftPalette.red800 : SoftPalette.pink100m,
+                    borderRadius: BorderRadius.circular(4),
+                    border: Border.all(color: isDark ? SoftPalette.red400 : SoftPalette.red400),
+                  ),
+                  child: Text(
+                    'Due: Rs. $extraAmt',
+                    style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: isDark ? SoftPalette.red350 : SoftPalette.red550),
+                  ),
+                ),
+              ],
+              if (diagnosis.isNotEmpty) ...[
+                const SizedBox(width: 8),
+                Container(width: 1, height: 14, color: isDark ? SoftPalette.slate700 : SoftPalette.slate200),
+                const SizedBox(width: 8),
+                Icon(Icons.medical_services_outlined, size: 13, color: isDark ? SoftPalette.teal300 : t.accent),
+                const SizedBox(width: 4),
+                Expanded(
+                  child: Text(
+                    'Diag: $diagnosis',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: t.textPrimary,
+                    ),
+                  ),
+                ),
+              ] else
+                const Spacer(),
+            ],
+          ),
+          if (labTests.isNotEmpty) ...[
+            const SizedBox(height: 5),
+            Wrap(
+              spacing: 5,
+              runSpacing: 4,
+              children: labTests.map((item) {
+                final name = item['name']?.toString() ?? 'Test';
+                return Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: isDark ? SoftPalette.teal700.withValues(alpha: 0.3) : SoftPalette.teal100m,
+                    borderRadius: BorderRadius.circular(5),
+                    border: Border.all(color: isDark ? SoftPalette.teal600 : SoftPalette.teal200),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(isPhysio ? Icons.spa_rounded : Icons.science_outlined, size: 11, color: isDark ? SoftPalette.teal300 : t.accent),
+                      const SizedBox(width: 4),
+                      Text(
+                        name,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: t.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }).toList(),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCompactSectionTitle(String title, int count, IconData icon, RoleThemeData t, bool isDark) {
+    return Padding(
+      padding: const EdgeInsets.only(top: 9, bottom: 4),
+      child: Row(
+        children: [
+          Icon(icon, size: 13, color: isDark ? SoftPalette.teal300 : t.accent),
+          const SizedBox(width: 5),
+          Text(
+            title.toUpperCase(),
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.5,
+              color: isDark ? SoftPalette.slate300 : SoftPalette.slate700,
+            ),
+          ),
+          if (count > 0) ...[
+            const SizedBox(width: 5),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5.5, vertical: 1.5),
+              decoration: BoxDecoration(
+                color: isDark ? SoftPalette.teal700 : SoftPalette.teal100m,
+                borderRadius: BorderRadius.circular(6),
+              ),
+              child: Text(
+                '$count',
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight: FontWeight.w800,
+                  color: isDark ? SoftPalette.teal200 : SoftPalette.teal700,
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(width: 7),
+          Expanded(
+            child: Divider(
+              height: 1,
+              thickness: 0.8,
+              color: isDark ? SoftPalette.slate700 : SoftPalette.slate200,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCompactMedTypeIconBadge(String? type, String? name, bool isDark) {
+    final t = (type ?? '').toLowerCase().trim();
+    final n = (name ?? '').toLowerCase().trim();
+
+    IconData icon;
+    Color color;
+    if (t.contains('cap') || n.startsWith('cap')) {
+      icon = FontAwesomeIcons.capsules;
+      color = SoftPalette.amber300;
+    } else if (t.contains('inj') || t.contains('drip') || t.contains('infusion') || n.startsWith('inj')) {
+      icon = FontAwesomeIcons.syringe;
+      color = SoftPalette.red400;
+    } else if (t.contains('syp') || t.contains('syrup') || t.contains('susp') || n.startsWith('syp')) {
+      icon = FontAwesomeIcons.bottleDroplet;
+      color = SoftPalette.emerald350;
+    } else if (t.contains('drop') || n.startsWith('drop')) {
+      icon = FontAwesomeIcons.eyeDropper;
+      color = SoftPalette.cyan350;
+    } else if (t.contains('cream') || t.contains('oint') || t.contains('gel')) {
+      icon = Icons.sanitizer_rounded;
+      color = SoftPalette.pink400;
+    } else if (t.contains('inhal') || t.contains('resp') || n.contains('inhal')) {
+      icon = FontAwesomeIcons.lungs;
+      color = SoftPalette.violet500;
+    } else if (t.contains('tab') || n.startsWith('tab')) {
+      icon = FontAwesomeIcons.tablets;
+      color = SoftPalette.blue500;
+    } else {
+      icon = Icons.medication_rounded;
+      color = SoftPalette.teal500;
+    }
+
+    return Container(
+      width: 22,
+      height: 22,
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: isDark ? 0.22 : 0.12),
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(color: color.withValues(alpha: isDark ? 0.45 : 0.28), width: 0.8),
+      ),
+      child: Center(
+        child: Icon(icon, size: 11.5, color: color),
+      ),
+    );
+  }
+
+  Widget _buildCompactMedicinesList(List items, RoleThemeData t, bool isDark) {
+    if (items.isEmpty) return const SizedBox.shrink();
+    final days = _daysOfMedicine;
+
+    if (!Hive.isBoxOpen('app_settings')) {
+      return _buildCompactMedicinesColumn(items, t, isDark, days, true);
+    }
+
+    return ValueListenableBuilder<Box>(
+      valueListenable: DispensaryPreferencesService.showUrduTimingListenable(),
+      builder: (context, box, _) {
+        final bool showUrduTiming = DispensaryPreferencesService.isShowUrduTiming();
+        return _buildCompactMedicinesColumn(items, t, isDark, days, showUrduTiming);
+      },
+    );
+  }
+
+  Widget _buildCompactMedicinesColumn(
+    List items,
+    RoleThemeData t,
+    bool isDark,
+    int days,
+    bool showUrduTiming,
+  ) {
+    return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: items.map((item) {
+            final abbrev = _getMedAbbrev(item['type']);
+            final rawName = item['name']?.toString() ?? '';
+            String dose = (item['dose'] ?? item['dosage'] ?? '').toString().trim();
+            if (dose.isEmpty || dose.contains('+')) {
+              final invId = (item['inventoryId'] ?? item['id'] ?? item['medicineId'])?.toString();
+              if (invId != null && invId.isNotEmpty) {
+                try {
+                  if (Hive.isBoxOpen(LocalStorageService.stockBox)) {
+                    final stockBox = Hive.box(LocalStorageService.stockBox);
+                    final stockItem = stockBox.get('stock:$invId') ?? stockBox.get(invId);
+                    if (stockItem is Map) {
+                      final stockDose = (stockItem['dose'] ?? stockItem['strength'] ?? '').toString().trim();
+                      if (stockDose.isNotEmpty) dose = stockDose;
+                    }
+                  }
+                } catch (_) {}
+              }
+            }
+            if (dose.contains('+')) dose = '';
+            final displayName = '$abbrev $rawName'.trim();
+            final isInj = _isInjectableType(item['type']?.toString());
+            final isSyrup = _isSyrupType(item['type']?.toString(), item['name']?.toString());
+            final qRaw = item['quantity'] ?? item['qty'] ?? 1;
+            final perDayQty = (qRaw is num) ? qRaw.toInt() : (int.tryParse(qRaw.toString()) ?? 1);
+            final totalQty = isSyrup ? 1 : (isInj ? perDayQty : perDayQty * days);
+            final formula = (item['formula'] ?? '').toString().trim();
+
+            // ── Dosage Timing Construction ──
+            final timing = item['timing']?.toString() ?? '';
+            final parts = PatientFormHelper.parseTiming(timing);
+            final rawMeal = (item['meal'] ?? '').toString().trim();
+            final mealLower = rawMeal.toLowerCase();
+
+            // Proper full Urdu meal text (کھانے کے بعد / کھانے سے پہلے / نہار منہ / سونے سے پہلے)
+            String mealUrdu = '';
+            if (mealLower.contains('after') || mealLower.contains('بعد')) {
+              mealUrdu = 'کھانے کے بعد';
+            } else if (mealLower.contains('before sleep') || mealLower.contains('سونے') || mealLower.contains('سوتے') || mealLower.contains('bedtime')) {
+              mealUrdu = 'سونے سے پہلے';
+            } else if (mealLower.contains('before') || mealLower.contains('پہلے')) {
+              mealUrdu = 'کھانے سے پہلے';
+            } else if (mealLower.contains('empty') || mealLower.contains('خالی') || mealLower.contains('نہار')) {
+              mealUrdu = 'نہار منہ';
+            } else if (mealLower.contains('during') || mealLower.contains('دوران') || mealLower.contains('with meal')) {
+              mealUrdu = 'کھانے کے دوران';
+            } else if (rawMeal.isNotEmpty) {
+              mealUrdu = rawMeal;
+            }
+
+            // Proper full English meal text (After Meal / Before Meal / Empty Stomach / Bedtime)
+            String mealEnglish = '';
+            if (mealLower.contains('after') || mealLower.contains('بعد')) {
+              mealEnglish = 'After Meal';
+            } else if (mealLower.contains('before sleep') || mealLower.contains('سونے') || mealLower.contains('سوتے') || mealLower.contains('bedtime')) {
+              mealEnglish = 'Bedtime';
+            } else if (mealLower.contains('before') || mealLower.contains('پہلے')) {
+              mealEnglish = 'Before Meal';
+            } else if (mealLower.contains('empty') || mealLower.contains('خالی') || mealLower.contains('نہار')) {
+              mealEnglish = 'Empty Stomach';
+            } else if (mealLower.contains('during') || mealLower.contains('دوران') || mealLower.contains('with meal')) {
+              mealEnglish = 'With Meal';
+            } else if (rawMeal.isNotEmpty) {
+              mealEnglish = rawMeal;
+            }
+
+            // 1. Urdu text format
+            String timingUrdu = '';
+            if (isInj) {
+              timingUrdu = 'ایک خوراک';
+            } else if (parts[0] > 0 || parts[1] > 0 || parts[2] > 0 || (parts.length > 3 && parts[3] > 0)) {
+              List<String> times = [];
+              if (parts[0] > 0) times.add('${parts[0]} صبح');
+              if (parts[1] > 0) times.add('${parts[1]} دوپہر');
+              if (parts[2] > 0) times.add('${parts[2]} شام');
+              if (parts.length > 3 && parts[3] > 0) times.add('${parts[3]} رات');
+              timingUrdu = times.join(' • ');
+            } else {
+              timingUrdu = PatientFormHelper.buildUrduDosageLine(item);
+            }
+
+            final compactUrdu = [
+              if (timingUrdu.isNotEmpty) timingUrdu,
+              if (mealUrdu.isNotEmpty) '($mealUrdu)',
+            ].join(' ');
+
+            // 2. Compact 1+1+1 English format
+            String numericTiming = '';
+            if (isInj) {
+              numericTiming = 'Single Dose';
+            } else if (parts[0] > 0 || parts[1] > 0 || parts[2] > 0 || (parts.length > 3 && parts[3] > 0)) {
+              final activeParts = parts.length > 3 && parts[3] > 0 ? parts.sublist(0, 4) : parts.sublist(0, 3);
+              numericTiming = activeParts.join('+');
+            } else if (timing.isNotEmpty) {
+              numericTiming = timing;
+            } else {
+              numericTiming = '$perDayQty/day';
+            }
+
+            final compactEnglish = [
+              numericTiming,
+              if (mealEnglish.isNotEmpty) '($mealEnglish)',
+            ].join(' ');
+
+            // Full instructions for tooltips
+            final fullUrdu = [
+              if (PatientFormHelper.buildUrduDosageLine(item).isNotEmpty)
+                PatientFormHelper.buildUrduDosageLine(item)
+              else if (timingUrdu.isNotEmpty)
+                timingUrdu,
+              if (mealUrdu.isNotEmpty) '($mealUrdu)',
+            ].join(' ');
+
+            List<String> engTimes = [];
+            if (parts[0] > 0) engTimes.add('${parts[0]} Morning');
+            if (parts[1] > 0) engTimes.add('${parts[1]} Noon');
+            if (parts[2] > 0) engTimes.add('${parts[2]} Night');
+            if (parts.length > 3 && parts[3] > 0) engTimes.add('${parts[3]} Bedtime');
+            final fullEnglish = isInj
+                ? 'Single Dose'
+                : [
+                    if (engTimes.isNotEmpty) engTimes.join(', ') else numericTiming,
+                    if (mealEnglish.isNotEmpty) '($mealEnglish)',
+                  ].join(' ');
+
+            final qtyLabel = isSyrup ? '1 Btl' : (isInj ? 'QTY $perDayQty' : 'QTY $totalQty');
+
+            final tooltipLines = [
+              displayName,
+              if (dose.isNotEmpty) 'Dose: $dose',
+              if (formula.isNotEmpty && formula.toLowerCase() != rawName.toLowerCase()) 'Formula: $formula',
+              if (showUrduTiming) ...[
+                if (fullUrdu.isNotEmpty) 'Instructions: $fullUrdu' else if (compactUrdu.isNotEmpty) 'Instructions: $compactUrdu',
+              ] else ...[
+                if (fullEnglish.isNotEmpty) 'Instructions: $fullEnglish' else if (compactEnglish.isNotEmpty) 'Instructions: $compactEnglish',
+              ],
+              if (!isSyrup && !isInj) '$perDayQty/day × $days days = $totalQty total' else 'Total: $qtyLabel',
+            ];
+
+            final hasTimingBadge = showUrduTiming ? compactUrdu.isNotEmpty : compactEnglish.isNotEmpty;
+
+            return Tooltip(
+              message: tooltipLines.join('\n'),
+              waitDuration: const Duration(milliseconds: 300),
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 3.5),
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                decoration: BoxDecoration(
+                  color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    // 1. Medicine Type Icon Badge
+                    _buildCompactMedTypeIconBadge(item['type']?.toString(), item['name']?.toString(), isDark),
+                    const SizedBox(width: 6),
+
+                    // 2. Medicine Title & Strength
+                    Expanded(
+                      child: Text.rich(
+                        TextSpan(
+                          style: TextStyle(
+                            fontFamily: 'Roboto',
+                            color: isDark ? SoftPalette.gray50 : t.textPrimary,
+                            fontSize: 12.5,
+                          ),
+                          children: [
+                            TextSpan(
+                              text: displayName,
+                              style: const TextStyle(fontWeight: FontWeight.w800),
+                            ),
+                            if (dose.isNotEmpty) ...[
+                              const TextSpan(text: ' '),
+                              TextSpan(
+                                text: dose,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 11.5,
+                                  color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+
+                    // 3. Timing / Instruction Badge (Urdu text or 1+1+1 English format)
+                    if (hasTimingBadge) ...[
+                      Container(
+                        constraints: const BoxConstraints(maxWidth: 240),
+                        padding: EdgeInsets.symmetric(horizontal: 6, vertical: showUrduTiming ? 1.5 : 2.5),
+                        decoration: BoxDecoration(
+                          color: showUrduTiming
+                              ? (isDark ? SoftPalette.green700.withValues(alpha: 0.22) : SoftPalette.emerald100)
+                              : (isDark ? SoftPalette.sky700.withValues(alpha: 0.25) : SoftPalette.blue500A10),
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(
+                            color: showUrduTiming
+                                ? (isDark ? SoftPalette.green600.withValues(alpha: 0.3) : SoftPalette.emerald200)
+                                : (isDark ? SoftPalette.sky600.withValues(alpha: 0.35) : SoftPalette.blue200),
+                            width: 0.8,
+                          ),
+                        ),
+                        child: showUrduTiming
+                            ? Text(
+                                compactUrdu,
+                                textAlign: TextAlign.center,
+                                textDirection: ui.TextDirection.rtl,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontFamily: 'Jameel Noori Nastaleeq',
+                                  fontSize: 12.5,
+                                  fontWeight: FontWeight.w700,
+                                  color: isDark ? SoftPalette.emerald200 : SoftPalette.green600,
+                                ),
+                              )
+                            : Text(
+                                compactEnglish,
+                                textAlign: TextAlign.center,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontFamily: 'Roboto',
+                                  fontSize: 11.5,
+                                  fontWeight: FontWeight.w800,
+                                  letterSpacing: 0.3,
+                                  color: isDark ? SoftPalette.sky200 : SoftPalette.blue550,
+                                ),
+                              ),
+                      ),
+                      const SizedBox(width: 6),
+                    ],
+
+                    // 4. Quantity Badge
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 6.5, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: isDark ? SoftPalette.teal700.withValues(alpha: 0.3) : SoftPalette.teal100m,
+                        borderRadius: BorderRadius.circular(4),
+                        border: Border.all(
+                          color: isDark ? SoftPalette.teal600.withValues(alpha: 0.4) : SoftPalette.teal200,
+                          width: 0.8,
+                        ),
+                      ),
+                      child: Text(
+                        qtyLabel,
+                        style: TextStyle(
+                          fontSize: 10.5,
+                          fontWeight: FontWeight.w800,
+                          color: isDark ? SoftPalette.teal200 : SoftPalette.teal700,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }).toList(),
+        );
+  }
+
+  Widget _buildCompactActionBar(RoleThemeData t, bool isDark) {
+    final days = _daysOfMedicine;
+
+    final dispenseLabel = _isDispensed
+        ? 'Dispensed'
+        : _isDispensing
+            ? 'Dispensing...'
+            : days > 1
+                ? 'Dispense ($days days)'
+                : 'Dispense Medicine';
+
+    final dispenseBtn = Container(
+      height: 42,
+      decoration: BoxDecoration(
+        gradient: !_isDispensed && !_isDispensing ? t.accentGradient : null,
+        color: _isDispensed || _isDispensing ? SoftPalette.gray300 : null,
+        borderRadius: BorderRadius.circular(21),
+        boxShadow: _isDispensed || _isDispensing
+            ? []
+            : [
+                BoxShadow(
+                  color: t.accent.withValues(alpha: 0.25),
+                  blurRadius: 8,
+                  offset: const Offset(0, 3),
+                )
+              ],
+      ),
+      child: ElevatedButton.icon(
+        onPressed: _isDispensed || _isDispensing ? null : _dispenseOnly,
+        icon: _isDispensing
+            ? const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50),
+              )
+            : const Icon(Icons.check_circle, color: SoftPalette.gray50, size: 18),
+        label: Text(
+          dispenseLabel,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: SoftPalette.gray50,
+            letterSpacing: 0.2,
+          ),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(21)),
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+        ),
+      ),
+    );
+
+    final reportBtn = Container(
+      height: 42,
+      decoration: BoxDecoration(
+        color: SoftPalette.red550,
+        borderRadius: BorderRadius.circular(21),
+        boxShadow: [
+          BoxShadow(
+            color: SoftPalette.red550.withValues(alpha: 0.2),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
+          )
+        ],
+      ),
+      child: ElevatedButton.icon(
+        onPressed: _handleDownloadPdf,
+        icon: const Icon(Icons.picture_as_pdf_rounded, color: SoftPalette.gray50, size: 17),
+        label: const Text(
+          'Report',
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            color: SoftPalette.gray50,
+            letterSpacing: 0.3,
+          ),
+        ),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.transparent,
+          shadowColor: Colors.transparent,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(21)),
+          padding: const EdgeInsets.symmetric(horizontal: 14),
+        ),
+      ),
+    );
+
+    return RepaintBoundary(
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(10, 8, 10, 10),
+        decoration: BoxDecoration(
+          color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+          border: Border(
+            top: BorderSide(color: isDark ? SoftPalette.slate700 : SoftPalette.slate200, width: 1),
+          ),
+        ),
+        child: Row(
+          children: [
+            Expanded(flex: 6, child: dispenseBtn),
+            const SizedBox(width: 8),
+            Expanded(flex: 4, child: reportBtn),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -3568,8 +4710,8 @@ class _PatientPrintOptionsSheetState extends State<_PatientPrintOptionsSheet> {
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Print failed: $e'), backgroundColor: Colors.red),
+        AppToast.showSnackBar(context, 
+          SnackBar(content: Text('Print failed: $e'), backgroundColor: SoftPalette.red400),
         );
       }
     } finally {
@@ -3594,8 +4736,8 @@ class _PatientPrintOptionsSheetState extends State<_PatientPrintOptionsSheet> {
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Save PDF failed: $e'), backgroundColor: Colors.red),
+        AppToast.showSnackBar(context, 
+          SnackBar(content: Text('Save PDF failed: $e'), backgroundColor: SoftPalette.red400),
         );
       }
     } finally {
@@ -3636,8 +4778,8 @@ class _PatientPrintOptionsSheetState extends State<_PatientPrintOptionsSheet> {
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('WhatsApp share failed: $e'), backgroundColor: Colors.red),
+        AppToast.showSnackBar(context, 
+          SnackBar(content: Text('WhatsApp share failed: $e'), backgroundColor: SoftPalette.red400),
         );
       }
     } finally {
@@ -3654,10 +4796,10 @@ class _PatientPrintOptionsSheetState extends State<_PatientPrintOptionsSheet> {
       );
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           const SnackBar(
             content: Text('📋 WhatsApp opened & PDF copied to clipboard! Press Ctrl+V in WhatsApp to attach.'),
-            backgroundColor: Color(0xFF00695C),
+            backgroundColor: SoftPalette.teal600,
             duration: Duration(seconds: 4),
           ),
         );
@@ -3670,20 +4812,20 @@ class _PatientPrintOptionsSheetState extends State<_PatientPrintOptionsSheet> {
       children: [
         Text(
           label.toUpperCase(),
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 9,
             fontWeight: FontWeight.bold,
-            color: Color(0xFF4DB6A7),
+            color: context.adapt(SoftPalette.teal350),
             letterSpacing: 0.5,
           ),
         ),
         const SizedBox(height: 4),
         Text(
           value,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 14,
             fontWeight: FontWeight.w900,
-            color: Color(0xFF002521),
+            color: context.adapt(SoftPalette.teal900),
           ),
         ),
       ],
@@ -3729,8 +4871,8 @@ class _PatientPrintOptionsSheetState extends State<_PatientPrintOptionsSheet> {
   @override
   Widget build(BuildContext context) {
     return Container(
-      decoration: const BoxDecoration(
-        color: Colors.white,
+      decoration: BoxDecoration(
+        color: context.adapt(SoftPalette.gray50),
         borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
       ),
       padding: EdgeInsets.fromLTRB(24, 12, 24, MediaQuery.of(context).padding.bottom + 24),
@@ -3744,26 +4886,26 @@ class _PatientPrintOptionsSheetState extends State<_PatientPrintOptionsSheet> {
                 height: 4,
                 margin: const EdgeInsets.only(bottom: 24),
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade200,
+                  color: context.adapt(SoftPalette.gray100),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Image.asset('assets/logo/gmwf-1.webp', height: 36, errorBuilder: (_, __, ___) => const Icon(Icons.medical_services, color: Color(0xFF00695C))),
-                  const Text(
+                  Image.asset('assets/logo/gmwf-1.webp', height: 36, errorBuilder: (_, __, ___) => const Icon(Icons.medical_services, color: SoftPalette.teal600)),
+                  Text(
                     'Print & Share Slip',
                     style: TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.w800,
-                      color: Color(0xFF002521),
+                      color: context.adapt(SoftPalette.teal900),
                     ),
                   ),
                   IconButton(
                     onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close_rounded, color: Colors.grey),
-                    style: IconButton.styleFrom(backgroundColor: Colors.grey.shade100),
+                    icon: Icon(Icons.close_rounded, color: context.adapt(SoftPalette.gray350)),
+                    style: IconButton.styleFrom(backgroundColor: context.adapt(SoftPalette.gray100)),
                   ),
                 ],
               ),
@@ -3774,18 +4916,18 @@ class _PatientPrintOptionsSheetState extends State<_PatientPrintOptionsSheet> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFE6F7F4),
+                  color: context.adapt(SoftPalette.teal100m),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFFCBECE6)),
+                  border: Border.all(color: context.adapt(SoftPalette.teal150)),
                 ),
                 child: Column(
                   children: [
                     Text(
                       (widget.data['patientName'] ?? 'Unknown Patient').toString().toUpperCase(), 
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 14,
                         fontWeight: FontWeight.w800,
-                        color: Color(0xFF00695C),
+                        color: context.adapt(SoftPalette.teal600),
                         letterSpacing: 0.5,
                       ),
                     ),
@@ -3794,7 +4936,7 @@ class _PatientPrintOptionsSheetState extends State<_PatientPrintOptionsSheet> {
                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                       children: [
                         _infoSummary('Serial Token', '#${widget.serial}'),
-                        Container(width: 1, height: 24, color: const Color(0xFFCBECE6)),
+                        Container(width: 1, height: 24, color: context.adapt(SoftPalette.teal150)),
                         _infoSummary('Queue Type', widget.queueType.toUpperCase()),
                       ],
                     ),
@@ -3807,28 +4949,28 @@ class _PatientPrintOptionsSheetState extends State<_PatientPrintOptionsSheet> {
               Container(
                 padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 12),
                 decoration: BoxDecoration(
-                  color: Colors.grey.shade50,
+                  color: context.adapt(SoftPalette.gray50),
                   borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: Colors.grey.shade100),
+                  border: Border.all(color: context.adapt(SoftPalette.gray100)),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
                     _premiumPrintBtn(
                       label: 'Print Slip',
-                      color: const Color(0xFF00695C),
+                      color: context.adapt(SoftPalette.teal600),
                       icon: Icons.print_rounded,
                       onTap: _handlePrint,
                     ),
                     _premiumPrintBtn(
                       label: 'Save PDF',
-                      color: const Color(0xFFB91C1C),
+                      color: context.adapt(SoftPalette.red550),
                       icon: Icons.picture_as_pdf_rounded,
                       onTap: _handleSavePdf,
                     ),
                     _premiumPrintBtn(
                       label: 'WhatsApp',
-                      color: const Color(0xFF2E7D32),
+                      color: context.adapt(SoftPalette.green550),
                       icon: Icons.share_rounded,
                       onTap: _handleWhatsAppShare,
                     ),
@@ -3840,19 +4982,19 @@ class _PatientPrintOptionsSheetState extends State<_PatientPrintOptionsSheet> {
           if (_isGenerating)
             Positioned.fill(
               child: Container(
-                color: Colors.white.withOpacity(0.9),
+                color: context.adapt(SoftPalette.gray50).withOpacity(0.9),
                 child: Center(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const CircularProgressIndicator(color: Color(0xFF00695C)),
+                      const CircularProgressIndicator(color: SoftPalette.teal600),
                       const SizedBox(height: 16),
                       Text(
                         _loadingMessage,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.bold,
-                          color: Color(0xFF002521),
+                          color: context.adapt(SoftPalette.teal900),
                         ),
                       ),
                     ],

@@ -1,0 +1,122 @@
+// tool/soft_palette/migrate_test.dart
+//
+// Run with:  flutter test tool/soft_palette/migrate_test.dart
+// (a Flutter test so Material `Colors.*` values can be evaluated exactly).
+//
+// 1. Finds every hard-coded colour in lib/ (Color(0xAARRGGBB) and Colors.*).
+// 2. Maps each one onto the soft eye-comfort palette (soft_palette_engine.dart),
+//    keeping its alpha.
+// 3. Writes lib/design/tokens/soft_palette.dart — the ONLY place colour values
+//    live — and rewrites each usage to `SoftPalette.<name>`.
+// Fully transparent colours and dynamic colours (Color(someVar)) are left alone.
+
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+import 'soft_palette_engine.dart';
+
+const paletteFile = 'lib/design/tokens/soft_palette.dart';
+const paletteImport = "import 'package:gmwf/design/tokens/soft_palette.dart';";
+
+final Map<String, Color> _plain = {
+  'white': Colors.white, 'black': Colors.black,
+  'white10': Colors.white10, 'white12': Colors.white12, 'white24': Colors.white24, 'white30': Colors.white30,
+  'white38': Colors.white38, 'white54': Colors.white54, 'white60': Colors.white60, 'white70': Colors.white70,
+  'black12': Colors.black12, 'black26': Colors.black26, 'black38': Colors.black38, 'black45': Colors.black45,
+  'black54': Colors.black54, 'black87': Colors.black87,
+};
+final Map<String, dynamic> _swatches = {
+  'red': Colors.red, 'redAccent': Colors.redAccent, 'pink': Colors.pink, 'pinkAccent': Colors.pinkAccent,
+  'purple': Colors.purple, 'purpleAccent': Colors.purpleAccent, 'deepPurple': Colors.deepPurple,
+  'deepPurpleAccent': Colors.deepPurpleAccent, 'indigo': Colors.indigo, 'indigoAccent': Colors.indigoAccent,
+  'blue': Colors.blue, 'blueAccent': Colors.blueAccent, 'lightBlue': Colors.lightBlue,
+  'lightBlueAccent': Colors.lightBlueAccent, 'cyan': Colors.cyan, 'cyanAccent': Colors.cyanAccent,
+  'teal': Colors.teal, 'tealAccent': Colors.tealAccent, 'green': Colors.green, 'greenAccent': Colors.greenAccent,
+  'lightGreen': Colors.lightGreen, 'lightGreenAccent': Colors.lightGreenAccent, 'lime': Colors.lime,
+  'limeAccent': Colors.limeAccent, 'yellow': Colors.yellow, 'yellowAccent': Colors.yellowAccent,
+  'amber': Colors.amber, 'amberAccent': Colors.amberAccent, 'orange': Colors.orange,
+  'orangeAccent': Colors.orangeAccent, 'deepOrange': Colors.deepOrange, 'deepOrangeAccent': Colors.deepOrangeAccent,
+  'brown': Colors.brown, 'grey': Colors.grey, 'blueGrey': Colors.blueGrey,
+};
+
+Color? _evalColors(String name, String? shade) {
+  if (_plain.containsKey(name)) return shade == null ? _plain[name] : null;
+  final s = _swatches[name];
+  if (s == null) return null;
+  if (shade == null) return s as Color;
+  return (s as dynamic)[int.parse(shade)] as Color?;
+}
+
+final _hexRe = RegExp(r'(?<![A-Za-z0-9_])(?:const\s+)?Color\(0x([0-9A-Fa-f]{8})\)');
+final _colorsRe = RegExp(r'(?<![A-Za-z0-9_])Colors\.([a-zA-Z0-9]+)(?:\.shade(\d+)|\[(\d+)\])?(!)?');
+
+void main() {
+  test('migrate to soft palette', () {
+    final names = <String, int>{}; // constant name -> ARGB
+    String constFor(int argb) {
+      final soft = softFor(argb & 0xFFFFFF);
+      final alpha = (argb >> 24) & 0xFF;
+      final name = alpha == 0xFF ? soft.name : '${soft.name}A${(alpha * 100 / 255).round()}';
+      names.putIfAbsent(name, () => (alpha << 24) | soft.rgb);
+      return 'SoftPalette.$name';
+    }
+
+    var filesChanged = 0, replaced = 0;
+    final files = Directory('lib').listSync(recursive: true).whereType<File>()
+        .where((f) => f.path.endsWith('.dart'))
+        .where((f) => !f.path.replaceAll('\\', '/').endsWith(paletteFile.substring(4)));
+    for (final f in files) {
+      final src = f.readAsStringSync();
+      var out = src.replaceAllMapped(_hexRe, (m) {
+        final argb = int.parse(m.group(1)!, radix: 16);
+        if ((argb >> 24) == 0) return m.group(0)!; // fully transparent: not a colour
+        replaced++;
+        return constFor(argb);
+      });
+      out = out.replaceAllMapped(_colorsRe, (m) {
+        final name = m.group(1)!;
+        if (name == 'transparent') return m.group(0)!;
+        final c = _evalColors(name, m.group(2) ?? m.group(3));
+        if (c == null) return m.group(0)!; // not a Material colour (e.g. AppColors.primary handled via its hex)
+        replaced++;
+        return constFor(c.toARGB32());
+      });
+      if (out != src) {
+        if (!out.contains(paletteImport)) {
+          final firstImport = RegExp(r'^import .*;$', multiLine: true).firstMatch(out);
+          out = firstImport != null
+              ? out.replaceRange(firstImport.end, firstImport.end, '\n$paletteImport')
+              : '$paletteImport\n$out';
+        }
+        f.writeAsStringSync(out);
+        filesChanged++;
+      }
+    }
+
+    // Generate the palette file (sorted: family, tone, alpha).
+    final keys = names.keys.toList()..sort();
+    final buf = StringBuffer()
+      ..writeln('// lib/design/tokens/soft_palette.dart')
+      ..writeln('//')
+      ..writeln('// GENERATED by tool/soft_palette/migrate_test.dart — the single source of every')
+      ..writeln('// colour value in the app. Eye-comfort palette: no pure white/black, no neon;')
+      ..writeln('// OKLCH tone ladder (50 = lightest … 900 = darkest) per family. Names ending')
+      ..writeln('// in `m` are muted variants; `A<n>` suffix = n% opacity.')
+      ..writeln('//')
+      ..writeln('// To change a colour app-wide, change it here. Do not add Color(0x…) literals')
+      ..writeln('// or Colors.* elsewhere — pick (or add) a palette entry instead.')
+      ..writeln()
+      ..writeln("import 'package:flutter/painting.dart';")
+      ..writeln()
+      ..writeln('abstract final class SoftPalette {');
+    for (final k in keys) {
+      buf.writeln('  static const Color $k = Color(0x${names[k]!.toRadixString(16).padLeft(8, '0').toUpperCase()});');
+    }
+    buf.writeln('}');
+    File(paletteFile).writeAsStringSync(buf.toString());
+    // ignore: avoid_print
+    print('files changed: $filesChanged, colours replaced: $replaced, palette entries: ${keys.length}');
+  });
+}

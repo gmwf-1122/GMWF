@@ -5,6 +5,7 @@
 // All Material Icons (rounded) · Consistent stroke · No random colors
 // ════════════════════════════════════════════════════════════════════════════════
 import 'dart:math';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -33,23 +34,23 @@ class DS {
   static const double s4 = Gsp.sp8;  // 32.0
 
   // Semantic colors — Role Based Decisions
-  static const Color zakat        = Color(0xFF16A34A); // Green — Zakat (Revenue/Money)
-  static const Color nonZakat     = Color(0xFF2563EB); // Blue — Non-Zakat (Standard Operations)
-  static const Color gmwf         = Color(0xFFEAB308); // Yellow — GMWF (Free/Internal)
-  static const Color danger       = Color(0xFFDC2626); // Red — Alerts / Critical
+  static const Color zakat        = SoftPalette.green400; // Green — Zakat (Revenue/Money)
+  static const Color nonZakat     = SoftPalette.blue550; // Blue — Non-Zakat (Standard Operations)
+  static const Color gmwf         = SoftPalette.amber300; // Yellow — GMWF (Free/Internal)
+  static const Color danger       = SoftPalette.red500; // Red — Alerts / Critical
 
   // UI Utilities
-  static const Color blue        = Color(0xFF2563EB);
-  static const Color blueMuted   = Color(0xFFEFF6FF);
-  static const Color green       = Color(0xFF16A34A);
-  static const Color greenMuted  = Color(0xFFDCFCE7);
-  static const Color purple      = Color(0xFF7C3AED);
-  static const Color purpleMuted = Color(0xFFF5F3FF);
-  static const Color orange      = Color(0xFFEA580C);
-  static const Color orangeMuted = Color(0xFFFFF7ED);
-  static const Color neutral     = Color(0xFF6B7280);
-  static const Color neutralBg   = Color(0xFFF9FAFB);
-  static const Color border      = Color(0xFFE5E7EB);
+  static const Color blue        = SoftPalette.blue550;
+  static const Color blueMuted   = SoftPalette.slate100;
+  static const Color green       = SoftPalette.green400;
+  static const Color greenMuted  = SoftPalette.emerald100;
+  static const Color purple      = SoftPalette.violet550;
+  static const Color purpleMuted = SoftPalette.violet100m;
+  static const Color orange      = SoftPalette.orange400;
+  static const Color orangeMuted = SoftPalette.amber50m;
+  static const Color neutral     = SoftPalette.slate550;
+  static const Color neutralBg   = SoftPalette.gray50;
+  static const Color border      = SoftPalette.gray150;
 
   // Typography sizes
   static const double h1 = 40.0;
@@ -891,12 +892,12 @@ class DashLoadingCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Shimmer.fromColors(
-    baseColor: DS.border,
-    highlightColor: Colors.white,
+    baseColor: context.adapt(DS.border),
+    highlightColor: context.adapt(SoftPalette.gray50),
     child: Container(
       height: height, width: double.infinity,
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.adapt(SoftPalette.gray50),
         borderRadius: BorderRadius.circular(DS.r3),
       ),
     ),
@@ -1022,7 +1023,7 @@ class _DonutPainter extends CustomPainter {
         final ly = center.dy + radius * sin(midAngle);
         final tp = TextPainter(
           text: TextSpan(text: '$pct%',
-              style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800)),
+              style: const TextStyle(color: SoftPalette.gray50, fontSize: 11, fontWeight: FontWeight.w800)),
           textDirection: ui.TextDirection.ltr,
         )..layout();
         tp.paint(canvas, Offset(lx - tp.width / 2, ly - tp.height / 2));
@@ -1194,7 +1195,7 @@ class _RevenueHeroCardState extends State<RevenueHeroCard>
         padding: const EdgeInsets.all(DS.s3),
         decoration: BoxDecoration(
           gradient: const LinearGradient(
-            colors: [Color(0xFF1E40AF), Color(0xFF2563EB), Color(0xFF3B82F6)],
+            colors: [SoftPalette.blue600, SoftPalette.blue550, SoftPalette.blue500],
             begin: Alignment.topLeft, end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(DS.r4),
@@ -1206,9 +1207,9 @@ class _RevenueHeroCardState extends State<RevenueHeroCard>
         child: Stack(children: [
           // Decorative circles
           Positioned(right: -24, top: -24, child: Container(width: 140, height: 140,
-              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withValues(alpha: 0.06)))),
+              decoration: BoxDecoration(shape: BoxShape.circle, color: SoftPalette.gray50.withValues(alpha: 0.06)))),
           Positioned(right: 60, bottom: -10, child: Container(width: 70, height: 70,
-              decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.white.withValues(alpha: 0.04)))),
+              decoration: BoxDecoration(shape: BoxShape.circle, color: SoftPalette.gray50.withValues(alpha: 0.04)))),
 
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             // Label row
@@ -1216,19 +1217,19 @@ class _RevenueHeroCardState extends State<RevenueHeroCard>
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: DS.s1, vertical: 4),
                 decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.18),
+                    color: SoftPalette.gray50.withValues(alpha: 0.18),
                     borderRadius: BorderRadius.circular(DS.r1)),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  const Icon(Icons.trending_up_rounded, color: Colors.white, size: 12),
+                  const Icon(Icons.trending_up_rounded, color: SoftPalette.gray50, size: 12),
                   const SizedBox(width: 5),
                   Text(widget.label ?? 'Today\'s Revenue',
-                      style: const TextStyle(color: Colors.white, fontSize: 11,
+                      style: const TextStyle(color: SoftPalette.gray50, fontSize: 11,
                           fontWeight: FontWeight.w700, letterSpacing: 0.5)),
                 ]),
               ),
               const Spacer(),
               Text(DateFormat('d MMM yyyy').format(DateTime.now()),
-                  style: TextStyle(color: Colors.white.withValues(alpha: 0.65), fontSize: 12)),
+                  style: TextStyle(color: SoftPalette.gray50.withValues(alpha: 0.65), fontSize: 12)),
             ]),
 
             const SizedBox(height: DS.s2),
@@ -1238,12 +1239,12 @@ class _RevenueHeroCardState extends State<RevenueHeroCard>
               value: s.totalRevenue,
               prefix: 'PKR ',
               style: const TextStyle(
-                  color: Colors.white, fontSize: DS.h1,
+                  color: SoftPalette.gray50, fontSize: DS.h1,
                   fontWeight: FontWeight.w900, letterSpacing: -1.5, height: 1.0),
             ),
             const SizedBox(height: 4),
             Text('Total Revenue (Dispensary + Dasterkhwaan + Donations)',
-                style: TextStyle(color: Colors.white.withValues(alpha: 0.65), fontSize: DS.caption)),
+                style: TextStyle(color: SoftPalette.gray50.withValues(alpha: 0.65), fontSize: DS.caption)),
 
             const SizedBox(height: DS.s2),
 
@@ -1252,17 +1253,17 @@ class _RevenueHeroCardState extends State<RevenueHeroCard>
               final isWide = c.maxWidth > 480;
               final pills = [
                 _revPill(Icons.local_pharmacy_rounded, 'Dispensary',
-                    s.dispensaryRevenue, const Color(0xFF93C5FD)),
+                    s.dispensaryRevenue, SoftPalette.blue300),
                 _revPill(Icons.restaurant_rounded, 'Dasterkhwaan',
-                    s.dasterkhwaanRevenue, const Color(0xFF6EE7B7)),
+                    s.dasterkhwaanRevenue, SoftPalette.emerald200),
                 _revPill(Icons.volunteer_activism_rounded, 'Donations',
-                    s.donations, const Color(0xFFC4B5FD)),
+                    s.donations, SoftPalette.violet300),
               ];
               if (isWide) {
                 return Row(children: [
                   for (int i = 0; i < pills.length; i++) ...[
                     if (i > 0) Container(width: 1, height: 40,
-                        color: Colors.white.withValues(alpha: 0.2),
+                        color: SoftPalette.gray50.withValues(alpha: 0.2),
                         margin: const EdgeInsets.symmetric(horizontal: DS.s2)),
                     Expanded(child: pills[i]),
                   ],
@@ -1281,12 +1282,12 @@ class _RevenueHeroCardState extends State<RevenueHeroCard>
   Widget _revPill(IconData icon, String label, int amount, Color color) =>
       Row(mainAxisSize: MainAxisSize.min, children: [
         Container(padding: const EdgeInsets.all(6),
-            decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.15),
+            decoration: BoxDecoration(color: SoftPalette.gray50.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(DS.r1)),
             child: Icon(icon, color: color, size: 14)),
         const SizedBox(width: DS.s1),
         Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(label, style: TextStyle(color: Colors.white.withValues(alpha: 0.70),
+          Text(label, style: TextStyle(color: SoftPalette.gray50.withValues(alpha: 0.70),
               fontSize: DS.caption, fontWeight: FontWeight.w500)),
           _AnimatedCount(value: amount, prefix: 'PKR ',
               style: TextStyle(color: color, fontSize: 14, fontWeight: FontWeight.w800)),
@@ -1312,25 +1313,25 @@ class OperationsOverviewRow extends StatelessWidget {
     final tiles = [
       _OpsTile(
         icon: Icons.people_rounded,
-        iconColor: DS.blue, iconBg: DS.blueMuted,
+        iconColor: DS.blue, iconBg: context.adapt(DS.blueMuted),
         value: fmtNum(s.tokens), label: 'Total Patients',
         isEmpty: s.tokens == 0,
       ),
       _OpsTile(
         icon: Icons.restaurant_rounded,
-        iconColor: DS.orange, iconBg: DS.orangeMuted,
+        iconColor: DS.orange, iconBg: context.adapt(DS.orangeMuted),
         value: fmtNum(s.dasterkhwaan), label: 'Tokens Issued',
         isEmpty: s.dasterkhwaan == 0,
       ),
       _OpsTile(
         icon: Icons.done_all_rounded,
-        iconColor: DS.green, iconBg: DS.greenMuted,
+        iconColor: DS.green, iconBg: context.adapt(DS.greenMuted),
         value: fmtNum(s.dasterkhwaanServed), label: 'Tokens Served',
         isEmpty: s.dasterkhwaanServed == 0,
       ),
       _OpsTile(
         icon: Icons.track_changes_rounded,
-        iconColor: DS.purple, iconBg: DS.purpleMuted,
+        iconColor: DS.purple, iconBg: context.adapt(DS.purpleMuted),
         value: '${completionPct.toStringAsFixed(0)}%',
         label: 'Completion',
         progressValue: completionPct / 100,
@@ -1369,10 +1370,10 @@ class _OpsTile extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(DS.s2),
     decoration: BoxDecoration(
-      color: Colors.white,
+      color: context.adapt(SoftPalette.gray50),
       borderRadius: BorderRadius.circular(DS.r2),
-      border: Border.all(color: DS.border),
-      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04),
+      border: Border.all(color: context.adapt(DS.border)),
+      boxShadow: [BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.04),
           blurRadius: 10, offset: const Offset(0, 3))],
     ),
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -1383,17 +1384,17 @@ class _OpsTile extends StatelessWidget {
         const Spacer(),
         if (isEmpty)
           Container(padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-              decoration: BoxDecoration(color: const Color(0xFFFEF3C7),
+              decoration: BoxDecoration(color: context.adapt(SoftPalette.yellow100),
                   borderRadius: BorderRadius.circular(DS.r1)),
-              child: const Text('—', style: TextStyle(color: Color(0xFFD97706), fontSize: 10, fontWeight: FontWeight.w700))),
+              child: Text('—', style: TextStyle(color: context.adapt(SoftPalette.orange400), fontSize: 10, fontWeight: FontWeight.w700))),
       ]),
       const Spacer(),
       Text(value, style: TextStyle(
           fontSize: value.length > 5 ? 18 : 24,
           fontWeight: FontWeight.w900,
-          color: isEmpty ? DS.neutral : iconColor, height: 1.1)),
+          color: isEmpty ? context.adapt(DS.neutral) : iconColor, height: 1.1)),
       const SizedBox(height: 2),
-      Text(label, style: const TextStyle(fontSize: DS.caption, color: DS.neutral,
+      Text(label, style: TextStyle(fontSize: DS.caption, color: context.adapt(DS.neutral),
           fontWeight: FontWeight.w500)),
       if (progressValue != null) ...[
         const SizedBox(height: 8),
@@ -1418,23 +1419,23 @@ class FinancialSourcesRow extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(DS.s2),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.adapt(SoftPalette.gray50),
         borderRadius: BorderRadius.circular(DS.r2),
-        border: Border.all(color: DS.border),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04),
+        border: Border.all(color: context.adapt(DS.border)),
+        boxShadow: [BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.04),
             blurRadius: 10, offset: const Offset(0, 3))],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         // Header
         Row(children: [
           Container(padding: const EdgeInsets.all(DS.s1),
-              decoration: BoxDecoration(color: DS.blueMuted, borderRadius: BorderRadius.circular(DS.r1)),
+              decoration: BoxDecoration(color: context.adapt(DS.blueMuted), borderRadius: BorderRadius.circular(DS.r1)),
               child: const Icon(Icons.account_balance_rounded, color: DS.blue, size: 16)),
           const SizedBox(width: DS.s1),
-          const Text('Patient Financial Sources',
-              style: TextStyle(color: Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w700)),
+          Text('Patient Financial Sources',
+              style: TextStyle(color: context.adapt(SoftPalette.slate900), fontSize: 14, fontWeight: FontWeight.w700)),
           const Spacer(),
-          Text('$total total', style: const TextStyle(color: DS.neutral, fontSize: 12)),
+          Text('$total total', style: TextStyle(color: context.adapt(DS.neutral), fontSize: 12)),
         ]),
 
         const SizedBox(height: DS.s2),
@@ -1524,8 +1525,8 @@ class _SrcTile extends StatelessWidget {
         Text('patients', style: TextStyle(color: color.withValues(alpha: 0.65), fontSize: DS.caption)),
         const SizedBox(height: 4),
         Text(revenue > 0 ? fmtPKR(revenue) : rateLabel,
-            style: TextStyle(color: const Color(0xFF374151), fontSize: 12, fontWeight: FontWeight.w600)),
-        Text(rateLabel, style: const TextStyle(color: DS.neutral, fontSize: DS.caption)),
+            style: TextStyle(color: context.adapt(SoftPalette.slate700), fontSize: 12, fontWeight: FontWeight.w600)),
+        Text(rateLabel, style: TextStyle(color: context.adapt(DS.neutral), fontSize: DS.caption)),
       ]),
     );
   }
@@ -1555,15 +1556,15 @@ class _EmptyOpsState extends StatelessWidget {
     padding: const EdgeInsets.symmetric(vertical: DS.s3),
     child: Column(mainAxisSize: MainAxisSize.min, children: [
       Container(padding: const EdgeInsets.all(DS.s2),
-          decoration: BoxDecoration(color: DS.neutralBg, shape: BoxShape.circle),
-          child: Icon(icon, size: 32, color: DS.neutral)),
+          decoration: BoxDecoration(color: context.adapt(DS.neutralBg), shape: BoxShape.circle),
+          child: Icon(icon, size: 32, color: context.adapt(DS.neutral))),
       const SizedBox(height: DS.s2),
-      Text(message, style: const TextStyle(color: Color(0xFF111827),
+      Text(message, style: TextStyle(color: context.adapt(SoftPalette.slate900),
           fontSize: 14, fontWeight: FontWeight.w600)),
       if (hint != null) ...[
         const SizedBox(height: 6),
         Text(hint!, textAlign: TextAlign.center,
-            style: const TextStyle(color: DS.neutral, fontSize: 12)),
+            style: TextStyle(color: context.adapt(DS.neutral), fontSize: 12)),
       ],
       if (onPrimary != null) ...[
         const SizedBox(height: DS.s2),
@@ -1641,21 +1642,21 @@ class _HeroBannerState extends State<HeroBanner>
             Container(
               padding: const EdgeInsets.symmetric(horizontal: DS.s1, vertical: 3),
               decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.20),
+                  color: SoftPalette.gray50.withValues(alpha: 0.20),
                   borderRadius: BorderRadius.circular(DS.r1)),
               child: Text(widget.roleLabel,
-                  style: const TextStyle(color: Colors.white, fontSize: 10,
+                  style: const TextStyle(color: SoftPalette.gray50, fontSize: 10,
                       fontWeight: FontWeight.w700, letterSpacing: 1.5)),
             ),
             const SizedBox(height: 6),
             // Username
             Text(widget.username,
-                style: const TextStyle(color: Colors.white, fontSize: 20,
+                style: const TextStyle(color: SoftPalette.gray50, fontSize: 20,
                     fontWeight: FontWeight.w800, height: 1.1),
                 overflow: TextOverflow.ellipsis),
             const SizedBox(height: 4),
             Text(DateFormat('EEE, d MMM').format(DateTime.now()),
-                style: TextStyle(color: Colors.white.withValues(alpha: 0.70), fontSize: 12)),
+                style: TextStyle(color: SoftPalette.gray50.withValues(alpha: 0.70), fontSize: 12)),
           ])),
           const SizedBox(width: DS.s2),
           // Two compact stat chips
@@ -1673,15 +1674,15 @@ class _HeroBannerState extends State<HeroBanner>
   Widget _statChip(IconData icon, String value, String label) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: DS.s1),
     decoration: BoxDecoration(
-      color: Colors.white.withValues(alpha: 0.18),
+      color: SoftPalette.gray50.withValues(alpha: 0.18),
       borderRadius: BorderRadius.circular(DS.r1 + 4),
     ),
     child: Column(mainAxisSize: MainAxisSize.min, children: [
-      Icon(icon, color: Colors.white, size: 14),
+      Icon(icon, color: SoftPalette.gray50, size: 14),
       const SizedBox(height: 3),
-      Text(value, style: const TextStyle(color: Colors.white,
+      Text(value, style: const TextStyle(color: SoftPalette.gray50,
           fontSize: 15, fontWeight: FontWeight.w900, height: 1.0)),
-      Text(label, style: TextStyle(color: Colors.white.withValues(alpha: 0.70), fontSize: 10)),
+      Text(label, style: TextStyle(color: SoftPalette.gray50.withValues(alpha: 0.70), fontSize: 10)),
     ]),
   );
 }
@@ -1829,22 +1830,22 @@ class _BranchPerformanceTableState extends State<BranchPerformanceTable> {
 
     return Container(
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.adapt(SoftPalette.gray50),
         borderRadius: BorderRadius.circular(DS.r2),
-        border: Border.all(color: DS.border),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04),
+        border: Border.all(color: context.adapt(DS.border)),
+        boxShadow: [BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.04),
             blurRadius: 14, offset: const Offset(0, 4))],
       ),
       child: Column(children: [
         // Table header
         Container(
           padding: const EdgeInsets.fromLTRB(DS.s2, DS.s1 + 4, DS.s2, DS.s1 + 4),
-          decoration: const BoxDecoration(
-              color: DS.neutralBg,
+          decoration: BoxDecoration(
+              color: context.adapt(DS.neutralBg),
               borderRadius: BorderRadius.vertical(top: Radius.circular(DS.r2))),
           child: Row(children: [
-            const Expanded(flex: 3, child: Text('Branch', style: TextStyle(
-                color: DS.neutral, fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5))),
+            Expanded(flex: 3, child: Text('Branch', style: TextStyle(
+                color: context.adapt(DS.neutral), fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.5))),
             if (widget.selectedTab == 'overall') ...[
               _headerCell('Patients', 'tokens', flex: 2),
               _headerCell('Disp. Rev', 'dispensaryRevenue', flex: 2),
@@ -1869,7 +1870,7 @@ class _BranchPerformanceTableState extends State<BranchPerformanceTable> {
             const SizedBox(width: 24), // expand chevron space
           ]),
         ),
-        Container(height: 1, color: DS.border),
+        Container(height: 1, color: context.adapt(DS.border)),
 
         // Rows with individual StreamBuilders for real-time independence
         ...sorted.asMap().entries.map((entry) {
@@ -1933,7 +1934,7 @@ class _BranchPerformanceTableState extends State<BranchPerformanceTable> {
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             Text(label, style: TextStyle(
-                color: active ? DS.blue : DS.neutral,
+                color: active ? DS.blue : context.adapt(DS.neutral),
                 fontSize: 11, fontWeight: FontWeight.w700)),
             if (sortable && active) ...[
               const SizedBox(width: 2),
@@ -1988,9 +1989,9 @@ class _BranchTableRow extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.fromLTRB(DS.s2, DS.s2 - 4, DS.s2, DS.s2 - 4),
           decoration: BoxDecoration(
-            color: isTop ? DS.green.withValues(alpha: 0.05) : (isExpanded ? DS.blueMuted.withValues(alpha: 0.5) : Colors.transparent),
+            color: isTop ? DS.green.withValues(alpha: 0.05) : (isExpanded ? context.adapt(DS.blueMuted).withValues(alpha: 0.5) : Colors.transparent),
             border: isLast && !isExpanded ? null
-                : const Border(bottom: BorderSide(color: DS.border, width: 0.5)),
+                : Border(bottom: BorderSide(color: context.adapt(DS.border), width: 0.5)),
           ),
           child: Row(children: [
             // Branch name
@@ -1999,7 +2000,7 @@ class _BranchTableRow extends StatelessWidget {
               if (isTop) const SizedBox(width: 4),
               Container(width: 6, height: 6,
                   decoration: BoxDecoration(
-                      color: s.tokens > 0 ? DS.green : DS.border,
+                      color: s.tokens > 0 ? DS.green : context.adapt(DS.border),
                       shape: BoxShape.circle)),
               const SizedBox(width: DS.s1),
               Expanded(child: Text(name,
@@ -2058,7 +2059,7 @@ class _BranchTableRow extends StatelessWidget {
               // Rate
               Expanded(flex: 2, child: Center(child: Text(
                   '${s.dasterkhwaan > 0 ? (s.dasterkhwaanServed * 100 ~/ s.dasterkhwaan) : 0}%',
-                  style: const TextStyle(color: DS.neutral, fontSize: 12,
+                  style: TextStyle(color: context.adapt(DS.neutral), fontSize: 12,
                       fontWeight: FontWeight.w700)))),
               // Food Revenue
               Expanded(flex: 2, child: Center(child: Text(fmtNum(s.dasterkhwaanRevenue),
@@ -2082,7 +2083,7 @@ class _BranchTableRow extends StatelessWidget {
             AnimatedRotation(
               turns: isExpanded ? 0.25 : 0,
               duration: const Duration(milliseconds: 250),
-              child: const Icon(Icons.chevron_right_rounded, color: DS.neutral, size: 20),
+              child: Icon(Icons.chevron_right_rounded, color: context.adapt(DS.neutral), size: 20),
             ),
           ]),
         ),
@@ -2097,7 +2098,7 @@ class _BranchTableRow extends StatelessWidget {
       ),
 
       if (isExpanded && !isLast)
-        const Divider(height: 1, color: DS.border),
+        Divider(height: 1, color: context.adapt(DS.border)),
     ]);
   }
 }
@@ -2115,9 +2116,9 @@ class _BranchDetailPanel extends StatelessWidget {
     if (selectedTab == 'dispensary') {
       return Container(
         padding: const EdgeInsets.fromLTRB(DS.s3, DS.s2, DS.s3, DS.s2),
-        color: DS.blueMuted.withValues(alpha: 0.25),
+        color: context.adapt(DS.blueMuted).withValues(alpha: 0.25),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Clinical Breakdown:', style: TextStyle(color: DS.neutral, fontSize: 11, fontWeight: FontWeight.bold)),
+          Text('Clinical Breakdown:', style: TextStyle(color: context.adapt(DS.neutral), fontSize: 11, fontWeight: FontWeight.bold)),
           const SizedBox(height: 8),
           Row(children: [
             _detailChip(t.zakat, 'Zakat Patients', s.zakat, 'PKR ${fmtNum(s.zakat * 20)}'),
@@ -2136,12 +2137,12 @@ class _BranchDetailPanel extends StatelessWidget {
     } else if (selectedTab == 'tokens') {
       return Container(
         padding: const EdgeInsets.fromLTRB(DS.s3, DS.s2, DS.s3, DS.s2),
-        color: DS.orangeMuted.withValues(alpha: 0.25),
+        color: context.adapt(DS.orangeMuted).withValues(alpha: 0.25),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             const Icon(Icons.restaurant_rounded, size: 13, color: DS.orange),
             const SizedBox(width: 6),
-            const Text('Food Service Progress:', style: TextStyle(color: DS.neutral, fontSize: 12)),
+            Text('Food Service Progress:', style: TextStyle(color: context.adapt(DS.neutral), fontSize: 12)),
             const Spacer(),
             Text('${s.dasterkhwaanServed} / ${s.dasterkhwaan} served',
                 style: const TextStyle(color: DS.orange, fontSize: 12, fontWeight: FontWeight.w700)),
@@ -2154,8 +2155,8 @@ class _BranchDetailPanel extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text('Pending Tokens: ${s.dasterkhwaanPending}', style: const TextStyle(color: DS.neutral, fontSize: 11)),
-              Text('Total Food Revenue: PKR ${fmtNum(s.dasterkhwaanRevenue)}', style: const TextStyle(color: DS.neutral, fontSize: 11, fontWeight: FontWeight.bold)),
+              Text('Pending Tokens: ${s.dasterkhwaanPending}', style: TextStyle(color: context.adapt(DS.neutral), fontSize: 11)),
+              Text('Total Food Revenue: PKR ${fmtNum(s.dasterkhwaanRevenue)}', style: TextStyle(color: context.adapt(DS.neutral), fontSize: 11, fontWeight: FontWeight.bold)),
             ],
           )
         ]),
@@ -2164,16 +2165,16 @@ class _BranchDetailPanel extends StatelessWidget {
       final branchDonations = DonationsLocalStorage.getAllDonations(branchId).take(5).toList();
       return Container(
         padding: const EdgeInsets.fromLTRB(DS.s3, DS.s2, DS.s3, DS.s2),
-        color: DS.purpleMuted.withValues(alpha: 0.25),
+        color: context.adapt(DS.purpleMuted).withValues(alpha: 0.25),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Recent Branch Contributions:', style: TextStyle(color: DS.neutral, fontSize: 11, fontWeight: FontWeight.bold)),
+            Text('Recent Branch Contributions:', style: TextStyle(color: context.adapt(DS.neutral), fontSize: 11, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             if (branchDonations.isEmpty)
-              const Padding(
+              Padding(
                 padding: EdgeInsets.symmetric(vertical: 8.0),
-                child: Text('No donations recorded recently', style: TextStyle(color: Colors.grey, fontSize: 11, fontStyle: FontStyle.italic)),
+                child: Text('No donations recorded recently', style: TextStyle(color: context.adapt(SoftPalette.gray350), fontSize: 11, fontStyle: FontStyle.italic)),
               )
             else
               ...branchDonations.map((d) => Padding(
@@ -2183,7 +2184,7 @@ class _BranchDetailPanel extends StatelessWidget {
                   children: [
                     Expanded(
                       child: Text('${d.donorName} (${d.categoryId.toUpperCase()})',
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.slate700)),
                         overflow: TextOverflow.ellipsis),
                     ),
                     Text('PKR ${NumberFormat('#,###').format(d.amount)}',
@@ -2199,7 +2200,7 @@ class _BranchDetailPanel extends StatelessWidget {
     // Default/Overall
     return Container(
       padding: const EdgeInsets.fromLTRB(DS.s3, DS.s2, DS.s3, DS.s2),
-      color: DS.blueMuted.withValues(alpha: 0.25),
+      color: context.adapt(DS.blueMuted).withValues(alpha: 0.25),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           _detailChip(t.zakat, 'Zakat', s.zakat, 'PKR ${fmtNum(s.zakat * 20)}'),
@@ -2212,7 +2213,7 @@ class _BranchDetailPanel extends StatelessWidget {
         Row(children: [
           const Icon(Icons.restaurant_rounded, size: 13, color: DS.orange),
           const SizedBox(width: 6),
-          const Text('Food Service:', style: TextStyle(color: DS.neutral, fontSize: 12)),
+          Text('Food Service:', style: TextStyle(color: context.adapt(DS.neutral), fontSize: 12)),
           const SizedBox(width: 6),
           Text('${s.dasterkhwaanServed} / ${s.dasterkhwaan} served',
               style: const TextStyle(color: DS.orange, fontSize: 12, fontWeight: FontWeight.w700)),
@@ -2323,51 +2324,51 @@ class TopBranchBanner extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: DS.s3, vertical: DS.s2),
     decoration: BoxDecoration(
       gradient: const LinearGradient(
-        colors: [Color(0xFFF59E0B), Color(0xFFEF4444)],
+        colors: [SoftPalette.amber300, SoftPalette.red400],
         begin: Alignment.centerLeft, end: Alignment.centerRight,
       ),
       borderRadius: BorderRadius.circular(DS.r2),
-      boxShadow: [BoxShadow(color: const Color(0xFFF59E0B).withValues(alpha: 0.30),
+      boxShadow: [BoxShadow(color: SoftPalette.amber300.withValues(alpha: 0.30),
           blurRadius: 20, offset: const Offset(0, 8))],
     ),
     child: Row(children: [
       Container(padding: const EdgeInsets.all(DS.s1 + 4),
-          decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.18),
+          decoration: BoxDecoration(color: SoftPalette.gray50.withValues(alpha: 0.18),
               borderRadius: BorderRadius.circular(DS.r1 + 4)),
-          child: const Icon(Icons.emoji_events_rounded, color: Colors.white, size: 24)),
+          child: const Icon(Icons.emoji_events_rounded, color: SoftPalette.gray50, size: 24)),
       const SizedBox(width: DS.s2),
       Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Container(
           padding: const EdgeInsets.symmetric(horizontal: DS.s1, vertical: 3),
-          decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.20),
+          decoration: BoxDecoration(color: SoftPalette.gray50.withValues(alpha: 0.20),
               borderRadius: BorderRadius.circular(DS.r1)),
           child: const Text('TOP PERFORMING BRANCH – TODAY',
-              style: TextStyle(color: Colors.white, fontSize: 9,
+              style: TextStyle(color: SoftPalette.gray50, fontSize: 9,
                   fontWeight: FontWeight.w800, letterSpacing: 1.2)),
         ),
         const SizedBox(height: DS.s1),
         Text(branchName, style: const TextStyle(
-            color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800, height: 1.1)),
+            color: SoftPalette.gray50, fontSize: 20, fontWeight: FontWeight.w800, height: 1.1)),
         const SizedBox(height: 4),
         Row(children: [
           const SizedBox(width: 4),
           Text(fmtPKR(revenue), style: const TextStyle(
-              color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+              color: SoftPalette.gray50, fontSize: 12, fontWeight: FontWeight.w600)),
           const SizedBox(width: DS.s2),
-          const Icon(Icons.volunteer_activism_rounded, color: Colors.white70, size: 14),
+          const Icon(Icons.volunteer_activism_rounded, color: SoftPalette.gray50A70, size: 14),
           const SizedBox(width: 4),
           Text(fmtNum(donations), style: const TextStyle(
-              color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+              color: SoftPalette.gray50, fontSize: 12, fontWeight: FontWeight.w600)),
           const SizedBox(width: DS.s2),
-          const Icon(Icons.restaurant_rounded, color: Colors.white70, size: 14),
+          const Icon(Icons.restaurant_rounded, color: SoftPalette.gray50A70, size: 14),
           const SizedBox(width: 4),
           Text(fmtNum(foodTokens), style: const TextStyle(
-              color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+              color: SoftPalette.gray50, fontSize: 12, fontWeight: FontWeight.w600)),
           const SizedBox(width: DS.s2),
-          const Icon(Icons.people_rounded, color: Colors.white70, size: 14),
+          const Icon(Icons.people_rounded, color: SoftPalette.gray50A70, size: 14),
           const SizedBox(width: 4),
           Text('$patients patients', style: const TextStyle(
-              color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+              color: SoftPalette.gray50, fontSize: 12, fontWeight: FontWeight.w600)),
         ]),
       ])),
     ]),
@@ -2441,19 +2442,19 @@ class PeakRecordsBanner extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: DS.s2, vertical: DS.s2),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(DS.r2),
         border: Border.all(
           color: records.isNewRecordToday
-              ? const Color(0xFFF59E0B)
-              : (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+              ? SoftPalette.amber300
+              : (isDark ? SoftPalette.slate700 : SoftPalette.slate150),
           width: records.isNewRecordToday ? 1.5 : 1.0,
         ),
         boxShadow: [
           BoxShadow(
             color: records.isNewRecordToday
-                ? const Color(0xFFF59E0B).withValues(alpha: 0.15)
-                : Colors.black.withValues(alpha: 0.04),
+                ? SoftPalette.amber300.withValues(alpha: 0.15)
+                : SoftPalette.gray900.withValues(alpha: 0.04),
             blurRadius: 10,
             offset: const Offset(0, 3),
           ),
@@ -2465,13 +2466,13 @@ class PeakRecordsBanner extends StatelessWidget {
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                colors: [Color(0xFFF59E0B), Color(0xFFD97706)],
+                colors: [SoftPalette.amber300, SoftPalette.orange400],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Icon(Icons.emoji_events_rounded, color: Colors.white, size: 20),
+            child: const Icon(Icons.emoji_events_rounded, color: SoftPalette.gray50, size: 20),
           ),
           const SizedBox(width: DS.s2),
           Expanded(
@@ -2483,7 +2484,7 @@ class PeakRecordsBanner extends StatelessWidget {
                     const Text(
                       'ALL-TIME PEAK SINGLE-DAY RECORD',
                       style: TextStyle(
-                        color: Color(0xFFD97706),
+                        color: SoftPalette.orange400,
                         fontSize: 9.5,
                         fontWeight: FontWeight.w800,
                         letterSpacing: 1.0,
@@ -2494,12 +2495,12 @@ class PeakRecordsBanner extends StatelessWidget {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF59E0B),
+                          color: SoftPalette.amber300,
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: const Text(
                           'BROKEN TODAY!',
-                          style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w900, color: Colors.white),
+                          style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.w900, color: SoftPalette.gray50),
                         ),
                       ),
                     ],
@@ -2535,14 +2536,14 @@ class PeakRecordsBanner extends StatelessWidget {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF0F172A) : const Color(0xFFFEF3C7),
+              color: isDark ? SoftPalette.slate900 : SoftPalette.yellow100,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.3)),
+              border: Border.all(color: SoftPalette.amber300.withValues(alpha: 0.3)),
             ),
             child: Text(
               dateStr,
               style: const TextStyle(
-                color: Color(0xFFD97706),
+                color: SoftPalette.orange400,
                 fontSize: 11,
                 fontWeight: FontWeight.w800,
               ),
@@ -2587,22 +2588,22 @@ class PatientDistributionCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(DS.s2 + 4),
       decoration: BoxDecoration(
-        color: Colors.white, borderRadius: BorderRadius.circular(DS.r2),
-        border: Border.all(color: DS.border),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04),
+        color: context.adapt(SoftPalette.gray50), borderRadius: BorderRadius.circular(DS.r2),
+        border: Border.all(color: context.adapt(DS.border)),
+        boxShadow: [BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.04),
             blurRadius: 14, offset: const Offset(0, 4))],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Container(padding: const EdgeInsets.all(DS.s1),
-              decoration: BoxDecoration(color: DS.blueMuted, borderRadius: BorderRadius.circular(DS.r1)),
+              decoration: BoxDecoration(color: context.adapt(DS.blueMuted), borderRadius: BorderRadius.circular(DS.r1)),
               child: const Icon(Icons.pie_chart_rounded, color: DS.blue, size: 16)),
           const SizedBox(width: DS.s1),
           Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            const Text('Patient Type Distribution',
-                style: TextStyle(color: Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w700)),
+            Text('Patient Type Distribution',
+                style: TextStyle(color: context.adapt(SoftPalette.slate900), fontSize: 14, fontWeight: FontWeight.w700)),
             Text('Today · Total across all branches',
-                style: const TextStyle(color: DS.neutral, fontSize: DS.caption)),
+                style: TextStyle(color: context.adapt(DS.neutral), fontSize: DS.caption)),
           ]),
         ]),
         const SizedBox(height: DS.s2 + 4),
@@ -2624,16 +2625,16 @@ class PatientDistributionCard extends StatelessWidget {
                 _AnimatedCount(value: total,
                     style: TextStyle(color: t.textPrimary,
                         fontSize: isDesktop ? 34 : 28, fontWeight: FontWeight.w900)),
-                Text('patients', style: const TextStyle(color: DS.neutral, fontSize: 12)),
+                Text('patients', style: TextStyle(color: context.adapt(DS.neutral), fontSize: 12)),
               ]),
             );
 
             final legend = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              _legendItem(t.zakat, 'Zakat', s.zakat, zPct, 'PKR ${fmtNum(s.zakat * 20)}', '@ PKR 20'),
+              _legendItem(context, t.zakat, 'Zakat', s.zakat, zPct, 'PKR ${fmtNum(s.zakat * 20)}', '@ PKR 20'),
               const SizedBox(height: DS.s1 + 4),
-              _legendItem(t.nonZakat, 'Non-Zakat', s.nonZakat, nPct, 'PKR ${fmtNum(s.nonZakat * 100)}', '@ PKR 100'),
+              _legendItem(context, t.nonZakat, 'Non-Zakat', s.nonZakat, nPct, 'PKR ${fmtNum(s.nonZakat * 100)}', '@ PKR 100'),
               const SizedBox(height: DS.s1 + 4),
-              _legendItem(t.gmwf, 'GMWF', s.gmwf, gPct, 'Free', 'No charge'),
+              _legendItem(context, t.gmwf, 'GMWF', s.gmwf, gPct, 'Free', 'No charge'),
             ]);
 
             if (isDesktop) {
@@ -2647,7 +2648,7 @@ class PatientDistributionCard extends StatelessWidget {
     );
   }
 
-  Widget _legendItem(Color color, String label, int count, int pct, String rev, String rate) =>
+  Widget _legendItem(BuildContext context, Color color, String label, int count, int pct, String rev, String rate) =>
       Container(
         padding: const EdgeInsets.symmetric(horizontal: DS.s2, vertical: 10),
         decoration: BoxDecoration(
@@ -2662,7 +2663,7 @@ class PatientDistributionCard extends StatelessWidget {
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Text(label, style: TextStyle(color: t.textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
             Text('$count patients  ·  $rev',
-                style: const TextStyle(color: DS.neutral, fontSize: 11)),
+                style: TextStyle(color: context.adapt(DS.neutral), fontSize: 11)),
           ])),
           Container(
             padding: const EdgeInsets.symmetric(horizontal: DS.s1 + 2, vertical: 4),
@@ -2697,6 +2698,7 @@ class GlobalOverviewGrid extends StatelessWidget {
       children: [
         _row([
           _tile(
+            context: context,
             label: 'Total Revenue',
             value: s.totalRevenue,
             prefix: 'PKR ',
@@ -2705,6 +2707,7 @@ class GlobalOverviewGrid extends StatelessWidget {
             itemCount: s.donations > 0 ? 'Inc. Donations' : null,
           ),
           _tile(
+            context: context,
             label: 'Total Patients',
             value: s.tokens,
             icon: Icons.people_alt_rounded,
@@ -2715,6 +2718,7 @@ class GlobalOverviewGrid extends StatelessWidget {
         const SizedBox(height: DS.s2),
         _row([
           _tile(
+            context: context,
             label: 'Food Tokens',
             value: s.dasterkhwaan,
             icon: Icons.restaurant_rounded,
@@ -2722,6 +2726,7 @@ class GlobalOverviewGrid extends StatelessWidget {
             itemCount: '${s.dasterkhwaanServed} served',
           ),
           _tile(
+            context: context,
             label: 'Donations',
             value: s.donations,
             prefix: 'PKR ',
@@ -2743,6 +2748,7 @@ class GlobalOverviewGrid extends StatelessWidget {
       );
 
   Widget _tile({
+    required BuildContext context,
     required String label,
     required int value,
     String? prefix,
@@ -2754,12 +2760,12 @@ class GlobalOverviewGrid extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(DS.s2 + 2),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: context.adapt(SoftPalette.gray50),
           borderRadius: BorderRadius.circular(DS.r2),
-          border: Border.all(color: DS.border),
+          border: Border.all(color: context.adapt(DS.border)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.03),
+              color: SoftPalette.gray900.withValues(alpha: 0.03),
               blurRadius: 10,
               offset: const Offset(0, 4),
             )
@@ -2783,7 +2789,7 @@ class GlobalOverviewGrid extends StatelessWidget {
                   Text(
                     itemCount,
                     style: TextStyle(
-                      color: DS.neutral,
+                      color: context.adapt(DS.neutral),
                       fontSize: 10,
                       fontWeight: FontWeight.w600,
                     ),
@@ -2804,8 +2810,8 @@ class GlobalOverviewGrid extends StatelessWidget {
             const SizedBox(height: 2),
             Text(
               label,
-              style: const TextStyle(
-                color: DS.neutral,
+              style: TextStyle(
+                color: context.adapt(DS.neutral),
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
               ),
@@ -2833,29 +2839,29 @@ class ServiceRevenueCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(DS.s2 + 4),
       decoration: BoxDecoration(
-        color: Colors.white, borderRadius: BorderRadius.circular(DS.r2),
-        border: Border.all(color: DS.border),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04),
+        color: context.adapt(SoftPalette.gray50), borderRadius: BorderRadius.circular(DS.r2),
+        border: Border.all(color: context.adapt(DS.border)),
+        boxShadow: [BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.04),
             blurRadius: 14, offset: const Offset(0, 4))],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        const Text('Services & Donations',
-            style: TextStyle(color: Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w700)),
+        Text('Services & Donations',
+            style: TextStyle(color: context.adapt(SoftPalette.slate900), fontSize: 14, fontWeight: FontWeight.w700)),
         const SizedBox(height: DS.s2),
-        _svcRow(Icons.restaurant_rounded, dasColor, 'Dasterkhwaan – Meals',
+        _svcRow(context, Icons.restaurant_rounded, dasColor, 'Dasterkhwaan – Meals',
             '${s.dasterkhwaan} issued · ${s.dasterkhwaanServed} served · × PKR 10',
             s.dasterkhwaanRevenue),
         const SizedBox(height: DS.s1),
-        Divider(height: 1, color: DS.border),
+        Divider(height: 1, color: context.adapt(DS.border)),
         const SizedBox(height: DS.s1),
-        _svcRow(Icons.volunteer_activism_rounded, donColor, 'Donations Collected',
+        _svcRow(context, Icons.volunteer_activism_rounded, donColor, 'Donations Collected',
             'Cash & transfers · today', s.donations),
         const SizedBox(height: DS.s2),
-        Divider(height: 1, color: DS.border),
+        Divider(height: 1, color: context.adapt(DS.border)),
         const SizedBox(height: DS.s1 + 4),
         Row(children: [
-          const Text('Services Total', style: TextStyle(
-              color: DS.neutral, fontSize: 13, fontWeight: FontWeight.w600)),
+          Text('Services Total', style: TextStyle(
+              color: context.adapt(DS.neutral), fontSize: 13, fontWeight: FontWeight.w600)),
           const Spacer(),
           _AnimatedCount(value: s.dasterkhwaanRevenue + s.donations, prefix: 'PKR ',
               style: TextStyle(color: t.accent, fontSize: 16, fontWeight: FontWeight.w800)),
@@ -2864,7 +2870,7 @@ class ServiceRevenueCard extends StatelessWidget {
     );
   }
 
-  Widget _svcRow(IconData icon, Color color, String title, String sub, int amount) =>
+  Widget _svcRow(BuildContext context, IconData icon, Color color, String title, String sub, int amount) =>
       Row(children: [
         Container(padding: const EdgeInsets.all(DS.s1 + 2),
             decoration: BoxDecoration(color: color.withValues(alpha: 0.10),
@@ -2872,9 +2878,9 @@ class ServiceRevenueCard extends StatelessWidget {
             child: Icon(icon, color: color, size: 18)),
         const SizedBox(width: DS.s1 + 4),
         Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(title, style: const TextStyle(color: Color(0xFF111827), fontSize: 13, fontWeight: FontWeight.w600)),
+          Text(title, style: TextStyle(color: context.adapt(SoftPalette.slate900), fontSize: 13, fontWeight: FontWeight.w600)),
           const SizedBox(height: 2),
-          Text(sub, style: const TextStyle(color: DS.neutral, fontSize: DS.caption)),
+          Text(sub, style: TextStyle(color: context.adapt(DS.neutral), fontSize: DS.caption)),
         ])),
         _AnimatedCount(value: amount, prefix: 'PKR ',
             style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w800)),
@@ -2912,25 +2918,25 @@ class BranchSummaryCard extends StatelessWidget {
         opacity: 1.0, duration: const Duration(milliseconds: 400),
         child: Container(
           decoration: BoxDecoration(
-            color: Colors.white, borderRadius: BorderRadius.circular(DS.r2),
-            border: Border.all(color: DS.border),
-            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04),
+            color: context.adapt(SoftPalette.gray50), borderRadius: BorderRadius.circular(DS.r2),
+            border: Border.all(color: context.adapt(DS.border)),
+            boxShadow: [BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.04),
                 blurRadius: 14, offset: const Offset(0, 4))],
           ),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             // Header
             Container(
               padding: const EdgeInsets.fromLTRB(DS.s2, DS.s2 - 2, DS.s2 - 2, DS.s2 - 2),
-              decoration: const BoxDecoration(
-                color: DS.neutralBg,
+              decoration: BoxDecoration(
+                color: context.adapt(DS.neutralBg),
                 borderRadius: BorderRadius.vertical(top: Radius.circular(DS.r2)),
               ),
               child: Row(children: [
                 Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(branchName, style: const TextStyle(
-                      color: Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w900)),
+                  Text(branchName, style: TextStyle(
+                      color: context.adapt(SoftPalette.slate900), fontSize: 14, fontWeight: FontWeight.w900)),
                   if (location != null && location!.isNotEmpty)
-                    Text(location!, style: const TextStyle(color: DS.neutral, fontSize: 10)),
+                    Text(location!, style: TextStyle(color: context.adapt(DS.neutral), fontSize: 10)),
                 ])),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -2950,7 +2956,7 @@ class BranchSummaryCard extends StatelessWidget {
                 ),
               ]),
             ),
-            Container(height: 0.5, color: DS.border),
+            Container(height: 0.5, color: context.adapt(DS.border)),
 
             // Body
             Padding(
@@ -2960,7 +2966,7 @@ class BranchSummaryCard extends StatelessWidget {
                 Row(children: [
                   Icon(Icons.payments_rounded, size: 12, color: t.accent),
                   const SizedBox(width: 6),
-                  const Text('Revenue', style: TextStyle(color: DS.neutral, fontSize: 12, fontWeight: FontWeight.w600)),
+                  Text('Revenue', style: TextStyle(color: context.adapt(DS.neutral), fontSize: 12, fontWeight: FontWeight.w600)),
                   const Spacer(),
                   _AnimatedCount(value: s.totalRevenue, prefix: 'PKR ',
                       style: TextStyle(color: t.accent, fontSize: 13, fontWeight: FontWeight.w900)),
@@ -3001,17 +3007,17 @@ class BranchSummaryCard extends StatelessWidget {
   );
 
 
-  Widget _typeCol(IconData icon, Color color, String label, int count) =>
+  Widget _typeCol(BuildContext context, IconData icon, Color color, String label, int count) =>
       Column(children: [
         Icon(icon, color: color, size: 20),
         const SizedBox(height: 4),
-        Text(label, style: const TextStyle(color: DS.neutral, fontSize: 10)),
+        Text(label, style: TextStyle(color: context.adapt(DS.neutral), fontSize: 10)),
         const SizedBox(height: 2),
         _AnimatedCount(value: count,
             style: TextStyle(color: color, fontSize: 16, fontWeight: FontWeight.w800)),
       ]);
 
-  Widget _svcChip(IconData icon, Color color, String label, String value) =>
+  Widget _svcChip(BuildContext context, IconData icon, Color color, String label, String value) =>
       Row(mainAxisSize: MainAxisSize.min, children: [
         Container(padding: const EdgeInsets.all(6),
             decoration: BoxDecoration(color: color.withValues(alpha: 0.10),
@@ -3019,7 +3025,7 @@ class BranchSummaryCard extends StatelessWidget {
             child: Icon(icon, color: color, size: 13)),
         const SizedBox(width: DS.s1),
         Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(label, style: const TextStyle(color: DS.neutral, fontSize: 11, fontWeight: FontWeight.w600)),
+          Text(label, style: TextStyle(color: context.adapt(DS.neutral), fontSize: 11, fontWeight: FontWeight.w600)),
           Text(value, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w800)),
         ]),
       ]);
@@ -3042,20 +3048,20 @@ class DonationsSummaryCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(DS.s2 + 4),
       decoration: BoxDecoration(
-        color: Colors.white, borderRadius: BorderRadius.circular(DS.r2),
+        color: context.adapt(SoftPalette.gray50), borderRadius: BorderRadius.circular(DS.r2),
         border: Border.all(color: DS.purple.withValues(alpha: 0.25)),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04),
+        boxShadow: [BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.04),
             blurRadius: 12, offset: const Offset(0, 3))],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Container(padding: const EdgeInsets.all(DS.s1),
-              decoration: BoxDecoration(color: DS.purpleMuted,
+              decoration: BoxDecoration(color: context.adapt(DS.purpleMuted),
                   borderRadius: BorderRadius.circular(DS.r1)),
               child: const Icon(Icons.volunteer_activism_rounded, color: DS.purple, size: 18)),
           const SizedBox(width: DS.s1),
-          const Text('Donations Collected',
-              style: TextStyle(color: Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w700)),
+          Text('Donations Collected',
+              style: TextStyle(color: context.adapt(SoftPalette.slate900), fontSize: 14, fontWeight: FontWeight.w700)),
           const Spacer(),
           _AnimatedCount(value: totalDonations, prefix: 'PKR ',
               style: const TextStyle(color: DS.purple, fontSize: 18, fontWeight: FontWeight.w900)),
@@ -3070,7 +3076,7 @@ class DonationsSummaryCard extends StatelessWidget {
           ),
         ] else ...[
           const SizedBox(height: DS.s2),
-          const Divider(height: 1, color: DS.border),
+          Divider(height: 1, color: context.adapt(DS.border)),
           const SizedBox(height: DS.s1 + 4),
           ...activeBranches.map((b) => Padding(
             padding: const EdgeInsets.only(bottom: DS.s1),
@@ -3079,7 +3085,7 @@ class DonationsSummaryCard extends StatelessWidget {
                   decoration: const BoxDecoration(color: DS.purple, shape: BoxShape.circle)),
               const SizedBox(width: DS.s1),
               Expanded(child: Text(b['name'] as String,
-                  style: const TextStyle(color: Color(0xFF374151), fontSize: 13))),
+                  style: TextStyle(color: context.adapt(SoftPalette.slate700), fontSize: 13))),
               Text(fmtPKR(b['donations'] as int),
                   style: const TextStyle(color: DS.purple, fontSize: 13, fontWeight: FontWeight.w700)),
             ]),
@@ -3101,10 +3107,10 @@ class BranchPerformanceHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Row(children: [
-    const Text('Branch Performance', style: TextStyle(
-        color: Color(0xFF111827), fontSize: DS.h2, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+    Text('Branch Performance', style: TextStyle(
+        color: context.adapt(SoftPalette.slate900), fontSize: DS.h2, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
     const Spacer(),
-    Text('$branchCount branches', style: const TextStyle(color: DS.neutral, fontSize: 13)),
+    Text('$branchCount branches', style: TextStyle(color: context.adapt(DS.neutral), fontSize: 13)),
   ]);
 }
 
@@ -3185,7 +3191,7 @@ class GlobalFilterBar extends StatelessWidget {
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.04),
+                        color: SoftPalette.gray900.withValues(alpha: 0.04),
                         blurRadius: 8,
                         offset: const Offset(0, 2),
                       ),
@@ -3214,7 +3220,7 @@ class GlobalFilterBar extends StatelessWidget {
                         decoration: BoxDecoration(
                           color: isFiltered
                               ? t.accent.withValues(alpha: 0.18)
-                              : (t.isDarkCanvas ? Colors.white10 : const Color(0xFFF1F5F9)),
+                              : (t.isDarkCanvas ? SoftPalette.gray50A10 : SoftPalette.slate100),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Text(
@@ -3247,11 +3253,11 @@ class GlobalFilterBar extends StatelessWidget {
                   child: Container(
                     padding: const EdgeInsets.all(6),
                     decoration: BoxDecoration(
-                      color: Colors.redAccent.withValues(alpha: 0.1),
+                      color: SoftPalette.red400.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.redAccent.withValues(alpha: 0.3)),
+                      border: Border.all(color: SoftPalette.red400.withValues(alpha: 0.3)),
                     ),
-                    child: const Icon(Icons.restart_alt_rounded, size: 15, color: Colors.redAccent),
+                    child: const Icon(Icons.restart_alt_rounded, size: 15, color: SoftPalette.red400),
                   ),
                 ),
               ),
@@ -3298,7 +3304,7 @@ class DashboardFilterDialog extends StatelessWidget {
               border: Border.all(color: t.bgRule, width: 1.2),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.18),
+                  color: SoftPalette.gray900.withValues(alpha: 0.18),
                   blurRadius: 32,
                   offset: const Offset(0, 12),
                 ),
@@ -3353,7 +3359,7 @@ class DashboardFilterDialog extends StatelessWidget {
                           icon: const Icon(Icons.restart_alt_rounded, size: 15),
                           label: const Text('Reset All', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                           style: TextButton.styleFrom(
-                            foregroundColor: Colors.redAccent,
+                            foregroundColor: SoftPalette.red400,
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                             visualDensity: VisualDensity.compact,
                           ),
@@ -3370,18 +3376,18 @@ class DashboardFilterDialog extends StatelessWidget {
                   const SizedBox(height: 16),
 
                   // Section 1: Time Range Presets
-                  _buildSectionLabel(Icons.calendar_today_rounded, 'Time Range & Date Presets', t),
+                  _buildSectionLabel(context, Icons.calendar_today_rounded, 'Time Range & Date Presets', t),
                   const SizedBox(height: 10),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
                     children: [
-                      _timeChip('Today', TimeRange.today, filter.timeRange, t),
-                      _timeChip('Yesterday', TimeRange.yesterday, filter.timeRange, t),
-                      _timeChip('7 Days', TimeRange.week, filter.timeRange, t),
-                      _timeChip('14 Days', TimeRange.biweek, filter.timeRange, t),
-                      _timeChip('30 Days', TimeRange.month, filter.timeRange, t),
-                      _timeChip('This Month', TimeRange.thisMonth, filter.timeRange, t),
+                      _timeChip(context, 'Today', TimeRange.today, filter.timeRange, t),
+                      _timeChip(context, 'Yesterday', TimeRange.yesterday, filter.timeRange, t),
+                      _timeChip(context, '7 Days', TimeRange.week, filter.timeRange, t),
+                      _timeChip(context, '14 Days', TimeRange.biweek, filter.timeRange, t),
+                      _timeChip(context, '30 Days', TimeRange.month, filter.timeRange, t),
+                      _timeChip(context, 'This Month', TimeRange.thisMonth, filter.timeRange, t),
                       _customDateChip(context, filter, t),
                     ],
                   ),
@@ -3389,7 +3395,7 @@ class DashboardFilterDialog extends StatelessWidget {
 
                   // Section 2: Branches (if multiple)
                   if (showBranchSelector) ...[
-                    _buildSectionLabel(Icons.location_on_rounded, 'Selected Branch', t),
+                    _buildSectionLabel(context, Icons.location_on_rounded, 'Selected Branch', t),
                     const SizedBox(height: 10),
                     Builder(
                       builder: (context) {
@@ -3403,8 +3409,8 @@ class DashboardFilterDialog extends StatelessWidget {
                           spacing: 8,
                           runSpacing: 8,
                           children: [
-                            _branchChip('all', 'All Branches', filter.branchId, t),
-                            ...filteredBranches.map((b) => _branchChip(b['id'] ?? '', b['name'] ?? '', filter.branchId, t)),
+                            _branchChip(context, 'all', 'All Branches', filter.branchId, t),
+                            ...filteredBranches.map((b) => _branchChip(context, b['id'] ?? '', b['name'] ?? '', filter.branchId, t)),
                           ],
                         );
                       },
@@ -3413,22 +3419,22 @@ class DashboardFilterDialog extends StatelessWidget {
                   ],
 
                   // Section 3: Patient Classification
-                  _buildSectionLabel(Icons.category_rounded, 'Patient Classification', t),
+                  _buildSectionLabel(context, Icons.category_rounded, 'Patient Classification', t),
                   const SizedBox(height: 10),
                   Wrap(
                     spacing: 8,
                     runSpacing: 8,
                     children: [
-                      _typeChip('All Patients', null, filter.patientType, DS.neutral),
-                      _typeChip('Zakat', 'zakat', filter.patientType, DS.zakat),
-                      _typeChip('Non-Zakat', 'non-zakat', filter.patientType, DS.nonZakat),
-                      _typeChip('GMWF', 'gmwf', filter.patientType, DS.gmwf),
+                      _typeChip(context, 'All Patients', null, filter.patientType, DS.neutral),
+                      _typeChip(context, 'Zakat', 'zakat', filter.patientType, DS.zakat),
+                      _typeChip(context, 'Non-Zakat', 'non-zakat', filter.patientType, DS.nonZakat),
+                      _typeChip(context, 'GMWF', 'gmwf', filter.patientType, DS.gmwf),
                     ],
                   ),
                   const SizedBox(height: 18),
 
                   // Section 4: Dispensary Course Filter
-                  _buildSectionLabel(Icons.medication_liquid_rounded, 'Dispensary Course Filter', t),
+                  _buildSectionLabel(context, Icons.medication_liquid_rounded, 'Dispensary Course Filter', t),
                   const SizedBox(height: 10),
                   _buildMultiDayCourseChip(filter, t),
                   const SizedBox(height: 22),
@@ -3443,7 +3449,7 @@ class DashboardFilterDialog extends StatelessWidget {
                         label: const Text('Apply & Close', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: t.accent,
-                          foregroundColor: Colors.white,
+                          foregroundColor: SoftPalette.gray50,
                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           elevation: 0,
@@ -3460,15 +3466,15 @@ class DashboardFilterDialog extends StatelessWidget {
     );
   }
 
-  Widget _buildSectionLabel(IconData icon, String title, RoleThemeData t) {
+  Widget _buildSectionLabel(BuildContext context, IconData icon, String title, RoleThemeData t) {
     return Row(
       children: [
-        Icon(icon, size: 13, color: DS.neutral),
+        Icon(icon, size: 13, color: context.adapt(DS.neutral)),
         const SizedBox(width: 6),
         Text(
           title,
-          style: const TextStyle(
-            color: DS.neutral,
+          style: TextStyle(
+            color: context.adapt(DS.neutral),
             fontSize: 11,
             fontWeight: FontWeight.bold,
             letterSpacing: 0.3,
@@ -3478,7 +3484,7 @@ class DashboardFilterDialog extends StatelessWidget {
     );
   }
 
-  Widget _timeChip(String label, TimeRange value, TimeRange activeValue, RoleThemeData t) {
+  Widget _timeChip(BuildContext context, String label, TimeRange value, TimeRange activeValue, RoleThemeData t) {
     final active = value == activeValue;
     return InkWell(
       onTap: () => controller.setTimeRange(value),
@@ -3486,16 +3492,16 @@ class DashboardFilterDialog extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         decoration: BoxDecoration(
-          color: active ? t.accent : DS.neutralBg,
+          color: active ? t.accent : context.adapt(DS.neutralBg),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: active ? t.accent : DS.border),
+          border: Border.all(color: active ? t.accent : context.adapt(DS.border)),
         ),
         child: Text(
           label,
           style: TextStyle(
             fontSize: 11,
             fontWeight: active ? FontWeight.w800 : FontWeight.w600,
-            color: active ? Colors.white : DS.neutral,
+            color: active ? SoftPalette.gray50 : context.adapt(DS.neutral),
           ),
         ),
       ),
@@ -3527,23 +3533,23 @@ class DashboardFilterDialog extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         decoration: BoxDecoration(
-          color: active ? t.accent : DS.neutralBg,
+          color: active ? t.accent : context.adapt(DS.neutralBg),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: active ? t.accent : DS.border),
+          border: Border.all(color: active ? t.accent : context.adapt(DS.border)),
         ),
         child: Text(
           label,
           style: TextStyle(
             fontSize: 11,
             fontWeight: active ? FontWeight.w800 : FontWeight.w600,
-            color: active ? Colors.white : DS.neutral,
+            color: active ? SoftPalette.gray50 : context.adapt(DS.neutral),
           ),
         ),
       ),
     );
   }
 
-  Widget _branchChip(String branchId, String branchName, String activeBranchId, RoleThemeData t) {
+  Widget _branchChip(BuildContext context, String branchId, String branchName, String activeBranchId, RoleThemeData t) {
     final active = (branchId == 'all' && (activeBranchId.isEmpty || activeBranchId == 'all' || activeBranchId == 'global')) ||
         (branchId != 'all' && branchId.toLowerCase().trim() == activeBranchId.toLowerCase().trim());
     return InkWell(
@@ -3552,21 +3558,21 @@ class DashboardFilterDialog extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         decoration: BoxDecoration(
-          color: active ? DS.blue : DS.neutralBg,
+          color: active ? DS.blue : context.adapt(DS.neutralBg),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: active ? DS.blue : DS.border),
+          border: Border.all(color: active ? DS.blue : context.adapt(DS.border)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.location_on_rounded, size: 12, color: active ? Colors.white : DS.neutral),
+            Icon(Icons.location_on_rounded, size: 12, color: active ? SoftPalette.gray50 : context.adapt(DS.neutral)),
             const SizedBox(width: 5),
             Text(
               branchName,
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: active ? FontWeight.w800 : FontWeight.w600,
-                color: active ? Colors.white : DS.neutral,
+                color: active ? SoftPalette.gray50 : context.adapt(DS.neutral),
               ),
             ),
           ],
@@ -3575,7 +3581,7 @@ class DashboardFilterDialog extends StatelessWidget {
     );
   }
 
-  Widget _typeChip(String label, String? value, String? activeValue, Color color) {
+  Widget _typeChip(BuildContext context, String label, String? value, String? activeValue, Color color) {
     final active = value == activeValue;
     return InkWell(
       onTap: () => controller.setPatientType(value),
@@ -3585,12 +3591,12 @@ class DashboardFilterDialog extends StatelessWidget {
         decoration: BoxDecoration(
           color: active ? color : Colors.transparent,
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: active ? color : DS.border),
+          border: Border.all(color: active ? color : context.adapt(DS.border)),
         ),
         child: Text(
           label,
           style: TextStyle(
-            color: active ? Colors.white : DS.neutral,
+            color: active ? SoftPalette.gray50 : context.adapt(DS.neutral),
             fontSize: 11,
             fontWeight: active ? FontWeight.w800 : FontWeight.w600,
           ),
@@ -3607,10 +3613,10 @@ class DashboardFilterDialog extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
         decoration: BoxDecoration(
-          color: active ? const Color(0xFF0284C7) : const Color(0xFF0284C7).withValues(alpha: 0.08),
+          color: active ? SoftPalette.sky500 : SoftPalette.sky500.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: active ? const Color(0xFF0284C7) : const Color(0xFF0284C7).withValues(alpha: 0.3),
+            color: active ? SoftPalette.sky500 : SoftPalette.sky500.withValues(alpha: 0.3),
             width: 1.2,
           ),
         ),
@@ -3620,13 +3626,13 @@ class DashboardFilterDialog extends StatelessWidget {
             Icon(
               active ? Icons.check_circle_rounded : Icons.medication_rounded,
               size: 14,
-              color: active ? Colors.white : const Color(0xFF0284C7),
+              color: active ? SoftPalette.gray50 : SoftPalette.sky500,
             ),
             const SizedBox(width: 6),
             Text(
               'Multi-Day Course (2+ Days)',
               style: TextStyle(
-                color: active ? Colors.white : const Color(0xFF0284C7),
+                color: active ? SoftPalette.gray50 : SoftPalette.sky500,
                 fontSize: 11,
                 fontWeight: active ? FontWeight.w800 : FontWeight.w600,
               ),
@@ -3670,19 +3676,19 @@ class ActionableKPICard extends StatelessWidget {
     final LinearGradient gradient = LinearGradient(
       colors: [
         mainColor,
-        Color.lerp(mainColor, Colors.black, 0.32)!,
+        Color.lerp(mainColor, SoftPalette.gray900, 0.32)!,
       ],
       begin: Alignment.topLeft,
       end: Alignment.bottomRight,
     );
     final Color glowColor = mainColor.withValues(alpha: 0.30);
-    final Color labelColor = Colors.white.withValues(alpha: 0.75);
-    final Color valueColor = Colors.white;
-    final Color prefixColor = Colors.white.withValues(alpha: 0.7);
-    final Color iconBgColor = Colors.white.withValues(alpha: 0.15);
-    final Color iconColor = Colors.white;
-    final Color insightBgColor = Colors.white.withValues(alpha: 0.15);
-    final Color insightTextColor = Colors.white;
+    final Color labelColor = SoftPalette.gray50.withValues(alpha: 0.75);
+    final Color valueColor = SoftPalette.gray50;
+    final Color prefixColor = SoftPalette.gray50.withValues(alpha: 0.7);
+    final Color iconBgColor = SoftPalette.gray50.withValues(alpha: 0.15);
+    final Color iconColor = SoftPalette.gray50;
+    final Color insightBgColor = SoftPalette.gray50.withValues(alpha: 0.15);
+    final Color insightTextColor = SoftPalette.gray50;
 
     return Container(
       padding: EdgeInsets.all(isPrimary ? 20 : 16),
@@ -3696,7 +3702,7 @@ class ActionableKPICard extends StatelessWidget {
             offset: const Offset(0, 6),
           ),
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: SoftPalette.gray900.withValues(alpha: 0.05),
             blurRadius: 4,
             offset: const Offset(0, 2),
           ),
@@ -3713,7 +3719,7 @@ class ActionableKPICard extends StatelessWidget {
               height: 80,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.white.withValues(alpha: 0.05),
+                color: SoftPalette.gray50.withValues(alpha: 0.05),
               ),
             ),
           ),
@@ -3735,12 +3741,12 @@ class ActionableKPICard extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.2),
+                        color: SoftPalette.gray50.withValues(alpha: 0.2),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
                         trend!,
-                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w700),
+                        style: const TextStyle(color: SoftPalette.gray50, fontSize: 10, fontWeight: FontWeight.w700),
                       ),
                     ),
                 ],
@@ -3830,8 +3836,8 @@ class DashSectionHeader extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: const TextStyle(
-                    color: Color(0xFF111827),
+                  style: TextStyle(
+                    color: context.adapt(SoftPalette.slate900),
                     fontSize: 18,
                     fontWeight: FontWeight.w800,
                     letterSpacing: -0.5,
@@ -3841,7 +3847,7 @@ class DashSectionHeader extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     subtitle!,
-                    style: const TextStyle(color: DS.neutral, fontSize: 12),
+                    style: TextStyle(color: context.adapt(DS.neutral), fontSize: 12),
                   ),
                 ],
               ],
@@ -3872,10 +3878,10 @@ class _KpiCard extends StatelessWidget {
   Widget build(BuildContext context) => Container(
     padding: const EdgeInsets.all(DS.s2),
     decoration: BoxDecoration(
-      color: Colors.white,
+      color: context.adapt(SoftPalette.gray50),
       borderRadius: BorderRadius.circular(DS.r2),
       border: Border.all(color: color.withValues(alpha: 0.20)),
-      boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04),
+      boxShadow: [BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.04),
           blurRadius: 12, offset: const Offset(0, 3))],
     ),
     child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -3885,7 +3891,7 @@ class _KpiCard extends StatelessWidget {
           child: Icon(icon, color: color, size: 18)),
       const Spacer(), child,
       const SizedBox(height: 4),
-      Text(label, style: const TextStyle(color: DS.neutral, fontSize: DS.caption)),
+      Text(label, style: TextStyle(color: context.adapt(DS.neutral), fontSize: DS.caption)),
     ]),
   );
 }

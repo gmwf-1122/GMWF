@@ -14,7 +14,6 @@ class ThemeValueNotifier extends ValueNotifier<bool> {
 /// Light Mode is ALWAYS the default.
 /// Preferences of User A do NOT affect User B on the same device.
 class UserThemeService {
-  static const String _globalThemeKey = 'is_dark_mode';
   static final ThemeValueNotifier currentThemeNotifier = ThemeValueNotifier(false);
 
   /// Notifies all active theme listeners that custom accent color or theme settings changed
@@ -30,22 +29,29 @@ class UserThemeService {
     }
 
     try {
+      if (Hive.isBoxOpen('app_settings')) {
+        final box = Hive.box('app_settings');
+        final data = box.get('user_data') ?? box.get('currentUser') ?? box.get('user');
+        if (data is Map) {
+          final id = data['uid'] ?? data['id'] ?? data['username'] ?? data['userName'] ?? data['email'];
+          if (id != null && id.toString().trim().isNotEmpty) {
+            return id.toString().trim().toLowerCase().replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_');
+          }
+        }
+        final activeUser = box.get('active_user_id') ?? box.get('last_username') ?? box.get('active_login_user');
+        if (activeUser != null && activeUser.toString().trim().isNotEmpty) {
+          return activeUser.toString().trim().toLowerCase().replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_');
+        }
+      }
+    } catch (_) {}
+
+    try {
       final user = FirebaseAuth.instance.currentUser;
       if (user != null && user.uid.isNotEmpty) {
         return user.uid.trim().toLowerCase();
       }
       if (user != null && user.email != null && user.email!.isNotEmpty) {
         return user.email!.trim().toLowerCase().replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_');
-      }
-    } catch (_) {}
-
-    try {
-      if (Hive.isBoxOpen('app_settings')) {
-        final box = Hive.box('app_settings');
-        final activeUser = box.get('active_user_id') ?? box.get('last_username') ?? box.get('active_login_user');
-        if (activeUser != null && activeUser.toString().trim().isNotEmpty) {
-          return activeUser.toString().trim().toLowerCase().replaceAll(RegExp(r'[^a-zA-Z0-9_]'), '_');
-        }
       }
     } catch (_) {}
 
@@ -66,11 +72,9 @@ class UserThemeService {
         final box = Hive.box('app_settings');
         final userKey = getStorageKey(explicitUserKey);
         final keyedValue = box.get(userKey);
-        if (keyedValue != null) {
-          return keyedValue == true;
+        if (keyedValue is bool) {
+          return keyedValue;
         }
-        final globalValue = box.get(_globalThemeKey, defaultValue: false);
-        return globalValue == true;
       }
     } catch (_) {}
     return false;
@@ -83,7 +87,6 @@ class UserThemeService {
         final box = Hive.box('app_settings');
         final userKey = getStorageKey(explicitUserKey);
         await box.put(userKey, isDark);
-        await box.put(_globalThemeKey, isDark);
       }
       currentThemeNotifier.value = isDark;
 
@@ -111,6 +114,6 @@ class UserThemeService {
   /// Returns a ValueListenable that fires when the user's theme setting changes.
   static ValueListenable<Box> listenable([String? explicitUserKey]) {
     final key = getStorageKey(explicitUserKey);
-    return Hive.box('app_settings').listenable(keys: [key, 'is_dark_mode']);
+    return Hive.box('app_settings').listenable(keys: [key]);
   }
 }

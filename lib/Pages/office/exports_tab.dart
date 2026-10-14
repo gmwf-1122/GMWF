@@ -2,6 +2,7 @@
 
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/design_system.dart';
 import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../services/local_storage_service.dart';
@@ -12,13 +13,13 @@ import '../../widgets/file_action_helper.dart';
 import 'finance_report_helper.dart';
 import 'shared_widgets.dart';
 
-const _kAccent = Color(0xFF10B981);
-const _kBg = Color(0xFFF8FAFC);
-const _kBgCard = Colors.white;
-const _kBorder = Color(0xFFE2E8F0);
-const _kTextPrimary = Color(0xFF111827);
-const _kTextSecondary = Color(0xFF6B7280);
-const _kTextTertiary = Color(0xFF9CA3AF);
+const _kAccent = SoftPalette.emerald350;
+const _kBg = SoftPalette.gray50;
+const _kBgCard = SoftPalette.gray50;
+const _kBorder = SoftPalette.slate150;
+const _kTextPrimary = SoftPalette.slate900;
+const _kTextSecondary = SoftPalette.slate550;
+const _kTextTertiary = SoftPalette.slate350;
 
 class ExportsTab extends StatefulWidget {
   final String branchId;
@@ -159,11 +160,11 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
     final lockAccess = permissionService.getPeriodLockAccess(widget.userRole);
 
     return Scaffold(
-      backgroundColor: _kBg,
+      backgroundColor: context.adapt(_kBg),
       appBar: PreferredSize(
         preferredSize: const Size.fromHeight(48),
         child: Container(
-          decoration: const BoxDecoration(color: _kBgCard, border: Border(bottom: BorderSide(color: _kBorder))),
+          decoration: BoxDecoration(color: context.adapt(_kBgCard), border: Border(bottom: BorderSide(color: context.adapt(_kBorder)))),
           child: Row(
             children: [
               TabBar(
@@ -171,7 +172,7 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
                 isScrollable: true,
                 indicatorColor: _kAccent,
                 labelColor: _kAccent,
-                unselectedLabelColor: _kTextSecondary,
+                unselectedLabelColor: context.adapt(_kTextSecondary),
                 tabs: const [
                   Tab(text: 'Finalized Exports'),
                   Tab(text: 'Bank Reconciliation'),
@@ -191,7 +192,7 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
               ),
               Text(
                 DateFormat('MMMM yyyy').format(DateFormat('yyyy-MM').parse(_selectedMonth)),
-                style: const TextStyle(fontWeight: FontWeight.bold, color: _kTextPrimary),
+                style: TextStyle(fontWeight: FontWeight.bold, color: context.adapt(_kTextPrimary)),
               ),
               IconButton(
                 icon: const Icon(Icons.arrow_forward_ios, size: 14),
@@ -235,17 +236,17 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
-          color: locked ? const Color(0xFFFEE2E2) : const Color(0xFFD1FAE5),
+          color: locked ? context.adapt(SoftPalette.red150m) : context.adapt(SoftPalette.emerald100),
           borderRadius: BorderRadius.circular(4),
-          border: Border.all(color: locked ? Colors.redAccent : _kAccent),
+          border: Border.all(color: locked ? SoftPalette.red400 : _kAccent),
         ),
         child: Row(
           children: [
-            Icon(locked ? Icons.lock : Icons.lock_open, size: 12, color: locked ? Colors.red : _kAccent),
+            Icon(locked ? Icons.lock : Icons.lock_open, size: 12, color: locked ? SoftPalette.red400 : _kAccent),
             const SizedBox(width: 4),
             Text(
               locked ? 'Locked' : 'Open',
-              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: locked ? Colors.red : _kAccent),
+              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: locked ? SoftPalette.red400 : _kAccent),
             ),
           ],
         ),
@@ -300,8 +301,8 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
           margin: const EdgeInsets.all(24),
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
-            color: _kBgCard,
-            border: Border.all(color: _kBorder),
+            color: context.adapt(_kBgCard),
+            border: Border.all(color: context.adapt(_kBorder)),
             borderRadius: BorderRadius.circular(16),
           ),
           child: Column(
@@ -320,29 +321,29 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.amber.withValues(alpha: 0.1),
-                    border: Border.all(color: Colors.amber.withValues(alpha: 0.4)),
+                    color: context.adapt(SoftPalette.amber200).withValues(alpha: 0.1),
+                    border: Border.all(color: context.adapt(SoftPalette.amber200).withValues(alpha: 0.4)),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Row(
                     children: [
-                      Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 16),
+                      Icon(Icons.warning_amber_rounded, color: SoftPalette.amber300, size: 16),
                       SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           'Warning: This month period is not locked yet. Exporting reports from unlocked periods may contain data subject to revision.',
-                          style: TextStyle(color: Colors.orange, fontSize: 11, fontWeight: FontWeight.w600),
+                          style: TextStyle(color: SoftPalette.amber300, fontSize: 11, fontWeight: FontWeight.w600),
                         ),
                       ),
                     ],
                   ),
                 ),
               const SizedBox(height: 20),
-              const Text('Report Type:', style: TextStyle(color: _kTextSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
+              Text('Report Type:', style: TextStyle(color: context.adapt(_kTextSecondary), fontSize: 12, fontWeight: FontWeight.bold)),
               const SizedBox(height: 6),
               DropdownButtonFormField<String>(
                 value: selType,
-                dropdownColor: _kBgCard,
+                dropdownColor: context.adapt(_kBgCard),
                 decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
                 items: const [
                   DropdownMenuItem(value: 'branch_pdf', child: Text('Bank Transfer Slip (PDF)')),
@@ -354,11 +355,11 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
               ),
               if (isPayroll) ...[
                 const SizedBox(height: 14),
-                const Text('Select Department:', style: TextStyle(color: _kTextSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
+                Text('Select Department:', style: TextStyle(color: context.adapt(_kTextSecondary), fontSize: 12, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 6),
                 DropdownButtonFormField<String>(
                   value: selDept,
-                  dropdownColor: _kBgCard,
+                  dropdownColor: context.adapt(_kBgCard),
                   decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
                   items: depts.map((d) => DropdownMenuItem(value: d, child: Text(d))).toList(),
                   onChanged: (v) {
@@ -372,11 +373,11 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
                 ),
                 if (isKarachi) ...[
                   const SizedBox(height: 14),
-                  const Text('Select Camp / Location:', style: TextStyle(color: _kTextSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
+                  Text('Select Camp / Location:', style: TextStyle(color: context.adapt(_kTextSecondary), fontSize: 12, fontWeight: FontWeight.bold)),
                   const SizedBox(height: 6),
                   DropdownButtonFormField<String>(
                     value: selCamp,
-                    dropdownColor: _kBgCard,
+                    dropdownColor: context.adapt(_kBgCard),
                     decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12, vertical: 8)),
                     items: const [
                       DropdownMenuItem(value: 'All Camps', child: Text('All Camps / Main Branch')),
@@ -394,7 +395,7 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
                   ),
                 ],
                 const SizedBox(height: 14),
-                const Text('Staff Members Selection:', style: TextStyle(color: _kTextSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
+                Text('Staff Members Selection:', style: TextStyle(color: context.adapt(_kTextSecondary), fontSize: 12, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 6),
                 Row(
                   children: [
@@ -422,7 +423,7 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('Check individuals to export:', style: TextStyle(fontSize: 11, color: _kTextSecondary, fontWeight: FontWeight.w600)),
+                      Text('Check individuals to export:', style: TextStyle(fontSize: 11, color: context.adapt(_kTextSecondary), fontWeight: FontWeight.w600)),
                       Row(
                         children: [
                           TextButton(
@@ -436,7 +437,7 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
                           ),
                           TextButton(
                             onPressed: () => setS(() => selectedEmpIds.clear()),
-                            child: const Text('Clear', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                            child: Text('Clear', style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.gray350))),
                           ),
                         ],
                       ),
@@ -445,14 +446,14 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
                   Container(
                     constraints: const BoxConstraints(maxHeight: 180),
                     decoration: BoxDecoration(
-                      color: _kBg,
+                      color: context.adapt(_kBg),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: _kBorder),
+                      border: Border.all(color: context.adapt(_kBorder)),
                     ),
                     child: filteredStaff.isEmpty
-                        ? const Padding(
+                        ? Padding(
                             padding: EdgeInsets.all(16),
-                            child: Center(child: Text('No staff members found matching selection', style: TextStyle(color: _kTextSecondary, fontSize: 12))),
+                            child: Center(child: Text('No staff members found matching selection', style: TextStyle(color: context.adapt(_kTextSecondary), fontSize: 12))),
                           )
                         : ListView.builder(
                             shrinkWrap: true,
@@ -473,7 +474,7 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
                                 title: Text(name, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                                 subtitle: Text(
                                   '$role • $dept${camp.isNotEmpty ? ' [$camp]' : ''}',
-                                  style: const TextStyle(fontSize: 10, color: _kTextSecondary),
+                                  style: TextStyle(fontSize: 10, color: context.adapt(_kTextSecondary)),
                                 ),
                                 onChanged: (chk) {
                                   setS(() {
@@ -495,12 +496,12 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
                 width: double.infinity,
                 height: 48,
                 child: ElevatedButton.icon(
-                  style: ElevatedButton.styleFrom(backgroundColor: _kAccent, foregroundColor: Colors.white),
+                  style: ElevatedButton.styleFrom(backgroundColor: _kAccent, foregroundColor: SoftPalette.gray50),
                   icon: isExporting
                       ? const SizedBox(
                           width: 18,
                           height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50),
                         )
                       : const Icon(Icons.download, size: 18),
                   label: Text(
@@ -589,22 +590,22 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('Bank & Cash Statement Reconciliation', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: _kTextPrimary)),
+                    Text('Bank & Cash Statement Reconciliation', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: context.adapt(_kTextPrimary))),
                     const SizedBox(height: 4),
-                    Text('Reconcile current ledger transactions against statement lines for GMWF ($_selectedMonth)', style: const TextStyle(fontSize: 12, color: _kTextSecondary)),
+                    Text('Reconcile current ledger transactions against statement lines for GMWF ($_selectedMonth)', style: TextStyle(fontSize: 12, color: context.adapt(_kTextSecondary))),
                   ],
                 ),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(border: Border.all(color: _kBorder), borderRadius: BorderRadius.circular(8)),
-                child: Text('Reconciled: $reconciledCount / $totalCount items', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _kTextSecondary)),
+                decoration: BoxDecoration(border: Border.all(color: context.adapt(_kBorder)), borderRadius: BorderRadius.circular(8)),
+                child: Text('Reconciled: $reconciledCount / $totalCount items', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(_kTextSecondary))),
               ),
               const SizedBox(width: 12),
               ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _kAccent,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
@@ -620,14 +621,14 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
             ],
           ),
           const SizedBox(height: 12),
-          LinearProgressIndicator(value: progress, color: _kAccent, backgroundColor: Colors.grey[200]),
+          LinearProgressIndicator(value: progress, color: _kAccent, backgroundColor: context.adapt(SoftPalette.gray100)),
           const SizedBox(height: 24),
           Expanded(
             child: _reconcileItems.isEmpty
-                ? const Center(child: Text('No active transactions found for this month.', style: TextStyle(color: _kTextTertiary)))
+                ? Center(child: Text('No active transactions found for this month.', style: TextStyle(color: context.adapt(_kTextTertiary))))
                 : ListView.separated(
                     itemCount: _reconcileItems.length,
-                    separatorBuilder: (context, index) => const Divider(height: 1, color: _kBorder),
+                    separatorBuilder: (context, index) => Divider(height: 1, color: context.adapt(_kBorder)),
                     itemBuilder: (context, idx) {
                       final item = _reconcileItems[idx];
                       final isRec = item['isReconciled'] == true;
@@ -637,15 +638,15 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
                         activeColor: _kAccent,
                         title: Row(
                           children: [
-                            Text(item['type'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: _kTextPrimary)),
+                            Text(item['type'], style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: context.adapt(_kTextPrimary))),
                             const SizedBox(width: 8),
-                            Text(item['date'], style: const TextStyle(color: _kTextTertiary, fontSize: 11)),
+                            Text(item['date'], style: TextStyle(color: context.adapt(_kTextTertiary), fontSize: 11)),
                           ],
                         ),
-                        subtitle: Text(item['description'], style: const TextStyle(color: _kTextSecondary, fontSize: 12)),
+                        subtitle: Text(item['description'], style: TextStyle(color: context.adapt(_kTextSecondary), fontSize: 12)),
                         secondary: Text(
                           _formatPaisa(item['amountMinor']),
-                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: isRec ? Colors.green : Colors.red),
+                          style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13, color: isRec ? SoftPalette.green400 : SoftPalette.red400),
                         ),
                         onChanged: (val) {
                           if (val != null) {
@@ -666,7 +667,7 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
       context: context,
       builder: (ctx) {
         return AlertDialog(
-          backgroundColor: _kBgCard,
+          backgroundColor: context.adapt(_kBgCard),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Text(locked ? 'Unlock Payroll Month' : 'Lock Payroll Month', style: const TextStyle(fontWeight: FontWeight.bold)),
           content: Text(
@@ -677,7 +678,7 @@ class _ExportsTabState extends State<ExportsTab> with SingleTickerProviderStateM
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: locked ? Colors.orange : _kAccent, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: locked ? SoftPalette.amber300 : _kAccent, foregroundColor: SoftPalette.gray50),
               onPressed: () async {
                 final settingsBox = Hive.box(LocalStorageService.financeSettingsBox);
                 await settingsBox.put('month_lock_$_selectedMonth', !locked);

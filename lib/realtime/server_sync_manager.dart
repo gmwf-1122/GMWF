@@ -36,8 +36,11 @@
 //       _downloadPrescriptions()   — fetches all CNIC-keyed prescriptions
 //       _downloadTodayDispensary() — fetches today's dispensary records
 
+import 'package:gmwf/utils/ui_stall_monitor.dart';
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
+import 'dart:math';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -47,6 +50,9 @@ import 'package:intl/intl.dart';
 
 import '../services/local_storage_service.dart';
 import '../services/camp_session_service.dart';
+import '../services/quota_service.dart';
+import '../services/cloud/cloud_db.dart';
+import '../services/cloud/sync_log.dart';
 import 'lan_server.dart';
 import 'realtime_events.dart';
 
@@ -1372,16 +1378,164 @@ class ServerSyncManager {
     }
   }
 
+  bool _isBacklogOp(Map op) {
+    if (op['backlog'] == true) return true;
+    final createdStr = op['createdAt']?.toString();
+    if (createdStr != null && createdStr.isNotEmpty) {
+      final created = DateTime.tryParse(createdStr);
+      if (created != null && DateTime.now().difference(created).inHours.abs() >= 24) {
+        return true;
+      }
+    }
+    final serial = (op['serial'] ?? op['data']?['serial'])?.toString().trim();
+    if (serial != null && serial.isNotEmpty) {
+      final dateKey = CampSessionService.getDateKeyFromSerial(serial);
+      if (dateKey.length == 6 && dateKey != _todayKey()) return true;
+    }
+    final dateKey = (op['dateKey'] ?? op['date'] ?? op['data']?['dateKey'] ?? op['data']?['date'])?.toString().trim();
+    if (dateKey != null && dateKey.isNotEmpty) {
+      if (dateKey.length == 6 && RegExp(r'^\d{6}$').hasMatch(dateKey) && dateKey != _todayKey()) return true;
+      if (dateKey.length >= 10 && RegExp(r'^\d{4}-\d{2}-\d{2}').hasMatch(dateKey)) {
+        final todayIso = DateFormat('yyyy-MM-dd').format(DateTime.now());
+        if (!dateKey.startsWith(todayIso)) return true;
+      }
+    }
+    return false;
+  }
+
+  int _opPrecedence(Map op) {
+    final type = (op['type'] ?? '').toString();
+    switch (type) {
+      case 'save_patient':
+        return 1;
+      case 'save_entry':
+        return 2;
+      case 'save_prescription':
+        return 3;
+      case 'update_serial_status':
+      case 'save_dispense':
+        return 4;
+      case 'update_inventory':
+      case 'add_inventory_stock':
+        return 5;
+      case 'save_attendance':
+      case 'save_biometric_log':
+        return 6;
+      default:
+        return 10;
+    }
+  }
+
+  int _compareServerOps(Map a, Map b) {
+    final precA = _opPrecedence(a);
+    final precB = _opPrecedence(b);
+    if (precA != precB) return precA.compareTo(precB);
+    final timeA = (a['createdAt'] ?? '') as String;
+    final timeB = (b['createdAt'] ?? '') as String;
+    if (timeA.isNotEmpty && timeB.isNotEmpty) {
+      final cmp = timeA.compareTo(timeB);
+      if (cmp != 0) return cmp;
+    }
+    return 0;
+  }
+
   Future<void> _uploadQueue() async {
     if (_uploading || !_running) return;
 
     final conn = await Connectivity().checkConnectivity();
     if (conn.every((r) => r == ConnectivityResult.none)) return;
 
+    // Firestore said the daily write quota is used up: nothing is accepted before the
+    // reset, so don't send (ops stay queued and go up after the reset).
+    if (QuotaService.isPausedForDailyReset) return;
+    final stalled = _stalledUntil;
+    if (stalled != null && DateTime.now().isBefore(stalled)) return;
+
     _uploading = true;
+    UiStallMonitor.mark('server: cloud upload pass');
+    final started = DateTime.now();
+    var uploaded = 0;
+    var networkFailures = 0;
+    var stop = false;
     try {
       final box  = Hive.box(_serverQueueBox);
-      final keys = box.keys.take(100).toList();
+      final now = DateTime.now();
+      final rawLiveKeys = <dynamic>[], rawBacklogKeys = <dynamic>[];
+      int scanned = 0;
+      for (final k in box.keys) {
+        if (++scanned % 25 == 0) {
+          await Future.delayed(Duration.zero);
+        }
+        final v = box.get(k);
+        if (v is! Map) {
+          rawLiveKeys.add(k);
+        } else {
+          final next = DateTime.tryParse((v['_nextRetryAt'] ?? '').toString());
+          if (next == null || !now.isBefore(next)) {
+            (_isBacklogOp(v) ? rawBacklogKeys : rawLiveKeys).add(k);
+          }
+        }
+      }
+
+      // Promote any backlog parent (patient/entry) needed by an express child
+      final livePatientIds = <String>{};
+      final liveSerials = <String>{};
+      for (final k in rawLiveKeys) {
+        final raw = box.get(k);
+        if (raw is Map) {
+          final pid = (raw['patientId'] ?? raw['data']?['patientId'] ?? raw['id'])?.toString().trim();
+          if (pid != null && pid.isNotEmpty) livePatientIds.add(pid);
+          final s = (raw['serial'] ?? raw['data']?['serial'])?.toString().trim();
+          if (s != null && s.isNotEmpty) liveSerials.add(s);
+        }
+      }
+
+      if (livePatientIds.isNotEmpty || liveSerials.isNotEmpty) {
+        final promoted = <dynamic>[];
+        for (final bk in rawBacklogKeys) {
+          final raw = box.get(bk);
+          if (raw is Map) {
+            final type = (raw['type'] ?? '').toString();
+            if (type == 'save_patient') {
+              final pid = (raw['patientId'] ?? raw['data']?['patientId'] ?? raw['id'])?.toString().trim();
+              if (pid != null && livePatientIds.contains(pid)) promoted.add(bk);
+            } else if (type == 'save_entry') {
+              final s = (raw['serial'] ?? raw['data']?['serial'])?.toString().trim();
+              if (s != null && liveSerials.contains(s)) promoted.add(bk);
+            }
+          }
+        }
+        for (final pk in promoted) {
+          rawBacklogKeys.remove(pk);
+          rawLiveKeys.add(pk);
+        }
+      }
+
+      rawLiveKeys.sort((a, b) {
+        final rawA = box.get(a);
+        final rawB = box.get(b);
+        if (rawA is Map && rawB is Map) return _compareServerOps(rawA, rawB);
+        return 0;
+      });
+
+      rawBacklogKeys.sort((a, b) {
+        final rawA = box.get(a);
+        final rawB = box.get(b);
+        if (rawA is Map && rawB is Map) return _compareServerOps(rawA, rawB);
+        return 0;
+      });
+
+      const int maxBatchSize = 100;
+      final int expressCount = min(80, rawLiveKeys.length);
+      final int remainingCapacity = maxBatchSize - expressCount;
+      final int freightCount = min(remainingCapacity, rawBacklogKeys.length);
+
+      final keys = <dynamic>[];
+      keys.addAll(rawLiveKeys.take(expressCount));
+      keys.addAll(rawBacklogKeys.take(freightCount));
+      if (keys.length < maxBatchSize && rawLiveKeys.length > expressCount) {
+        keys.addAll(rawLiveKeys.skip(expressCount).take(maxBatchSize - keys.length));
+      }
 
       for (final key in keys) {
         if (!_running) break;
@@ -1392,7 +1546,7 @@ class ServerSyncManager {
           continue;
         }
 
-        final op       = Map<String, dynamic>.from(raw);
+        final op       = Map<String, dynamic>.from(raw)..remove('_handedOffAt');
         final attempts = (op['_attempts'] as int?) ?? 0;
 
         // Token and prescription writes are durable until Firestore accepts
@@ -1405,19 +1559,68 @@ class ServerSyncManager {
         }
 
         try {
-          await _executeOp(op);
-          box.delete(key);
+          // Each write waits for Firestore's real answer (REST). The time limit only guards
+          // against a read that never answers; a timed-out op is retried (idempotent writes).
+          await CloudDb.runWith(const CloudWriteContext(), () => _executeOp(op))
+              .timeout(const Duration(seconds: 120));
+          await box.delete(key);
+          uploaded++;
+          networkFailures = 0;
         } catch (e) {
+          final err = e.toString().substring(0, e.toString().length.clamp(0, 200));
+          op['_err'] = err;
+          if (QuotaService.isQuotaError(e) && QuotaService.isPausedForDailyReset) {
+            // Daily quota used up: the op waits for the reset, it is not a failure.
+            await box.put(key, op);
+            stop = true;
+            break;
+          }
+          if (_isTransientCloudError(e)) {
+            // No network / no answer: retry later without counting toward quarantine.
+            op['_nextRetryAt'] = DateTime.now().add(const Duration(seconds: 30)).toIso8601String();
+            await box.put(key, op);
+            if (++networkFailures >= 3) {
+              _stalledUntil = DateTime.now().add(const Duration(minutes: 2));
+              SyncLog.write('[Server] ⏸️ Cloud not reachable ($err) — server uploads retry in 2 minutes');
+              stop = true;
+              break;
+            }
+            continue;
+          }
           op['_attempts'] = attempts + 1;
-          op['_err']      =
-              e.toString().substring(0, e.toString().length.clamp(0, 200));
+          op['_nextRetryAt'] = DateTime.now()
+              .add(Duration(seconds: min(1800, pow(2, min(attempts + 5, 11)).toInt())))
+              .toIso8601String();
           await box.put(key, op);
+          SyncLog.write('[Server] Upload failed for ${op['type']} (attempt ${attempts + 1}/5): $err');
         }
 
         await Future.delayed(const Duration(milliseconds: 10));
       }
 
-      if (_running && box.isNotEmpty) {
+      if (uploaded > 0 || stop) {
+        SyncLog.write('[Server] Upload pass: $uploaded op(s) uploaded, ${box.length} still queued, '
+            '${DateTime.now().difference(started).inSeconds}s. Today: ${QuotaService.dailyWriteCount} writes from this PC'
+            '${QuotaService.isPausedForDailyReset ? ' — quota used up, waiting for the reset' : ''}');
+      }
+
+      final checkAt = DateTime.now();
+      bool hasReadyOps = false;
+      if (!stop) {
+        for (final k in box.keys) {
+          final v = box.get(k);
+          if (v is! Map) {
+            hasReadyOps = true;
+            break;
+          }
+          final next = DateTime.tryParse((v['_nextRetryAt'] ?? '').toString());
+          if (next == null || !checkAt.isBefore(next)) {
+            hasReadyOps = true;
+            break;
+          }
+        }
+      }
+      if (_running && hasReadyOps && !QuotaService.isPausedForDailyReset) {
         Future.delayed(const Duration(seconds: 2), () {
           if (_running) _uploadQueue().ignore();
         });
@@ -1425,6 +1628,17 @@ class ServerSyncManager {
     } finally {
       _uploading = false;
     }
+  }
+
+  /// Set when the cloud cannot be reached; upload passes wait until then.
+  DateTime? _stalledUntil;
+
+  static bool _isTransientCloudError(Object e) {
+    if (e is TimeoutException || e is SocketException || e is HandshakeException || e is HttpException) return true;
+    final s = e.toString().toLowerCase();
+    return s.contains('unavailable') || s.contains('deadline') || s.contains('network') ||
+        s.contains('failed to connect') || s.contains('connection') || s.contains('aborted') ||
+        s.contains('[cloud_firestore/internal]') || s.contains('unauthenticated');
   }
 
   // ── [FAIL-BOX] Move op to dead-letter box ─────────────────────────────────
@@ -1449,6 +1663,11 @@ class ServerSyncManager {
 
   // ── Execute Op ────────────────────────────────────────────────────────────
   Future<void> _executeOp(Map<String, dynamic> op) async {
+    // Same paths and data as before, but each write goes to Firestore's REST API and
+    // completes only when Firestore has accepted it (see CloudDb). An SDK write the server
+    // never answered used to hang this whole uploader until the app was restarted.
+    // ignore: no_leading_underscores_for_local_identifiers
+    final _db = CloudDb.instance;
     final type      = op['type']?.toString() ?? '';
     final branchId  = (op['branchId'] ?? _branchId!).toString();
     final data      = Map<String, dynamic>.from(op['data'] ?? {});

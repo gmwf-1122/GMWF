@@ -1,8 +1,11 @@
 // lib/widgets/file_action_helper.dart
 
 import 'dart:io';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:printing/printing.dart';
@@ -63,13 +66,15 @@ class FileActionHelper {
     }
 
     final bool isPdf = fileName.toLowerCase().endsWith('.pdf') || (resolvedPath?.toLowerCase().endsWith('.pdf') ?? false);
-    const accentColor = Color(0xFF00695C);
+    final accentColor = context.adapt(SoftPalette.teal600);
 
     if (!context.mounted) return;
 
+    // Theme-aware: a fixed light sheet made the theme-coloured item text unreadable in dark mode.
+    final comfort = context.comfort;
     showModalBottomSheet(
       context: context,
-      backgroundColor: Colors.white,
+      backgroundColor: comfort.surface,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -84,7 +89,7 @@ class FileActionHelper {
                   width: 40,
                   height: 4,
                   decoration: BoxDecoration(
-                    color: Colors.grey[300],
+                    color: comfort.borderStrong,
                     borderRadius: BorderRadius.circular(2),
                   ),
                 ),
@@ -110,11 +115,11 @@ class FileActionHelper {
                         children: [
                           Text(
                             title,
-                            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Color(0xFF111827)),
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: comfort.textPrimary),
                           ),
                           Text(
                             fileName,
-                            style: TextStyle(color: Colors.grey[600], fontSize: 12),
+                            style: TextStyle(color: comfort.textMuted, fontSize: 12),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ],
@@ -128,7 +133,7 @@ class FileActionHelper {
 
                 // 1. WhatsApp Share
                 ListTile(
-                  leading: const Icon(Icons.share_rounded, color: Color(0xFF2E7D32)),
+                  leading: Icon(Icons.share_rounded, color: context.adapt(SoftPalette.green550)),
                   title: const Text('Send via WhatsApp', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                   subtitle: Text(
                     phoneNumber != null && phoneNumber.isNotEmpty
@@ -156,14 +161,14 @@ class FileActionHelper {
                 // 2. Open Document
                 if (resolvedPath != null && resolvedPath.isNotEmpty && !kIsWeb)
                   ListTile(
-                    leading: const Icon(Icons.open_in_new_rounded, color: accentColor),
+                    leading: Icon(Icons.open_in_new_rounded, color: accentColor),
                     title: const Text('Open Document', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                     subtitle: const Text('Open with system default PDF reader', style: TextStyle(fontSize: 11)),
                     onTap: () async {
                       Navigator.pop(ctx);
                       final res = await OpenFilex.open(resolvedPath!);
                       if (res.type != ResultType.done && context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
+                        AppToast.showSnackBar(context, 
                           SnackBar(content: Text('Could not open file: ${res.message}')),
                         );
                       }
@@ -173,7 +178,7 @@ class FileActionHelper {
                 // 3. Windows Explorer / Folder Location
                 if (Platform.isWindows && resolvedPath != null && resolvedPath.isNotEmpty)
                   ListTile(
-                    leading: const Icon(Icons.folder_open_rounded, color: Color(0xFFD97706)),
+                    leading: Icon(Icons.folder_open_rounded, color: context.adapt(SoftPalette.orange400)),
                     title: const Text('Show in Folder', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                     subtitle: const Text('Open file location in Windows Explorer for drag & drop', style: TextStyle(fontSize: 11)),
                     onTap: () async {
@@ -191,7 +196,7 @@ class FileActionHelper {
                 // 4. Print Document (PDF only)
                 if (isPdf)
                   ListTile(
-                    leading: const Icon(Icons.print_rounded, color: Colors.purple),
+                    leading: Icon(Icons.print_rounded, color: context.adapt(SoftPalette.purple550)),
                     title: const Text('Print Document', style: TextStyle(fontWeight: FontWeight.w600, fontSize: 14)),
                     subtitle: const Text('Send directly to local or network printer', style: TextStyle(fontSize: 11)),
                     onTap: () async {
@@ -205,7 +210,7 @@ class FileActionHelper {
                         }
                       } catch (e) {
                         if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
+                          AppToast.showSnackBar(context, 
                             SnackBar(content: Text('Printing failed: $e')),
                           );
                         }

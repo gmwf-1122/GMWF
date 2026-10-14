@@ -4,6 +4,8 @@
 // Allows selecting a donor and generates a slip based on their weekly donations.
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:intl/intl.dart';
 
 import 'package:gmwf/pages/donations/donations_shared.dart';
@@ -126,7 +128,7 @@ class _BankSlipDialogState extends State<BankSlipDialog> {
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [
-                    const Color(0xFF92400E),
+                    SoftPalette.orange600,
                     DonDS.amber.withValues(alpha: 0.85),
                   ],
                   begin: Alignment.topLeft,
@@ -137,10 +139,10 @@ class _BankSlipDialogState extends State<BankSlipDialog> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.12),
+                    color: SoftPalette.gray50.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(DS.rMd),
                   ),
-                  child: const Icon(Icons.account_balance_rounded, color: Colors.white, size: 22),
+                  child: const Icon(Icons.account_balance_rounded, color: SoftPalette.gray50, size: 22),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -148,25 +150,25 @@ class _BankSlipDialogState extends State<BankSlipDialog> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text('Weekly Bank Slip',
-                          style: DS.display(color: Colors.white).copyWith(fontSize: 20)),
+                          style: DS.display(color: SoftPalette.gray50).copyWith(fontSize: 20)),
                       Text(
                         _step == 0
                             ? 'Step 1: Select a Donor'
                             : 'Step 2: Configure & Generate',
-                        style: DS.caption(color: Colors.white.withValues(alpha: 0.75)),
+                        style: DS.caption(color: SoftPalette.gray50.withValues(alpha: 0.75)),
                       ),
                     ],
                   ),
                 ),
                 if (_step == 1)
                   IconButton(
-                    icon: Icon(Icons.arrow_back_rounded, color: Colors.white.withValues(alpha: 0.8)),
+                    icon: Icon(Icons.arrow_back_rounded, color: SoftPalette.gray50.withValues(alpha: 0.8)),
                     onPressed: () => setState(() { _step = 0; _selectedDonor = null; }),
                     tooltip: 'Back to donor selection',
                   ),
                 IconButton(
                   onPressed: () => Navigator.pop(context),
-                  icon: Icon(Icons.close_rounded, color: Colors.white.withValues(alpha: 0.8)),
+                  icon: Icon(Icons.close_rounded, color: SoftPalette.gray50.withValues(alpha: 0.8)),
                 ),
               ]),
             ),
@@ -243,10 +245,10 @@ class _BankSlipDialogState extends State<BankSlipDialog> {
 
       if (mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Row(children: const [
-              Icon(Icons.check_circle_rounded, color: Colors.white, size: 16),
+              Icon(Icons.check_circle_rounded, color: SoftPalette.gray50, size: 16),
               SizedBox(width: 8),
               Text('Bank slip saved & PDF generated!'),
             ]),
@@ -258,10 +260,10 @@ class _BankSlipDialogState extends State<BankSlipDialog> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('Error: $e'),
-            backgroundColor: Colors.red.shade700,
+            backgroundColor: SoftPalette.red500,
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -445,7 +447,7 @@ class _DonorSelector extends StatelessWidget {
   }
 
   Color _avatarColor(String name) {
-    final colors = [DonDS.teal, DonDS.amber, const Color(0xFF7C3AED), const Color(0xFF059669)];
+    final colors = [DonDS.teal, DonDS.amber, SoftPalette.violet550, SoftPalette.emerald500];
     return colors[name.length % colors.length];
   }
 
@@ -564,7 +566,7 @@ class _SlipForm extends StatelessWidget {
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [const Color(0xFF92400E), DonDS.amber.withValues(alpha: 0.9)],
+                  colors: [SoftPalette.orange600, DonDS.amber.withValues(alpha: 0.9)],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
@@ -573,16 +575,16 @@ class _SlipForm extends StatelessWidget {
               ),
               child: Column(children: [
                 Text('WEEKLY COLLECTION',
-                    style: DS.label(color: Colors.white.withValues(alpha: 0.75)).copyWith(letterSpacing: 1.4, fontSize: 9)),
+                    style: DS.label(color: SoftPalette.gray50.withValues(alpha: 0.75)).copyWith(letterSpacing: 1.4, fontSize: 9)),
                 const SizedBox(height: 6),
                 Text(
                   'PKR ${NumberFormat('#,###').format(totalAmount)}',
-                  style: DS.display(color: Colors.white).copyWith(fontSize: 28),
+                  style: DS.display(color: SoftPalette.gray50).copyWith(fontSize: 28),
                 ),
                 const SizedBox(height: 6),
                 Text(
                   '${weeklyDonations.length} transactions verified as received',
-                  style: DS.caption(color: Colors.white.withValues(alpha: 0.8)).copyWith(fontSize: 11),
+                  style: DS.caption(color: SoftPalette.gray50.withValues(alpha: 0.8)).copyWith(fontSize: 11),
                 ),
               ]),
             ),
@@ -644,7 +646,7 @@ class _SlipForm extends StatelessWidget {
                     style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: DonDS.amber,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                   disabledBackgroundColor: DonDS.amber.withValues(alpha: 0.3),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(DS.rLg)),
                   elevation: 0,
@@ -711,13 +713,13 @@ class _StepDot extends StatelessWidget {
   Widget build(BuildContext context) {
     final t = RoleThemeScope.dataOf(context);
     final bg = done ? color : (active ? color : t.bgRule);
-    final fg = (active || done) ? Colors.white : t.textTertiary;
+    final fg = (active || done) ? SoftPalette.gray50 : t.textTertiary;
     return Container(
       width: 28, height: 28,
       decoration: BoxDecoration(color: bg, shape: BoxShape.circle),
       child: Center(
         child: done
-            ? const Icon(Icons.check_rounded, color: Colors.white, size: 14)
+            ? const Icon(Icons.check_rounded, color: SoftPalette.gray50, size: 14)
             : Text('$num', style: DS.heading(color: fg).copyWith(fontSize: 12)),
       ),
     );

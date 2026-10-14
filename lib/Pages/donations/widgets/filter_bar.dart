@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import '../../../constants/colors.dart';
 import '../donations_shared.dart';
 
@@ -22,20 +24,20 @@ class FilterBar extends StatelessWidget {
       child: Container(
         width: 220,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: context.adapt(SoftPalette.gray50),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: AppColors.gray200, width: 1.5),
+          border: Border.all(color: context.adapt(AppColors.gray200), width: 1.5),
         ),
         padding: const EdgeInsets.symmetric(horizontal: 12),
         child: DropdownButtonHideUnderline(
           child: DropdownButton<String>(
             value: selectedCategory,
-            icon: const Icon(Icons.arrow_drop_down_rounded, color: AppColors.gray500),
+            icon: Icon(Icons.arrow_drop_down_rounded, color: context.adapt(AppColors.gray500)),
             isExpanded: true,
-            style: const TextStyle(
+            style: TextStyle(
               fontSize: 14,
               fontWeight: FontWeight.w600,
-              color: AppColors.gray800,
+              color: context.adapt(AppColors.gray800),
             ),
             onChanged: (val) {
               if (val != null) onCategoryChanged(val);

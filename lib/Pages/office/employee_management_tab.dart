@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/design_system.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 
@@ -17,64 +18,64 @@ import 'finance_report_helper.dart';
 // ── Executive Navy Design System Tokens ─────────────────────────────────────────
 class ExecTokens {
   // 1. Structural & Surface Neutrals
-  static const navSurface      = Color(0xFF0B132B); // Obsidian Navy
-  static const canvasBg        = Color(0xFFF8FAFC); // Cool Off-White
-  static const cardSurface     = Color(0xFFFFFFFF); // Pure White
-  static const rowHover        = Color(0xFFF1F5F9); // Slate Tint
-  static const rowSelected     = Color(0xFFEFF6FF); // Ice Blue
-  static const borderMuted     = Color(0xFFE2E8F0); // Muted Slate
-  static const borderDivider   = Color(0xFFCBD5E1); // Neutral Border
+  static const navSurface      = SoftPalette.slate900; // Obsidian Navy
+  static const canvasBg        = SoftPalette.gray50; // Cool Off-White
+  static const cardSurface     = SoftPalette.gray50; // Pure White
+  static const rowHover        = SoftPalette.slate100; // Slate Tint
+  static const rowSelected     = SoftPalette.slate100; // Ice Blue
+  static const borderMuted     = SoftPalette.slate150; // Muted Slate
+  static const borderDivider   = SoftPalette.slate200; // Neutral Border
 
   // 2. Brand & Actions
-  static const primaryCTA      = Color(0xFF1D4ED8); // Executive Cobalt
-  static const primaryHover    = Color(0xFF1E40AF); // Deep Cobalt
-  static const primaryRing     = Color(0xFF93C5FD); // Cobalt Glow
-  static const secBtnSurface   = Color(0xFFFFFFFF);
-  static const secBtnBorder    = Color(0xFFCBD5E1);
-  static const secBtnHover     = Color(0xFFF8FAFC);
+  static const primaryCTA      = SoftPalette.blue550; // Executive Cobalt
+  static const primaryHover    = SoftPalette.blue600; // Deep Cobalt
+  static const primaryRing     = SoftPalette.blue300; // Cobalt Glow
+  static const secBtnSurface   = SoftPalette.gray50;
+  static const secBtnBorder    = SoftPalette.slate200;
+  static const secBtnHover     = SoftPalette.gray50;
 
   // 3. Typography Colors
-  static const textPrimary     = Color(0xFF0F172A); // Deep Slate Navy
-  static const textSecondary   = Color(0xFF334155); // Mid Slate
-  static const textMuted       = Color(0xFF475569); // Cool Gray
-  static const textInverse     = Color(0xFFFFFFFF); // Pure White
+  static const textPrimary     = SoftPalette.slate900; // Deep Slate Navy
+  static const textSecondary   = SoftPalette.slate700; // Mid Slate
+  static const textMuted       = SoftPalette.slate600; // Cool Gray
+  static const textInverse     = SoftPalette.gray50; // Pure White
 
   // 4. Semantic Status Badges (BG / Border / Text / Dot)
   // Present / Active
-  static const presentBg       = Color(0xFFECFDF5);
-  static const presentBorder   = Color(0xFFA7F3D0);
-  static const presentText     = Color(0xFF065F46);
-  static const presentDot      = Color(0xFF10B981);
+  static const presentBg       = SoftPalette.emerald50;
+  static const presentBorder   = SoftPalette.emerald150;
+  static const presentText     = SoftPalette.emerald600;
+  static const presentDot      = SoftPalette.emerald350;
 
   // Late
-  static const lateBg          = Color(0xFFFFFBEB);
-  static const lateBorder      = Color(0xFFFDE68A);
-  static const lateText        = Color(0xFF92400E);
-  static const lateDot         = Color(0xFFF59E0B);
+  static const lateBg          = SoftPalette.yellow50m;
+  static const lateBorder      = SoftPalette.yellow150;
+  static const lateText        = SoftPalette.orange600;
+  static const lateDot         = SoftPalette.amber300;
 
   // Absent / Inactive
-  static const absentBg        = Color(0xFFFEF2F2);
-  static const absentBorder    = Color(0xFFFECACA);
-  static const absentText      = Color(0xFF991B1B);
-  static const absentDot       = Color(0xFFEF4444);
+  static const absentBg        = SoftPalette.red100t;
+  static const absentBorder    = SoftPalette.red200;
+  static const absentText      = SoftPalette.red600;
+  static const absentDot       = SoftPalette.red400;
 
   // On Leave / Remote
-  static const leaveBg         = Color(0xFFEFF6FF);
-  static const leaveBorder     = Color(0xFFBFDBFE);
-  static const leaveText       = Color(0xFF1E40AF);
-  static const leaveDot        = Color(0xFF3B82F6);
+  static const leaveBg         = SoftPalette.slate100;
+  static const leaveBorder     = SoftPalette.slate200;
+  static const leaveText       = SoftPalette.blue600;
+  static const leaveDot        = SoftPalette.blue500;
 
   // Sunday / Off Day
-  static const sundayBg        = Color(0xFFF1F5F9);
-  static const sundayBorder    = Color(0xFFE2E8F0);
-  static const sundayText      = Color(0xFF475569);
-  static const sundayDot       = Color(0xFF64748B);
+  static const sundayBg        = SoftPalette.slate100;
+  static const sundayBorder    = SoftPalette.slate150;
+  static const sundayText      = SoftPalette.slate600;
+  static const sundayDot       = SoftPalette.slate550;
 
   // Holiday
-  static const holidayBg       = Color(0xFFFAF5FF);
-  static const holidayBorder   = Color(0xFFE9D5FF);
-  static const holidayText     = Color(0xFF6B21A8);
-  static const holidayDot      = Color(0xFFA855F7);
+  static const holidayBg       = SoftPalette.purple50t;
+  static const holidayBorder   = SoftPalette.purple150;
+  static const holidayText     = SoftPalette.violet600;
+  static const holidayDot      = SoftPalette.violet400;
 
   // Typography Styles
   static const pageTitle = TextStyle(
@@ -265,29 +266,29 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
     final ok = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: ExecTokens.cardSurface,
+        backgroundColor: context.adapt(ExecTokens.cardSurface),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: const Row(
+        title: Row(
           children: [
             Icon(Icons.warning_amber_rounded, color: ExecTokens.absentDot, size: 24),
             SizedBox(width: 8),
-            Text('Wipe All Employees?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: ExecTokens.textPrimary)),
+            Text('Wipe All Employees?', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: context.adapt(ExecTokens.textPrimary))),
           ],
         ),
-        content: const Text(
+        content: Text(
           'This will delete all employees from local storage and enqueue deletion requests for Firestore sync when connected.\n\nAre you sure you want to proceed?',
-          style: TextStyle(fontSize: 13, color: ExecTokens.textSecondary, height: 1.4),
+          style: TextStyle(fontSize: 13, color: context.adapt(ExecTokens.textSecondary), height: 1.4),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel', style: TextStyle(color: ExecTokens.textMuted)),
+            child: Text('Cancel', style: TextStyle(color: context.adapt(ExecTokens.textMuted))),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: ExecTokens.absentDot,
-              foregroundColor: Colors.white,
+              foregroundColor: SoftPalette.gray50,
               elevation: 0,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
             ),
@@ -302,7 +303,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
         performedBy: LocalStorageService.getActiveUsername(),
       );
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('✅ Removed $removed employees from local storage & enqueued cloud deletes.'),
             backgroundColor: ExecTokens.primaryCTA,
@@ -358,8 +359,8 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
     final monthKey = DateFormat('yyyy-MM').format(widget.date);
 
     if (!Hive.isBoxOpen(LocalStorageService.employeesBox) || !Hive.isBoxOpen(LocalStorageService.attendanceBox)) {
-      return const Scaffold(
-        backgroundColor: ExecTokens.canvasBg,
+      return Scaffold(
+        backgroundColor: context.adapt(ExecTokens.canvasBg),
         body: Center(
           child: CircularProgressIndicator(color: ExecTokens.primaryCTA),
         ),
@@ -367,7 +368,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
     }
 
     return Scaffold(
-      backgroundColor: ExecTokens.canvasBg,
+      backgroundColor: context.adapt(ExecTokens.canvasBg),
       body: ValueListenableBuilder(
         valueListenable: FinanceLocalStorage.employeesBox.listenable(),
         builder: (ctx, Box empBox, _) {
@@ -644,9 +645,9 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
   Widget _buildHeaderToolbar(int totalStaffCount, int offboardedCount) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-      decoration: const BoxDecoration(
-        color: ExecTokens.cardSurface,
-        border: Border(bottom: BorderSide(color: ExecTokens.borderMuted)),
+      decoration: BoxDecoration(
+        color: context.adapt(ExecTokens.cardSurface),
+        border: Border(bottom: BorderSide(color: context.adapt(ExecTokens.borderMuted))),
       ),
       child: LayoutBuilder(builder: (ctx, constraints) {
         final isWide = constraints.maxWidth >= 900;
@@ -657,9 +658,9 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
             // Category Segmented Pill (Active vs Offboarded)
             Container(
               decoration: BoxDecoration(
-                color: ExecTokens.canvasBg,
+                color: context.adapt(ExecTokens.canvasBg),
                 borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: ExecTokens.borderMuted),
+                border: Border.all(color: context.adapt(ExecTokens.borderMuted)),
               ),
               padding: const EdgeInsets.all(2),
               child: Row(
@@ -671,16 +672,16 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                        color: !_isViewingOffboarded ? ExecTokens.cardSurface : Colors.transparent,
+                        color: !_isViewingOffboarded ? context.adapt(ExecTokens.cardSurface) : Colors.transparent,
                         borderRadius: BorderRadius.circular(4),
-                        boxShadow: !_isViewingOffboarded ? [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 2)] : null,
+                        boxShadow: !_isViewingOffboarded ? [BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.05), blurRadius: 2)] : null,
                       ),
                       child: Text(
                         'Active Staff ($totalStaffCount)',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: !_isViewingOffboarded ? FontWeight.bold : FontWeight.normal,
-                          color: !_isViewingOffboarded ? ExecTokens.primaryCTA : ExecTokens.textSecondary,
+                          color: !_isViewingOffboarded ? ExecTokens.primaryCTA : context.adapt(ExecTokens.textSecondary),
                         ),
                       ),
                     ),
@@ -691,9 +692,9 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                        color: _isViewingOffboarded ? ExecTokens.cardSurface : Colors.transparent,
+                        color: _isViewingOffboarded ? context.adapt(ExecTokens.cardSurface) : Colors.transparent,
                         borderRadius: BorderRadius.circular(4),
-                        boxShadow: _isViewingOffboarded ? [BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 2)] : null,
+                        boxShadow: _isViewingOffboarded ? [BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.05), blurRadius: 2)] : null,
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -703,7 +704,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: _isViewingOffboarded ? FontWeight.bold : FontWeight.normal,
-                              color: _isViewingOffboarded ? ExecTokens.absentDot : ExecTokens.textSecondary,
+                              color: _isViewingOffboarded ? ExecTokens.absentDot : context.adapt(ExecTokens.textSecondary),
                             ),
                           ),
                           if (offboardedCount > 0) ...[
@@ -711,7 +712,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                               decoration: BoxDecoration(
-                                color: _isViewingOffboarded ? ExecTokens.absentBg : ExecTokens.borderMuted,
+                                color: _isViewingOffboarded ? context.adapt(ExecTokens.absentBg) : context.adapt(ExecTokens.borderMuted),
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Text(
@@ -719,7 +720,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                                 style: TextStyle(
                                   fontSize: 10,
                                   fontWeight: FontWeight.bold,
-                                  color: _isViewingOffboarded ? ExecTokens.absentDot : ExecTokens.textMuted,
+                                  color: _isViewingOffboarded ? ExecTokens.absentDot : context.adapt(ExecTokens.textMuted),
                                 ),
                               ),
                             ),
@@ -738,22 +739,22 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
               width: 230,
               height: 36,
               decoration: BoxDecoration(
-                color: ExecTokens.canvasBg,
+                color: context.adapt(ExecTokens.canvasBg),
                 borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: ExecTokens.borderMuted),
+                border: Border.all(color: context.adapt(ExecTokens.borderMuted)),
               ),
               child: TextField(
                 controller: _searchCtrl,
-                style: const TextStyle(fontSize: 12, color: ExecTokens.textPrimary),
+                style: TextStyle(fontSize: 12, color: context.adapt(ExecTokens.textPrimary)),
                 decoration: InputDecoration(
                   hintText: 'Search by name, PIN, role...',
-                  hintStyle: const TextStyle(fontSize: 12, color: ExecTokens.textMuted),
-                  prefixIcon: const Icon(Icons.search_rounded, size: 16, color: ExecTokens.textMuted),
+                  hintStyle: TextStyle(fontSize: 12, color: context.adapt(ExecTokens.textMuted)),
+                  prefixIcon: Icon(Icons.search_rounded, size: 16, color: context.adapt(ExecTokens.textMuted)),
                   prefixIconConstraints: const BoxConstraints(minWidth: 32, minHeight: 32),
                   suffixIcon: _searchQuery.isNotEmpty
                       ? IconButton(
                           padding: EdgeInsets.zero,
-                          icon: const Icon(Icons.close_rounded, size: 14, color: ExecTokens.textMuted),
+                          icon: Icon(Icons.close_rounded, size: 14, color: context.adapt(ExecTokens.textMuted)),
                           onPressed: () {
                             _searchCtrl.clear();
                             setState(() => _searchQuery = '');
@@ -776,19 +777,19 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                 icon: Icon(
                   _isCalendarExpanded ? Icons.calendar_month_rounded : Icons.calendar_today_outlined,
                   size: 15,
-                  color: _isCalendarExpanded ? ExecTokens.primaryCTA : ExecTokens.textSecondary,
+                  color: _isCalendarExpanded ? ExecTokens.primaryCTA : context.adapt(ExecTokens.textSecondary),
                 ),
                 label: Text(
                   _isCalendarExpanded ? 'Hide Calendar' : 'Calendar Filter',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: _isCalendarExpanded ? ExecTokens.primaryCTA : ExecTokens.textSecondary,
+                    color: _isCalendarExpanded ? ExecTokens.primaryCTA : context.adapt(ExecTokens.textSecondary),
                   ),
                 ),
                 style: OutlinedButton.styleFrom(
-                  backgroundColor: _isCalendarExpanded ? ExecTokens.rowSelected : ExecTokens.secBtnSurface,
-                  side: BorderSide(color: _isCalendarExpanded ? ExecTokens.primaryRing : ExecTokens.secBtnBorder),
+                  backgroundColor: _isCalendarExpanded ? context.adapt(ExecTokens.rowSelected) : context.adapt(ExecTokens.secBtnSurface),
+                  side: BorderSide(color: _isCalendarExpanded ? ExecTokens.primaryRing : context.adapt(ExecTokens.secBtnBorder)),
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                 ),
@@ -804,11 +805,11 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
             // Leave Range
             OutlinedButton.icon(
               onPressed: () => _openLeaveRangeDialog(),
-              icon: const Icon(Icons.date_range_outlined, size: 14, color: ExecTokens.textSecondary),
-              label: const Text('Leave Range', style: TextStyle(fontSize: 12, color: ExecTokens.textSecondary)),
+              icon: Icon(Icons.date_range_outlined, size: 14, color: context.adapt(ExecTokens.textSecondary)),
+              label: Text('Leave Range', style: TextStyle(fontSize: 12, color: context.adapt(ExecTokens.textSecondary))),
               style: OutlinedButton.styleFrom(
-                backgroundColor: ExecTokens.secBtnSurface,
-                side: const BorderSide(color: ExecTokens.secBtnBorder),
+                backgroundColor: context.adapt(ExecTokens.secBtnSurface),
+                side: BorderSide(color: context.adapt(ExecTokens.secBtnBorder)),
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
               ),
@@ -825,11 +826,11 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                   onSaved: () => setState(() {}),
                 );
               },
-              icon: const Icon(Icons.table_chart_outlined, size: 14, color: ExecTokens.textSecondary),
-              label: const Text('Monthly Grid', style: TextStyle(fontSize: 12, color: ExecTokens.textSecondary)),
+              icon: Icon(Icons.table_chart_outlined, size: 14, color: context.adapt(ExecTokens.textSecondary)),
+              label: Text('Monthly Grid', style: TextStyle(fontSize: 12, color: context.adapt(ExecTokens.textSecondary))),
               style: OutlinedButton.styleFrom(
-                backgroundColor: ExecTokens.secBtnSurface,
-                side: const BorderSide(color: ExecTokens.secBtnBorder),
+                backgroundColor: context.adapt(ExecTokens.secBtnSurface),
+                side: BorderSide(color: context.adapt(ExecTokens.secBtnBorder)),
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
               ),
@@ -843,11 +844,11 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                   MaterialPageRoute(builder: (_) => BiometricDeviceManagerPage(branchId: widget.branchId)),
                 );
               },
-              icon: const Icon(Icons.fingerprint_rounded, size: 14, color: ExecTokens.textSecondary),
-              label: const Text('Biometric PINs', style: TextStyle(fontSize: 12, color: ExecTokens.textSecondary)),
+              icon: Icon(Icons.fingerprint_rounded, size: 14, color: context.adapt(ExecTokens.textSecondary)),
+              label: Text('Biometric PINs', style: TextStyle(fontSize: 12, color: context.adapt(ExecTokens.textSecondary))),
               style: OutlinedButton.styleFrom(
-                backgroundColor: ExecTokens.secBtnSurface,
-                side: const BorderSide(color: ExecTokens.secBtnBorder),
+                backgroundColor: context.adapt(ExecTokens.secBtnSurface),
+                side: BorderSide(color: context.adapt(ExecTokens.secBtnBorder)),
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
               ),
@@ -860,8 +861,8 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                 icon: const Icon(Icons.delete_sweep_outlined, size: 14, color: ExecTokens.absentDot),
                 label: const Text('Wipe Staff', style: TextStyle(fontSize: 12, color: ExecTokens.absentDot)),
                 style: OutlinedButton.styleFrom(
-                  backgroundColor: ExecTokens.absentBg,
-                  side: const BorderSide(color: ExecTokens.absentBorder),
+                  backgroundColor: context.adapt(ExecTokens.absentBg),
+                  side: BorderSide(color: context.adapt(ExecTokens.absentBorder)),
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                 ),
@@ -921,9 +922,9 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
       margin: const EdgeInsets.fromLTRB(24, 6, 24, 6),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
       decoration: BoxDecoration(
-        color: ExecTokens.cardSurface,
+        color: context.adapt(ExecTokens.cardSurface),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: ExecTokens.borderMuted),
+        border: Border.all(color: context.adapt(ExecTokens.borderMuted)),
       ),
       child: LayoutBuilder(builder: (ctx, constraints) {
         final isWide = constraints.maxWidth >= 850;
@@ -934,7 +935,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
             IconButton(
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
-              icon: const Icon(Icons.chevron_left_rounded, size: 20, color: ExecTokens.textSecondary),
+              icon: Icon(Icons.chevron_left_rounded, size: 20, color: context.adapt(ExecTokens.textSecondary)),
               tooltip: 'Previous Day',
               onPressed: () {
                 _draftRecords.clear();
@@ -945,9 +946,9 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
               decoration: BoxDecoration(
-                color: isSunday ? ExecTokens.lateBg : ExecTokens.rowSelected,
+                color: isSunday ? context.adapt(ExecTokens.lateBg) : context.adapt(ExecTokens.rowSelected),
                 borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: isSunday ? ExecTokens.lateBorder : ExecTokens.primaryRing),
+                border: Border.all(color: isSunday ? context.adapt(ExecTokens.lateBorder) : ExecTokens.primaryRing),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -955,7 +956,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                   Icon(
                     isSunday ? Icons.weekend_outlined : Icons.calendar_today_rounded,
                     size: 13,
-                    color: isSunday ? ExecTokens.lateText : ExecTokens.primaryCTA,
+                    color: isSunday ? context.adapt(ExecTokens.lateText) : ExecTokens.primaryCTA,
                   ),
                   const SizedBox(width: 6),
                   Text(
@@ -963,7 +964,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
-                      color: isSunday ? ExecTokens.lateText : ExecTokens.primaryCTA,
+                      color: isSunday ? context.adapt(ExecTokens.lateText) : ExecTokens.primaryCTA,
                     ),
                   ),
                 ],
@@ -973,7 +974,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
             IconButton(
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
-              icon: const Icon(Icons.chevron_right_rounded, size: 20, color: ExecTokens.textSecondary),
+              icon: Icon(Icons.chevron_right_rounded, size: 20, color: context.adapt(ExecTokens.textSecondary)),
               tooltip: 'Next Day',
               onPressed: () {
                 _draftRecords.clear();
@@ -992,11 +993,11 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: ExecTokens.rowHover,
+                  color: context.adapt(ExecTokens.rowHover),
                   borderRadius: BorderRadius.circular(4),
-                  border: Border.all(color: ExecTokens.borderMuted),
+                  border: Border.all(color: context.adapt(ExecTokens.borderMuted)),
                 ),
-                child: const Text('Today', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: ExecTokens.textPrimary)),
+                child: Text('Today', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: context.adapt(ExecTokens.textPrimary))),
               ),
             ),
           ],
@@ -1007,15 +1008,15 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
           runSpacing: 4,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            _statusFilterPill('All Staff', '$totalStaff', 'all', ExecTokens.textSecondary, ExecTokens.canvasBg, ExecTokens.borderMuted),
-            _statusFilterPill('Present', '$present', 'present', ExecTokens.presentText, ExecTokens.presentBg, ExecTokens.presentBorder),
+            _statusFilterPill('All Staff', '$totalStaff', 'all', context.adapt(ExecTokens.textSecondary), context.adapt(ExecTokens.canvasBg), context.adapt(ExecTokens.borderMuted)),
+            _statusFilterPill('Present', '$present', 'present', context.adapt(ExecTokens.presentText), context.adapt(ExecTokens.presentBg), context.adapt(ExecTokens.presentBorder)),
             if (late > 0)
-              _statusFilterPill('Late', '$late', 'late', ExecTokens.lateText, ExecTokens.lateBg, ExecTokens.lateBorder),
+              _statusFilterPill('Late', '$late', 'late', context.adapt(ExecTokens.lateText), context.adapt(ExecTokens.lateBg), context.adapt(ExecTokens.lateBorder)),
             if (leave > 0)
-              _statusFilterPill('On Leave', '$leave', 'leave', ExecTokens.leaveText, ExecTokens.leaveBg, ExecTokens.leaveBorder),
-            _statusFilterPill('Absent', '$absent', 'absent', ExecTokens.absentText, ExecTokens.absentBg, ExecTokens.absentBorder),
+              _statusFilterPill('On Leave', '$leave', 'leave', context.adapt(ExecTokens.leaveText), context.adapt(ExecTokens.leaveBg), context.adapt(ExecTokens.leaveBorder)),
+            _statusFilterPill('Absent', '$absent', 'absent', context.adapt(ExecTokens.absentText), context.adapt(ExecTokens.absentBg), context.adapt(ExecTokens.absentBorder)),
             if (holiday > 0)
-              _statusFilterPill('Holiday', '$holiday', 'holiday', ExecTokens.holidayText, ExecTokens.holidayBg, ExecTokens.holidayBorder),
+              _statusFilterPill('Holiday', '$holiday', 'holiday', context.adapt(ExecTokens.holidayText), context.adapt(ExecTokens.holidayBg), context.adapt(ExecTokens.holidayBorder)),
           ],
         );
 
@@ -1083,10 +1084,10 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
       margin: const EdgeInsets.fromLTRB(24, 6, 24, 6),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: ExecTokens.cardSurface,
+        color: context.adapt(ExecTokens.cardSurface),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: ExecTokens.borderMuted),
-        boxShadow: const [BoxShadow(color: Color(0x04000000), blurRadius: 4, offset: Offset(0, 1))],
+        border: Border.all(color: context.adapt(ExecTokens.borderMuted)),
+        boxShadow: const [BoxShadow(color: SoftPalette.gray900A2, blurRadius: 4, offset: Offset(0, 1))],
       ),
       child: LayoutBuilder(builder: (ctx, constraints) {
         final isDesktop = constraints.maxWidth >= 900;
@@ -1103,12 +1104,12 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                 children: [
                   const Icon(Icons.calendar_month_outlined, size: 16, color: ExecTokens.primaryCTA),
                   const SizedBox(width: 6),
-                  Text(monthTitle, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: ExecTokens.textPrimary)),
+                  Text(monthTitle, style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: context.adapt(ExecTokens.textPrimary))),
                   const Spacer(),
                   IconButton(
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
-                    icon: const Icon(Icons.chevron_left_rounded, size: 18, color: ExecTokens.textSecondary),
+                    icon: Icon(Icons.chevron_left_rounded, size: 18, color: context.adapt(ExecTokens.textSecondary)),
                     onPressed: () {
                       setState(() {
                         _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month - 1, 1);
@@ -1118,7 +1119,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                   IconButton(
                     padding: EdgeInsets.zero,
                     constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
-                    icon: const Icon(Icons.chevron_right_rounded, size: 18, color: ExecTokens.textSecondary),
+                    icon: Icon(Icons.chevron_right_rounded, size: 18, color: context.adapt(ExecTokens.textSecondary)),
                     onPressed: () {
                       setState(() {
                         _calendarMonth = DateTime(_calendarMonth.year, _calendarMonth.month + 1, 1);
@@ -1137,11 +1138,11 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: ExecTokens.rowHover,
+                        color: context.adapt(ExecTokens.rowHover),
                         borderRadius: BorderRadius.circular(4),
-                        border: Border.all(color: ExecTokens.borderMuted),
+                        border: Border.all(color: context.adapt(ExecTokens.borderMuted)),
                       ),
-                      child: const Text('Today', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: ExecTokens.textPrimary)),
+                      child: Text('Today', style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: context.adapt(ExecTokens.textPrimary))),
                     ),
                   ),
                 ],
@@ -1158,7 +1159,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.w600,
-                          color: isSun ? ExecTokens.lateText : ExecTokens.textMuted,
+                          color: isSun ? context.adapt(ExecTokens.lateText) : context.adapt(ExecTokens.textMuted),
                         ),
                       ),
                     ),
@@ -1198,15 +1199,15 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                           color: isSelected
                               ? ExecTokens.primaryCTA
                               : (isHol
-                                  ? ExecTokens.holidayBg
-                                  : (isSun ? ExecTokens.sundayBg : Colors.transparent)),
+                                  ? context.adapt(ExecTokens.holidayBg)
+                                  : (isSun ? context.adapt(ExecTokens.sundayBg) : Colors.transparent)),
                           borderRadius: BorderRadius.circular(4),
                           border: Border.all(
                             color: isSelected
                                 ? ExecTokens.primaryRing
                                 : (isHol
-                                    ? ExecTokens.holidayBorder
-                                    : (isSun ? ExecTokens.sundayBorder : Colors.transparent)),
+                                    ? context.adapt(ExecTokens.holidayBorder)
+                                    : (isSun ? context.adapt(ExecTokens.sundayBorder) : Colors.transparent)),
                             width: isSelected ? 1.2 : 0.8,
                           ),
                         ),
@@ -1219,8 +1220,8 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                             color: isSelected
                                 ? ExecTokens.textInverse
                                 : (isHol
-                                    ? ExecTokens.holidayText
-                                    : (isSun ? ExecTokens.lateText : ExecTokens.textPrimary)),
+                                    ? context.adapt(ExecTokens.holidayText)
+                                    : (isSun ? context.adapt(ExecTokens.lateText) : context.adapt(ExecTokens.textPrimary))),
                           ),
                         ),
                       ),
@@ -1247,15 +1248,15 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
           children: [
             Row(
               children: [
-                const Icon(Icons.analytics_outlined, size: 15, color: ExecTokens.textSecondary),
+                Icon(Icons.analytics_outlined, size: 15, color: context.adapt(ExecTokens.textSecondary)),
                 const SizedBox(width: 6),
-                Text('$monthTitle Overview', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: ExecTokens.textPrimary)),
+                Text('$monthTitle Overview', style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: context.adapt(ExecTokens.textPrimary))),
                 const Spacer(),
                 IconButton(
                   tooltip: 'Hide Calendar',
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(minWidth: 24, minHeight: 24),
-                  icon: const Icon(Icons.close_rounded, size: 18, color: ExecTokens.textMuted),
+                  icon: Icon(Icons.close_rounded, size: 18, color: context.adapt(ExecTokens.textMuted)),
                   onPressed: () => setState(() => _isCalendarExpanded = false),
                 ),
               ],
@@ -1264,24 +1265,24 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
             // Metric cards in a row
             Row(
               children: [
-                Expanded(child: _metricCard('Total Days', '$daysInMonth', 'Month cycle', ExecTokens.textPrimary, ExecTokens.canvasBg, ExecTokens.borderMuted)),
+                Expanded(child: _metricCard('Total Days', '$daysInMonth', 'Month cycle', context.adapt(ExecTokens.textPrimary), context.adapt(ExecTokens.canvasBg), context.adapt(ExecTokens.borderMuted))),
                 const SizedBox(width: 8),
-                Expanded(child: _metricCard('Working Days', '$totalWorkingDays', 'Schedule', ExecTokens.presentText, ExecTokens.presentBg, ExecTokens.presentBorder)),
+                Expanded(child: _metricCard('Working Days', '$totalWorkingDays', 'Schedule', context.adapt(ExecTokens.presentText), context.adapt(ExecTokens.presentBg), context.adapt(ExecTokens.presentBorder))),
                 const SizedBox(width: 8),
-                Expanded(child: _metricCard('Sundays', '$totalSundays', 'Off days', ExecTokens.lateText, ExecTokens.lateBg, ExecTokens.lateBorder)),
+                Expanded(child: _metricCard('Sundays', '$totalSundays', 'Off days', context.adapt(ExecTokens.lateText), context.adapt(ExecTokens.lateBg), context.adapt(ExecTokens.lateBorder))),
                 const SizedBox(width: 8),
-                Expanded(child: _metricCard('Holidays', '$totalHolidays', 'Public/Gazetted', ExecTokens.holidayText, ExecTokens.holidayBg, ExecTokens.holidayBorder)),
+                Expanded(child: _metricCard('Holidays', '$totalHolidays', 'Public/Gazetted', context.adapt(ExecTokens.holidayText), context.adapt(ExecTokens.holidayBg), context.adapt(ExecTokens.holidayBorder))),
               ],
             ),
             const SizedBox(height: 10),
-            const Divider(color: ExecTokens.borderMuted, height: 1),
+            Divider(color: context.adapt(ExecTokens.borderMuted), height: 1),
             const SizedBox(height: 8),
             // Today / Selected Date Status Filter Pills
             Row(
               children: [
                 Text(
                   '${DateFormat("EEE, d MMM").format(widget.date)} Live:',
-                  style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: ExecTokens.textSecondary),
+                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: context.adapt(ExecTokens.textSecondary)),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
@@ -1290,15 +1291,15 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                     runSpacing: 4,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      _statusFilterPill('All Staff', '$totalStaff', 'all', ExecTokens.textSecondary, ExecTokens.canvasBg, ExecTokens.borderMuted),
-                      _statusFilterPill('Present', '$present', 'present', ExecTokens.presentText, ExecTokens.presentBg, ExecTokens.presentBorder),
+                      _statusFilterPill('All Staff', '$totalStaff', 'all', context.adapt(ExecTokens.textSecondary), context.adapt(ExecTokens.canvasBg), context.adapt(ExecTokens.borderMuted)),
+                      _statusFilterPill('Present', '$present', 'present', context.adapt(ExecTokens.presentText), context.adapt(ExecTokens.presentBg), context.adapt(ExecTokens.presentBorder)),
                       if (late > 0)
-                        _statusFilterPill('Late', '$late', 'late', ExecTokens.lateText, ExecTokens.lateBg, ExecTokens.lateBorder),
+                        _statusFilterPill('Late', '$late', 'late', context.adapt(ExecTokens.lateText), context.adapt(ExecTokens.lateBg), context.adapt(ExecTokens.lateBorder)),
                       if (leave > 0)
-                        _statusFilterPill('On Leave', '$leave', 'leave', ExecTokens.leaveText, ExecTokens.leaveBg, ExecTokens.leaveBorder),
-                      _statusFilterPill('Absent', '$absent', 'absent', ExecTokens.absentText, ExecTokens.absentBg, ExecTokens.absentBorder),
+                        _statusFilterPill('On Leave', '$leave', 'leave', context.adapt(ExecTokens.leaveText), context.adapt(ExecTokens.leaveBg), context.adapt(ExecTokens.leaveBorder)),
+                      _statusFilterPill('Absent', '$absent', 'absent', context.adapt(ExecTokens.absentText), context.adapt(ExecTokens.absentBg), context.adapt(ExecTokens.absentBorder)),
                       if (holiday > 0)
-                        _statusFilterPill('Holiday', '$holiday', 'holiday', ExecTokens.holidayText, ExecTokens.holidayBg, ExecTokens.holidayBorder),
+                        _statusFilterPill('Holiday', '$holiday', 'holiday', context.adapt(ExecTokens.holidayText), context.adapt(ExecTokens.holidayBg), context.adapt(ExecTokens.holidayBorder)),
                     ],
                   ),
                 ),
@@ -1313,7 +1314,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
             children: [
               calendarBlock,
               const SizedBox(height: 12),
-              const Divider(color: ExecTokens.borderMuted, height: 1),
+              Divider(color: context.adapt(ExecTokens.borderMuted), height: 1),
               const SizedBox(height: 10),
               analyticsBlock,
             ],
@@ -1325,7 +1326,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
           children: [
             calendarBlock,
             const SizedBox(width: 16),
-            const SizedBox(height: 200, child: VerticalDivider(color: ExecTokens.borderMuted, width: 1)),
+            SizedBox(height: 200, child: VerticalDivider(color: context.adapt(ExecTokens.borderMuted), width: 1)),
             const SizedBox(width: 16),
             Expanded(child: analyticsBlock),
           ],
@@ -1346,7 +1347,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(label, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: ExecTokens.textMuted)),
+          Text(label, style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: context.adapt(ExecTokens.textMuted))),
           const SizedBox(height: 2),
           Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: color, letterSpacing: -0.3)),
           const SizedBox(height: 1),
@@ -1364,7 +1365,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
-          color: isSelected ? ExecTokens.rowSelected : bg,
+          color: isSelected ? context.adapt(ExecTokens.rowSelected) : bg,
           borderRadius: BorderRadius.circular(6),
           border: Border.all(
             color: isSelected ? ExecTokens.primaryCTA : border,
@@ -1387,7 +1388,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                 style: TextStyle(
                   fontSize: 10.5,
                   fontWeight: FontWeight.w800,
-                  color: isSelected ? Colors.white : textColor,
+                  color: isSelected ? SoftPalette.gray50 : textColor,
                 ),
               ),
             ),
@@ -1413,9 +1414,9 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
           margin: const EdgeInsets.fromLTRB(24, 4, 24, 4),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
-            color: ExecTokens.absentBg,
+            color: context.adapt(ExecTokens.absentBg),
             borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: ExecTokens.absentBorder),
+            border: Border.all(color: context.adapt(ExecTokens.absentBorder)),
           ),
           child: Row(
             children: [
@@ -1424,7 +1425,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
               Expanded(
                 child: Text(
                   '${unmappedList.length} Unmapped Biometric Scans Detected (PINs: ${uniquePins.join(", ")})',
-                  style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ExecTokens.absentText),
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(ExecTokens.absentText)),
                 ),
               ),
               OutlinedButton.icon(
@@ -1432,16 +1433,16 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                   final assigned = await ZkTecoNetworkService.bulkAutoAssignBiometricPins();
                   final remapped = await ZkTecoNetworkService.processPendingUnmappedPunches();
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    AppToast.showSnackBar(context, 
                       SnackBar(content: Text('✅ Auto-assigned $assigned PINs and routed $remapped punches!'), backgroundColor: ExecTokens.presentDot),
                     );
                     setState(() {});
                   }
                 },
-                icon: const Icon(Icons.auto_fix_high_rounded, size: 13, color: ExecTokens.absentText),
-                label: const Text('Auto-Route', style: TextStyle(fontSize: 11, color: ExecTokens.absentText, fontWeight: FontWeight.bold)),
+                icon: Icon(Icons.auto_fix_high_rounded, size: 13, color: context.adapt(ExecTokens.absentText)),
+                label: Text('Auto-Route', style: TextStyle(fontSize: 11, color: context.adapt(ExecTokens.absentText), fontWeight: FontWeight.bold)),
                 style: OutlinedButton.styleFrom(
-                  side: const BorderSide(color: ExecTokens.absentBorder),
+                  side: BorderSide(color: context.adapt(ExecTokens.absentBorder)),
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 ),
               ),
@@ -1469,9 +1470,9 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
           margin: const EdgeInsets.fromLTRB(24, 4, 24, 4),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
           decoration: BoxDecoration(
-            color: ExecTokens.lateBg,
+            color: context.adapt(ExecTokens.lateBg),
             borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: ExecTokens.lateBorder),
+            border: Border.all(color: context.adapt(ExecTokens.lateBorder)),
           ),
           child: Row(
             children: [
@@ -1479,7 +1480,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
               const SizedBox(width: 8),
               Text(
                 'Cross-Branch Approvals (${pendingList.length} Pending)',
-                style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ExecTokens.lateText),
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(ExecTokens.lateText)),
               ),
               const Spacer(),
               ElevatedButton(
@@ -1491,7 +1492,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                     );
                   }
                   if (context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    AppToast.showSnackBar(context, 
                       const SnackBar(content: Text('✅ Approved cross-branch punches!'), backgroundColor: ExecTokens.presentDot),
                     );
                     setState(() {});
@@ -1499,7 +1500,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: ExecTokens.lateDot,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   elevation: 0,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
@@ -1517,23 +1518,23 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
   Widget _buildTableHeader() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: const BoxDecoration(
-        color: ExecTokens.canvasBg,
+      decoration: BoxDecoration(
+        color: context.adapt(ExecTokens.canvasBg),
         borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
-        border: Border(bottom: BorderSide(color: ExecTokens.borderMuted)),
+        border: Border(bottom: BorderSide(color: context.adapt(ExecTokens.borderMuted))),
       ),
-      child: const Row(
+      child: Row(
         children: [
           SizedBox(width: 36), // avatar space
           SizedBox(width: 12),
-          Expanded(flex: 3, child: Text('EMPLOYEE', style: ExecTokens.tableHeader)),
-          Expanded(flex: 2, child: Text('DEPARTMENT', style: ExecTokens.tableHeader)),
-          Expanded(flex: 2, child: Text('WORKING HOURS', style: ExecTokens.tableHeader)),
-          Expanded(flex: 2, child: Text('CLOCK IN / OUT', style: ExecTokens.tableHeader)),
-          Expanded(flex: 2, child: Text('DURATION', style: ExecTokens.tableHeader)),
-          Expanded(flex: 2, child: Text('STATUS', style: ExecTokens.tableHeader)),
-          Expanded(flex: 2, child: Text('ATTENDANCE % & DAYS', style: ExecTokens.tableHeader)),
-          Expanded(flex: 2, child: Text('NOTES', style: ExecTokens.tableHeader)),
+          Expanded(flex: 3, child: Text('EMPLOYEE', style: ExecTokens.tableHeader.copyWith(color: context.adapt(ExecTokens.textMuted)))),
+          Expanded(flex: 2, child: Text('DEPARTMENT', style: ExecTokens.tableHeader.copyWith(color: context.adapt(ExecTokens.textMuted)))),
+          Expanded(flex: 2, child: Text('WORKING HOURS', style: ExecTokens.tableHeader.copyWith(color: context.adapt(ExecTokens.textMuted)))),
+          Expanded(flex: 2, child: Text('CLOCK IN / OUT', style: ExecTokens.tableHeader.copyWith(color: context.adapt(ExecTokens.textMuted)))),
+          Expanded(flex: 2, child: Text('DURATION', style: ExecTokens.tableHeader.copyWith(color: context.adapt(ExecTokens.textMuted)))),
+          Expanded(flex: 2, child: Text('STATUS', style: ExecTokens.tableHeader.copyWith(color: context.adapt(ExecTokens.textMuted)))),
+          Expanded(flex: 2, child: Text('ATTENDANCE % & DAYS', style: ExecTokens.tableHeader.copyWith(color: context.adapt(ExecTokens.textMuted)))),
+          Expanded(flex: 2, child: Text('NOTES', style: ExecTokens.tableHeader.copyWith(color: context.adapt(ExecTokens.textMuted)))),
           SizedBox(width: 36), // 3 dots
         ],
       ),
@@ -1546,9 +1547,9 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
       return Container(
         margin: const EdgeInsets.fromLTRB(24, 6, 24, 16),
         decoration: BoxDecoration(
-          color: ExecTokens.cardSurface,
+          color: context.adapt(ExecTokens.cardSurface),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: ExecTokens.borderMuted),
+          border: Border.all(color: context.adapt(ExecTokens.borderMuted)),
         ),
         child: Column(
           children: [
@@ -1563,13 +1564,13 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                       children: [
                         Container(
                           padding: const EdgeInsets.all(12),
-                          decoration: const BoxDecoration(color: ExecTokens.rowHover, shape: BoxShape.circle),
-                          child: const Icon(Icons.people_outline_rounded, size: 28, color: ExecTokens.textMuted),
+                          decoration: BoxDecoration(color: context.adapt(ExecTokens.rowHover), shape: BoxShape.circle),
+                          child: Icon(Icons.people_outline_rounded, size: 28, color: context.adapt(ExecTokens.textMuted)),
                         ),
                         const SizedBox(height: 10),
-                        const Text('No employees found', style: ExecTokens.pageTitle),
+                        Text('No employees found', style: ExecTokens.pageTitle.copyWith(color: context.adapt(ExecTokens.textPrimary))),
                         const SizedBox(height: 4),
-                        const Text('Add a new employee to get started or adjust your filters.', style: ExecTokens.rowSecondary),
+                        Text('Add a new employee to get started or adjust your filters.', style: ExecTokens.rowSecondary.copyWith(color: context.adapt(ExecTokens.textMuted))),
                         const SizedBox(height: 12),
                         ElevatedButton.icon(
                           onPressed: widget.onAddEmployee,
@@ -1577,7 +1578,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                           label: const Text('Register Employee', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: ExecTokens.primaryCTA,
-                            foregroundColor: Colors.white,
+                            foregroundColor: SoftPalette.gray50,
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                           ),
@@ -1596,9 +1597,9 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
     return Container(
       margin: const EdgeInsets.fromLTRB(24, 6, 24, 16),
       decoration: BoxDecoration(
-        color: ExecTokens.cardSurface,
+        color: context.adapt(ExecTokens.cardSurface),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: ExecTokens.borderMuted),
+        border: Border.all(color: context.adapt(ExecTokens.borderMuted)),
       ),
       child: Column(
         children: [
@@ -1607,7 +1608,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
           Expanded(
             child: ListView.separated(
               itemCount: records.length,
-              separatorBuilder: (c, i) => const Divider(color: ExecTokens.borderDivider, height: 1, thickness: 0.5),
+              separatorBuilder: (c, i) => Divider(color: context.adapt(ExecTokens.borderDivider), height: 1, thickness: 0.5),
               itemBuilder: (ctx, idx) {
                 final r = records[idx];
                 return _buildEmployeeRow(r, monthKey, isSunday);
@@ -1624,9 +1625,9 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
       margin: const EdgeInsets.fromLTRB(24, 12, 24, 0),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: ExecTokens.absentBg.withValues(alpha: 0.5),
+        color: context.adapt(ExecTokens.absentBg).withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: ExecTokens.absentBorder.withValues(alpha: 0.6)),
+        border: Border.all(color: context.adapt(ExecTokens.absentBorder).withValues(alpha: 0.6)),
       ),
       child: Row(
         children: [
@@ -1635,7 +1636,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
           Expanded(
             child: Text(
               'Offboarded Staff Archive ($count) · Historical attendance, profile records, and payroll settlements are preserved here permanently.',
-              style: const TextStyle(fontSize: 12.5, color: ExecTokens.textPrimary, fontWeight: FontWeight.w500),
+              style: TextStyle(fontSize: 12.5, color: context.adapt(ExecTokens.textPrimary), fontWeight: FontWeight.w500),
             ),
           ),
           OutlinedButton.icon(
@@ -1643,8 +1644,8 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
             icon: const Icon(Icons.arrow_back_rounded, size: 14, color: ExecTokens.primaryCTA),
             label: const Text('Back to Active Staff', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ExecTokens.primaryCTA)),
             style: OutlinedButton.styleFrom(
-              backgroundColor: ExecTokens.cardSurface,
-              side: const BorderSide(color: ExecTokens.borderMuted),
+              backgroundColor: context.adapt(ExecTokens.cardSurface),
+              side: BorderSide(color: context.adapt(ExecTokens.borderMuted)),
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             ),
           ),
@@ -1658,9 +1659,9 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
       return Container(
         margin: const EdgeInsets.fromLTRB(24, 12, 24, 16),
         decoration: BoxDecoration(
-          color: ExecTokens.cardSurface,
+          color: context.adapt(ExecTokens.cardSurface),
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: ExecTokens.borderMuted),
+          border: Border.all(color: context.adapt(ExecTokens.borderMuted)),
         ),
         child: Center(
           child: Padding(
@@ -1670,13 +1671,13 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
               children: [
                 Container(
                   padding: const EdgeInsets.all(12),
-                  decoration: const BoxDecoration(color: ExecTokens.rowHover, shape: BoxShape.circle),
-                  child: const Icon(Icons.people_outline_rounded, size: 28, color: ExecTokens.textMuted),
+                  decoration: BoxDecoration(color: context.adapt(ExecTokens.rowHover), shape: BoxShape.circle),
+                  child: Icon(Icons.people_outline_rounded, size: 28, color: context.adapt(ExecTokens.textMuted)),
                 ),
                 const SizedBox(height: 10),
-                const Text('No offboarded staff found', style: ExecTokens.pageTitle),
+                Text('No offboarded staff found', style: ExecTokens.pageTitle.copyWith(color: context.adapt(ExecTokens.textPrimary))),
                 const SizedBox(height: 4),
-                const Text('Employees moved to offboarded status will appear in this category.', style: ExecTokens.rowSecondary),
+                Text('Employees moved to offboarded status will appear in this category.', style: ExecTokens.rowSecondary.copyWith(color: context.adapt(ExecTokens.textMuted))),
               ],
             ),
           ),
@@ -1687,30 +1688,30 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
     return Container(
       margin: const EdgeInsets.fromLTRB(24, 12, 24, 16),
       decoration: BoxDecoration(
-        color: ExecTokens.cardSurface,
+        color: context.adapt(ExecTokens.cardSurface),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: ExecTokens.borderMuted),
+        border: Border.all(color: context.adapt(ExecTokens.borderMuted)),
       ),
       child: Column(
         children: [
           // Table Header
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            decoration: const BoxDecoration(
-              color: ExecTokens.canvasBg,
+            decoration: BoxDecoration(
+              color: context.adapt(ExecTokens.canvasBg),
               borderRadius: BorderRadius.vertical(top: Radius.circular(8)),
-              border: Border(bottom: BorderSide(color: ExecTokens.borderMuted)),
+              border: Border(bottom: BorderSide(color: context.adapt(ExecTokens.borderMuted))),
             ),
-            child: const Row(
+            child: Row(
               children: [
                 SizedBox(width: 36), // avatar
                 SizedBox(width: 12),
-                Expanded(flex: 3, child: Text('EMPLOYEE', style: ExecTokens.tableHeader)),
-                Expanded(flex: 2, child: Text('DEPARTMENT', style: ExecTokens.tableHeader)),
-                Expanded(flex: 2, child: Text('OFFBOARDED DATE', style: ExecTokens.tableHeader)),
-                Expanded(flex: 3, child: Text('REASON / STATUS', style: ExecTokens.tableHeader)),
-                Expanded(flex: 2, child: Text('ADVANCE BALANCE', style: ExecTokens.tableHeader)),
-                SizedBox(width: 140, child: Text('ACTIONS', style: ExecTokens.tableHeader, textAlign: TextAlign.right)),
+                Expanded(flex: 3, child: Text('EMPLOYEE', style: ExecTokens.tableHeader.copyWith(color: context.adapt(ExecTokens.textMuted)))),
+                Expanded(flex: 2, child: Text('DEPARTMENT', style: ExecTokens.tableHeader.copyWith(color: context.adapt(ExecTokens.textMuted)))),
+                Expanded(flex: 2, child: Text('OFFBOARDED DATE', style: ExecTokens.tableHeader.copyWith(color: context.adapt(ExecTokens.textMuted)))),
+                Expanded(flex: 3, child: Text('REASON / STATUS', style: ExecTokens.tableHeader.copyWith(color: context.adapt(ExecTokens.textMuted)))),
+                Expanded(flex: 2, child: Text('ADVANCE BALANCE', style: ExecTokens.tableHeader.copyWith(color: context.adapt(ExecTokens.textMuted)))),
+                SizedBox(width: 140, child: Text('ACTIONS', style: ExecTokens.tableHeader.copyWith(color: context.adapt(ExecTokens.textMuted)), textAlign: TextAlign.right)),
               ],
             ),
           ),
@@ -1718,7 +1719,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
           Expanded(
             child: ListView.separated(
               itemCount: employees.length,
-              separatorBuilder: (c, i) => const Divider(color: ExecTokens.borderDivider, height: 1, thickness: 0.5),
+              separatorBuilder: (c, i) => Divider(color: context.adapt(ExecTokens.borderDivider), height: 1, thickness: 0.5),
               itemBuilder: (ctx, idx) {
                 final emp = employees[idx];
                 final empId = (emp['localId'] ?? emp['id'] ?? '').toString();
@@ -1746,7 +1747,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                       // Avatar
                       CircleAvatar(
                         radius: 17,
-                        backgroundColor: ExecTokens.absentBg,
+                        backgroundColor: context.adapt(ExecTokens.absentBg),
                         child: Text(
                           name.isNotEmpty ? name[0].toUpperCase() : '?',
                           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: ExecTokens.absentDot),
@@ -1760,20 +1761,20 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Text(name, style: ExecTokens.rowPrimary),
+                            Text(name, style: ExecTokens.rowPrimary.copyWith(color: context.adapt(ExecTokens.textPrimary))),
                             const SizedBox(height: 2),
                             Row(
                               children: [
-                                Text(role, style: ExecTokens.rowSecondary),
+                                Text(role, style: ExecTokens.rowSecondary.copyWith(color: context.adapt(ExecTokens.textMuted))),
                                 if (pin.isNotEmpty) ...[
                                   const SizedBox(width: 6),
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                                     decoration: BoxDecoration(
-                                      color: ExecTokens.borderMuted,
+                                      color: context.adapt(ExecTokens.borderMuted),
                                       borderRadius: BorderRadius.circular(3),
                                     ),
-                                    child: Text('PIN $pin', style: const TextStyle(fontSize: 10, fontFamily: 'monospace', color: ExecTokens.textMuted)),
+                                    child: Text('PIN $pin', style: TextStyle(fontSize: 10, fontFamily: 'monospace', color: context.adapt(ExecTokens.textMuted))),
                                   ),
                                 ],
                               ],
@@ -1784,12 +1785,12 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                       // Department
                       Expanded(
                         flex: 2,
-                        child: Text(dept, style: ExecTokens.rowSecondary),
+                        child: Text(dept, style: ExecTokens.rowSecondary.copyWith(color: context.adapt(ExecTokens.textMuted))),
                       ),
                       // Offboarded Date
                       Expanded(
                         flex: 2,
-                        child: Text(formattedDate, style: ExecTokens.rowSecondary),
+                        child: Text(formattedDate, style: ExecTokens.rowSecondary.copyWith(color: context.adapt(ExecTokens.textMuted))),
                       ),
                       // Reason & Details
                       Expanded(
@@ -1801,18 +1802,18 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                color: ExecTokens.absentBg,
+                                color: context.adapt(ExecTokens.absentBg),
                                 borderRadius: BorderRadius.circular(4),
-                                border: Border.all(color: ExecTokens.absentBorder, width: 0.8),
+                                border: Border.all(color: context.adapt(ExecTokens.absentBorder), width: 0.8),
                               ),
                               child: Text(
                                 reason.toString().toUpperCase(),
-                                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: ExecTokens.absentText),
+                                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: context.adapt(ExecTokens.absentText)),
                               ),
                             ),
                             if (detailedReason.isNotEmpty) ...[
                               const SizedBox(height: 2),
-                              Text(detailedReason, style: const TextStyle(fontSize: 11, color: ExecTokens.textMuted), maxLines: 1, overflow: TextOverflow.ellipsis),
+                              Text(detailedReason, style: TextStyle(fontSize: 11, color: context.adapt(ExecTokens.textMuted)), maxLines: 1, overflow: TextOverflow.ellipsis),
                             ],
                           ],
                         ),
@@ -1825,7 +1826,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
-                            color: advance > 0 ? ExecTokens.absentDot : ExecTokens.presentText,
+                            color: advance > 0 ? ExecTokens.absentDot : context.adapt(ExecTokens.presentText),
                           ),
                         ),
                       ),
@@ -1837,7 +1838,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                           children: [
                             IconButton(
                               tooltip: 'View Profile & History',
-                              icon: const Icon(Icons.visibility_outlined, size: 18, color: ExecTokens.textSecondary),
+                              icon: Icon(Icons.visibility_outlined, size: 18, color: context.adapt(ExecTokens.textSecondary)),
                               onPressed: () => _openEmployeeProfile(empId),
                             ),
                             const SizedBox(width: 4),
@@ -1847,7 +1848,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                               label: const Text('Reinstate', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: ExecTokens.primaryCTA,
-                                foregroundColor: Colors.white,
+                                foregroundColor: SoftPalette.gray50,
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                               ),
@@ -1870,23 +1871,23 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: ExecTokens.cardSurface,
+        backgroundColor: context.adapt(ExecTokens.cardSurface),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         title: Row(
           children: [
             const Icon(Icons.restore_rounded, color: ExecTokens.primaryCTA, size: 22),
             const SizedBox(width: 8),
-            Text('Reinstate $name', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: ExecTokens.textPrimary)),
+            Text('Reinstate $name', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: context.adapt(ExecTokens.textPrimary))),
           ],
         ),
         content: Text(
           'Are you sure you want to reinstate $name back to Active Staff?\n\nThis will restore their profile in daily attendance and payroll rosters.',
-          style: const TextStyle(fontSize: 13, color: ExecTokens.textSecondary),
+          style: TextStyle(fontSize: 13, color: context.adapt(ExecTokens.textSecondary)),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: ExecTokens.textMuted)),
+            child: Text('Cancel', style: TextStyle(color: context.adapt(ExecTokens.textMuted))),
           ),
           ElevatedButton(
             onPressed: () async {
@@ -1894,7 +1895,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
               await FinanceLocalStorage.reinstateEmployee(empId, performedBy: LocalStorageService.getActiveUsername());
               if (mounted) {
                 setState(() {});
-                ScaffoldMessenger.of(context).showSnackBar(
+                AppToast.showSnackBar(context, 
                   SnackBar(
                     content: Text('$name has been reinstated to Active Staff.'),
                     backgroundColor: ExecTokens.primaryCTA,
@@ -1902,7 +1903,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                 );
               }
             },
-            style: ElevatedButton.styleFrom(backgroundColor: ExecTokens.primaryCTA, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: ExecTokens.primaryCTA, foregroundColor: SoftPalette.gray50),
             child: const Text('Reinstate'),
           ),
         ],
@@ -1952,7 +1953,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
     final int totalDays = stats['totalDays'] as int;
 
     return InkWell(
-      hoverColor: ExecTokens.rowHover,
+      hoverColor: context.adapt(ExecTokens.rowHover),
       onTap: () => _openEmployeeProfile(empId, empName: name, pin: pin),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -1961,7 +1962,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
             // Avatar Circle
             CircleAvatar(
               radius: 17,
-              backgroundColor: ExecTokens.rowSelected,
+              backgroundColor: context.adapt(ExecTokens.rowSelected),
               child: Text(
                 name.isNotEmpty ? name[0].toUpperCase() : '?',
                 style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: ExecTokens.primaryCTA),
@@ -1976,11 +1977,11 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(name, style: ExecTokens.rowPrimary),
+                  Text(name, style: ExecTokens.rowPrimary.copyWith(color: context.adapt(ExecTokens.textPrimary))),
                   const SizedBox(height: 2),
                   Row(
                     children: [
-                      Text(role, style: ExecTokens.rowSecondary),
+                      Text(role, style: ExecTokens.rowSecondary.copyWith(color: context.adapt(ExecTokens.textMuted))),
                       const SizedBox(width: 6),
                       // PIN Chip
                       InkWell(
@@ -1988,10 +1989,10 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                           decoration: BoxDecoration(
-                            color: pin.isNotEmpty ? ExecTokens.rowSelected : ExecTokens.absentBg,
+                            color: pin.isNotEmpty ? context.adapt(ExecTokens.rowSelected) : context.adapt(ExecTokens.absentBg),
                             borderRadius: BorderRadius.circular(3),
                             border: Border.all(
-                              color: pin.isNotEmpty ? ExecTokens.leaveBorder : ExecTokens.absentBorder,
+                              color: pin.isNotEmpty ? context.adapt(ExecTokens.leaveBorder) : context.adapt(ExecTokens.absentBorder),
                               width: 0.8,
                             ),
                           ),
@@ -2001,7 +2002,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                               fontSize: 10,
                               fontFamily: 'monospace',
                               fontWeight: FontWeight.bold,
-                              color: pin.isNotEmpty ? ExecTokens.primaryCTA : ExecTokens.absentText,
+                              color: pin.isNotEmpty ? ExecTokens.primaryCTA : context.adapt(ExecTokens.absentText),
                             ),
                           ),
                         ),
@@ -2015,7 +2016,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
             // Department
             Expanded(
               flex: 2,
-              child: Text(dept, style: ExecTokens.rowSecondary),
+              child: Text(dept, style: ExecTokens.rowSecondary.copyWith(color: context.adapt(ExecTokens.textMuted))),
             ),
 
             // Working Hours (Shift) + Camp tags
@@ -2025,7 +2026,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(shiftHours, style: ExecTokens.monoData),
+                  Text(shiftHours, style: ExecTokens.monoData.copyWith(color: context.adapt(ExecTokens.textSecondary))),
                   if (camps != null && camps.isNotEmpty && (CampSessionService.hasCampsForBranch(widget.branchId) || CampSessionService.isKarachiFamily(widget.branchId)))
                     Padding(
                       padding: const EdgeInsets.only(top: 2),
@@ -2060,9 +2061,9 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                                 decoration: BoxDecoration(
-                                  color: ExecTokens.rowSelected,
+                                  color: context.adapt(ExecTokens.rowSelected),
                                   borderRadius: BorderRadius.circular(4),
-                                  border: Border.all(color: ExecTokens.leaveBorder, width: 0.6),
+                                  border: Border.all(color: context.adapt(ExecTokens.leaveBorder), width: 0.6),
                                 ),
                                 child: Text(
                                   campLabel.length > 9 ? campLabel.substring(0, 9) : campLabel,
@@ -2094,13 +2095,13 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                                   style: ExecTokens.monoData.copyWith(
                                     fontSize: 10.5,
                                     fontWeight: FontWeight.w600,
-                                    color: (sIn != '--:--' && sIn.isNotEmpty) ? ExecTokens.presentText : ExecTokens.textMuted,
+                                    color: (sIn != '--:--' && sIn.isNotEmpty) ? context.adapt(ExecTokens.presentText) : context.adapt(ExecTokens.textMuted),
                                     decoration: TextDecoration.underline,
                                     decorationStyle: TextDecorationStyle.dotted,
                                   ),
                                 ),
                               ),
-                              const Text(' → ', style: TextStyle(fontSize: 9.5, color: ExecTokens.textMuted)),
+                              Text(' → ', style: TextStyle(fontSize: 9.5, color: context.adapt(ExecTokens.textMuted))),
                               // Interactive Check-Out for this shift
                               InkWell(
                                 onTap: () => _pickTime(context, (t) async {
@@ -2123,7 +2124,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                                   style: ExecTokens.monoData.copyWith(
                                     fontSize: 10.5,
                                     fontWeight: FontWeight.w600,
-                                    color: (sOut != '--:--' && sOut.isNotEmpty) ? ExecTokens.primaryCTA : ExecTokens.textMuted,
+                                    color: (sOut != '--:--' && sOut.isNotEmpty) ? ExecTokens.primaryCTA : context.adapt(ExecTokens.textMuted),
                                     decoration: TextDecoration.underline,
                                     decorationStyle: TextDecorationStyle.dotted,
                                   ),
@@ -2131,7 +2132,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                               ),
                               if (sDur.isNotEmpty) ...[
                                 const SizedBox(width: 4),
-                                Text('($sDur)', style: const TextStyle(fontSize: 9.5, color: ExecTokens.textMuted)),
+                                Text('($sDur)', style: TextStyle(fontSize: 9.5, color: context.adapt(ExecTokens.textMuted))),
                               ],
                             ],
                           ),
@@ -2152,13 +2153,13 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                             inTime != null && inTime.isNotEmpty ? inTime : '-- : --',
                             style: ExecTokens.monoData.copyWith(
                               color: (inTime != null && inTime.isNotEmpty && inTime != '--:--')
-                                  ? ExecTokens.presentText
-                                  : ExecTokens.textMuted,
+                                  ? context.adapt(ExecTokens.presentText)
+                                  : context.adapt(ExecTokens.textMuted),
                               fontWeight: FontWeight.w600,
                             ),
                           ),
                         ),
-                        const Text('  ', style: TextStyle(color: ExecTokens.textMuted)),
+                        Text('  ', style: TextStyle(color: context.adapt(ExecTokens.textMuted))),
                         // Check Out
                         InkWell(
                           onTap: () => _pickTime(context, (t) async {
@@ -2171,7 +2172,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                             style: ExecTokens.monoData.copyWith(
                               color: (outTime != null && outTime.isNotEmpty && outTime != '--:--')
                                   ? ExecTokens.primaryCTA
-                                  : ExecTokens.textMuted,
+                                  : context.adapt(ExecTokens.textMuted),
                             ),
                           ),
                         ),
@@ -2192,9 +2193,9 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                       margin: const EdgeInsets.only(right: 5),
                       decoration: const BoxDecoration(color: ExecTokens.presentDot, shape: BoxShape.circle),
                     ),
-                    const Text('Running', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ExecTokens.presentText)),
+                    Text('Running', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(ExecTokens.presentText))),
                   ] else ...[
-                    Text(duration, style: ExecTokens.rowSecondary),
+                    Text(duration, style: ExecTokens.rowSecondary.copyWith(color: context.adapt(ExecTokens.textMuted))),
                   ],
                 ],
               ),
@@ -2236,10 +2237,10 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                color: pct >= 85 ? ExecTokens.presentBg : (pct >= 60 ? ExecTokens.lateBg : ExecTokens.absentBg),
+                                color: pct >= 85 ? context.adapt(ExecTokens.presentBg) : (pct >= 60 ? context.adapt(ExecTokens.lateBg) : context.adapt(ExecTokens.absentBg)),
                                 borderRadius: BorderRadius.circular(4),
                                 border: Border.all(
-                                  color: pct >= 85 ? ExecTokens.presentBorder : (pct >= 60 ? ExecTokens.lateBorder : ExecTokens.absentBorder),
+                                  color: pct >= 85 ? context.adapt(ExecTokens.presentBorder) : (pct >= 60 ? context.adapt(ExecTokens.lateBorder) : context.adapt(ExecTokens.absentBorder)),
                                   width: 0.8,
                                 ),
                               ),
@@ -2248,7 +2249,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                                 style: TextStyle(
                                   fontSize: 10.5,
                                   fontWeight: FontWeight.bold,
-                                  color: pct >= 85 ? ExecTokens.presentText : (pct >= 60 ? ExecTokens.lateText : ExecTokens.absentText),
+                                  color: pct >= 85 ? context.adapt(ExecTokens.presentText) : (pct >= 60 ? context.adapt(ExecTokens.lateText) : context.adapt(ExecTokens.absentText)),
                                 ),
                               ),
                             ),
@@ -2262,10 +2263,10 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                           children: [
                             Text(
                               '$workedDays / $totalDays Days',
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 10.5,
                                 fontWeight: FontWeight.w600,
-                                color: ExecTokens.textPrimary,
+                                color: context.adapt(ExecTokens.textPrimary),
                               ),
                             ),
                             const SizedBox(width: 3),
@@ -2297,7 +2298,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 11.5,
-                    color: note.isNotEmpty ? ExecTokens.textPrimary : ExecTokens.textMuted,
+                    color: note.isNotEmpty ? context.adapt(ExecTokens.textPrimary) : context.adapt(ExecTokens.textMuted),
                     fontStyle: note.isNotEmpty ? FontStyle.normal : FontStyle.italic,
                   ),
                 ),
@@ -2306,8 +2307,8 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
 
             // 3-Dots Actions Menu
             PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert_rounded, size: 18, color: ExecTokens.textMuted),
-              color: ExecTokens.cardSurface,
+              icon: Icon(Icons.more_vert_rounded, size: 18, color: context.adapt(ExecTokens.textMuted)),
+              color: context.adapt(ExecTokens.cardSurface),
               elevation: 4,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               onSelected: (val) async {
@@ -2382,18 +2383,18 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                     Text('View Profile & History', style: TextStyle(fontSize: 12.5)),
                   ]),
                 ),
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: 'edit',
                   child: Row(children: [
-                    Icon(Icons.edit_outlined, size: 16, color: ExecTokens.textSecondary),
+                    Icon(Icons.edit_outlined, size: 16, color: context.adapt(ExecTokens.textSecondary)),
                     SizedBox(width: 8),
                     Text('Edit Details / Profile', style: TextStyle(fontSize: 12.5)),
                   ]),
                 ),
-                const PopupMenuItem(
+                PopupMenuItem(
                   value: 'pin',
                   child: Row(children: [
-                    Icon(Icons.fingerprint_rounded, size: 16, color: ExecTokens.textSecondary),
+                    Icon(Icons.fingerprint_rounded, size: 16, color: context.adapt(ExecTokens.textSecondary)),
                     SizedBox(width: 8),
                     Text('Change Biometric PIN', style: TextStyle(fontSize: 12.5)),
                   ]),
@@ -2447,45 +2448,45 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
 
     switch (status) {
       case 'present':
-        bg = ExecTokens.presentBg;
-        border = ExecTokens.presentBorder;
-        text = ExecTokens.presentText;
+        bg = context.adapt(ExecTokens.presentBg);
+        border = context.adapt(ExecTokens.presentBorder);
+        text = context.adapt(ExecTokens.presentText);
         dot = ExecTokens.presentDot;
         label = 'PRESENT';
         break;
       case 'late':
-        bg = ExecTokens.lateBg;
-        border = ExecTokens.lateBorder;
-        text = ExecTokens.lateText;
+        bg = context.adapt(ExecTokens.lateBg);
+        border = context.adapt(ExecTokens.lateBorder);
+        text = context.adapt(ExecTokens.lateText);
         dot = ExecTokens.lateDot;
         label = 'LATE';
         break;
       case 'leave':
-        bg = ExecTokens.leaveBg;
-        border = ExecTokens.leaveBorder;
-        text = ExecTokens.leaveText;
+        bg = context.adapt(ExecTokens.leaveBg);
+        border = context.adapt(ExecTokens.leaveBorder);
+        text = context.adapt(ExecTokens.leaveText);
         dot = ExecTokens.leaveDot;
         label = 'ON LEAVE';
         break;
       case 'holiday':
-        bg = ExecTokens.holidayBg;
-        border = ExecTokens.holidayBorder;
-        text = ExecTokens.holidayText;
+        bg = context.adapt(ExecTokens.holidayBg);
+        border = context.adapt(ExecTokens.holidayBorder);
+        text = context.adapt(ExecTokens.holidayText);
         dot = ExecTokens.holidayDot;
         label = 'HOLIDAY';
         break;
       case 'off':
-        bg = ExecTokens.sundayBg;
-        border = ExecTokens.sundayBorder;
-        text = ExecTokens.sundayText;
-        dot = ExecTokens.sundayDot;
+        bg = context.adapt(ExecTokens.sundayBg);
+        border = context.adapt(ExecTokens.sundayBorder);
+        text = context.adapt(ExecTokens.sundayText);
+        dot = context.adapt(ExecTokens.sundayDot);
         label = 'OFF DAY';
         break;
       case 'absent':
       default:
-        bg = ExecTokens.absentBg;
-        border = ExecTokens.absentBorder;
-        text = ExecTokens.absentText;
+        bg = context.adapt(ExecTokens.absentBg);
+        border = context.adapt(ExecTokens.absentBorder);
+        text = context.adapt(ExecTokens.absentText);
         dot = ExecTokens.absentDot;
         label = 'ABSENT';
         break;
@@ -2493,7 +2494,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
 
     return PopupMenuButton<String>(
       tooltip: 'Change status',
-      color: ExecTokens.cardSurface,
+      color: context.adapt(ExecTokens.cardSurface),
       elevation: 4,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
       onSelected: (newStatus) async {
@@ -2511,11 +2512,11 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
         });
         await _saveRecordInstantly(empId, record);
       },
-      itemBuilder: (_) => const [
-        PopupMenuItem(value: 'present', child: Text('● PRESENT', style: TextStyle(color: ExecTokens.presentText, fontWeight: FontWeight.bold, fontSize: 12))),
-        PopupMenuItem(value: 'late', child: Text('● LATE', style: TextStyle(color: ExecTokens.lateText, fontWeight: FontWeight.bold, fontSize: 12))),
-        PopupMenuItem(value: 'leave', child: Text('● ON LEAVE', style: TextStyle(color: ExecTokens.leaveText, fontWeight: FontWeight.bold, fontSize: 12))),
-        PopupMenuItem(value: 'absent', child: Text('● ABSENT', style: TextStyle(color: ExecTokens.absentText, fontWeight: FontWeight.bold, fontSize: 12))),
+      itemBuilder: (_) => [
+        PopupMenuItem(value: 'present', child: Text('● PRESENT', style: TextStyle(color: context.adapt(ExecTokens.presentText), fontWeight: FontWeight.bold, fontSize: 12))),
+        PopupMenuItem(value: 'late', child: Text('● LATE', style: TextStyle(color: context.adapt(ExecTokens.lateText), fontWeight: FontWeight.bold, fontSize: 12))),
+        PopupMenuItem(value: 'leave', child: Text('● ON LEAVE', style: TextStyle(color: context.adapt(ExecTokens.leaveText), fontWeight: FontWeight.bold, fontSize: 12))),
+        PopupMenuItem(value: 'absent', child: Text('● ABSENT', style: TextStyle(color: context.adapt(ExecTokens.absentText), fontWeight: FontWeight.bold, fontSize: 12))),
       ],
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -2606,7 +2607,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
             final weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
             return Dialog(
-              backgroundColor: ExecTokens.cardSurface,
+              backgroundColor: context.adapt(ExecTokens.cardSurface),
               insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               child: ConstrainedBox(
@@ -2622,7 +2623,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                         children: [
                           CircleAvatar(
                             radius: 20,
-                            backgroundColor: ExecTokens.rowSelected,
+                            backgroundColor: context.adapt(ExecTokens.rowSelected),
                             child: Text(
                               empName.isNotEmpty ? empName[0].toUpperCase() : '?',
                               style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: ExecTokens.primaryCTA),
@@ -2637,19 +2638,19 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                                   children: [
                                     Text(
                                       empName,
-                                      style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: ExecTokens.textPrimary),
+                                      style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold, color: context.adapt(ExecTokens.textPrimary)),
                                     ),
                                     if (pin.isNotEmpty) ...[
                                       const SizedBox(width: 8),
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                         decoration: BoxDecoration(
-                                          color: ExecTokens.borderMuted,
+                                          color: context.adapt(ExecTokens.borderMuted),
                                           borderRadius: BorderRadius.circular(4),
                                         ),
                                         child: Text(
                                           'PIN $pin',
-                                          style: const TextStyle(fontSize: 11, fontFamily: 'monospace', fontWeight: FontWeight.bold, color: ExecTokens.textMuted),
+                                          style: TextStyle(fontSize: 11, fontFamily: 'monospace', fontWeight: FontWeight.bold, color: context.adapt(ExecTokens.textMuted)),
                                         ),
                                       ),
                                     ],
@@ -2658,7 +2659,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                                 const SizedBox(height: 2),
                                 Text(
                                   '$role • $dept',
-                                  style: const TextStyle(fontSize: 12, color: ExecTokens.textSecondary),
+                                  style: TextStyle(fontSize: 12, color: context.adapt(ExecTokens.textSecondary)),
                                 ),
                               ],
                             ),
@@ -2666,15 +2667,15 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                           // Month Selector
                           Container(
                             decoration: BoxDecoration(
-                              color: ExecTokens.canvasBg,
+                              color: context.adapt(ExecTokens.canvasBg),
                               borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: ExecTokens.borderMuted),
+                              border: Border.all(color: context.adapt(ExecTokens.borderMuted)),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 IconButton(
-                                  icon: const Icon(Icons.chevron_left_rounded, size: 20, color: ExecTokens.textPrimary),
+                                  icon: Icon(Icons.chevron_left_rounded, size: 20, color: context.adapt(ExecTokens.textPrimary)),
                                   tooltip: 'Previous Month',
                                   onPressed: () {
                                     final prev = DateTime(yr, mo - 1, 1);
@@ -2687,11 +2688,11 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                                   padding: const EdgeInsets.symmetric(horizontal: 8),
                                   child: Text(
                                     monthTitle,
-                                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: ExecTokens.textPrimary),
+                                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: context.adapt(ExecTokens.textPrimary)),
                                   ),
                                 ),
                                 IconButton(
-                                  icon: const Icon(Icons.chevron_right_rounded, size: 20, color: ExecTokens.textPrimary),
+                                  icon: Icon(Icons.chevron_right_rounded, size: 20, color: context.adapt(ExecTokens.textPrimary)),
                                   tooltip: 'Next Month',
                                   onPressed: () {
                                     final next = DateTime(yr, mo + 1, 1);
@@ -2722,7 +2723,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                           ),
                           const SizedBox(width: 8),
                           IconButton(
-                            icon: const Icon(Icons.close_rounded, size: 20, color: ExecTokens.textMuted),
+                            icon: Icon(Icons.close_rounded, size: 20, color: context.adapt(ExecTokens.textMuted)),
                             onPressed: () => Navigator.pop(dialogCtx),
                           ),
                         ],
@@ -2734,20 +2735,20 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                         spacing: 8,
                         runSpacing: 8,
                         children: [
-                          _buildCalendarSummaryBadge('Present', '$presentDays Days', ExecTokens.presentBg, ExecTokens.presentBorder, ExecTokens.presentText, Icons.check_circle_outline_rounded),
+                          _buildCalendarSummaryBadge('Present', '$presentDays Days', context.adapt(ExecTokens.presentBg), context.adapt(ExecTokens.presentBorder), context.adapt(ExecTokens.presentText), Icons.check_circle_outline_rounded),
                           if (lateDays > 0)
-                            _buildCalendarSummaryBadge('Late', '$lateDays Days', ExecTokens.lateBg, ExecTokens.lateBorder, ExecTokens.lateText, Icons.alarm_rounded),
+                            _buildCalendarSummaryBadge('Late', '$lateDays Days', context.adapt(ExecTokens.lateBg), context.adapt(ExecTokens.lateBorder), context.adapt(ExecTokens.lateText), Icons.alarm_rounded),
                           if (totalLeaves > 0)
-                            _buildCalendarSummaryBadge('Leave', '${totalLeaves.toStringAsFixed(1).replaceAll('.0', '')} Days', ExecTokens.leaveBg, ExecTokens.leaveBorder, ExecTokens.leaveText, Icons.beach_access_outlined),
+                            _buildCalendarSummaryBadge('Leave', '${totalLeaves.toStringAsFixed(1).replaceAll('.0', '')} Days', context.adapt(ExecTokens.leaveBg), context.adapt(ExecTokens.leaveBorder), context.adapt(ExecTokens.leaveText), Icons.beach_access_outlined),
                           if (holidayCount > 0)
-                            _buildCalendarSummaryBadge('Holidays', '$holidayCount Days', ExecTokens.holidayBg, ExecTokens.holidayBorder, ExecTokens.holidayText, Icons.celebration_outlined),
-                          _buildCalendarSummaryBadge('Absent', '$absentDays Days', ExecTokens.absentBg, ExecTokens.absentBorder, ExecTokens.absentText, Icons.highlight_off_rounded),
+                            _buildCalendarSummaryBadge('Holidays', '$holidayCount Days', context.adapt(ExecTokens.holidayBg), context.adapt(ExecTokens.holidayBorder), context.adapt(ExecTokens.holidayText), Icons.celebration_outlined),
+                          _buildCalendarSummaryBadge('Absent', '$absentDays Days', context.adapt(ExecTokens.absentBg), context.adapt(ExecTokens.absentBorder), context.adapt(ExecTokens.absentText), Icons.highlight_off_rounded),
                           _buildCalendarSummaryBadge(
                             'Attendance',
                             '${pct.toStringAsFixed(0)}% (${workingDays.round()}/$totalEmployed)',
-                            pct >= 85 ? ExecTokens.presentBg : (pct >= 60 ? ExecTokens.lateBg : ExecTokens.absentBg),
-                            pct >= 85 ? ExecTokens.presentBorder : (pct >= 60 ? ExecTokens.lateBorder : ExecTokens.absentBorder),
-                            pct >= 85 ? ExecTokens.presentText : (pct >= 60 ? ExecTokens.lateText : ExecTokens.absentText),
+                            pct >= 85 ? context.adapt(ExecTokens.presentBg) : (pct >= 60 ? context.adapt(ExecTokens.lateBg) : context.adapt(ExecTokens.absentBg)),
+                            pct >= 85 ? context.adapt(ExecTokens.presentBorder) : (pct >= 60 ? context.adapt(ExecTokens.lateBorder) : context.adapt(ExecTokens.absentBorder)),
+                            pct >= 85 ? context.adapt(ExecTokens.presentText) : (pct >= 60 ? context.adapt(ExecTokens.lateText) : context.adapt(ExecTokens.absentText)),
                             Icons.pie_chart_outline_rounded,
                           ),
                         ],
@@ -2763,7 +2764,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                               alignment: Alignment.center,
                               padding: const EdgeInsets.symmetric(vertical: 6),
                               decoration: BoxDecoration(
-                                color: isSun ? ExecTokens.sundayBg : ExecTokens.canvasBg,
+                                color: isSun ? context.adapt(ExecTokens.sundayBg) : context.adapt(ExecTokens.canvasBg),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(
@@ -2771,7 +2772,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                                 style: TextStyle(
                                   fontSize: 11,
                                   fontWeight: FontWeight.bold,
-                                  color: isSun ? ExecTokens.sundayText : ExecTokens.textSecondary,
+                                  color: isSun ? context.adapt(ExecTokens.sundayText) : context.adapt(ExecTokens.textSecondary),
                                 ),
                               ),
                             ),
@@ -2808,7 +2809,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                           const SizedBox(width: 14),
                           _buildCalendarLegendDot(ExecTokens.holidayDot, 'Holiday'),
                           const SizedBox(width: 14),
-                          _buildCalendarLegendDot(ExecTokens.sundayDot, 'Sunday Off'),
+                          _buildCalendarLegendDot(context.adapt(ExecTokens.sundayDot), 'Sunday Off'),
                           const SizedBox(width: 14),
                           _buildCalendarLegendDot(ExecTokens.absentDot, 'Absent'),
                         ],
@@ -2856,7 +2857,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
       children: [
         Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
         const SizedBox(width: 5),
-        Text(label, style: const TextStyle(fontSize: 11, color: ExecTokens.textSecondary)),
+        Text(label, style: TextStyle(fontSize: 11, color: context.adapt(ExecTokens.textSecondary))),
       ],
     );
   }
@@ -2888,7 +2889,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
         if (idx < totalOffset || idx >= totalCells) {
           return Container(
             decoration: BoxDecoration(
-              color: ExecTokens.canvasBg.withValues(alpha: 0.3),
+              color: context.adapt(ExecTokens.canvasBg).withValues(alpha: 0.3),
               borderRadius: BorderRadius.circular(6),
             ),
           );
@@ -2902,40 +2903,40 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
         final shifts = dayData['shifts'];
         final note = dayData['note']?.toString();
 
-        Color bg = ExecTokens.canvasBg;
-        Color border = ExecTokens.borderMuted;
-        Color textColor = ExecTokens.textSecondary;
+        Color bg = context.adapt(ExecTokens.canvasBg);
+        Color border = context.adapt(ExecTokens.borderMuted);
+        Color textColor = context.adapt(ExecTokens.textSecondary);
         String badgeText = '—';
 
         if (status == 'present') {
-          bg = ExecTokens.presentBg;
-          border = ExecTokens.presentBorder;
-          textColor = ExecTokens.presentText;
+          bg = context.adapt(ExecTokens.presentBg);
+          border = context.adapt(ExecTokens.presentBorder);
+          textColor = context.adapt(ExecTokens.presentText);
           badgeText = '✓ Present';
         } else if (status == 'late') {
-          bg = ExecTokens.lateBg;
-          border = ExecTokens.lateBorder;
-          textColor = ExecTokens.lateText;
+          bg = context.adapt(ExecTokens.lateBg);
+          border = context.adapt(ExecTokens.lateBorder);
+          textColor = context.adapt(ExecTokens.lateText);
           badgeText = '⏱ Late';
         } else if (status == 'leave') {
-          bg = ExecTokens.leaveBg;
-          border = ExecTokens.leaveBorder;
-          textColor = ExecTokens.leaveText;
+          bg = context.adapt(ExecTokens.leaveBg);
+          border = context.adapt(ExecTokens.leaveBorder);
+          textColor = context.adapt(ExecTokens.leaveText);
           badgeText = '🏖 Leave';
         } else if (status == 'holiday') {
-          bg = ExecTokens.holidayBg;
-          border = ExecTokens.holidayBorder;
-          textColor = ExecTokens.holidayText;
+          bg = context.adapt(ExecTokens.holidayBg);
+          border = context.adapt(ExecTokens.holidayBorder);
+          textColor = context.adapt(ExecTokens.holidayText);
           badgeText = '🎉 Holiday';
         } else if (status == 'off') {
-          bg = ExecTokens.sundayBg;
-          border = ExecTokens.sundayBorder;
-          textColor = ExecTokens.sundayText;
+          bg = context.adapt(ExecTokens.sundayBg);
+          border = context.adapt(ExecTokens.sundayBorder);
+          textColor = context.adapt(ExecTokens.sundayText);
           badgeText = 'Off Day';
         } else if (status == 'absent') {
-          bg = ExecTokens.absentBg;
-          border = ExecTokens.absentBorder;
-          textColor = ExecTokens.absentText;
+          bg = context.adapt(ExecTokens.absentBg);
+          border = context.adapt(ExecTokens.absentBorder);
+          textColor = context.adapt(ExecTokens.absentText);
           badgeText = '✕ Absent';
         }
 
@@ -2979,7 +2980,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
-                        color: status == 'off' ? ExecTokens.textMuted : ExecTokens.textPrimary,
+                        color: status == 'off' ? context.adapt(ExecTokens.textMuted) : context.adapt(ExecTokens.textPrimary),
                       ),
                     ),
                     Text(
@@ -2996,10 +2997,10 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                 if (punchStr.isNotEmpty) ...[
                   Text(
                     punchStr,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 9,
                       fontWeight: FontWeight.w600,
-                      color: ExecTokens.textPrimary,
+                      color: context.adapt(ExecTokens.textPrimary),
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -3016,10 +3017,10 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                 ] else if (note != null && note.isNotEmpty) ...[
                   Text(
                     note,
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 8.5,
                       fontStyle: FontStyle.italic,
-                      color: ExecTokens.textMuted,
+                      color: context.adapt(ExecTokens.textMuted),
                     ),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
@@ -3038,22 +3039,22 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: ExecTokens.cardSurface,
+        backgroundColor: context.adapt(ExecTokens.cardSurface),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         title: Row(
           children: [
             const Icon(Icons.fingerprint_rounded, color: ExecTokens.primaryCTA, size: 22),
             const SizedBox(width: 8),
-            Text('Biometric PIN - $empName', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: ExecTokens.textPrimary)),
+            Text('Biometric PIN - $empName', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: context.adapt(ExecTokens.textPrimary))),
           ],
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Enter the hardware User ID / PIN registered for this employee on the physical ZKTeco machine.',
-              style: TextStyle(fontSize: 12, color: ExecTokens.textSecondary),
+              style: TextStyle(fontSize: 12, color: context.adapt(ExecTokens.textSecondary)),
             ),
             const SizedBox(height: 14),
             TextField(
@@ -3063,15 +3064,15 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
               decoration: InputDecoration(
                 labelText: 'ZKTeco Hardware PIN',
                 filled: true,
-                fillColor: ExecTokens.canvasBg,
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: ExecTokens.borderMuted)),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: ExecTokens.borderMuted)),
+                fillColor: context.adapt(ExecTokens.canvasBg),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: context.adapt(ExecTokens.borderMuted))),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: context.adapt(ExecTokens.borderMuted))),
               ),
             ),
           ],
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: ExecTokens.textMuted))),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: TextStyle(color: context.adapt(ExecTokens.textMuted)))),
           ElevatedButton(
             onPressed: () async {
               final newPin = ctrl.text.trim();
@@ -3098,13 +3099,13 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
               }
 
               if (mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                AppToast.showSnackBar(context, 
                   SnackBar(content: Text('✅ PIN $newPin assigned to $empName!'), backgroundColor: ExecTokens.primaryCTA),
                 );
                 setState(() {});
               }
             },
-            style: ElevatedButton.styleFrom(backgroundColor: ExecTokens.primaryCTA, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: ExecTokens.primaryCTA, foregroundColor: SoftPalette.gray50),
             child: const Text('Save PIN'),
           ),
         ],
@@ -3117,9 +3118,9 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: ExecTokens.cardSurface,
+        backgroundColor: context.adapt(ExecTokens.cardSurface),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: const Text('Attendance Remarks', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: ExecTokens.textPrimary)),
+        title: Text('Attendance Remarks', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: context.adapt(ExecTokens.textPrimary))),
         content: TextField(
           controller: ctrl,
           maxLines: 3,
@@ -3127,19 +3128,19 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
           decoration: InputDecoration(
             hintText: 'Enter reason, late notes, or remarks...',
             filled: true,
-            fillColor: ExecTokens.canvasBg,
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: ExecTokens.borderMuted)),
+            fillColor: context.adapt(ExecTokens.canvasBg),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: context.adapt(ExecTokens.borderMuted))),
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: ExecTokens.textMuted))),
+          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: TextStyle(color: context.adapt(ExecTokens.textMuted)))),
           ElevatedButton(
             onPressed: () async {
               record['note'] = ctrl.text.trim();
               Navigator.pop(ctx);
               await _saveRecordInstantly(empId, record);
             },
-            style: ElevatedButton.styleFrom(backgroundColor: ExecTokens.primaryCTA, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: ExecTokens.primaryCTA, foregroundColor: SoftPalette.gray50),
             child: const Text('Save'),
           ),
         ],
@@ -3206,7 +3207,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDlgState) {
           return AlertDialog(
-            backgroundColor: ExecTokens.cardSurface,
+            backgroundColor: context.adapt(ExecTokens.cardSurface),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             title: Row(
               children: [
@@ -3217,8 +3218,8 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Text('Edit Attendance: $empName', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: ExecTokens.textPrimary)),
-                      Text('Date: $dateStr', style: const TextStyle(fontSize: 12, color: ExecTokens.textMuted)),
+                      Text('Edit Attendance: $empName', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: context.adapt(ExecTokens.textPrimary))),
+                      Text('Date: $dateStr', style: TextStyle(fontSize: 12, color: context.adapt(ExecTokens.textMuted))),
                     ],
                   ),
                 ),
@@ -3232,7 +3233,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     // Status Selector
-                    const Text('Attendance Status', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ExecTokens.textSecondary)),
+                    Text('Attendance Status', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(ExecTokens.textSecondary))),
                     const SizedBox(height: 6),
                     Wrap(
                       spacing: 8,
@@ -3240,10 +3241,10 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                       children: ['present', 'late', 'absent', 'leave', 'off'].map((st) {
                         final isSel = curStatus == st;
                         return ChoiceChip(
-                          label: Text(st.toUpperCase(), style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isSel ? Colors.white : ExecTokens.textSecondary)),
+                          label: Text(st.toUpperCase(), style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isSel ? SoftPalette.gray50 : context.adapt(ExecTokens.textSecondary))),
                           selected: isSel,
                           selectedColor: ExecTokens.primaryCTA,
-                          backgroundColor: ExecTokens.canvasBg,
+                          backgroundColor: context.adapt(ExecTokens.canvasBg),
                           onSelected: (val) {
                             if (val) setDlgState(() => curStatus = st);
                           },
@@ -3254,7 +3255,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
 
                     // Multi-shift editor if shifts exist
                     if (localShifts.isNotEmpty) ...[
-                      const Text('Shift / Camp Punches', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ExecTokens.textSecondary)),
+                      Text('Shift / Camp Punches', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(ExecTokens.textSecondary))),
                       const SizedBox(height: 8),
                       ...localShifts.entries.map((entry) {
                         final sData = entry.value is Map ? Map<String, dynamic>.from(entry.value as Map) : <String, dynamic>{};
@@ -3266,15 +3267,15 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                           margin: const EdgeInsets.only(bottom: 8),
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: ExecTokens.canvasBg,
+                            color: context.adapt(ExecTokens.canvasBg),
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: ExecTokens.borderMuted),
+                            border: Border.all(color: context.adapt(ExecTokens.borderMuted)),
                           ),
                           child: Row(
                             children: [
                               Expanded(
                                 flex: 3,
-                                child: Text(campLabel, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ExecTokens.textPrimary)),
+                                child: Text(campLabel, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(ExecTokens.textPrimary))),
                               ),
                               // Shift In Time
                               InkWell(
@@ -3289,11 +3290,11 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                                 }),
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4), border: Border.all(color: ExecTokens.borderDivider)),
-                                  child: Text(sIn, style: const TextStyle(fontSize: 11, fontFamily: 'monospace', fontWeight: FontWeight.bold, color: ExecTokens.presentText)),
+                                  decoration: BoxDecoration(color: context.adapt(SoftPalette.gray50), borderRadius: BorderRadius.circular(4), border: Border.all(color: context.adapt(ExecTokens.borderDivider))),
+                                  child: Text(sIn, style: TextStyle(fontSize: 11, fontFamily: 'monospace', fontWeight: FontWeight.bold, color: context.adapt(ExecTokens.presentText))),
                                 ),
                               ),
-                              const Text('  →  ', style: TextStyle(fontSize: 11, color: ExecTokens.textMuted)),
+                              Text('  →  ', style: TextStyle(fontSize: 11, color: context.adapt(ExecTokens.textMuted))),
                               // Shift Out Time
                               InkWell(
                                 onTap: () => _pickTime(ctx, (t) {
@@ -3306,7 +3307,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                                 }),
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                  decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(4), border: Border.all(color: ExecTokens.borderDivider)),
+                                  decoration: BoxDecoration(color: context.adapt(SoftPalette.gray50), borderRadius: BorderRadius.circular(4), border: Border.all(color: context.adapt(ExecTokens.borderDivider))),
                                   child: Text(sOut, style: const TextStyle(fontSize: 11, fontFamily: 'monospace', fontWeight: FontWeight.bold, color: ExecTokens.primaryCTA)),
                                 ),
                               ),
@@ -3322,18 +3323,18 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text('Check In Time', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ExecTokens.textSecondary)),
+                                Text('Check In Time', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: context.adapt(ExecTokens.textSecondary))),
                                 const SizedBox(height: 4),
                                 InkWell(
                                   onTap: () => _pickTime(ctx, (t) => setDlgState(() => inTime = t)),
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                    decoration: BoxDecoration(color: ExecTokens.canvasBg, borderRadius: BorderRadius.circular(6), border: Border.all(color: ExecTokens.borderMuted)),
+                                    decoration: BoxDecoration(color: context.adapt(ExecTokens.canvasBg), borderRadius: BorderRadius.circular(6), border: Border.all(color: context.adapt(ExecTokens.borderMuted))),
                                     child: Row(
                                       children: [
-                                        const Icon(Icons.login_rounded, size: 16, color: ExecTokens.presentText),
+                                        Icon(Icons.login_rounded, size: 16, color: context.adapt(ExecTokens.presentText)),
                                         const SizedBox(width: 8),
-                                        Text(inTime.isNotEmpty ? inTime : 'Pick Time', style: TextStyle(fontSize: 13, fontFamily: 'monospace', color: inTime.isNotEmpty ? ExecTokens.textPrimary : ExecTokens.textMuted)),
+                                        Text(inTime.isNotEmpty ? inTime : 'Pick Time', style: TextStyle(fontSize: 13, fontFamily: 'monospace', color: inTime.isNotEmpty ? context.adapt(ExecTokens.textPrimary) : context.adapt(ExecTokens.textMuted))),
                                       ],
                                     ),
                                   ),
@@ -3346,18 +3347,18 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text('Check Out Time', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ExecTokens.textSecondary)),
+                                Text('Check Out Time', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: context.adapt(ExecTokens.textSecondary))),
                                 const SizedBox(height: 4),
                                 InkWell(
                                   onTap: () => _pickTime(ctx, (t) => setDlgState(() => outTime = t)),
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                                    decoration: BoxDecoration(color: ExecTokens.canvasBg, borderRadius: BorderRadius.circular(6), border: Border.all(color: ExecTokens.borderMuted)),
+                                    decoration: BoxDecoration(color: context.adapt(ExecTokens.canvasBg), borderRadius: BorderRadius.circular(6), border: Border.all(color: context.adapt(ExecTokens.borderMuted))),
                                     child: Row(
                                       children: [
                                         const Icon(Icons.logout_rounded, size: 16, color: ExecTokens.primaryCTA),
                                         const SizedBox(width: 8),
-                                        Text(outTime.isNotEmpty ? outTime : 'Pick Time', style: TextStyle(fontSize: 13, fontFamily: 'monospace', color: outTime.isNotEmpty ? ExecTokens.textPrimary : ExecTokens.textMuted)),
+                                        Text(outTime.isNotEmpty ? outTime : 'Pick Time', style: TextStyle(fontSize: 13, fontFamily: 'monospace', color: outTime.isNotEmpty ? context.adapt(ExecTokens.textPrimary) : context.adapt(ExecTokens.textMuted))),
                                       ],
                                     ),
                                   ),
@@ -3371,7 +3372,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                     const SizedBox(height: 16),
 
                     // Remarks / Note
-                    const Text('Remarks / Note', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: ExecTokens.textSecondary)),
+                    Text('Remarks / Note', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: context.adapt(ExecTokens.textSecondary))),
                     const SizedBox(height: 4),
                     TextField(
                       controller: noteCtrl,
@@ -3379,8 +3380,8 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                       decoration: InputDecoration(
                         hintText: 'e.g. Overtime approved, late arrival note...',
                         filled: true,
-                        fillColor: ExecTokens.canvasBg,
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: ExecTokens.borderMuted)),
+                        fillColor: context.adapt(ExecTokens.canvasBg),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: context.adapt(ExecTokens.borderMuted))),
                       ),
                     ),
                   ],
@@ -3388,7 +3389,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
               ),
             ),
             actions: [
-              TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel', style: TextStyle(color: ExecTokens.textMuted))),
+              TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: TextStyle(color: context.adapt(ExecTokens.textMuted)))),
               ElevatedButton(
                 onPressed: () async {
                   record['status'] = curStatus;
@@ -3418,12 +3419,12 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                   Navigator.pop(ctx);
                   await _saveRecordInstantly(empId, record);
                   if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    AppToast.showSnackBar(context, 
                       SnackBar(content: Text('Attendance updated for $empName')),
                     );
                   }
                 },
-                style: ElevatedButton.styleFrom(backgroundColor: ExecTokens.primaryCTA, foregroundColor: Colors.white),
+                style: ElevatedButton.styleFrom(backgroundColor: ExecTokens.primaryCTA, foregroundColor: SoftPalette.gray50),
                 child: const Text('Save Changes'),
               ),
             ],
@@ -3457,7 +3458,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setS) => AlertDialog(
-          backgroundColor: ExecTokens.cardSurface,
+          backgroundColor: context.adapt(ExecTokens.cardSurface),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           title: const Row(
             children: [
@@ -3476,8 +3477,8 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                 initialValue: selectedEmpId,
                 decoration: InputDecoration(
                   filled: true,
-                  fillColor: ExecTokens.canvasBg,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: const BorderSide(color: ExecTokens.borderMuted)),
+                  fillColor: context.adapt(ExecTokens.canvasBg),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: context.adapt(ExecTokens.borderMuted))),
                 ),
                 items: [
                   const DropdownMenuItem(value: 'all', child: Text('All Employees')),
@@ -3537,14 +3538,14 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                   }
                 }
                 if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
+                AppToast.showSnackBar(context, 
                   const SnackBar(content: Text('✅ Leave marked for range!'), backgroundColor: ExecTokens.presentDot),
                 );
                 if (mounted) {
                   setState(() {});
                 }
               },
-              style: ElevatedButton.styleFrom(backgroundColor: ExecTokens.primaryCTA, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: ExecTokens.primaryCTA, foregroundColor: SoftPalette.gray50),
               child: const Text('Apply Leaves'),
             ),
           ],

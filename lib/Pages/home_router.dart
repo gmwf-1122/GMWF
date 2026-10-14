@@ -1,5 +1,7 @@
 // lib/pages/home_router.dart
 import '../utils/ui_stall_monitor.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -22,6 +24,7 @@ import '../utils/formatters.dart';
 import '../services/auth_service.dart';
 import '../services/cloud_messaging_service.dart';
 import '../services/offline_auth_service.dart' as offline_auth;
+import '../services/user_theme_service.dart';
 import '../models/patient.dart';
 import '../models/token.dart';
 
@@ -1151,6 +1154,7 @@ class _HomeRouterState extends State<HomeRouter> {
         }
       }
       await LocalStorageService.saveLocalUser(userData);
+      UserThemeService.notifyThemeChanged();
     } catch (e) {
       debugPrint("Warning: Error caching user data locally: $e");
     }
@@ -1522,21 +1526,21 @@ class _HomeRouterState extends State<HomeRouter> {
                 child: Column(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
-                    const Icon(Icons.error_outline_rounded, size: 64, color: Colors.orange),
+                    const Icon(Icons.error_outline_rounded, size: 64, color: SoftPalette.amber300),
                     const SizedBox(height: 20),
-                    const Text(
+                    Text(
                       "Profile Retrieval Failed",
                       style: TextStyle(
                         fontSize: 20, 
                         fontWeight: FontWeight.bold,
-                        color: Color(0xFF111827),
+                        color: context.adapt(SoftPalette.slate900),
                       ),
                     ),
                     const SizedBox(height: 8),
                     const Text(
                       "We couldn't retrieve your user profile role or branch details.\nThis could be due to a missing collectionGroup database index or lack of local cache.",
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey, fontSize: 14),
+                      style: TextStyle(color: SoftPalette.gray350, fontSize: 14),
                     ),
                     const SizedBox(height: 28),
                     Row(
@@ -1549,8 +1553,8 @@ class _HomeRouterState extends State<HomeRouter> {
                           icon: const Icon(Icons.refresh_rounded),
                           label: const Text("Retry"),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF00695C),
-                            foregroundColor: Colors.white,
+                            backgroundColor: SoftPalette.teal600,
+                            foregroundColor: SoftPalette.gray50,
                             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           ),
@@ -1574,8 +1578,8 @@ class _HomeRouterState extends State<HomeRouter> {
                           icon: const Icon(Icons.logout_rounded),
                           label: const Text("Log Out"),
                           style: OutlinedButton.styleFrom(
-                            foregroundColor: Colors.red,
-                            side: const BorderSide(color: Colors.red),
+                            foregroundColor: SoftPalette.red400,
+                            side: const BorderSide(color: SoftPalette.red400),
                             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           ),
@@ -1806,7 +1810,7 @@ class _HomeRouterState extends State<HomeRouter> {
               child: Column(
                 children: [
                   Material(
-                    color: const Color(0xFF0F172A),
+                    color: SoftPalette.slate900,
                     elevation: 4,
                     child: SafeArea(
                       bottom: false,
@@ -1814,11 +1818,11 @@ class _HomeRouterState extends State<HomeRouter> {
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                         child: Row(
                           children: [
-                            const Icon(Icons.preview_rounded, color: Colors.amberAccent, size: 18),
+                            const Icon(Icons.preview_rounded, color: SoftPalette.yellow200, size: 18),
                             const SizedBox(width: 8),
                             const Text(
                               'SIMULATOR MODE:',
-                              style: TextStyle(color: Colors.amberAccent, fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 0.5),
+                              style: TextStyle(color: SoftPalette.yellow200, fontWeight: FontWeight.bold, fontSize: 11, letterSpacing: 0.5),
                             ),
                             const SizedBox(width: 8),
                             Expanded(
@@ -1855,9 +1859,9 @@ class _HomeRouterState extends State<HomeRouter> {
 
                                     return DropdownButton<String>(
                                       value: activeRole,
-                                      dropdownColor: const Color(0xFF1E293B),
+                                      dropdownColor: SoftPalette.slate800,
                                       isDense: true,
-                                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                                      style: const TextStyle(color: SoftPalette.gray50, fontSize: 12, fontWeight: FontWeight.bold),
                                       items: menuItems,
                                       onChanged: (val) {
                                         if (val != null) RoleSimulatorService.simulate(val);
@@ -1869,8 +1873,8 @@ class _HomeRouterState extends State<HomeRouter> {
                             ),
                             ElevatedButton.icon(
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.redAccent,
-                                foregroundColor: Colors.white,
+                                backgroundColor: SoftPalette.red400,
+                                foregroundColor: SoftPalette.gray50,
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                 minimumSize: Size.zero,
                                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -2030,18 +2034,18 @@ class _UnassignedRoleRecoveryScreenState extends State<_UnassignedRoleRecoverySc
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
+      backgroundColor: SoftPalette.slate900,
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 32),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 620),
             child: Card(
-              color: const Color(0xFF1E293B),
+              color: SoftPalette.slate800,
               elevation: 8,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(20),
-                side: const BorderSide(color: Color(0xFF334155), width: 1.2),
+                side: const BorderSide(color: SoftPalette.slate700, width: 1.2),
               ),
               child: Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
@@ -2054,11 +2058,11 @@ class _UnassignedRoleRecoveryScreenState extends State<_UnassignedRoleRecoverySc
                         Container(
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF0F766E).withValues(alpha: 0.25),
+                            color: SoftPalette.teal550.withValues(alpha: 0.25),
                             shape: BoxShape.circle,
-                            border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.5)),
+                            border: Border.all(color: SoftPalette.emerald350.withValues(alpha: 0.5)),
                           ),
-                          child: const Icon(Icons.shield_outlined, size: 30, color: Color(0xFF34D399)),
+                          child: const Icon(Icons.shield_outlined, size: 30, color: SoftPalette.emerald300),
                         ),
                         const SizedBox(width: 16),
                         Expanded(
@@ -2070,13 +2074,13 @@ class _UnassignedRoleRecoveryScreenState extends State<_UnassignedRoleRecoverySc
                                 style: TextStyle(
                                   fontSize: 20,
                                   fontWeight: FontWeight.bold,
-                                  color: Colors.white,
+                                  color: SoftPalette.gray50,
                                 ),
                               ),
                               const SizedBox(height: 3),
                               Text(
                                 'Logged in as @${widget.userName} — Select your designated role:',
-                                style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
+                                style: const TextStyle(color: SoftPalette.slate350, fontSize: 13),
                               ),
                             ],
                           ),
@@ -2084,7 +2088,7 @@ class _UnassignedRoleRecoveryScreenState extends State<_UnassignedRoleRecoverySc
                       ],
                     ),
                     const SizedBox(height: 20),
-                    const Divider(color: Color(0xFF334155), height: 1),
+                    const Divider(color: SoftPalette.slate700, height: 1),
                     const SizedBox(height: 16),
 
                     ConstrainedBox(
@@ -2103,11 +2107,11 @@ class _UnassignedRoleRecoveryScreenState extends State<_UnassignedRoleRecoverySc
                               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
                               decoration: BoxDecoration(
                                 color: isSelected
-                                    ? const Color(0xFF0F766E).withValues(alpha: 0.35)
-                                    : const Color(0xFF0F172A).withValues(alpha: 0.6),
+                                    ? SoftPalette.teal550.withValues(alpha: 0.35)
+                                    : SoftPalette.slate900.withValues(alpha: 0.6),
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                  color: isSelected ? const Color(0xFF10B981) : const Color(0xFF334155),
+                                  color: isSelected ? SoftPalette.emerald350 : SoftPalette.slate700,
                                   width: isSelected ? 1.5 : 1.0,
                                 ),
                               ),
@@ -2116,7 +2120,7 @@ class _UnassignedRoleRecoveryScreenState extends State<_UnassignedRoleRecoverySc
                                   Icon(
                                     item['icon'] as IconData,
                                     size: 22,
-                                    color: isSelected ? const Color(0xFF34D399) : const Color(0xFF94A3B8),
+                                    color: isSelected ? SoftPalette.emerald300 : SoftPalette.slate350,
                                   ),
                                   const SizedBox(width: 12),
                                   Expanded(
@@ -2126,20 +2130,20 @@ class _UnassignedRoleRecoveryScreenState extends State<_UnassignedRoleRecoverySc
                                         Text(
                                           item['label'] as String,
                                           style: TextStyle(
-                                            color: isSelected ? Colors.white : const Color(0xFFE2E8F0),
+                                            color: isSelected ? SoftPalette.gray50 : SoftPalette.slate150,
                                             fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
                                             fontSize: 14,
                                           ),
                                         ),
                                         Text(
                                           item['desc'] as String,
-                                          style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11.5),
+                                          style: const TextStyle(color: SoftPalette.slate350, fontSize: 11.5),
                                         ),
                                       ],
                                     ),
                                   ),
                                   if (isSelected)
-                                    const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 20),
+                                    const Icon(Icons.check_circle_rounded, color: SoftPalette.emerald350, size: 20),
                                 ],
                               ),
                             ),
@@ -2154,7 +2158,7 @@ class _UnassignedRoleRecoveryScreenState extends State<_UnassignedRoleRecoverySc
                       const Center(
                         child: Padding(
                           padding: EdgeInsets.all(12),
-                          child: CircularProgressIndicator(color: Color(0xFF10B981)),
+                          child: CircularProgressIndicator(color: SoftPalette.emerald350),
                         ),
                       )
                     else ...[
@@ -2164,8 +2168,8 @@ class _UnassignedRoleRecoveryScreenState extends State<_UnassignedRoleRecoverySc
                         label: Text('Confirm Role & Open App (${_selectedRole.toUpperCase()})',
                             style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF059669),
-                          foregroundColor: Colors.white,
+                          backgroundColor: SoftPalette.emerald500,
+                          foregroundColor: SoftPalette.gray50,
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
@@ -2176,10 +2180,10 @@ class _UnassignedRoleRecoveryScreenState extends State<_UnassignedRoleRecoverySc
                           Expanded(
                             child: OutlinedButton.icon(
                               onPressed: () => _applyRoleAndLaunch('hq manager'),
-                              icon: const Icon(Icons.bolt_rounded, color: Color(0xFFFBBF24), size: 18),
-                              label: const Text('Quick HQ Launch', style: TextStyle(color: Color(0xFFFBBF24), fontSize: 12.5)),
+                              icon: const Icon(Icons.bolt_rounded, color: SoftPalette.amber200, size: 18),
+                              label: const Text('Quick HQ Launch', style: TextStyle(color: SoftPalette.amber200, fontSize: 12.5)),
                               style: OutlinedButton.styleFrom(
-                                side: const BorderSide(color: Color(0xFFFBBF24), width: 0.8),
+                                side: const BorderSide(color: SoftPalette.amber200, width: 0.8),
                                 padding: const EdgeInsets.symmetric(vertical: 11),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                               ),
@@ -2198,10 +2202,10 @@ class _UnassignedRoleRecoveryScreenState extends State<_UnassignedRoleRecoverySc
                                   );
                                 }
                               },
-                              icon: const Icon(Icons.logout_rounded, color: Color(0xFFEF4444), size: 18),
-                              label: const Text('Log Out', style: TextStyle(color: Color(0xFFEF4444), fontSize: 12.5)),
+                              icon: const Icon(Icons.logout_rounded, color: SoftPalette.red400, size: 18),
+                              label: const Text('Log Out', style: TextStyle(color: SoftPalette.red400, fontSize: 12.5)),
                               style: OutlinedButton.styleFrom(
-                                side: const BorderSide(color: Color(0xFFEF4444), width: 0.8),
+                                side: const BorderSide(color: SoftPalette.red400, width: 0.8),
                                 padding: const EdgeInsets.symmetric(vertical: 11),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                               ),

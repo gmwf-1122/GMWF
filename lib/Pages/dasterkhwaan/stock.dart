@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
@@ -29,10 +32,10 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
   late final String _today = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
   // Goodwill & Charity Palette
-  static const Color _primary = Color(0xFFD97706); // Warm Amber Gold
-  static const Color _primaryDark = Color(0xFF92400E); // Deep Mahogany Gold
-  static const Color _accent = Color(0xFF059669); // Emerald Blessing
-  static const Color _surface = Color(0xFFFFFBEB); // Warm Vanilla Cream
+  static const Color _primary = SoftPalette.orange400; // Warm Amber Gold
+  static const Color _primaryDark = SoftPalette.orange600; // Deep Mahogany Gold
+  static const Color _accent = SoftPalette.emerald500; // Emerald Blessing
+  static const Color _surface = SoftPalette.yellow50m; // Warm Vanilla Cream
 
   @override
   void initState() {
@@ -117,9 +120,9 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
           padding: EdgeInsets.only(
               bottom: MediaQuery.of(context).viewInsets.bottom),
           child: Container(
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            decoration: BoxDecoration(
+              color: context.adapt(SoftPalette.gray50),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
             ),
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
             child: Form(
@@ -134,7 +137,7 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                         height: 4,
                         margin: const EdgeInsets.only(bottom: 20),
                         decoration: BoxDecoration(
-                            color: Colors.grey.shade300,
+                            color: context.adapt(SoftPalette.gray150),
                             borderRadius: BorderRadius.circular(2))),
                   ),
                   Row(children: [
@@ -182,8 +185,8 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(14)),
                         ),
-                        child: const Text("Cancel",
-                            style: TextStyle(color: Colors.grey, fontSize: 15)),
+                        child: Text("Cancel",
+                            style: TextStyle(color: context.adapt(SoftPalette.gray350), fontSize: 15)),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -192,7 +195,7 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
                           backgroundColor: _primary,
-                          foregroundColor: Colors.white,
+                          foregroundColor: SoftPalette.gray50,
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(14)),
@@ -276,9 +279,9 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
           padding:
               EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
           child: Container(
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            decoration: BoxDecoration(
+              color: context.adapt(SoftPalette.gray50),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
             ),
             padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
             child: Form(
@@ -293,7 +296,7 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                         height: 4,
                         margin: const EdgeInsets.only(bottom: 20),
                         decoration: BoxDecoration(
-                            color: Colors.grey.shade300,
+                            color: context.adapt(SoftPalette.gray150),
                             borderRadius: BorderRadius.circular(2))),
                   ),
                   Row(children: [
@@ -301,8 +304,8 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
                         color: isIncrement
-                            ? const Color(0xFF059669).withValues(alpha: 0.12)
-                            : Colors.red.withValues(alpha: 0.12),
+                            ? SoftPalette.emerald500.withValues(alpha: 0.12)
+                            : SoftPalette.red400.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Icon(
@@ -310,8 +313,8 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                             ? Icons.add_circle_outline_rounded
                             : Icons.remove_circle_outline_rounded,
                         color: isIncrement
-                            ? const Color(0xFF059669)
-                            : Colors.red.shade600,
+                            ? SoftPalette.emerald500
+                            : SoftPalette.red500,
                         size: 22,
                       ),
                     ),
@@ -326,7 +329,7 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                         ),
                         Text(item.name,
                             style: TextStyle(
-                                color: Colors.grey[600], fontSize: 13)),
+                                color: context.adapt(SoftPalette.gray500), fontSize: 13)),
                       ],
                     ),
                   ]),
@@ -336,21 +339,21 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                   Container(
                     padding: const EdgeInsets.all(14),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFFEF3C7),
+                      color: context.adapt(SoftPalette.yellow100),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFFFDE68A)),
+                      border: Border.all(color: context.adapt(SoftPalette.yellow150)),
                     ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text("Current Stock Level",
                             style: TextStyle(
-                                color: Colors.amber.shade900, fontSize: 13, fontWeight: FontWeight.w500)),
+                                color: context.adapt(SoftPalette.orange350), fontSize: 13, fontWeight: FontWeight.w500)),
                         Text(
                           "${item.quantity} ${item.unit}",
                           style: TextStyle(
                               fontWeight: FontWeight.w800,
-                              color: Colors.amber.shade900,
+                              color: context.adapt(SoftPalette.orange350),
                               fontSize: 15),
                         ),
                       ],
@@ -409,8 +412,8 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(14)),
                         ),
-                        child: const Text("Cancel",
-                            style: TextStyle(color: Colors.grey, fontSize: 15)),
+                        child: Text("Cancel",
+                            style: TextStyle(color: context.adapt(SoftPalette.gray350), fontSize: 15)),
                       ),
                     ),
                     const SizedBox(width: 12),
@@ -419,9 +422,9 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
                           backgroundColor: isIncrement
-                              ? const Color(0xFF059669)
-                              : Colors.red.shade600,
-                          foregroundColor: Colors.white,
+                              ? SoftPalette.emerald500
+                              : SoftPalette.red500,
+                          foregroundColor: SoftPalette.gray50,
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(14)),
@@ -529,18 +532,18 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
   }
 
   void _showSnack(String msg, {bool isError = false}) {
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    AppToast.showSnackBar(context, SnackBar(
       content: Row(children: [
         Icon(
             isError ? Icons.error_outline : Icons.check_circle_outline,
-            color: Colors.white,
+            color: SoftPalette.gray50,
             size: 18),
         const SizedBox(width: 10),
         Expanded(
             child: Text(msg,
                 style: const TextStyle(fontWeight: FontWeight.w600))),
       ]),
-      backgroundColor: isError ? const Color(0xFFB71C1C) : _accent,
+      backgroundColor: isError ? SoftPalette.red550 : _accent,
       behavior: SnackBarBehavior.floating,
       margin: const EdgeInsets.all(16),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -553,13 +556,13 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
       labelText: label,
       prefixIcon: Icon(icon, color: _primary, size: 20),
       filled: true,
-      fillColor: Colors.white,
+      fillColor: context.adapt(SoftPalette.gray50),
       border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey.shade300)),
+          borderSide: BorderSide(color: context.adapt(SoftPalette.gray150))),
       enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: Colors.grey.shade300)),
+          borderSide: BorderSide(color: context.adapt(SoftPalette.gray150))),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
         borderSide: const BorderSide(color: _primary, width: 2),
@@ -583,7 +586,7 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
         _allStockItems.where((i) => i.quantity <= 2).length;
 
     return Scaffold(
-      backgroundColor: _surface,
+      backgroundColor: context.adapt(_surface),
       body: CustomScrollView(
         slivers: [
           // Header banner with goodwill & charity palette
@@ -591,7 +594,7 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
             pinned: true,
             expandedHeight: 120,
             backgroundColor: _primaryDark,
-            foregroundColor: Colors.white,
+            foregroundColor: SoftPalette.gray50,
             automaticallyImplyLeading: false,
             elevation: 0,
             flexibleSpace: FlexibleSpaceBar(
@@ -613,10 +616,10 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                         Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.2),
+                            color: SoftPalette.gray50.withValues(alpha: 0.2),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.volunteer_activism_rounded, color: Colors.white, size: 24),
+                          child: const Icon(Icons.volunteer_activism_rounded, color: SoftPalette.gray50, size: 24),
                         ),
                         const SizedBox(width: 12),
                         Column(
@@ -627,13 +630,13 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                               style: TextStyle(
                                   fontSize: 20,
                                   fontWeight: FontWeight.bold,
-                                  color: Colors.white),
+                                  color: SoftPalette.gray50),
                             ),
                             Text(
                               "Charity Kitchen Stock & Manual Audit Deductions · Branch: ${_branchId ?? 'all'}",
                               style: TextStyle(
                                   fontSize: 12,
-                                  color: Colors.amber.shade100),
+                                  color: SoftPalette.yellow150),
                             ),
                           ],
                         ),
@@ -652,9 +655,9 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
               child: Container(
                 padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: context.adapt(SoftPalette.gray50),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: const Color(0xFFFDE68A)),
+                  border: Border.all(color: context.adapt(SoftPalette.yellow150)),
                 ),
                 child: Row(
                   children: [
@@ -673,14 +676,14 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                             children: [
                               Icon(Icons.inventory_2_rounded,
                                   size: 18,
-                                  color: _viewMode == 0 ? Colors.white : Colors.grey.shade700),
+                                  color: _viewMode == 0 ? SoftPalette.gray50 : context.adapt(SoftPalette.gray550)),
                               const SizedBox(width: 8),
                               Text(
                                 "Stock Inventory (${_allStockItems.length})",
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 13,
-                                  color: _viewMode == 0 ? Colors.white : Colors.grey.shade700,
+                                  color: _viewMode == 0 ? SoftPalette.gray50 : context.adapt(SoftPalette.gray550),
                                 ),
                               ),
                             ],
@@ -703,14 +706,14 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                             children: [
                               Icon(Icons.history_rounded,
                                   size: 18,
-                                  color: _viewMode == 1 ? Colors.white : Colors.grey.shade700),
+                                  color: _viewMode == 1 ? SoftPalette.gray50 : context.adapt(SoftPalette.gray550)),
                               const SizedBox(width: 8),
                               Text(
                                 "Audit & Deductions",
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 13,
-                                  color: _viewMode == 1 ? Colors.white : Colors.grey.shade700,
+                                  color: _viewMode == 1 ? SoftPalette.gray50 : context.adapt(SoftPalette.gray550),
                                 ),
                               ),
                             ],
@@ -733,19 +736,19 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                     decoration: BoxDecoration(
-                      color: Colors.red.shade50,
+                      color: context.adapt(SoftPalette.pink100m),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.red.shade200),
+                      border: Border.all(color: context.adapt(SoftPalette.red300)),
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.warning_amber_rounded, color: Colors.red.shade700, size: 20),
+                        Icon(Icons.warning_amber_rounded, color: context.adapt(SoftPalette.red500), size: 20),
                         const SizedBox(width: 10),
                         Expanded(
                           child: Text(
                             "$lowStock items low on stock (≤ 2 units remaining). Replenish for Dasterkhwaan meals.",
                             style: TextStyle(
-                                color: Colors.red.shade900,
+                                color: context.adapt(SoftPalette.red550),
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600),
                           ),
@@ -766,7 +769,7 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                   decoration: InputDecoration(
                     hintText: "Search food stock (e.g. Chawal, Aloo, Ghee)...",
                     prefixIcon:
-                        Icon(Icons.search, color: Colors.grey[500], size: 20),
+                        Icon(Icons.search, color: context.adapt(SoftPalette.gray350), size: 20),
                     suffixIcon: _searchController.text.isNotEmpty
                         ? IconButton(
                             icon: const Icon(Icons.clear, size: 18),
@@ -776,10 +779,10 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                             })
                         : null,
                     filled: true,
-                    fillColor: Colors.white,
+                    fillColor: context.adapt(SoftPalette.gray50),
                     border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(14),
-                        borderSide: BorderSide(color: Colors.grey.shade300)),
+                        borderSide: BorderSide(color: context.adapt(SoftPalette.gray150))),
                     contentPadding: const EdgeInsets.symmetric(
                         vertical: 12, horizontal: 16),
                   ),
@@ -806,7 +809,7 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                       const SizedBox(height: 12),
                       Text("No items found",
                           style: TextStyle(
-                              color: Colors.grey[500], fontSize: 15)),
+                              color: context.adapt(SoftPalette.gray350), fontSize: 15)),
                     ],
                   ),
                 ),
@@ -823,16 +826,16 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                       return Container(
                         margin: const EdgeInsets.only(bottom: 10),
                         decoration: BoxDecoration(
-                          color: Colors.white,
+                          color: context.adapt(SoftPalette.gray50),
                           borderRadius: BorderRadius.circular(18),
                           border: Border.all(
                             color: isLow
-                                ? Colors.red.withValues(alpha: 0.3)
-                                : const Color(0xFFFDE68A),
+                                ? SoftPalette.red400.withValues(alpha: 0.3)
+                                : context.adapt(SoftPalette.yellow150),
                           ),
                           boxShadow: [
                             BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.04),
+                                color: SoftPalette.gray900.withValues(alpha: 0.04),
                                 blurRadius: 8,
                                 offset: const Offset(0, 2))
                           ],
@@ -846,7 +849,7 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                                 height: 48,
                                 decoration: BoxDecoration(
                                   color: isLow
-                                      ? Colors.red.withValues(alpha: 0.08)
+                                      ? SoftPalette.red400.withValues(alpha: 0.08)
                                       : _primary.withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(14),
                                 ),
@@ -855,7 +858,7 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                                       ? Icons.warning_rounded
                                       : Icons.restaurant_rounded,
                                   color: isLow
-                                      ? Colors.red.shade500
+                                      ? SoftPalette.red400
                                       : _primary,
                                   size: 22,
                                 ),
@@ -874,7 +877,7 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                                     Text(
                                       "Updated ${DateFormat('dd MMM, hh:mm a').format(updated)}",
                                       style: TextStyle(
-                                          color: Colors.grey[500],
+                                          color: context.adapt(SoftPalette.gray350),
                                           fontSize: 11),
                                     ),
                                   ],
@@ -885,13 +888,13 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                                     horizontal: 10, vertical: 4),
                                 decoration: BoxDecoration(
                                   color: isLow
-                                      ? Colors.red.withValues(alpha: 0.1)
-                                      : const Color(0xFFFEF3C7),
+                                      ? SoftPalette.red400.withValues(alpha: 0.1)
+                                      : context.adapt(SoftPalette.yellow100),
                                   borderRadius: BorderRadius.circular(10),
                                   border: Border.all(
                                     color: isLow
-                                        ? Colors.red.withValues(alpha: 0.3)
-                                        : const Color(0xFFFDE68A),
+                                        ? SoftPalette.red400.withValues(alpha: 0.3)
+                                        : context.adapt(SoftPalette.yellow150),
                                   ),
                                 ),
                                 child: Text(
@@ -899,8 +902,8 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                                   style: TextStyle(
                                       fontWeight: FontWeight.w800,
                                       color: isLow
-                                          ? Colors.red.shade600
-                                          : _primaryDark,
+                                          ? SoftPalette.red500
+                                          : context.adapt(_primaryDark),
                                       fontSize: 13),
                                 ),
                               ),
@@ -916,7 +919,7 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                                   const SizedBox(height: 4),
                                   _ActionBtn(
                                     icon: Icons.remove_rounded,
-                                    color: Colors.red.shade500,
+                                    color: SoftPalette.red400,
                                     onTap: () => _showAdjustDialog(item,
                                         isIncrement: false),
                                   ),
@@ -945,7 +948,7 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                 FloatingActionButton.extended(
                   heroTag: 'logFood',
                   backgroundColor: kWarning,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                   onPressed: () => showFoodTypeChooser(
                     context,
                     allStockItems: _allStockItems,
@@ -963,7 +966,7 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                 FloatingActionButton.extended(
                   heroTag: 'addStock',
                   backgroundColor: _primary,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                   onPressed: _showAddItemDialog,
                   icon: const Icon(Icons.add_rounded, size: 22),
                   label: const Text("Add New Stock",
@@ -1011,10 +1014,10 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.history_rounded, size: 64, color: Colors.grey.shade400),
+                  Icon(Icons.history_rounded, size: 64, color: context.adapt(SoftPalette.gray300)),
                   const SizedBox(height: 12),
                   Text("No stock audit or deduction records found",
-                      style: TextStyle(color: Colors.grey.shade600, fontSize: 14)),
+                      style: TextStyle(color: context.adapt(SoftPalette.gray500), fontSize: 14)),
                 ],
               ),
             ),
@@ -1049,27 +1052,27 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
 
                 switch (changeType) {
                   case 'consumed':
-                    badgeColor = const Color(0xFF059669);
+                    badgeColor = SoftPalette.emerald500;
                     typeLabel = 'Used in Kitchen';
                     typeIcon = Icons.soup_kitchen_rounded;
                     break;
                   case 'wasted':
-                    badgeColor = Colors.red.shade700;
+                    badgeColor = SoftPalette.red500;
                     typeLabel = 'Spoiled / Wasted';
                     typeIcon = Icons.delete_outline_rounded;
                     break;
                   case 'expired':
-                    badgeColor = Colors.orange.shade800;
+                    badgeColor = SoftPalette.orange400;
                     typeLabel = 'Expired';
                     typeIcon = Icons.event_busy_rounded;
                     break;
                   case 'received':
-                    badgeColor = const Color(0xFF2563EB);
+                    badgeColor = SoftPalette.blue550;
                     typeLabel = 'Received / Added';
                     typeIcon = Icons.add_circle_outline_rounded;
                     break;
                   default:
-                    badgeColor = Colors.purple.shade700;
+                    badgeColor = SoftPalette.purple600;
                     typeLabel = 'Audit Adjustment';
                     typeIcon = Icons.rule_rounded;
                     break;
@@ -1079,12 +1082,12 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                   margin: const EdgeInsets.only(bottom: 10),
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: context.adapt(SoftPalette.gray50),
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.grey.shade200),
+                    border: Border.all(color: context.adapt(SoftPalette.gray100)),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.03),
+                        color: SoftPalette.gray900.withValues(alpha: 0.03),
                         blurRadius: 6,
                         offset: const Offset(0, 2),
                       ),
@@ -1135,7 +1138,7 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                               "Changed: ${qtyChanged > 0 ? '+' : ''}$qtyChanged $unit",
                               style: TextStyle(
                                 fontWeight: FontWeight.w700,
-                                color: qtyChanged < 0 ? Colors.red.shade700 : Colors.green.shade700,
+                                color: qtyChanged < 0 ? SoftPalette.red500 : SoftPalette.green500,
                                 fontSize: 13,
                               ),
                             ),
@@ -1144,7 +1147,7 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                               Text(
                                 "Notes: $notes",
                                 style: TextStyle(
-                                    color: Colors.grey.shade700,
+                                    color: context.adapt(SoftPalette.gray550),
                                     fontSize: 11,
                                     fontStyle: FontStyle.italic),
                               ),
@@ -1155,11 +1158,11 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                               children: [
                                 Text(
                                   "Audited by: $auditedBy",
-                                  style: TextStyle(color: Colors.grey.shade500, fontSize: 10),
+                                  style: TextStyle(color: context.adapt(SoftPalette.gray350), fontSize: 10),
                                 ),
                                 Text(
                                   DateFormat('dd MMM yyyy, hh:mm a').format(ts),
-                                  style: TextStyle(color: Colors.grey.shade500, fontSize: 10),
+                                  style: TextStyle(color: context.adapt(SoftPalette.gray350), fontSize: 10),
                                 ),
                               ],
                             ),

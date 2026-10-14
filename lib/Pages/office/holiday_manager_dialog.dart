@@ -1,6 +1,7 @@
 // lib/pages/office/holiday_manager_dialog.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 import '../../theme/role_theme_provider.dart';
@@ -247,11 +248,11 @@ class _HolidayManagerDialogState extends State<HolidayManagerDialog> {
                             if (hol['syncStatus'] == 'pending')
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(color: Colors.orange.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
-                                child: const Text('Syncing...', style: TextStyle(color: Colors.orange, fontSize: 9, fontWeight: FontWeight.bold)),
+                                decoration: BoxDecoration(color: SoftPalette.amber300.withOpacity(0.1), borderRadius: BorderRadius.circular(6)),
+                                child: const Text('Syncing...', style: TextStyle(color: SoftPalette.amber300, fontSize: 9, fontWeight: FontWeight.bold)),
                               ),
                             IconButton(
-                              icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                              icon: const Icon(Icons.delete_outline, color: SoftPalette.red400, size: 20),
                               onPressed: () => _confirmDelete(id, branches),
                             ),
                           ],
@@ -265,8 +266,8 @@ class _HolidayManagerDialogState extends State<HolidayManagerDialog> {
                       spacing: 6,
                       runSpacing: 4,
                       children: [
-                        _buildBadge(isGlobal ? 'All Branches' : 'Selected Branches', Colors.blue, t),
-                        _buildBadge(appliesToAllDepts ? 'All Departments' : 'Dept: ${departments.join(", ")}', Colors.teal, t),
+                        _buildBadge(isGlobal ? 'All Branches' : 'Selected Branches', SoftPalette.blue400, t),
+                        _buildBadge(appliesToAllDepts ? 'All Departments' : 'Dept: ${departments.join(", ")}', SoftPalette.teal500, t),
                       ],
                     ),
                     if (exceptions.isNotEmpty) ...[
@@ -282,7 +283,7 @@ class _HolidayManagerDialogState extends State<HolidayManagerDialog> {
                             padding: const EdgeInsets.only(bottom: 2.0),
                             child: Row(
                               children: [
-                                const Icon(Icons.info_outline, color: Colors.orange, size: 10),
+                                const Icon(Icons.info_outline, color: SoftPalette.amber300, size: 10),
                                 const SizedBox(width: 6),
                                 Text(
                                   '${exDept.toUpperCase()} department on ${_getBranchName(exBranch)}',
@@ -460,7 +461,7 @@ class _HolidayManagerDialogState extends State<HolidayManagerDialog> {
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: t.accent,
-                    foregroundColor: Colors.white,
+                    foregroundColor: SoftPalette.gray50,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
@@ -594,7 +595,7 @@ class _HolidayManagerDialogState extends State<HolidayManagerDialog> {
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.remove_circle_outline, color: Colors.red, size: 18),
+                    icon: const Icon(Icons.remove_circle_outline, color: SoftPalette.red400, size: 18),
                     onPressed: () {
                       setState(() {
                         _exceptions.removeAt(idx);
@@ -723,7 +724,7 @@ class _HolidayManagerDialogState extends State<HolidayManagerDialog> {
               child: Text('Cancel', style: TextStyle(color: t.textSecondary)),
             ),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.red400),
               onPressed: () async {
                 Navigator.pop(ctx);
                 try {
@@ -738,7 +739,7 @@ class _HolidayManagerDialogState extends State<HolidayManagerDialog> {
                   showCustomSnackBar(context, 'Failed: $e', error: true);
                 }
               },
-              child: const Text('Delete', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              child: const Text('Delete', style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold)),
             ),
           ],
         );

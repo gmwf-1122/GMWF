@@ -2,6 +2,7 @@
 // Note: excel package aliased as 'xl' to avoid Border conflict with Flutter
 
 import 'dart:convert';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'dart:io';
 
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -76,14 +77,14 @@ class _DownloadScreenState extends State<DownloadScreen>
   bool _isLoadingBranches = true;
 
   final List<Map<String, dynamic>> _categoryDef = [
-    {'id': 'dispensary', 'label': 'Dispensary', 'icon': Icons.medication_outlined, 'color': const Color(0xFF0D9488)},
-    {'id': 'dasterkhwaan', 'label': 'Dasterkhwaan & Food Stock', 'icon': Icons.restaurant_rounded, 'color': const Color(0xFFEA580C)},
-    {'id': 'madrassa', 'label': 'Madrassa Module', 'icon': Icons.menu_book_rounded, 'color': const Color(0xFF4F46E5)},
-    {'id': 'school', 'label': 'School System (TWT)', 'icon': Icons.school_rounded, 'color': const Color(0xFF6366F1)},
-    {'id': 'donations', 'label': 'Donations & Credit', 'icon': Icons.volunteer_activism_outlined, 'color': const Color(0xFFBE185D)},
-    {'id': 'officeboy', 'label': 'Food Tokens (Dasterkhwaan)', 'icon': Icons.confirmation_number_rounded, 'color': const Color(0xFFF59E0B)},
-    {'id': 'finance', 'label': 'Finance, Loans & Expenses', 'icon': Icons.account_balance_wallet_rounded, 'color': const Color(0xFF10B981)},
-    {'id': 'hr', 'label': 'HR & Staff Payroll', 'icon': Icons.badge_rounded, 'color': const Color(0xFF0284C7)},
+    {'id': 'dispensary', 'label': 'Dispensary', 'icon': Icons.medication_outlined, 'color': SoftPalette.teal500},
+    {'id': 'dasterkhwaan', 'label': 'Dasterkhwaan & Food Stock', 'icon': Icons.restaurant_rounded, 'color': SoftPalette.orange400},
+    {'id': 'madrassa', 'label': 'Madrassa Module', 'icon': Icons.menu_book_rounded, 'color': SoftPalette.indigo550},
+    {'id': 'school', 'label': 'School System (TWT)', 'icon': Icons.school_rounded, 'color': SoftPalette.indigo500},
+    {'id': 'donations', 'label': 'Donations & Credit', 'icon': Icons.volunteer_activism_outlined, 'color': SoftPalette.pink550},
+    {'id': 'officeboy', 'label': 'Food Tokens (Dasterkhwaan)', 'icon': Icons.confirmation_number_rounded, 'color': SoftPalette.amber300},
+    {'id': 'finance', 'label': 'Finance, Loans & Expenses', 'icon': Icons.account_balance_wallet_rounded, 'color': SoftPalette.emerald350},
+    {'id': 'hr', 'label': 'HR & Staff Payroll', 'icon': Icons.badge_rounded, 'color': SoftPalette.sky500},
   ];
 
   @override
@@ -261,7 +262,7 @@ class _DownloadScreenState extends State<DownloadScreen>
       data: Theme.of(ctx).copyWith(
         colorScheme: ColorScheme.dark(
           primary: t.accent,
-          onPrimary: Colors.white,
+          onPrimary: SoftPalette.gray50,
           surface: t.bgCard,
           onSurface: t.textPrimary,
         ), dialogTheme: DialogThemeData(backgroundColor: t.bgCard),
@@ -1097,7 +1098,7 @@ class _DownloadScreenState extends State<DownloadScreen>
         Clipboard.setData(ClipboardData(text: savePath));
         _showSnack(
             '✓ Excel Backup saved — ${data.length} sheets, $totalRecords total rows\n$savePath',
-            color: const Color(0xFF2E7D32));
+            color: SoftPalette.green550);
         FileActionHelper.showFileOptions(
           context,
           filePath: savePath,
@@ -1107,7 +1108,7 @@ class _DownloadScreenState extends State<DownloadScreen>
         );
       }
     } catch (e) {
-      _showSnack('Excel failed: $e', color: Colors.red);
+      _showSnack('Excel failed: $e', color: SoftPalette.red400);
     } finally {
       setState(() {
         _isDownloadingExcel = false;
@@ -1152,7 +1153,7 @@ class _DownloadScreenState extends State<DownloadScreen>
 
   void _showSnack(String msg, {required Color color}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    AppToast.showSnackBar(context, SnackBar(
       content: Text(msg, style: const TextStyle(fontSize: 13)),
       backgroundColor: color,
       duration: const Duration(seconds: 8),
@@ -1161,9 +1162,9 @@ class _DownloadScreenState extends State<DownloadScreen>
           RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       action: SnackBarAction(
         label: 'Close',
-        textColor: Colors.white,
+        textColor: SoftPalette.gray50,
         onPressed: () =>
-            ScaffoldMessenger.of(context).hideCurrentSnackBar(),
+            AppToast.hideCurrent(),
       ),
     ));
   }
@@ -1552,7 +1553,7 @@ class _DownloadScreenState extends State<DownloadScreen>
             children: [
               Icon(icon,
                   size: 14,
-                  color: active ? Colors.white : t.textTertiary),
+                  color: active ? SoftPalette.gray50 : t.textTertiary),
               const SizedBox(width: 5),
               Text(label,
                   style: TextStyle(
@@ -1560,7 +1561,7 @@ class _DownloadScreenState extends State<DownloadScreen>
                       fontWeight: active
                           ? FontWeight.w700
                           : FontWeight.w500,
-                      color: active ? Colors.white : t.textTertiary)),
+                      color: active ? SoftPalette.gray50 : t.textTertiary)),
             ],
           ),
         ),
@@ -1870,30 +1871,30 @@ class _DownloadScreenState extends State<DownloadScreen>
               crossAxisSpacing: 10,
               childAspectRatio: 2.2,
               children: [
-                if (_totalPatients > 0) _statTile('Patients', _totalPatients, Icons.people_rounded, const Color(0xFF4CAF50), total, t),
-                if (_totalTokens > 0) _statTile('Tokens', _totalTokens, Icons.confirmation_number_rounded, const Color(0xFF2196F3), total, t),
-                if (_totalPrescriptions > 0) _statTile('Prescriptions', _totalPrescriptions, Icons.medication_rounded, const Color(0xFFFF9800), total, t),
-                if (_totalDispensary > 0) _statTile('Medicine Stock', _totalDispensary, Icons.inventory_2_rounded, const Color(0xFF9C27B0), total, t),
-                if (_totalDonations > 0) _statTile('Donations', _totalDonations, Icons.volunteer_activism_rounded, const Color(0xFFE91E63), total, t),
-                if (_totalFood > 0) _statTile('Food Tokens', _totalFood, Icons.restaurant_rounded, const Color(0xFF795548), total, t),
-                if (_totalFoodStock > 0) _statTile('Food Stock Items', _totalFoodStock, Icons.kitchen_rounded, const Color(0xFFD97706), total, t),
-                if (_totalFoodLogs > 0) _statTile('Food Audit Logs', _totalFoodLogs, Icons.history_rounded, const Color(0xFFB45309), total, t),
-                if (_totalCredits > 0) _statTile('Credits', _totalCredits, Icons.payments_rounded, const Color(0xFF009688), total, t),
-                if (_totalMadrassaS > 0) _statTile('Madrassa Students', _totalMadrassaS, Icons.school_rounded, const Color(0xFF4F46E5), total, t),
-                if (_totalMadrassaL > 0) _statTile('Madrassa Logs', _totalMadrassaL, Icons.menu_book_rounded, const Color(0xFF3F51B5), total, t),
-                if (_totalSchoolStudents > 0) _statTile('School Students', _totalSchoolStudents, Icons.groups_rounded, const Color(0xFF6366F1), total, t),
-                if (_totalSchoolTeachers > 0) _statTile('School Faculty', _totalSchoolTeachers, Icons.record_voice_over_rounded, const Color(0xFF10B981), total, t),
-                if (_totalSchoolLogs > 0) _statTile('School Attendance', _totalSchoolLogs, Icons.how_to_reg_rounded, const Color(0xFF0284C7), total, t),
-                if (_totalSchoolBooks > 0) _statTile('Library Books', _totalSchoolBooks, Icons.local_library_rounded, const Color(0xFF8B5CF6), total, t),
-                if (_totalSchoolBookLoans > 0) _statTile('Book Loans', _totalSchoolBookLoans, Icons.auto_stories_rounded, const Color(0xFFA855F7), total, t),
-                if (_totalSchoolGrades > 0) _statTile('Exam Grades', _totalSchoolGrades, Icons.grade_rounded, const Color(0xFFEC4899), total, t),
-                if (_totalSchoolAudit > 0) _statTile('School Audit Logs', _totalSchoolAudit, Icons.security_rounded, const Color(0xFF64748B), total, t),
-                if (_totalOfficeBoyTasks > 0) _statTile('Office Boy Tasks', _totalOfficeBoyTasks, Icons.cleaning_services_rounded, const Color(0xFFF59E0B), total, t),
-                if (_totalOfficeBoyLogs > 0) _statTile('Office Boy Logs', _totalOfficeBoyLogs, Icons.task_alt_rounded, const Color(0xFFD97706), total, t),
-                if (_totalFinanceLoans > 0) _statTile('Finance Loans', _totalFinanceLoans, Icons.account_balance_wallet_rounded, const Color(0xFF059669), total, t),
-                if (_totalExpenses > 0) _statTile('Expenses', _totalExpenses, Icons.receipt_long_rounded, const Color(0xFF16A34A), total, t),
-                if (_totalEmployees > 0) _statTile('Staff Employees', _totalEmployees, Icons.badge_rounded, const Color(0xFF0284C7), total, t),
-                if (_totalSalaryHistory > 0) _statTile('Salary Payroll', _totalSalaryHistory, Icons.monetization_on_rounded, const Color(0xFF0369A1), total, t),
+                if (_totalPatients > 0) _statTile('Patients', _totalPatients, Icons.people_rounded, SoftPalette.green400, total, t),
+                if (_totalTokens > 0) _statTile('Tokens', _totalTokens, Icons.confirmation_number_rounded, SoftPalette.blue400, total, t),
+                if (_totalPrescriptions > 0) _statTile('Prescriptions', _totalPrescriptions, Icons.medication_rounded, SoftPalette.amber300, total, t),
+                if (_totalDispensary > 0) _statTile('Medicine Stock', _totalDispensary, Icons.inventory_2_rounded, SoftPalette.purple550, total, t),
+                if (_totalDonations > 0) _statTile('Donations', _totalDonations, Icons.volunteer_activism_rounded, SoftPalette.red500, total, t),
+                if (_totalFood > 0) _statTile('Food Tokens', _totalFood, Icons.restaurant_rounded, SoftPalette.orange600m, total, t),
+                if (_totalFoodStock > 0) _statTile('Food Stock Items', _totalFoodStock, Icons.kitchen_rounded, SoftPalette.orange400, total, t),
+                if (_totalFoodLogs > 0) _statTile('Food Audit Logs', _totalFoodLogs, Icons.history_rounded, SoftPalette.orange500, total, t),
+                if (_totalCredits > 0) _statTile('Credits', _totalCredits, Icons.payments_rounded, SoftPalette.teal500, total, t),
+                if (_totalMadrassaS > 0) _statTile('Madrassa Students', _totalMadrassaS, Icons.school_rounded, SoftPalette.indigo550, total, t),
+                if (_totalMadrassaL > 0) _statTile('Madrassa Logs', _totalMadrassaL, Icons.menu_book_rounded, SoftPalette.indigo600, total, t),
+                if (_totalSchoolStudents > 0) _statTile('School Students', _totalSchoolStudents, Icons.groups_rounded, SoftPalette.indigo500, total, t),
+                if (_totalSchoolTeachers > 0) _statTile('School Faculty', _totalSchoolTeachers, Icons.record_voice_over_rounded, SoftPalette.emerald350, total, t),
+                if (_totalSchoolLogs > 0) _statTile('School Attendance', _totalSchoolLogs, Icons.how_to_reg_rounded, SoftPalette.sky500, total, t),
+                if (_totalSchoolBooks > 0) _statTile('Library Books', _totalSchoolBooks, Icons.local_library_rounded, SoftPalette.violet500, total, t),
+                if (_totalSchoolBookLoans > 0) _statTile('Book Loans', _totalSchoolBookLoans, Icons.auto_stories_rounded, SoftPalette.violet400, total, t),
+                if (_totalSchoolGrades > 0) _statTile('Exam Grades', _totalSchoolGrades, Icons.grade_rounded, SoftPalette.pink400, total, t),
+                if (_totalSchoolAudit > 0) _statTile('School Audit Logs', _totalSchoolAudit, Icons.security_rounded, SoftPalette.slate550, total, t),
+                if (_totalOfficeBoyTasks > 0) _statTile('Office Boy Tasks', _totalOfficeBoyTasks, Icons.cleaning_services_rounded, SoftPalette.amber300, total, t),
+                if (_totalOfficeBoyLogs > 0) _statTile('Office Boy Logs', _totalOfficeBoyLogs, Icons.task_alt_rounded, SoftPalette.orange400, total, t),
+                if (_totalFinanceLoans > 0) _statTile('Finance Loans', _totalFinanceLoans, Icons.account_balance_wallet_rounded, SoftPalette.emerald500, total, t),
+                if (_totalExpenses > 0) _statTile('Expenses', _totalExpenses, Icons.receipt_long_rounded, SoftPalette.green400, total, t),
+                if (_totalEmployees > 0) _statTile('Staff Employees', _totalEmployees, Icons.badge_rounded, SoftPalette.sky500, total, t),
+                if (_totalSalaryHistory > 0) _statTile('Salary Payroll', _totalSalaryHistory, Icons.monetization_on_rounded, SoftPalette.sky550, total, t),
               ],
             ),
             const SizedBox(height: 16),
@@ -1952,30 +1953,30 @@ class _DownloadScreenState extends State<DownloadScreen>
 
   Widget _buildProportionBar(int total, RoleThemeData t) {
     final segments = [
-      (_totalPatients / total, const Color(0xFF4CAF50)),
-      (_totalTokens / total, const Color(0xFF2196F3)),
-      (_totalPrescriptions / total, const Color(0xFFFF9800)),
-      (_totalDispensary / total, const Color(0xFF9C27B0)),
-      (_totalDonations / total, const Color(0xFFE91E63)),
-      (_totalFood / total, const Color(0xFF795548)),
-      (_totalFoodStock / total, const Color(0xFFD97706)),
-      (_totalFoodLogs / total, const Color(0xFFB45309)),
-      (_totalCredits / total, const Color(0xFF009688)),
-      (_totalMadrassaS / total, const Color(0xFF4F46E5)),
-      (_totalMadrassaL / total, const Color(0xFF3F51B5)),
-      (_totalSchoolStudents / total, const Color(0xFF6366F1)),
-      (_totalSchoolTeachers / total, const Color(0xFF10B981)),
-      (_totalSchoolLogs / total, const Color(0xFF0284C7)),
-      (_totalSchoolBooks / total, const Color(0xFF8B5CF6)),
-      (_totalSchoolBookLoans / total, const Color(0xFFA855F7)),
-      (_totalSchoolGrades / total, const Color(0xFFEC4899)),
-      (_totalSchoolAudit / total, const Color(0xFF64748B)),
-      (_totalOfficeBoyTasks / total, const Color(0xFFF59E0B)),
-      (_totalOfficeBoyLogs / total, const Color(0xFFD97706)),
-      (_totalFinanceLoans / total, const Color(0xFF059669)),
-      (_totalExpenses / total, const Color(0xFF16A34A)),
-      (_totalEmployees / total, const Color(0xFF0284C7)),
-      (_totalSalaryHistory / total, const Color(0xFF0369A1)),
+      (_totalPatients / total, SoftPalette.green400),
+      (_totalTokens / total, SoftPalette.blue400),
+      (_totalPrescriptions / total, SoftPalette.amber300),
+      (_totalDispensary / total, SoftPalette.purple550),
+      (_totalDonations / total, SoftPalette.red500),
+      (_totalFood / total, SoftPalette.orange600m),
+      (_totalFoodStock / total, SoftPalette.orange400),
+      (_totalFoodLogs / total, SoftPalette.orange500),
+      (_totalCredits / total, SoftPalette.teal500),
+      (_totalMadrassaS / total, SoftPalette.indigo550),
+      (_totalMadrassaL / total, SoftPalette.indigo600),
+      (_totalSchoolStudents / total, SoftPalette.indigo500),
+      (_totalSchoolTeachers / total, SoftPalette.emerald350),
+      (_totalSchoolLogs / total, SoftPalette.sky500),
+      (_totalSchoolBooks / total, SoftPalette.violet500),
+      (_totalSchoolBookLoans / total, SoftPalette.violet400),
+      (_totalSchoolGrades / total, SoftPalette.pink400),
+      (_totalSchoolAudit / total, SoftPalette.slate550),
+      (_totalOfficeBoyTasks / total, SoftPalette.amber300),
+      (_totalOfficeBoyLogs / total, SoftPalette.orange400),
+      (_totalFinanceLoans / total, SoftPalette.emerald500),
+      (_totalExpenses / total, SoftPalette.green400),
+      (_totalEmployees / total, SoftPalette.sky500),
+      (_totalSalaryHistory / total, SoftPalette.sky550),
     ];
     return ClipRRect(
       borderRadius: BorderRadius.circular(6),
@@ -2069,17 +2070,17 @@ class _DownloadScreenState extends State<DownloadScreen>
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Icon(icon, color: Colors.white, size: 24),
+              Icon(icon, color: SoftPalette.gray50, size: 24),
               const SizedBox(height: 10),
               Text(label,
                   style: const TextStyle(
-                      color: Colors.white,
+                      color: SoftPalette.gray50,
                       fontSize: 14,
                       fontWeight: FontWeight.w800)),
               const SizedBox(height: 3),
               Text(subtitle,
                   style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.7),
+                      color: SoftPalette.gray50.withValues(alpha: 0.7),
                       fontSize: 11)),
             ],
           ),
@@ -2112,7 +2113,7 @@ class _DownloadScreenState extends State<DownloadScreen>
         border: Border.all(color: t.bgRule),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withValues(alpha: 0.05),
+              color: SoftPalette.gray900.withValues(alpha: 0.05),
               blurRadius: 16,
               offset: const Offset(0, 4)),
         ],

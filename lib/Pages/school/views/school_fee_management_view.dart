@@ -1,6 +1,7 @@
 // lib/pages/school/views/school_fee_management_view.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:intl/intl.dart';
 import '../../../services/image_upload_service.dart';
 import '../models/school_fee.dart';
@@ -188,36 +189,36 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
         label: 'Total Expected Fee',
         value: 'PKR ${totalExpected.toStringAsFixed(0)}',
         icon: Icons.account_balance_wallet_rounded,
-        color: SchoolTheme.primary,
-        bgColor: SchoolTheme.primaryLight,
+        color: context.adapt(SchoolTheme.primary),
+        bgColor: context.adapt(SchoolTheme.primaryLight),
       ),
       _buildSummaryTile(
         label: 'Total Fee Collected',
         value: 'PKR ${totalCollected.toStringAsFixed(0)}',
         icon: Icons.payments_rounded,
         color: SchoolTheme.statusPresent,
-        bgColor: SchoolTheme.statusPresentBg,
+        bgColor: context.adapt(SchoolTheme.statusPresentBg),
       ),
       _buildSummaryTile(
         label: 'Outstanding Dues',
         value: 'PKR ${outstandingDues.toStringAsFixed(0)}',
         icon: Icons.pending_actions_rounded,
         color: SchoolTheme.statusAbsent,
-        bgColor: SchoolTheme.statusAbsentBg,
+        bgColor: context.adapt(SchoolTheme.statusAbsentBg),
       ),
       _buildSummaryTile(
         label: 'Defaulters Count',
         value: '$defaultersCount Students',
         icon: Icons.person_off_rounded,
         color: SchoolTheme.statusLeave,
-        bgColor: SchoolTheme.statusLeaveBg,
+        bgColor: context.adapt(SchoolTheme.statusLeaveBg),
       ),
     ];
 
     if (isMobile) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        color: Colors.white,
+        color: context.adapt(SoftPalette.gray50),
         child: LayoutBuilder(
           builder: (context, constraints) {
             final cardWidth = (constraints.maxWidth - 10) / 2;
@@ -233,7 +234,7 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
 
     return Container(
       padding: const EdgeInsets.all(16),
-      color: Colors.white,
+      color: context.adapt(SoftPalette.gray50),
       child: Row(
         children: cards.map((c) => Expanded(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 6), child: c))).toList(),
       ),
@@ -259,7 +260,7 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: context.adapt(SoftPalette.gray50),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(icon, color: color, size: 20),
@@ -270,7 +271,7 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(label, style: TextStyle(color: Colors.grey.shade700, fontSize: 11, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis),
+                Text(label, style: TextStyle(color: context.adapt(SoftPalette.gray550), fontSize: 11, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis),
                 const SizedBox(height: 2),
                 Text(value, style: TextStyle(color: color, fontSize: 14, fontWeight: FontWeight.bold), overflow: TextOverflow.ellipsis),
               ],
@@ -287,7 +288,7 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
     if (isMobile) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        color: const Color(0xFFF8FAFC),
+        color: context.adapt(SoftPalette.gray50),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -296,11 +297,11 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
               onChanged: (_) => setState(() {}),
               decoration: InputDecoration(
                 hintText: 'Search student by name or roll number...',
-                prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF1B4965), size: 20),
+                prefixIcon: Icon(Icons.search_rounded, color: context.adapt(SoftPalette.sky700), size: 20),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: context.adapt(SoftPalette.gray50),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: context.adapt(SoftPalette.slate150))),
               ),
             ),
             const SizedBox(height: 8),
@@ -314,8 +315,8 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
                 _buildDropdown('Status:', _selectedStatus, _statuses, (v) => setState(() => _selectedStatus = v!)),
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2D9B83),
-                    foregroundColor: Colors.white,
+                    backgroundColor: SoftPalette.teal500,
+                    foregroundColor: SoftPalette.gray50,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
@@ -332,7 +333,7 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      color: const Color(0xFFF8FAFC),
+      color: context.adapt(SoftPalette.gray50),
       child: Row(
         children: [
           // Search box
@@ -343,11 +344,11 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
               onChanged: (_) => setState(() {}),
               decoration: InputDecoration(
                 hintText: 'Search student by name or roll number...',
-                prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF1B4965)),
+                prefixIcon: Icon(Icons.search_rounded, color: context.adapt(SoftPalette.sky700)),
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: context.adapt(SoftPalette.gray50),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: context.adapt(SoftPalette.slate150))),
               ),
             ),
           ),
@@ -368,8 +369,8 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
           // Export Defaulters Button
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF2D9B83),
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.teal500,
+              foregroundColor: SoftPalette.gray50,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
@@ -386,14 +387,14 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.adapt(SoftPalette.gray50),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFFCBD5E1)),
+        border: Border.all(color: context.adapt(SoftPalette.slate200)),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
           value: value,
-          style: const TextStyle(color: Color(0xFF1E293B), fontWeight: FontWeight.bold, fontSize: 13),
+          style: TextStyle(color: context.adapt(SoftPalette.slate800), fontWeight: FontWeight.bold, fontSize: 13),
           items: items.map((i) => DropdownMenuItem(value: i, child: Text('$label $i'))).toList(),
           onChanged: onChanged,
         ),
@@ -406,22 +407,22 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
     String statusLabel;
 
     if (fee.status == 'paid') {
-      statusColor = const Color(0xFF2D9B83);
+      statusColor = SoftPalette.teal500;
       statusLabel = 'Paid';
     } else if (fee.status == 'partial') {
-      statusColor = const Color(0xFFD4940A);
+      statusColor = SoftPalette.amber350;
       statusLabel = 'Partial (Bal: PKR ${fee.remainingBalance.toStringAsFixed(0)})';
     } else {
-      statusColor = const Color(0xFFDC4A4A);
+      statusColor = SoftPalette.red500;
       statusLabel = 'Unpaid';
     }
 
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.adapt(SoftPalette.gray50),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(color: context.adapt(SoftPalette.slate150)),
       ),
       child: Row(
         children: [
@@ -432,19 +433,19 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
               if (bytes != null && bytes.isNotEmpty) {
                 return CircleAvatar(
                   radius: 20,
-                  backgroundColor: const Color(0xFF1B4965).withValues(alpha: 0.1),
+                  backgroundColor: context.adapt(SoftPalette.sky700).withValues(alpha: 0.1),
                   backgroundImage: MemoryImage(bytes),
                 );
               } else if (student.photoUrl.startsWith('http')) {
                 return CircleAvatar(
                   radius: 20,
-                  backgroundColor: const Color(0xFF1B4965).withValues(alpha: 0.1),
+                  backgroundColor: context.adapt(SoftPalette.sky700).withValues(alpha: 0.1),
                   backgroundImage: NetworkImage(student.photoUrl),
                 );
               }
               return CircleAvatar(
-                backgroundColor: const Color(0xFF1B4965).withValues(alpha: 0.1),
-                child: Text(student.rollNo.isNotEmpty ? student.rollNo : '#', style: const TextStyle(color: Color(0xFF1B4965), fontWeight: FontWeight.bold)),
+                backgroundColor: context.adapt(SoftPalette.sky700).withValues(alpha: 0.1),
+                child: Text(student.rollNo.isNotEmpty ? student.rollNo : '#', style: TextStyle(color: context.adapt(SoftPalette.sky700), fontWeight: FontWeight.bold)),
               );
             },
           ),
@@ -455,9 +456,9 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(student.name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF1E293B))),
+                Text(student.name, style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: context.adapt(SoftPalette.slate800))),
                 const SizedBox(height: 2),
-                Text('Class: ${student.grade} - Section ${student.section} • Guardian: ${student.guardianName}', style: const TextStyle(color: Color(0xFF64748B), fontSize: 12)),
+                Text('Class: ${student.grade} - Section ${student.section} • Guardian: ${student.guardianName}', style: TextStyle(color: context.adapt(SoftPalette.slate550), fontSize: 12)),
               ],
             ),
           ),
@@ -468,7 +469,7 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Total Due: PKR ${fee.totalAmount.toStringAsFixed(0)}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                Text('Paid: PKR ${fee.paidAmount.toStringAsFixed(0)}', style: const TextStyle(color: Color(0xFF2D9B83), fontSize: 12)),
+                Text('Paid: PKR ${fee.paidAmount.toStringAsFixed(0)}', style: const TextStyle(color: SoftPalette.teal500, fontSize: 12)),
               ],
             ),
           ),
@@ -493,7 +494,7 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
               backgroundColor: SchoolTheme.accent,
-              foregroundColor: Colors.white,
+              foregroundColor: SoftPalette.gray50,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
@@ -520,7 +521,7 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Row(
             children: [
-              const Icon(Icons.payments_rounded, color: Color(0xFF2D9B83)),
+              const Icon(Icons.payments_rounded, color: SoftPalette.teal500),
               const SizedBox(width: 10),
               Expanded(
                 child: Text('Record Fee Payment — ${student.name} (${student.grade})', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
@@ -533,7 +534,7 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Month: $_selectedMonth • Roll No: ${student.rollNo}', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF1B4965))),
+                Text('Month: $_selectedMonth • Roll No: ${student.rollNo}', style: TextStyle(fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.sky700))),
                 const SizedBox(height: 14),
 
                 TextField(
@@ -574,7 +575,7 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF2D9B83), foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.teal500, foregroundColor: SoftPalette.gray50),
               onPressed: () async {
                 final paid = double.tryParse(paidCtrl.text.trim()) ?? 0.0;
                 final discount = double.tryParse(discountCtrl.text.trim()) ?? 0.0;
@@ -596,8 +597,8 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
 
                 if (context.mounted) {
                   Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Payment recorded for ${student.name}!'), backgroundColor: const Color(0xFF2D9B83)),
+                  AppToast.showSnackBar(context, 
+                    SnackBar(content: Text('Payment recorded for ${student.name}!'), backgroundColor: SoftPalette.teal500),
                   );
                 }
               },
@@ -610,10 +611,10 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
   }
 
   void _exportFeeReport() {
-    ScaffoldMessenger.of(context).showSnackBar(
+    AppToast.showSnackBar(context, 
       const SnackBar(
         content: Text('Exporting School Fee Collection & Defaulters Summary Report...'),
-        backgroundColor: Color(0xFF1B4965),
+        backgroundColor: SoftPalette.sky700,
       ),
     );
   }
@@ -622,10 +623,10 @@ class _SchoolFeeManagementViewState extends State<SchoolFeeManagementView> {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
-        children: const [
-          Icon(Icons.request_quote_rounded, size: 64, color: Colors.grey),
+        children: [
+          Icon(Icons.request_quote_rounded, size: 64, color: context.adapt(SoftPalette.gray350)),
           SizedBox(height: 12),
-          Text('No fee records found matching criteria.', style: TextStyle(color: Colors.grey, fontSize: 16, fontWeight: FontWeight.bold)),
+          Text('No fee records found matching criteria.', style: TextStyle(color: context.adapt(SoftPalette.gray350), fontSize: 16, fontWeight: FontWeight.bold)),
         ],
       ),
     );

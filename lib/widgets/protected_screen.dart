@@ -1,5 +1,7 @@
 // lib/widgets/protected_screen.dart
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import '../services/permission_service.dart';
 
 class ProtectedScreen extends StatelessWidget {
@@ -26,7 +28,7 @@ class ProtectedScreen extends StatelessWidget {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.lock_outline, size: 80, color: Colors.red),
+                const Icon(Icons.lock_outline, size: 80, color: SoftPalette.red400),
                 const SizedBox(height: 24),
                 const Text(
                   'Access Denied',
@@ -36,7 +38,7 @@ class ProtectedScreen extends StatelessWidget {
                 Text(
                   'You do not have permission to view this module (${requiredPermission.name}).',
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey[600]),
+                  style: TextStyle(color: context.adapt(SoftPalette.gray500)),
                 ),
                 const SizedBox(height: 32),
                 ElevatedButton(

@@ -1,6 +1,7 @@
 // lib/pages/school/views/school_grading_view.dart
 
 import 'dart:convert';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:file_picker/file_picker.dart';
@@ -230,26 +231,26 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
                       if (enrolledStudents.isNotEmpty)
                         Container(
                           padding: const EdgeInsets.all(16),
-                          decoration: const BoxDecoration(
-                            color: Colors.white,
-                            border: Border(top: BorderSide(color: Color(0xFFE2E8F0))),
+                          decoration: BoxDecoration(
+                            color: context.adapt(SoftPalette.gray50),
+                            border: Border(top: BorderSide(color: context.adapt(SoftPalette.slate150))),
                           ),
                           child: Row(
                             children: [
                               Text(
                                 'Subject: $_selectedSubject • Exam: $_selectedExamType ($_selectedTerm)',
-                                style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF334155)),
+                                style: TextStyle(fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate700)),
                               ),
                               const Spacer(),
                               ElevatedButton.icon(
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: SchoolTheme.accent,
-                                  foregroundColor: Colors.white,
+                                  foregroundColor: SoftPalette.gray50,
                                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                                   shape: RoundedRectangleBorder(borderRadius: SchoolTheme.radius12),
                                 ),
                                 icon: _isSaving
-                                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50))
                                     : const Icon(Icons.save_rounded, size: 18),
                                 label: Text(_isSaving ? 'Saving Marks…' : 'Save Class Marks'),
                                 onPressed: _isSaving ? null : () => _saveAllMarks(enrolledStudents, gradeMap),
@@ -339,19 +340,19 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
         final msg = autoFilledCount > 0
             ? '✓ Excel parsed: Auto-filled $autoFilledCount student grades & attached $fileName'
             : '✓ Document attached: $fileName';
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text(msg),
-            backgroundColor: const Color(0xFF2D9B83),
+            backgroundColor: SoftPalette.teal500,
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('Failed to attach document: $e'),
-            backgroundColor: const Color(0xFFDC4A4A),
+            backgroundColor: SoftPalette.red500,
           ),
         );
       }
@@ -361,7 +362,7 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
   Widget _buildFilterBar(List<SchoolStudent> enrolledStudents) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      color: Colors.white,
+      color: context.adapt(SoftPalette.gray50),
       child: Wrap(
         spacing: 12,
         runSpacing: 10,
@@ -371,7 +372,7 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
           DropdownButton<String>(
             value: _selectedGrade,
             underline: const SizedBox.shrink(),
-            icon: const Icon(Icons.keyboard_arrow_down_rounded, color: SchoolTheme.primary),
+            icon: Icon(Icons.keyboard_arrow_down_rounded, color: context.adapt(SchoolTheme.primary)),
             items: _grades.map((g) => DropdownMenuItem(value: g, child: Text('Class: $g'))).toList(),
             onChanged: (val) {
               if (val != null) setState(() => _selectedGrade = val);
@@ -440,8 +441,8 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
           if (_attachmentName == null)
             OutlinedButton.icon(
               style: OutlinedButton.styleFrom(
-                foregroundColor: SchoolTheme.primary,
-                side: const BorderSide(color: SchoolTheme.primary),
+                foregroundColor: context.adapt(SchoolTheme.primary),
+                side: BorderSide(color: context.adapt(SchoolTheme.primary)),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
               ),
@@ -453,9 +454,9 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               decoration: BoxDecoration(
-                color: SchoolTheme.primaryLight,
+                color: context.adapt(SchoolTheme.primaryLight),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: SchoolTheme.primary.withValues(alpha: 0.3)),
+                border: Border.all(color: context.adapt(SchoolTheme.primary).withValues(alpha: 0.3)),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -465,7 +466,7 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
                         ? Icons.table_chart_rounded
                         : (_attachmentType == 'pdf' ? Icons.picture_as_pdf_rounded : Icons.insert_drive_file_rounded),
                     size: 16,
-                    color: SchoolTheme.primary,
+                    color: context.adapt(SchoolTheme.primary),
                   ),
                   const SizedBox(width: 6),
                   ConstrainedBox(
@@ -474,7 +475,7 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
                       _attachmentName!,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: SchoolTheme.primary),
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SchoolTheme.primary)),
                     ),
                   ),
                   const SizedBox(width: 4),
@@ -484,7 +485,7 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
                       _attachmentName = null;
                       _attachmentType = null;
                     }),
-                    child: const Icon(Icons.close_rounded, size: 16, color: Colors.redAccent),
+                    child: const Icon(Icons.close_rounded, size: 16, color: SoftPalette.red400),
                   ),
                 ],
               ),
@@ -516,7 +517,7 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
       _buildKPITileContent(
         label: 'Graded',
         value: '$gradedCount / $totalStudents',
-        valueColor: SchoolTheme.primary,
+        valueColor: context.adapt(SchoolTheme.primary),
         icon: Icons.how_to_reg_rounded,
       ),
       _buildKPITileContent(
@@ -536,7 +537,7 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
     if (isMobile) {
       return Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        color: const Color(0xFFF8FAFC),
+        color: context.adapt(SoftPalette.gray50),
         child: LayoutBuilder(
           builder: (context, constraints) {
             final cardWidth = (constraints.maxWidth - 10) / 2;
@@ -552,7 +553,7 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      color: const Color(0xFFF8FAFC),
+      color: context.adapt(SoftPalette.gray50),
       child: Row(
         children: tiles.map((t) => Expanded(child: Padding(padding: const EdgeInsets.symmetric(horizontal: 4), child: t))).toList(),
       ),
@@ -568,9 +569,9 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.adapt(SoftPalette.gray50),
         borderRadius: SchoolTheme.radius12,
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(color: context.adapt(SoftPalette.slate150)),
       ),
       child: Row(
         children: [
@@ -588,7 +589,7 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(label, style: const TextStyle(fontSize: 11, color: Color(0xFF64748B)), overflow: TextOverflow.ellipsis),
+                Text(label, style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.slate550)), overflow: TextOverflow.ellipsis),
                 const SizedBox(height: 2),
                 Text(
                   value,
@@ -641,9 +642,9 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.adapt(SoftPalette.gray50),
         borderRadius: SchoolTheme.radius14,
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(color: context.adapt(SoftPalette.gray100)),
       ),
       child: Row(
         children: [
@@ -654,22 +655,22 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
               if (bytes != null && bytes.isNotEmpty) {
                 return CircleAvatar(
                   radius: 20,
-                  backgroundColor: SchoolTheme.primary.withValues(alpha: 0.1),
+                  backgroundColor: context.adapt(SchoolTheme.primary).withValues(alpha: 0.1),
                   backgroundImage: MemoryImage(bytes),
                 );
               } else if (student.photoUrl.startsWith('http')) {
                 return CircleAvatar(
                   radius: 20,
-                  backgroundColor: SchoolTheme.primary.withValues(alpha: 0.1),
+                  backgroundColor: context.adapt(SchoolTheme.primary).withValues(alpha: 0.1),
                   backgroundImage: NetworkImage(student.photoUrl),
                 );
               }
               return CircleAvatar(
                 radius: 20,
-                backgroundColor: SchoolTheme.primary.withValues(alpha: 0.1),
+                backgroundColor: context.adapt(SchoolTheme.primary).withValues(alpha: 0.1),
                 child: Text(
                   student.rollNo.isNotEmpty ? student.rollNo : '0',
-                  style: const TextStyle(color: SchoolTheme.primary, fontWeight: FontWeight.bold, fontSize: 13),
+                  style: TextStyle(color: context.adapt(SchoolTheme.primary), fontWeight: FontWeight.bold, fontSize: 13),
                 ),
               );
             },
@@ -684,11 +685,11 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
               children: [
                 Text(
                   student.name,
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Color(0xFF0F172A)),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: context.adapt(SoftPalette.slate900)),
                 ),
                 Text(
                   'Guardian: ${student.guardianName}',
-                  style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                  style: TextStyle(color: context.adapt(SoftPalette.gray500), fontSize: 12),
                 ),
               ],
             ),
@@ -734,7 +735,7 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
                   ),
                   child: Text(
                     tempLetter,
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+                    style: const TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 11),
                   ),
                 ),
               ],
@@ -759,7 +760,7 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
           // Report Card Icon Action
           IconButton(
             tooltip: 'Generate Report Card',
-            icon: const Icon(Icons.assignment_ind_rounded, color: SchoolTheme.primary),
+            icon: Icon(Icons.assignment_ind_rounded, color: context.adapt(SchoolTheme.primary)),
             onPressed: () => _openReportCardDialog(student, allGrades),
           ),
         ],
@@ -772,16 +773,16 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.school_rounded, size: 64, color: Colors.grey.shade300),
+          Icon(Icons.school_rounded, size: 64, color: context.adapt(SoftPalette.gray150)),
           const SizedBox(height: 12),
           Text(
             'No students enrolled in Class $_selectedGrade (Section $_selectedSection)',
-            style: const TextStyle(color: Colors.grey, fontSize: 15, fontWeight: FontWeight.bold),
+            style: TextStyle(color: context.adapt(SoftPalette.gray350), fontSize: 15, fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 6),
-          const Text(
+          Text(
             'Select another grade/section or enroll new students first.',
-            style: TextStyle(color: Colors.grey),
+            style: TextStyle(color: context.adapt(SoftPalette.gray350)),
           ),
         ],
       ),
@@ -844,7 +845,7 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
     setState(() => _isSaving = false);
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: Text('Successfully saved marks for $savedCount students in Class $_selectedGrade!'),
           backgroundColor: SchoolTheme.accent,
@@ -862,7 +863,7 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
         shape: RoundedRectangleBorder(borderRadius: SchoolTheme.radius16),
         title: Row(
           children: [
-            const Icon(Icons.school_rounded, color: SchoolTheme.primary),
+            Icon(Icons.school_rounded, color: context.adapt(SchoolTheme.primary)),
             const SizedBox(width: 10),
             Text('Academic Report Card — ${student.name}'),
           ],
@@ -877,7 +878,7 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: SchoolTheme.primaryLight,
+                  color: context.adapt(SchoolTheme.primaryLight),
                   borderRadius: SchoolTheme.radius12,
                 ),
                 child: Row(
@@ -887,9 +888,9 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text('Roll No: ${student.rollNo} • Grade: ${student.grade} (${student.section})',
-                            style: const TextStyle(fontWeight: FontWeight.bold, color: SchoolTheme.primaryDark)),
+                            style: TextStyle(fontWeight: FontWeight.bold, color: context.adapt(SchoolTheme.primaryDark))),
                         Text('Guardian: ${student.guardianName} • Term: $_selectedTerm',
-                            style: const TextStyle(fontSize: 12, color: Color(0xFF475569))),
+                            style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.slate600))),
                       ],
                     ),
                     Container(
@@ -899,7 +900,7 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
                         borderRadius: SchoolTheme.radius8,
                       ),
                       child: const Text('OFFICIAL EXAM REPORT',
-                          style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                          style: TextStyle(color: SoftPalette.gray50, fontSize: 10, fontWeight: FontWeight.bold)),
                     ),
                   ],
                 ),
@@ -908,12 +909,12 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
 
               // Subject Grades Table
               studentGrades.isEmpty
-                  ? const Padding(
+                  ? Padding(
                       padding: EdgeInsets.all(20),
-                      child: Center(child: Text('No exam grades recorded yet for this term.', style: TextStyle(color: Colors.grey))),
+                      child: Center(child: Text('No exam grades recorded yet for this term.', style: TextStyle(color: context.adapt(SoftPalette.gray350)))),
                     )
                   : Table(
-                      border: TableBorder.all(color: Colors.grey.shade300, borderRadius: SchoolTheme.radius8),
+                      border: TableBorder.all(color: context.adapt(SoftPalette.gray150), borderRadius: SchoolTheme.radius8),
                       columnWidths: const {
                         0: FlexColumnWidth(3),
                         1: FlexColumnWidth(2),
@@ -923,7 +924,7 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
                       },
                       children: [
                         TableRow(
-                          decoration: BoxDecoration(color: Colors.grey.shade100),
+                          decoration: BoxDecoration(color: context.adapt(SoftPalette.gray100)),
                           children: const [
                             Padding(padding: EdgeInsets.all(8), child: Text('Subject', style: TextStyle(fontWeight: FontWeight.bold))),
                             Padding(padding: EdgeInsets.all(8), child: Text('Marks', style: TextStyle(fontWeight: FontWeight.bold))),
@@ -959,18 +960,18 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: SchoolTheme.primaryLight,
+                    color: context.adapt(SchoolTheme.primaryLight),
                     borderRadius: SchoolTheme.radius8,
-                    border: Border.all(color: SchoolTheme.primary.withValues(alpha: 0.2)),
+                    border: Border.all(color: context.adapt(SchoolTheme.primary).withValues(alpha: 0.2)),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.attach_file_rounded, color: SchoolTheme.primary, size: 18),
+                      Icon(Icons.attach_file_rounded, color: context.adapt(SchoolTheme.primary), size: 18),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
                           'Attached Marksheet / Exam File: ${studentGrades.firstWhere((g) => g.attachmentName.isNotEmpty).attachmentName}',
-                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: SchoolTheme.primary),
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SchoolTheme.primary)),
                         ),
                       ),
                     ],
@@ -983,12 +984,12 @@ class _SchoolGradingViewState extends State<SchoolGradingView> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Close')),
           ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(backgroundColor: SchoolTheme.primary, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: SchoolTheme.primary, foregroundColor: SoftPalette.gray50),
             icon: const Icon(Icons.print_rounded, size: 16),
             label: const Text('Print Report Card'),
             onPressed: () {
               Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(
+              AppToast.showSnackBar(context, 
                 const SnackBar(content: Text('Preparing printable report card PDF…')),
               );
             },

@@ -7,6 +7,9 @@
 
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive/hive.dart';
@@ -83,9 +86,9 @@ class _RegisterTeacherDialogState extends State<RegisterTeacherDialog>
   late final AnimationController _anim;
   late final Animation<double>   _fade;
 
-  static const _emerald   = Color(0xFF0F766E);
-  static const _emeraldLt = Color(0xFF14B8A6);
-  static const _danger    = Color(0xFFEF4444);
+  static const _emerald   = SoftPalette.teal550;
+  static const _emeraldLt = SoftPalette.teal350;
+  static const _danger    = SoftPalette.red400;
 
   @override
   void initState() {
@@ -110,11 +113,11 @@ class _RegisterTeacherDialogState extends State<RegisterTeacherDialog>
 
   // ── Theme helpers ─────────────────────────────────────────────────────────
   bool   _isDark(BuildContext ctx) => Theme.of(ctx).brightness == Brightness.dark;
-  Color  _bg(BuildContext ctx)     => _isDark(ctx) ? const Color(0xFF0F172A) : Colors.white;
-  Color  _card(BuildContext ctx)   => _isDark(ctx) ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC);
-  Color  _bord(BuildContext ctx)   => _isDark(ctx) ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
-  Color  _text(BuildContext ctx)   => _isDark(ctx) ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A);
-  Color  _muted(BuildContext ctx)  => _isDark(ctx) ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+  Color  _bg(BuildContext ctx)     => _isDark(ctx) ? SoftPalette.slate900 : SoftPalette.gray50;
+  Color  _card(BuildContext ctx)   => _isDark(ctx) ? SoftPalette.slate800 : SoftPalette.gray50;
+  Color  _bord(BuildContext ctx)   => _isDark(ctx) ? SoftPalette.slate700 : SoftPalette.slate150;
+  Color  _text(BuildContext ctx)   => _isDark(ctx) ? SoftPalette.slate100 : SoftPalette.slate900;
+  Color  _muted(BuildContext ctx)  => _isDark(ctx) ? SoftPalette.slate350 : SoftPalette.slate550;
 
   // ── Pickers ───────────────────────────────────────────────────────────────
   Future<void> _pickPhoto() async {
@@ -245,16 +248,16 @@ class _RegisterTeacherDialogState extends State<RegisterTeacherDialog>
 
   void _snack(String msg, {bool error = false, bool success = false}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    AppToast.showSnackBar(context, SnackBar(
       content: Row(children: [
         Icon(
           error ? Icons.error_outline : success ? Icons.check_circle_outline : Icons.info_outline,
-          color: Colors.white, size: 17,
+          color: SoftPalette.gray50, size: 17,
         ),
         const SizedBox(width: 9),
         Expanded(child: Text(msg, style: const TextStyle(fontSize: 13))),
       ]),
-      backgroundColor: error ? _danger : success ? _emerald : const Color(0xFF37474F),
+      backgroundColor: error ? _danger : success ? _emerald : SoftPalette.slate700,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       margin: const EdgeInsets.all(16),
@@ -331,7 +334,7 @@ class _RegisterTeacherDialogState extends State<RegisterTeacherDialog>
                             const SizedBox(height: 14),
                             _buildSection(
                               dark: dark, card: card, bord: bord, text: text, muted: muted,
-                              icon: Icons.person_outline_rounded, accent: const Color(0xFF7C3AED),
+                              icon: Icons.person_outline_rounded, accent: context.adapt(SoftPalette.violet550),
                               title: 'Personal Details',
                               child: Column(children: [
                                 _field(dark: dark, bord: bord, text: text, muted: muted,
@@ -360,21 +363,21 @@ class _RegisterTeacherDialogState extends State<RegisterTeacherDialog>
                             const SizedBox(height: 14),
                             _buildSection(
                               dark: dark, card: card, bord: bord, text: text, muted: muted,
-                              icon: Icons.menu_book_rounded, accent: const Color(0xFF7E22CE),
+                              icon: Icons.menu_book_rounded, accent: context.adapt(SoftPalette.violet550),
                               title: 'Teaching Specialization',
                               child: _teachingTypeSelector(dark, bord, text, muted),
                             ),
                             const SizedBox(height: 14),
                             _buildSection(
                               dark: dark, card: card, bord: bord, text: text, muted: muted,
-                              icon: Icons.access_time_rounded, accent: const Color(0xFF0369A1),
+                              icon: Icons.access_time_rounded, accent: context.adapt(SoftPalette.sky550),
                               title: 'Teaching Shift',
                               child: _sessionSelector(dark, bord, text, muted),
                             ),
                             const SizedBox(height: 14),
                             _buildSection(
                               dark: dark, card: card, bord: bord, text: text, muted: muted,
-                              icon: Icons.folder_outlined, accent: const Color(0xFFD97706),
+                              icon: Icons.folder_outlined, accent: context.adapt(SoftPalette.orange400),
                               title: 'Documents (Optional)',
                               child: _docTile(dark, bord, text, muted),
                             ),
@@ -384,7 +387,7 @@ class _RegisterTeacherDialogState extends State<RegisterTeacherDialog>
                               child: ElevatedButton.icon(
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: _emerald,
-                                  foregroundColor: Colors.white,
+                                  foregroundColor: SoftPalette.gray50,
                                   elevation: 3,
                                   shadowColor: _emerald.withValues(alpha: 0.4),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -410,7 +413,7 @@ class _RegisterTeacherDialogState extends State<RegisterTeacherDialog>
                 Positioned.fill(
                   child: Container(
                     decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.45),
+                      color: SoftPalette.gray900.withValues(alpha: 0.45),
                       borderRadius: BorderRadius.circular(24),
                     ),
                     child: Center(
@@ -419,7 +422,7 @@ class _RegisterTeacherDialogState extends State<RegisterTeacherDialog>
                         decoration: BoxDecoration(
                           color: bg,
                           borderRadius: BorderRadius.circular(18),
-                          boxShadow: const [BoxShadow(color: Colors.black26, blurRadius: 24)],
+                          boxShadow: const [BoxShadow(color: SoftPalette.gray900A26, blurRadius: 24)],
                         ),
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
@@ -471,7 +474,7 @@ class _RegisterTeacherDialogState extends State<RegisterTeacherDialog>
               borderRadius: BorderRadius.circular(12),
               boxShadow: [BoxShadow(color: _emerald.withValues(alpha: 0.35), blurRadius: 10, offset: const Offset(0, 3))],
             ),
-            child: const Icon(Icons.school_rounded, color: Colors.white, size: 22),
+            child: const Icon(Icons.school_rounded, color: SoftPalette.gray50, size: 22),
           ),
           const SizedBox(width: 14),
           Expanded(
@@ -543,12 +546,12 @@ class _RegisterTeacherDialogState extends State<RegisterTeacherDialog>
                   decoration: BoxDecoration(
                     color: _profileBytes != null ? _danger : _emerald,
                     shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white, width: 2),
-                    boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.15), blurRadius: 4)],
+                    border: Border.all(color: SoftPalette.gray50, width: 2),
+                    boxShadow: [BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.15), blurRadius: 4)],
                   ),
                   child: Icon(
                     _profileBytes != null ? Icons.close_rounded : Icons.camera_alt_rounded,
-                    color: Colors.white, size: 12,
+                    color: SoftPalette.gray50, size: 12,
                   ),
                 ),
               ),
@@ -571,7 +574,7 @@ class _RegisterTeacherDialogState extends State<RegisterTeacherDialog>
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: bord),
         boxShadow: [BoxShadow(
-          color: Colors.black.withValues(alpha: dark ? 0.12 : 0.04),
+          color: SoftPalette.gray900.withValues(alpha: dark ? 0.12 : 0.04),
           blurRadius: 10, offset: const Offset(0, 3),
         )],
       ),
@@ -625,7 +628,7 @@ class _RegisterTeacherDialogState extends State<RegisterTeacherDialog>
         labelStyle: TextStyle(color: muted, fontSize: 13),
         hintStyle: TextStyle(color: muted.withValues(alpha: 0.6), fontSize: 12.5),
         filled: true,
-        fillColor: dark ? const Color(0xFF0F172A) : Colors.white,
+        fillColor: dark ? SoftPalette.slate900 : SoftPalette.gray50,
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: bord)),
         enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: bord)),
@@ -655,7 +658,7 @@ class _RegisterTeacherDialogState extends State<RegisterTeacherDialog>
         ),
         labelStyle: TextStyle(color: muted, fontSize: 13),
         filled: true,
-        fillColor: dark ? const Color(0xFF0F172A) : Colors.white,
+        fillColor: dark ? SoftPalette.slate900 : SoftPalette.gray50,
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: bord)),
         enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: bord)),
@@ -668,8 +671,8 @@ class _RegisterTeacherDialogState extends State<RegisterTeacherDialog>
   }
 
   Widget _teachingTypeSelector(bool dark, Color bord, Color text, Color muted) {
-    const purple = Color(0xFF7E22CE);
-    const purpleLt = Color(0xFFA855F7);
+    const purple = SoftPalette.violet550;
+    const purpleLt = SoftPalette.violet400;
 
     const types = [
       {
@@ -707,7 +710,7 @@ class _RegisterTeacherDialogState extends State<RegisterTeacherDialog>
             decoration: BoxDecoration(
               color: isSelected
                   ? purple.withValues(alpha: dark ? 0.22 : 0.08)
-                  : (dark ? const Color(0xFF0F172A) : Colors.white),
+                  : (dark ? SoftPalette.slate900 : SoftPalette.gray50),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
                 color: isSelected ? purple : bord,
@@ -781,7 +784,7 @@ class _RegisterTeacherDialogState extends State<RegisterTeacherDialog>
                     ),
                   ),
                   child: isSelected
-                      ? const Icon(Icons.check_rounded, size: 11, color: Colors.white)
+                      ? const Icon(Icons.check_rounded, size: 11, color: SoftPalette.gray50)
                       : null,
                 ),
               ],
@@ -812,7 +815,7 @@ class _RegisterTeacherDialogState extends State<RegisterTeacherDialog>
             decoration: BoxDecoration(
               color: isSelected
                   ? _emerald.withValues(alpha: dark ? 0.22 : 0.09)
-                  : (dark ? const Color(0xFF0F172A) : Colors.white),
+                  : (dark ? SoftPalette.slate900 : SoftPalette.gray50),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
                 color: isSelected ? _emerald : bord,
@@ -858,7 +861,7 @@ class _RegisterTeacherDialogState extends State<RegisterTeacherDialog>
         decoration: BoxDecoration(
           color: attached
               ? _emerald.withValues(alpha: dark ? 0.15 : 0.07)
-              : (dark ? const Color(0xFF0F172A) : Colors.white),
+              : (dark ? SoftPalette.slate900 : SoftPalette.gray50),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: attached ? _emerald : bord, width: attached ? 1.5 : 1),
         ),
@@ -867,13 +870,13 @@ class _RegisterTeacherDialogState extends State<RegisterTeacherDialog>
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: (attached ? _emerald : const Color(0xFFD97706)).withValues(alpha: 0.12),
+                color: (attached ? _emerald : context.adapt(SoftPalette.orange400)).withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Icon(
                 attached ? Icons.check_circle_rounded : Icons.upload_file_rounded,
                 size: 18,
-                color: attached ? _emerald : const Color(0xFFD97706),
+                color: attached ? _emerald : context.adapt(SoftPalette.orange400),
               ),
             ),
             const SizedBox(width: 12),

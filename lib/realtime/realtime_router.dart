@@ -38,6 +38,8 @@ import '../services/zkteco_network_service.dart';
 import '../pages/madrassa/utils/madrassa_local_storage.dart';
 import 'realtime_events.dart';
 import 'realtime_manager.dart';
+import 'lan_server.dart';
+import 'lan_host_manager.dart';
 
 class RealtimeRouter {
   // ── [P3] Fast In-memory & Hive-backed dedup store ─────────────────────────
@@ -93,6 +95,26 @@ class RealtimeRouter {
 
   // ── Main router ───────────────────────────────────────────────────────────
 
+  /// Queues a cloud upload for a record that arrived over the LAN.
+  ///
+  /// The PC that created the record uploads it itself, so only the LAN server queues a
+  /// copy (a backup for clients that cannot reach the internet). Every receiving PC used
+  /// to queue its own copy, so each donation, food token or dispense was written to
+  /// Firestore once per PC in the branch.
+  static Future<void> _queueLanCopy(Map<String, dynamic> action) async {
+    if (!(LanServer.isRunning || LanHostManager.isHostRunning)) return;
+    // These add to the day's counters (totalTokens, servedTokens): a second upload of the
+    // same batch would count it twice, so only the PC that issued them uploads them.
+    if (_counterTypes.contains(action['type'])) return;
+    await LocalStorageService.enqueueSync(action);
+  }
+
+  static const Set<String> _counterTypes = {
+    'save_dasterkhwan_tokens',
+    'reverse_dasterkhwan_tokens',
+    'serve_dasterkhwan_token',
+  };
+
   static Future<void> routeMessage(Map<String, dynamic> message) async {
     // Periodic prune — replaces the old 5-min in-memory clear
     if (DateTime.now().difference(_lastCleanup).inMinutes > 5) {
@@ -119,12 +141,15 @@ class RealtimeRouter {
       return;
     }
 
-    // Record seen
-    _seenMessageIds.add(messageId);
-    if (Hive.isBoxOpen(_dedupBox)) {
-      final box = Hive.box(_dedupBox);
-      final dedupKey = '${DateTime.now().millisecondsSinceEpoch}_$messageId';
-      box.put(dedupKey, messageId);
+    // Record seen. Server pushes/catch-ups are never deduplicated (see above), so recording
+    // them only grew this RAM-resident box by thousands of keys per hour (plus disk writes),
+    // and an id seen before is already stored — don't add a second key for it.
+    if (!isServerPush && _seenMessageIds.add(messageId)) {
+      if (Hive.isBoxOpen(_dedupBox)) {
+        final box = Hive.box(_dedupBox);
+        final dedupKey = '${DateTime.now().millisecondsSinceEpoch}_$messageId';
+        box.put(dedupKey, messageId);
+      }
     }
 
     final incomingVersion = (message['version'] is int)
@@ -389,7 +414,10 @@ Serial: ${data['serial'] ?? 'N/A'}
       case RealtimeEvents.forceSyncUpload:
       case 'force_all_users_cloud_sync':
         debugPrint('[RealtimeRouter] ☁️ Received force_sync_upload command! Sweeping & uploading local queues to Firestore...');
-        SyncService().sweepAllPendingLocalData(force: true);
+        // Not forced: forcing made every PC on the LAN lift its quota pause and re-download
+        // users, prescriptions, inventory, donations, madrassa and school data from Firestore
+        // at the same moment. The sweep still queues and uploads everything pending.
+        SyncService().sweepAllPendingLocalData();
         break;
 
       // ── DASTERKHWAAN EVENTS ───────────────────────────────────────────────
@@ -761,7 +789,7 @@ Serial: ${data['serial'] ?? 'N/A'}
           ? Map<String, dynamic>.from(existing)
           : <String, dynamic>{};
 
-      await LocalStorageService.enqueueSync({
+      await _queueLanCopy({
         'type':      'update_serial_status',
         'branchId':  branchId,
         'serial':    serial,
@@ -907,7 +935,7 @@ Serial: ${data['serial'] ?? 'N/A'}
 
       // Enqueue Firestore sync for this registration (offline resilience)
       if (fullMessage['_serverPush'] != true && branchId.isNotEmpty) {
-        await LocalStorageService.enqueueSync({
+        await _queueLanCopy({
           'type':     'register_medicine',
           'branchId': branchId,
           'data':     enrichedData,
@@ -1030,6 +1058,12 @@ Serial: ${data['serial'] ?? 'N/A'}
 
       final box = await LocalStorageService.openBoxSafe(LocalStorageService.attendanceBox);
       punchData['branchId'] = branchId;
+      // A punch received over LAN is uploaded by the device that recorded it. Without
+      // these flags every PC on the LAN queued the same punch and uploaded it again.
+      punchData['syncStatus'] = 'synced';
+      punchData['synced'] = true;
+      punchData['pendingSync'] = false;
+      punchData['receivedViaLan'] = true;
       final id = punchData['id']?.toString() ?? punchData['logId']?.toString() ?? (empId.isNotEmpty ? 'att_${branchId}_${empId}_$dt' : 'att_${DateTime.now().microsecondsSinceEpoch}');
 
       // Write locally to Hive box (Never re-broadcast on LAN to eliminate LAN Echo Loop - Pillar 2-A)
@@ -1150,7 +1184,7 @@ Serial: ${data['serial'] ?? 'N/A'}
       final hiveKey = data['hiveKey']?.toString() ?? '${branchId}_${date}_$id';
       final sanitized = LocalStorageService.sanitize(data);
       await box.put(hiveKey, sanitized);
-      await LocalStorageService.enqueueSync({
+      await _queueLanCopy({
         'type': 'save_donation',
         'branchId': branchId,
         'localId': id,
@@ -1170,7 +1204,7 @@ Serial: ${data['serial'] ?? 'N/A'}
         final box = DonationBox.fromMap(data, data['id']?.toString() ?? '');
         final hiveBox = await LocalStorageService.openBoxSafe(DonationBoxStorage.boxesBoxName);
         await hiveBox.put(box.id, box.toMap());
-        await LocalStorageService.enqueueSync({
+        await _queueLanCopy({
           'type': 'save_donation_box',
           'entityId': box.id,
           'boxId': box.id,
@@ -1183,7 +1217,7 @@ Serial: ${data['serial'] ?? 'N/A'}
         final opening = BoxOpening.fromMap(data, data['id']?.toString() ?? '');
         final openingsBox = await LocalStorageService.openBoxSafe(DonationBoxStorage.openingsBoxName);
         await openingsBox.put(opening.id, opening.toMap());
-        await LocalStorageService.enqueueSync({
+        await _queueLanCopy({
           'type': 'save_box_opening',
           'entityId': opening.id,
           'openingId': opening.id,
@@ -1213,7 +1247,7 @@ Serial: ${data['serial'] ?? 'N/A'}
             await tokenBox.delete(tid);
           }
           final revBatchId = data['batchId']?.toString() ?? 'rev_${branchId}_${dateKey}_${tokenIds.join('_')}';
-          await LocalStorageService.enqueueSync({
+          await _queueLanCopy({
             'type': 'reverse_dasterkhwan_tokens',
             'entityId': revBatchId,
             'branchId': branchId,
@@ -1234,7 +1268,7 @@ Serial: ${data['serial'] ?? 'N/A'}
           final firstNum = tokensList.isNotEmpty && tokensList.first is Map ? (tokensList.first['number'] ?? '') : '';
           final lastNum = tokensList.isNotEmpty && tokensList.last is Map ? (tokensList.last['number'] ?? '') : '';
           final batchId = data['batchId']?.toString() ?? 'dst_batch_${branchId}_${dateKey}_${firstNum}_$lastNum';
-          await LocalStorageService.enqueueSync({
+          await _queueLanCopy({
             'type': 'save_dasterkhwan_tokens',
             'entityId': batchId,
             'branchId': branchId,
@@ -1259,7 +1293,7 @@ Serial: ${data['serial'] ?? 'N/A'}
             await tokenBox.put(tokenId, updated);
           }
         }
-        await LocalStorageService.enqueueSync({
+        await _queueLanCopy({
           'type': 'serve_dasterkhwan_token',
           'branchId': data['branchId']?.toString() ?? '',
           'dateKey': data['dateKey']?.toString() ?? DateTime.now().toIso8601String().substring(0, 10),

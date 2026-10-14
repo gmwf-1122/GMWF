@@ -1,6 +1,18 @@
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
+/// Firestore write-quota state for this PC.
+///
+/// There are no artificial limits on live work. Uploads pause only when Firestore itself
+/// answers "quota used up" (RESOURCE_EXHAUSTED / HTTP 429 — the Spark plan's 20k writes a
+/// day for the whole project). Firestore would reject every write until its daily reset
+/// anyway, so the pause just stops sending; everything stays queued in Hive and resumes
+/// on its own at the reset (midnight US-Pacific = about noon in Pakistan).
+///
+/// Older backlog (records re-queued by the backfill sweeps) only uses a per-PC daily
+/// share ([backlogDailyBudget]), so a large backlog never eats the quota that today's
+/// tokens, prescriptions and donations need. Set `quota_backlog_daily_budget` in the
+/// `app_flags` box to change it (0 = unlimited, e.g. on the Blaze plan).
 class QuotaService {
   static final QuotaService _instance = QuotaService._internal();
   factory QuotaService() => _instance;
@@ -10,93 +22,63 @@ class QuotaService {
   static final ValueNotifier<String?> quotaExhaustedReasonNotifier = ValueNotifier<String?>(null);
   static final ValueNotifier<DateTime?> quotaExhaustedTimestampNotifier = ValueNotifier<DateTime?>(null);
 
-  static bool get isQuotaExhausted => isQuotaExhaustedNotifier.value;
+  /// Cloud reads are never blocked: write-quota exhaustion does not stop reads, and the
+  /// read paths that check this must keep working.
+  static bool get isQuotaExhausted => false;
 
-  // ── Daily Write Counter ──────────────────────────────────────────────────
-  // Raised ceiling to accommodate multi-branch operations and massive backlog flushes.
-  static const int _dailyWriteCeiling = 500000;
+  static const int _defaultBacklogDailyBudget = 3000;
   static const String _writeCountKey = 'quota_daily_writes';
+  static const String _backlogCountKey = 'quota_daily_backlog_writes';
   static const String _writeDateKey = 'quota_daily_date';
-  static const String _quotaPausedUntilKey = 'quota_paused_until';
+  static const String _resetPauseKey = 'quota_reset_pause_until';
+  static const String _backlogBudgetKey = 'quota_backlog_daily_budget';
 
-  /// Returns true if a write operation is allowed. Records the write.
-  /// Call this BEFORE every Firestore write in SyncService.
-  /// If [isPriority] is true (e.g. Tokens, Donations, Madrassa, Employees, School), writes proceed even during soft pauses.
-  static bool canWrite({int count = 1, bool isPriority = false}) {
-    try {
-      if (isPriority) {
-        // Priority business writes are never blocked by soft exhaustion or pauses
-        return true;
-      }
-
-      if (isQuotaExhausted) {
-        // Auto-recover after 2 minutes if no new quota error occurred
-        final lastExhausted = quotaExhaustedTimestampNotifier.value;
-        if (lastExhausted != null && DateTime.now().difference(lastExhausted).inMinutes >= 2) {
-          recordSuccess();
-        } else {
-          return false;
-        }
-      }
-
-      // Check if paused due to a quota error backoff
-      final pausedUntilStr = _getFlag(_quotaPausedUntilKey);
-      if (pausedUntilStr != null) {
-        final pausedUntil = DateTime.tryParse(pausedUntilStr);
-        if (pausedUntil != null && DateTime.now().isBefore(pausedUntil)) {
-          return false;
-        }
-        // Backoff expired, clear pause
-        _setFlag(_quotaPausedUntilKey, null);
-      }
-
-      final today = DateTime.now().toIso8601String().substring(0, 10);
-      final storedDate = _getFlag(_writeDateKey);
-
-      // Daily reset: if the stored date is not today, reset the counter
-      if (storedDate != today) {
-        _setFlag(_writeDateKey, today);
-        _setFlag(_writeCountKey, '0');
-        // Also auto-recover quota exhaustion on a new day
-        if (isQuotaExhausted) {
-          recordSuccess();
-        }
-      }
-
-      final current = int.tryParse(_getFlag(_writeCountKey) ?? '0') ?? 0;
-      if (current + count > _dailyWriteCeiling) {
-        recordQuotaExceeded(reason: 'Daily write ceiling reached ($current/$_dailyWriteCeiling)');
-        return false;
-      }
-
-      // Record the writes
-      _setFlag(_writeCountKey, '${current + count}');
-      return true;
-    } catch (e) {
-      debugPrint('[QuotaService] canWrite error: $e');
-      return true; // Fail-open: allow writes if quota tracking itself fails
-    }
+  /// Per-PC daily share for backlog uploads. 0 means unlimited.
+  static int get backlogDailyBudget {
+    final v = int.tryParse(_getFlag(_backlogBudgetKey) ?? '');
+    return v ?? _defaultBacklogDailyBudget;
   }
 
-  /// Get current daily write count for monitoring
-  static int get dailyWriteCount {
+  /// The Firestore quota day this moment belongs to (its US-Pacific date).
+  static String _quotaDay() =>
+      nextDailyReset().subtract(const Duration(days: 1)).toIso8601String().substring(0, 10);
+
+  /// Records [count] successful cloud writes for today ([backlog] = sent for a backlog item).
+  static void recordWrites(int count, {bool backlog = false}) {
     try {
-      final today = DateTime.now().toIso8601String().substring(0, 10);
-      final storedDate = _getFlag(_writeDateKey);
-      if (storedDate != today) return 0;
-      return int.tryParse(_getFlag(_writeCountKey) ?? '0') ?? 0;
+      final day = _quotaDay();
+      final sameDay = _getFlag(_writeDateKey) == day;
+      final total = sameDay ? (int.tryParse(_getFlag(_writeCountKey) ?? '0') ?? 0) : 0;
+      final back = sameDay ? (int.tryParse(_getFlag(_backlogCountKey) ?? '0') ?? 0) : 0;
+      _setFlag(_writeDateKey, day);
+      _setFlag(_writeCountKey, '${total + count}');
+      _setFlag(_backlogCountKey, '${back + (backlog ? count : 0)}');
+    } catch (_) {}
+  }
+
+  /// This device's successful cloud writes in the current Firestore quota day.
+  static int get dailyWriteCount => _todayCount(_writeCountKey);
+
+  /// Of [dailyWriteCount], the writes made for backlog items.
+  static int get dailyBacklogWriteCount => _todayCount(_backlogCountKey);
+
+  static int _todayCount(String key) {
+    try {
+      if (_getFlag(_writeDateKey) != _quotaDay()) return 0;
+      return int.tryParse(_getFlag(key) ?? '0') ?? 0;
     } catch (_) {
       return 0;
     }
   }
 
-  /// Pause uploads for a specified duration (used on quota errors, capped at 30 seconds max)
-  static void pauseForDuration(Duration duration) {
-    final effectiveDuration = duration > const Duration(seconds: 30) ? const Duration(seconds: 30) : duration;
-    final until = DateTime.now().add(effectiveDuration);
-    _setFlag(_quotaPausedUntilKey, until.toIso8601String());
-    debugPrint('[QuotaService] ⏸️ Uploads paused until ${until.toIso8601String()}');
+  /// True while backlog items may still use today's share.
+  static bool get backlogBudgetAvailable {
+    final budget = backlogDailyBudget;
+    return budget <= 0 || dailyBacklogWriteCount < budget;
   }
+
+  /// False only while Firestore has reported the daily write quota as used up.
+  static bool canWrite({int count = 1, bool isPriority = false}) => !isPausedForDailyReset;
 
   /// Check if an exception/error is a Firebase quota exhaustion error
   static bool isQuotaError(dynamic error) {
@@ -111,33 +93,79 @@ class QuotaService {
         errStr.contains('usage limit');
   }
 
-  /// Record that quota has been exceeded
+  /// Informational: a read or other non-upload call hit a quota error. Uploads are only
+  /// paused by [pauseUntilDailyReset], when a write itself is refused.
   static void recordQuotaExceeded({String? reason, dynamic error}) {
-    final effectiveReason = reason ?? (error != null ? error.toString() : 'Firebase Cloud Daily Quota Exceeded (50,000 Reads Limit Reached)');
-    isQuotaExhaustedNotifier.value = true;
-    quotaExhaustedReasonNotifier.value = effectiveReason;
-    quotaExhaustedTimestampNotifier.value = DateTime.now();
-    debugPrint('🚨 [QuotaService] Cloud Quota Exhaustion Detected: $effectiveReason');
+    final effectiveReason = reason ?? (error != null ? error.toString() : 'Firestore notice');
+    debugPrint('[QuotaService] Notice: $effectiveReason');
   }
 
-  /// Record a successful cloud operation to recover state after midnight reset or transient error
+  /// A write was accepted, so any stored pause is stale.
   static void recordSuccess() {
-    if (isQuotaExhaustedNotifier.value) {
-      final lastExhausted = quotaExhaustedTimestampNotifier.value;
-      if (lastExhausted == null || DateTime.now().difference(lastExhausted).inMinutes >= 2) {
-        isQuotaExhaustedNotifier.value = false;
-        quotaExhaustedReasonNotifier.value = null;
-        debugPrint('✅ [QuotaService] Firestore connection restored / quota reset.');
-      }
-    }
+    if (isPausedForDailyReset) clearDailyResetPause();
   }
 
-  /// Reset manual override (for admin testing/recovery)
-  static void resetState() {
+  // ── Daily quota pause (Spark plan) ───────────────────────────────────────
+  /// Next Firestore daily-quota reset: midnight America/Los_Angeles, in UTC.
+  static DateTime nextDailyReset([DateTime? nowUtc]) {
+    final now = (nowUtc ?? DateTime.now()).toUtc();
+    DateTime nthSunday(int year, int month, int n) {
+      var d = DateTime.utc(year, month, 1);
+      while (d.weekday != DateTime.sunday) {
+        d = d.add(const Duration(days: 1));
+      }
+      return d.add(Duration(days: 7 * (n - 1)));
+    }
+    // US daylight saving: 2nd Sunday of March 02:00 PST → 1st Sunday of November 02:00 PDT.
+    final dstStart = nthSunday(now.year, 3, 2).add(const Duration(hours: 10));
+    final dstEnd = nthSunday(now.year, 11, 1).add(const Duration(hours: 9));
+    final offsetHours = (now.isAfter(dstStart) && now.isBefore(dstEnd)) ? 7 : 8;
+    final pacific = now.subtract(Duration(hours: offsetHours));
+    return DateTime.utc(pacific.year, pacific.month, pacific.day + 1).add(Duration(hours: offsetHours));
+  }
+
+  /// Firestore refused a write for quota: pause until the daily reset.
+  static void pauseUntilDailyReset({String? reason}) {
+    final until = nextDailyReset();
+    _setFlag(_resetPauseKey, until.toIso8601String());
+    _pauseUntilMemo = until;
+    isQuotaExhaustedNotifier.value = true;
+    quotaExhaustedReasonNotifier.value = reason ?? 'Firestore daily write quota used up';
+    quotaExhaustedTimestampNotifier.value = DateTime.now();
+    debugPrint('[QuotaService] ⛔ Daily write quota exceeded — uploads paused until ${until.toLocal()}');
+  }
+
+  static DateTime? _pauseUntilMemo;
+
+  /// When the current pause ends (UTC), or null when uploads are not paused.
+  static DateTime? get dailyResetPauseUntil {
+    final rawStr = _getFlag(_resetPauseKey);
+    final until = _pauseUntilMemo ?? (rawStr != null ? DateTime.tryParse(rawStr) : null);
+    if (until == null) return null;
+    final now = DateTime.now().toUtc();
+    if (!now.isBefore(until)) {
+      clearDailyResetPause();
+      return null;
+    }
+    return until;
+  }
+
+  static bool get isPausedForDailyReset => dailyResetPauseUntil != null;
+
+  /// Lifts the pause (daily reset passed, a write succeeded, or a manual "Sync now").
+  static void clearDailyResetPause() {
+    _pauseUntilMemo = null;
+    _setFlag(_resetPauseKey, null);
+    _setFlag('quota_paused_until', null); // legacy key from older versions
     isQuotaExhaustedNotifier.value = false;
     quotaExhaustedReasonNotifier.value = null;
     quotaExhaustedTimestampNotifier.value = null;
-    _setFlag(_quotaPausedUntilKey, null);
+  }
+
+  /// Manual recovery ("Sync now", app start): try Firestore again right away. If the
+  /// quota is still used up, the first write refused pauses uploads again.
+  static void resetState() {
+    clearDailyResetPause();
   }
 
   // ── Hive helpers ─────────────────────────────────────────────────────────

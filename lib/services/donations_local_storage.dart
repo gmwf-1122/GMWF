@@ -17,6 +17,7 @@
 //
 //   4. All other logic is identical to the previous revision.
 
+import 'package:gmwf/services/cloud/cloud_db.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -1539,7 +1540,7 @@ class DonationsLocalStorage {
     // 5. Direct asynchronous deletion in Firestore across target branches
     for (final b in targetBranches) {
       for (final id in candidates) {
-        FirebaseFirestore.instance
+        CloudDb.instance
             .collection('branches')
             .doc(b)
             .collection('donations')

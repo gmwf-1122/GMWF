@@ -1,15 +1,16 @@
 // lib/pages/office/shared_finance_components.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/design_system.dart';
 import 'package:intl/intl.dart';
 import '../../services/finance_ledger_storage.dart';
 import '../../widgets/bank_logo_widget.dart';
 
-const _kAccent = Color(0xFF10B981);
-const _kBgCard = Colors.white;
-const _kBorder = Color(0xFFE2E8F0);
-const _kTextPrimary = Color(0xFF0F172A);
-const _kTextSecondary = Color(0xFF64748B);
+const _kAccent = SoftPalette.emerald350;
+const _kBgCard = SoftPalette.gray50;
+const _kBorder = SoftPalette.slate150;
+const _kTextPrimary = SoftPalette.slate900;
+const _kTextSecondary = SoftPalette.slate550;
 
 // ── 1. AccountPicker Component ───────────────────────────────────────────────
 
@@ -45,8 +46,8 @@ class AccountPicker extends StatelessWidget {
         if (label != null) ...[
           Row(
             children: [
-              Text(label!, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _kTextPrimary)),
-              if (isRequired) const Text(' *', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+              Text(label!, style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(_kTextPrimary))),
+              if (isRequired) const Text(' *', style: TextStyle(color: SoftPalette.red400, fontWeight: FontWeight.bold)),
             ],
           ),
           const SizedBox(height: 6),
@@ -54,16 +55,16 @@ class AccountPicker extends StatelessWidget {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: context.adapt(SoftPalette.gray50),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: _kBorder, width: 1.2),
+            border: Border.all(color: context.adapt(_kBorder), width: 1.2),
           ),
           child: DropdownButtonHideUnderline(
             child: DropdownButton<OrgBankAccount>(
               value: selectedAcc,
-              hint: Text(hint!, style: const TextStyle(fontSize: 13, color: _kTextSecondary)),
+              hint: Text(hint!, style: TextStyle(fontSize: 13, color: context.adapt(_kTextSecondary))),
               isExpanded: true,
-              icon: const Icon(Icons.keyboard_arrow_down_rounded, color: _kTextSecondary),
+              icon: Icon(Icons.keyboard_arrow_down_rounded, color: context.adapt(_kTextSecondary)),
               items: accounts.map((acc) {
                 final balancePaisa = balances[acc.accountCode] ?? 0;
                 final balancePkr = NumberFormat.currency(symbol: 'PKR ', decimalDigits: 0).format(balancePaisa / 100);
@@ -81,12 +82,12 @@ class AccountPicker extends StatelessWidget {
                           children: [
                             Text(
                               acc.accountTitle,
-                              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _kTextPrimary),
+                              style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: context.adapt(_kTextPrimary)),
                               overflow: TextOverflow.ellipsis,
                             ),
                             Text(
                               '${acc.accountNumber} • Balance: $balancePkr',
-                              style: const TextStyle(fontSize: 11, color: _kTextSecondary),
+                              style: TextStyle(fontSize: 11, color: context.adapt(_kTextSecondary)),
                             ),
                           ],
                         ),
@@ -166,20 +167,21 @@ class GlobalFilterBar extends StatelessWidget {
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-      decoration: const BoxDecoration(
-        color: _kBgCard,
-        border: Border(bottom: BorderSide(color: _kBorder)),
+      decoration: BoxDecoration(
+        color: context.adapt(_kBgCard),
+        border: Border(bottom: BorderSide(color: context.adapt(_kBorder))),
       ),
       child: Row(
         children: [
           const Icon(Icons.filter_list_rounded, size: 18, color: _kAccent),
           const SizedBox(width: 8),
-          const Text('Filters:', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: _kTextPrimary)),
+          Text('Filters:', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: context.adapt(_kTextPrimary))),
           const SizedBox(width: 16),
 
           // Branch Filter
           if (branches.isNotEmpty) ...[
             _buildDropdown<String>(
+              context: context,
               label: 'Branch',
               value: safeBranchValue,
               items: branchItems,
@@ -190,6 +192,7 @@ class GlobalFilterBar extends StatelessWidget {
 
           // Department Filter
           _buildDropdown<String>(
+            context: context,
             label: 'Department',
             value: safeDeptValue,
             items: deptItems,
@@ -201,7 +204,7 @@ class GlobalFilterBar extends StatelessWidget {
           if (selectedBranchId != 'all' || selectedDeptId.toUpperCase() != 'ALL')
             TextButton.icon(
               style: TextButton.styleFrom(
-                foregroundColor: Colors.red,
+                foregroundColor: SoftPalette.red400,
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 minimumSize: Size.zero,
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -216,6 +219,7 @@ class GlobalFilterBar extends StatelessWidget {
   }
 
   Widget _buildDropdown<T>({
+    required BuildContext context,
     required String label,
     required T value,
     required List<DropdownMenuItem<T>> items,
@@ -233,21 +237,21 @@ class GlobalFilterBar extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text(label, style: const TextStyle(fontSize: 11, color: _kTextSecondary, fontWeight: FontWeight.w600)),
+        Text(label, style: TextStyle(fontSize: 11, color: context.adapt(_kTextSecondary), fontWeight: FontWeight.w600)),
         const SizedBox(width: 6),
         Container(
           height: 32,
           padding: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
-            color: const Color(0xFFF8FAFC),
+            color: context.adapt(SoftPalette.gray50),
             borderRadius: BorderRadius.circular(6),
-            border: Border.all(color: _kBorder),
+            border: Border.all(color: context.adapt(_kBorder)),
           ),
           child: DropdownButtonHideUnderline(
             child: DropdownButton<T>(
               value: safeValue,
-              dropdownColor: Colors.white,
-              style: const TextStyle(color: _kTextPrimary, fontSize: 11, fontWeight: FontWeight.bold),
+              dropdownColor: context.adapt(SoftPalette.gray50),
+              style: TextStyle(color: context.adapt(_kTextPrimary), fontSize: 11, fontWeight: FontWeight.bold),
               items: dedupedItems,
               onChanged: onChanged,
             ),
@@ -299,7 +303,7 @@ class _VoidableRecordDialogState extends State<VoidableRecordDialog> {
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       title: Row(
         children: [
-          const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 24),
+          const Icon(Icons.warning_amber_rounded, color: SoftPalette.red400, size: 24),
           const SizedBox(width: 10),
           Text(widget.title, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
         ],
@@ -311,7 +315,7 @@ class _VoidableRecordDialogState extends State<VoidableRecordDialog> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text('Are you sure you want to void/reverse "${widget.entityDescription}"? This action will generate a balancing reversal entry in the double-entry ledger.',
-                style: const TextStyle(fontSize: 12, color: _kTextSecondary)),
+                style: TextStyle(fontSize: 12, color: context.adapt(_kTextSecondary))),
             const SizedBox(height: 16),
             TextFormField(
               controller: _reasonCtrl,
@@ -338,7 +342,7 @@ class _VoidableRecordDialogState extends State<VoidableRecordDialog> {
       actions: [
         TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
         ElevatedButton(
-          style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+          style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.red400, foregroundColor: SoftPalette.gray50),
           onPressed: () {
             if (_formKey.currentState!.validate()) {
               Navigator.pop(context, {
@@ -363,17 +367,17 @@ class DepartmentChip extends StatelessWidget {
 
   static Color getDeptColor(String dept) {
     final d = dept.toLowerCase();
-    if (d.contains('dispensary')) return const Color(0xFF0284C7);
-    if (d.contains('madrassa')) return const Color(0xFF059669);
-    if (d.contains('school')) return const Color(0xFF7C3AED);
-    if (d.contains('dasterkhwaan')) return const Color(0xFFD97706);
-    if (d.contains('office') || d.contains('admin')) return const Color(0xFF475569);
-    return const Color(0xFF64748B);
+    if (d.contains('dispensary')) return SoftPalette.sky500;
+    if (d.contains('madrassa')) return SoftPalette.emerald500;
+    if (d.contains('school')) return SoftPalette.violet550;
+    if (d.contains('dasterkhwaan')) return SoftPalette.orange400;
+    if (d.contains('office') || d.contains('admin')) return SoftPalette.slate600;
+    return SoftPalette.slate550;
   }
 
   @override
   Widget build(BuildContext context) {
-    final col = getDeptColor(department);
+    final col = context.adapt(getDeptColor(department));
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
@@ -399,18 +403,18 @@ class BranchChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: const Color(0xFFF1F5F9),
+        color: context.adapt(SoftPalette.slate100),
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: const Color(0xFFCBD5E1), width: 0.8),
+        border: Border.all(color: context.adapt(SoftPalette.slate200), width: 0.8),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          const Icon(Icons.storefront_rounded, size: 11, color: Color(0xFF475569)),
+          Icon(Icons.storefront_rounded, size: 11, color: context.adapt(SoftPalette.slate600)),
           const SizedBox(width: 4),
           Text(
             branchId.toUpperCase(),
-            style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: Color(0xFF334155)),
+            style: TextStyle(fontSize: 10, fontWeight: FontWeight.w700, color: context.adapt(SoftPalette.slate700)),
           ),
         ],
       ),

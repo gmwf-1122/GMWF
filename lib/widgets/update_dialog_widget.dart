@@ -1,7 +1,9 @@
 // lib/widgets/update_dialog_widget.dart
 
 import 'dart:math' as math;
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../services/auto_update_service.dart';
 import '../theme/role_theme_provider.dart';
@@ -32,7 +34,7 @@ class UpdateDialogWidget extends StatefulWidget {
       final updateInfo = await AutoUpdateService.checkForUpdates();
       if (updateInfo == null || !updateInfo.hasUpdate) {
         if (manualCheck && context.mounted) {
-          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          AppToast.showSnackBar(context, 
             const SnackBar(
               content: Text('Your application is up to date!'),
               duration: Duration(seconds: 3),
@@ -75,7 +77,7 @@ class UpdateDialogWidget extends StatefulWidget {
       await showDialog(
         context: context,
         barrierDismissible: !updateInfo.forceUpdate,
-        barrierColor: Colors.black.withValues(alpha: 0.65),
+        barrierColor: SoftPalette.gray900.withValues(alpha: 0.65),
         builder: (ctx) => UpdateDialogWidget(updateInfo: updateInfo),
       );
     } catch (e) {
@@ -97,11 +99,11 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
   // ── GMWF Brand Identity Colors ──────────────────────────────────────────────
   // Locked to organization teal regardless of user role, so the update dialog
   // always presents consistent brand identity.
-  static const Color _brandTeal       = Color(0xFF0E6E63);
-  static const Color _brandTealLight  = Color(0xFF16897A);
-  static const Color _brandTealDark   = Color(0xFF0A4F47);
-  static const Color _brandTealMuted  = Color(0xFFD3EDEA);
-  static const Color _brandGold       = Color(0xFFB07C2C);
+  static const Color _brandTeal       = SoftPalette.teal600;
+  static const Color _brandTealLight  = SoftPalette.teal500;
+  static const Color _brandTealDark   = SoftPalette.teal700;
+  static const Color _brandTealMuted  = SoftPalette.teal150m;
+  static const Color _brandGold       = SoftPalette.amber500;
 
   Future<void> _startInAppDownload() async {
     if (_isDownloading) return;
@@ -194,7 +196,7 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
             border: Border.all(color: _brandTeal.withValues(alpha: 0.28), width: 1.5),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.25),
+                color: SoftPalette.gray900.withValues(alpha: 0.25),
                 blurRadius: 36,
                 spreadRadius: 4,
                 offset: const Offset(0, 14),
@@ -245,7 +247,7 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
                                     style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600,
-                                      color: t.isDarkCanvas ? _brandGold : const Color(0xFF7A5A1E),
+                                      color: t.isDarkCanvas ? _brandGold : SoftPalette.amber550m,
                                       height: 1.3,
                                     ),
                                   ),
@@ -410,7 +412,7 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
                   ),
                   child: const Icon(
                     Icons.system_update_rounded,
-                    color: Colors.white,
+                    color: SoftPalette.gray50,
                     size: 13,
                   ),
                 ),
@@ -570,20 +572,20 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
         width: double.infinity,
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: const Color(0xFF7F1D1D).withValues(alpha: 0.10),
+          color: SoftPalette.red700.withValues(alpha: 0.10),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: const Color(0xFFDC2626).withValues(alpha: 0.35), width: 1.0),
+          border: Border.all(color: SoftPalette.red500.withValues(alpha: 0.35), width: 1.0),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Row(
               children: [
-                Icon(Icons.error_outline_rounded, color: Color(0xFFDC2626), size: 17),
+                Icon(Icons.error_outline_rounded, color: SoftPalette.red500, size: 17),
                 SizedBox(width: 8),
                 Text(
                   'Installation Notice',
-                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: Color(0xFFDC2626)),
+                  style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: SoftPalette.red500),
                 ),
               ],
             ),
@@ -592,7 +594,7 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
               _statusMessage,
               style: TextStyle(
                 fontSize: 11.5,
-                color: t.isDarkCanvas ? const Color(0xFFFCA5A5) : const Color(0xFF991B1B),
+                color: t.isDarkCanvas ? SoftPalette.red300 : SoftPalette.red600,
                 height: 1.35,
               ),
             ),
@@ -613,11 +615,11 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
                     child: const Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.refresh_rounded, color: Colors.white, size: 15),
+                        Icon(Icons.refresh_rounded, color: SoftPalette.gray50, size: 15),
                         SizedBox(width: 6),
                         Text(
                           'Retry',
-                          style: TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.bold),
+                          style: TextStyle(color: SoftPalette.gray50, fontSize: 11.5, fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
@@ -635,11 +637,11 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
                     child: const Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.open_in_browser_rounded, color: Colors.white, size: 15),
+                        Icon(Icons.open_in_browser_rounded, color: SoftPalette.gray50, size: 15),
                         SizedBox(width: 6),
                         Text(
                           'Download via Browser',
-                          style: TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.bold),
+                          style: TextStyle(color: SoftPalette.gray50, fontSize: 11.5, fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
@@ -711,9 +713,9 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
                 onPressed: _isDownloading ? null : _startInAppDownload,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _brandTeal,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                   disabledBackgroundColor: _brandTeal.withValues(alpha: 0.5),
-                  disabledForegroundColor: Colors.white70,
+                  disabledForegroundColor: SoftPalette.gray50A70,
                   padding: const EdgeInsets.symmetric(vertical: 13),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                   elevation: 0,

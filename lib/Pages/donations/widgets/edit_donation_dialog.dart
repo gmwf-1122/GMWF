@@ -9,6 +9,9 @@
 // • Updates Firestore + local storage atomically
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
@@ -222,10 +225,10 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
 
       if (mounted) {
         Navigator.pop(context, true); // true = refresh needed
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Row(children: const [
-              Icon(Icons.check_circle_rounded, color: Colors.white, size: 16),
+              Icon(Icons.check_circle_rounded, color: SoftPalette.gray50, size: 16),
               SizedBox(width: 8),
               Text('Donation updated successfully'),
             ]),
@@ -308,9 +311,9 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
         constraints: const BoxConstraints(maxHeight: 680),
         clipBehavior: Clip.hardEdge,
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: context.adapt(SoftPalette.gray50),
           borderRadius: BorderRadius.circular(20),
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.12), blurRadius: 24)],
+          boxShadow: [BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.12), blurRadius: 24)],
         ),
         child: Column(
           children: [
@@ -319,24 +322,24 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [Colors.orange.shade800, Colors.amber.shade600],
+                  colors: [SoftPalette.orange400, SoftPalette.amber300],
                 ),
               ),
               child: Row(children: [
-                const Icon(Icons.edit_rounded, color: Colors.white, size: 20),
+                const Icon(Icons.edit_rounded, color: SoftPalette.gray50, size: 20),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     const Text('Edit Donation',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Colors.white)),
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: SoftPalette.gray50)),
                     Text(
                       'Receipt: ${cleanReceiptNumber(d.receiptNo)}  •  ${d.donorName}  •  ${d.branchName.isNotEmpty ? d.branchName : d.branchId}',
-                      style: const TextStyle(fontSize: 11, color: Colors.white70),
+                      style: const TextStyle(fontSize: 11, color: SoftPalette.gray50A70),
                     ),
                   ]),
                 ),
                 IconButton(
-                  icon: const Icon(Icons.close_rounded, color: Colors.white70, size: 20),
+                  icon: const Icon(Icons.close_rounded, color: SoftPalette.gray50A70, size: 20),
                   onPressed: () => Navigator.pop(context),
                 ),
               ]),
@@ -357,15 +360,15 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
                           padding: const EdgeInsets.all(12),
                           margin: const EdgeInsets.only(bottom: 16),
                           decoration: BoxDecoration(
-                            color: Colors.red.shade50,
+                            color: context.adapt(SoftPalette.pink100m),
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: Colors.red.shade200),
+                            border: Border.all(color: context.adapt(SoftPalette.red300)),
                           ),
                           child: Row(children: [
-                            Icon(Icons.error_outline_rounded, color: Colors.red.shade700, size: 16),
+                            Icon(Icons.error_outline_rounded, color: context.adapt(SoftPalette.red500), size: 16),
                             const SizedBox(width: 8),
                             Expanded(child: Text(_errorMessage!,
-                                style: TextStyle(color: Colors.red.shade800, fontSize: 12))),
+                                style: TextStyle(color: context.adapt(SoftPalette.red550), fontSize: 12))),
                           ]),
                         ),
                       ],
@@ -379,7 +382,7 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
                         decoration: _inputDecoration(
                           hint: 'e.g. Amount was entered incorrectly, wrong category selected…',
                           icon: Icons.report_problem_rounded,
-                          iconColor: Colors.orange.shade700,
+                          iconColor: SoftPalette.orange350,
                         ),
                         validator: (v) =>
                             (v == null || v.trim().isEmpty) ? 'Reason is required' : null,
@@ -416,7 +419,7 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
                       ),
 
                       const SizedBox(height: 20),
-                      const Divider(color: AppColors.gray100),
+                      Divider(color: context.adapt(AppColors.gray100)),
                       const SizedBox(height: 16),
 
                       // Amount (cash only)
@@ -456,7 +459,7 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
                           decoration: _inputDecoration(
                               hint: 'e.g. 50kg Flour, 2 Fans',
                               icon: Icons.inventory_2_rounded,
-                              iconColor: Colors.blue.shade700),
+                              iconColor: SoftPalette.blue500),
                         ),
                         const SizedBox(height: 16),
                         _sectionLabel('Estimated Amount (PKR)'),
@@ -470,7 +473,7 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
                           decoration: _inputDecoration(
                               hint: '0.00',
                               icon: Icons.payments_rounded,
-                              iconColor: Colors.green.shade700),
+                              iconColor: SoftPalette.green500),
                         ),
                         const SizedBox(height: 16),
                       ],
@@ -494,21 +497,21 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
                                 margin: const EdgeInsets.symmetric(horizontal: 4),
                                 padding: const EdgeInsets.symmetric(vertical: 8),
                                 decoration: BoxDecoration(
-                                  color: sel ? cat.lightColor : Colors.white,
+                                  color: sel ? cat.lightColor : context.adapt(SoftPalette.gray50),
                                   borderRadius: BorderRadius.circular(8),
                                   border: Border.all(
-                                      color: sel ? cat.color : AppColors.gray200,
+                                      color: sel ? cat.color : context.adapt(AppColors.gray200),
                                       width: sel ? 2 : 1),
                                 ),
                                 child: Column(children: [
                                   Icon(cat.icon,
-                                      color: sel ? cat.color : AppColors.gray400, size: 20),
+                                      color: sel ? cat.color : context.adapt(AppColors.gray400), size: 20),
                                   const SizedBox(height: 4),
                                   Text(cat.label,
                                       style: TextStyle(
                                           fontSize: 11,
                                           fontWeight: FontWeight.w700,
-                                          color: sel ? cat.color : AppColors.gray600)),
+                                          color: sel ? cat.color : context.adapt(AppColors.gray600))),
                                 ]),
                               ),
                             ),
@@ -534,7 +537,7 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
                               }),
                               selectedColor: sub.lightColor,
                               labelStyle: TextStyle(
-                                  color: sel ? sub.color : AppColors.gray600,
+                                  color: sel ? sub.color : context.adapt(AppColors.gray600),
                                   fontWeight: sel ? FontWeight.w700 : null,
                                   fontSize: 12),
                             );
@@ -556,8 +559,8 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
                             gmwfSub: _selectedGmwfSub,
                           );
                           if (subtypes.isEmpty) {
-                            return const Text('No subtypes for this selection.',
-                                style: TextStyle(fontSize: 12, color: AppColors.gray400));
+                            return Text('No subtypes for this selection.',
+                                style: TextStyle(fontSize: 12, color: context.adapt(AppColors.gray400)));
                           }
                           return Wrap(
                             spacing: 8, runSpacing: 8,
@@ -570,7 +573,7 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
                                     setState(() => _selectedSubtype = v ? st : null),
                                 selectedColor: st.color.withValues(alpha: 0.15),
                                 labelStyle: TextStyle(
-                                    color: sel ? st.color : AppColors.gray600,
+                                    color: sel ? st.color : context.adapt(AppColors.gray600),
                                     fontWeight: sel ? FontWeight.w700 : null,
                                     fontSize: 12),
                               );
@@ -595,12 +598,12 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
                                   decoration: BoxDecoration(
                                     color: _paymentMethod == m
                                         ? AppColors.primary
-                                        : Colors.white,
+                                        : context.adapt(SoftPalette.gray50),
                                     borderRadius: BorderRadius.circular(6),
                                     border: Border.all(
                                         color: _paymentMethod == m
                                             ? AppColors.primary
-                                            : AppColors.gray200),
+                                            : context.adapt(AppColors.gray200)),
                                   ),
                                   child: Center(
                                     child: Text(m,
@@ -608,8 +611,8 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
                                             fontSize: 12,
                                             fontWeight: FontWeight.w600,
                                             color: _paymentMethod == m
-                                                ? Colors.white
-                                                : AppColors.gray600)),
+                                                ? SoftPalette.gray50
+                                                : context.adapt(AppColors.gray600))),
                                   ),
                                 ),
                               ),
@@ -643,13 +646,13 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
                                   child: Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                                     decoration: BoxDecoration(
-                                      color: AppColors.gray50,
+                                      color: context.adapt(AppColors.gray50),
                                       borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(color: AppColors.gray200),
+                                      border: Border.all(color: context.adapt(AppColors.gray200)),
                                     ),
                                     child: Row(
                                       children: [
-                                        const Icon(Icons.calendar_today_rounded, size: 18, color: AppColors.gray500),
+                                        Icon(Icons.calendar_today_rounded, size: 18, color: context.adapt(AppColors.gray500)),
                                         const SizedBox(width: 8),
                                         Text(
                                           DateFormat('dd MMM yyyy').format(_selectedDate ?? DateTime.now()),
@@ -675,7 +678,7 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
                                   decoration: _inputDecoration(
                                     hint: 'e.g. B-12345',
                                     icon: Icons.confirmation_number_outlined,
-                                    iconColor: AppColors.gray500,
+                                    iconColor: context.adapt(AppColors.gray500),
                                   ),
                                 ),
                               ],
@@ -694,7 +697,7 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
                         decoration: _inputDecoration(
                             hint: 'Any notes or clarification…',
                             icon: Icons.notes_rounded,
-                            iconColor: AppColors.gray500),
+                            iconColor: context.adapt(AppColors.gray500)),
                       ),
                     ],
                   ),
@@ -705,8 +708,8 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
             // ── Bottom actions ───────────────────────────────────────────────
             Container(
               padding: const EdgeInsets.all(16),
-              decoration: const BoxDecoration(
-                  border: Border(top: BorderSide(color: AppColors.gray100))),
+              decoration: BoxDecoration(
+                  border: Border(top: BorderSide(color: context.adapt(AppColors.gray100)))),
               child: Row(children: [
                 Expanded(
                   child: OutlinedButton(
@@ -724,12 +727,12 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
                             width: 14,
                             height: 14,
                             child: CircularProgressIndicator(
-                                strokeWidth: 2, color: Colors.white))
+                                strokeWidth: 2, color: SoftPalette.gray50))
                         : const Icon(Icons.save_rounded, size: 18),
                     label: Text(_saving ? 'Saving…' : 'Save Changes'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.orange.shade700,
-                      foregroundColor: Colors.white,
+                      backgroundColor: SoftPalette.orange350,
+                      foregroundColor: SoftPalette.gray50,
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(10)),
                     ),
@@ -745,26 +748,26 @@ class _EditDonationDialogState extends State<EditDonationDialog> {
 
   Widget _sectionLabel(String label) => Text(
         label,
-        style: const TextStyle(
+        style: TextStyle(
             fontSize: 12,
             fontWeight: FontWeight.w700,
-            color: AppColors.gray700),
+            color: context.adapt(AppColors.gray700)),
       );
 
   InputDecoration _inputDecoration(
       {required String hint, required IconData icon, Color? iconColor}) {
     return InputDecoration(
       hintText: hint,
-      hintStyle: const TextStyle(color: AppColors.gray400, fontSize: 13),
-      prefixIcon: Icon(icon, size: 18, color: iconColor ?? AppColors.gray500),
+      hintStyle: TextStyle(color: context.adapt(AppColors.gray400), fontSize: 13),
+      prefixIcon: Icon(icon, size: 18, color: iconColor ?? context.adapt(AppColors.gray500)),
       filled: true,
-      fillColor: AppColors.gray50,
+      fillColor: context.adapt(AppColors.gray50),
       border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: AppColors.gray200)),
+          borderSide: BorderSide(color: context.adapt(AppColors.gray200))),
       enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
-          borderSide: const BorderSide(color: AppColors.gray200)),
+          borderSide: BorderSide(color: context.adapt(AppColors.gray200))),
       focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(10),
           borderSide: const BorderSide(color: AppColors.primary, width: 1.5)),
@@ -786,19 +789,19 @@ class EditedBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
       decoration: BoxDecoration(
-        color: Colors.orange.shade50,
+        color: SoftPalette.amber100m,
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: Colors.orange.shade200),
+        border: Border.all(color: SoftPalette.amber200),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.edit_rounded, size: 8, color: Colors.orange.shade700),
+        Icon(Icons.edit_rounded, size: 8, color: SoftPalette.orange350),
         const SizedBox(width: 3),
         Text(
           'EDITED',
           style: TextStyle(
               fontSize: 8,
               fontWeight: FontWeight.w800,
-              color: Colors.orange.shade800,
+              color: SoftPalette.orange400,
               letterSpacing: 0.5),
         ),
       ]),
@@ -827,19 +830,19 @@ class EditHistoryViewer extends StatelessWidget {
           margin: const EdgeInsets.only(top: 16, bottom: 10),
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: Colors.orange.shade50,
+            color: context.adapt(SoftPalette.amber100m),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: Colors.orange.shade200),
+            border: Border.all(color: context.adapt(SoftPalette.amber200)),
           ),
           child: Row(children: [
-            Icon(Icons.history_rounded, color: Colors.orange.shade700, size: 16),
+            Icon(Icons.history_rounded, color: context.adapt(SoftPalette.orange350), size: 16),
             const SizedBox(width: 8),
             Text(
               'Edit History (${history.length} edit${history.length > 1 ? 's' : ''})',
               style: TextStyle(
                   fontWeight: FontWeight.w700,
                   fontSize: 13,
-                  color: Colors.orange.shade800),
+                  color: context.adapt(SoftPalette.orange400)),
             ),
           ]),
         ),
@@ -875,12 +878,12 @@ class EditHistoryViewer extends StatelessWidget {
           return Container(
             margin: const EdgeInsets.only(bottom: 12),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: context.adapt(SoftPalette.gray50),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.orange.shade100),
+              border: Border.all(color: context.adapt(SoftPalette.amber150)),
               boxShadow: [
                 BoxShadow(
-                    color: Colors.orange.withValues(alpha: 0.05), blurRadius: 8)
+                    color: SoftPalette.amber300.withValues(alpha: 0.05), blurRadius: 8)
               ],
             ),
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -889,7 +892,7 @@ class EditHistoryViewer extends StatelessWidget {
                 padding:
                     const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
-                  color: Colors.orange.shade50,
+                  color: context.adapt(SoftPalette.amber100m),
                   borderRadius:
                       const BorderRadius.vertical(top: Radius.circular(10)),
                 ),
@@ -898,11 +901,11 @@ class EditHistoryViewer extends StatelessWidget {
                     padding:
                         const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                     decoration: BoxDecoration(
-                        color: Colors.orange.shade700,
+                        color: SoftPalette.orange350,
                         borderRadius: BorderRadius.circular(4)),
                     child: Text('Edit ${idx + 1}',
                         style: const TextStyle(
-                            color: Colors.white,
+                            color: SoftPalette.gray50,
                             fontSize: 10,
                             fontWeight: FontWeight.w800)),
                   ),
@@ -910,12 +913,12 @@ class EditHistoryViewer extends StatelessWidget {
                   Expanded(
                       child: Text(fmtDate(editedAt),
                           style:
-                              TextStyle(fontSize: 11, color: Colors.orange.shade700))),
+                              TextStyle(fontSize: 11, color: context.adapt(SoftPalette.orange350)))),
                   Text('by $editedBy',
                       style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
-                          color: Colors.orange.shade800)),
+                          color: context.adapt(SoftPalette.orange400))),
                 ]),
               ),
 
@@ -928,30 +931,30 @@ class EditHistoryViewer extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                        color: AppColors.gray50,
+                        color: context.adapt(AppColors.gray50),
                         borderRadius: BorderRadius.circular(6)),
                     child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                      const Icon(Icons.chat_bubble_outline_rounded,
-                          size: 13, color: AppColors.gray500),
+                      Icon(Icons.chat_bubble_outline_rounded,
+                          size: 13, color: context.adapt(AppColors.gray500)),
                       const SizedBox(width: 6),
                       Expanded(
                           child: Text(reason,
-                              style: const TextStyle(
+                              style: TextStyle(
                                   fontSize: 12,
-                                  color: AppColors.gray700,
+                                  color: context.adapt(AppColors.gray700),
                                   fontStyle: FontStyle.italic))),
                     ]),
                   ),
 
                   if (changes.isNotEmpty) ...[
                     const SizedBox(height: 10),
-                    const Text('Changes made:',
+                    Text('Changes made:',
                         style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
-                            color: AppColors.gray600)),
+                            color: context.adapt(AppColors.gray600))),
                     const SizedBox(height: 6),
                     ...changes.map((ch) => Padding(
                       padding: const EdgeInsets.only(bottom: 5),
@@ -962,10 +965,10 @@ class EditHistoryViewer extends StatelessWidget {
                           width: 70,
                           child: Text(
                             (ch['label'] as String? ?? '').toUpperCase(),
-                            style: const TextStyle(
+                            style: TextStyle(
                                 fontSize: 9,
                                 fontWeight: FontWeight.w700,
-                                color: AppColors.gray400),
+                                color: context.adapt(AppColors.gray400)),
                           ),
                         ),
                         Expanded(
@@ -974,33 +977,33 @@ class EditHistoryViewer extends StatelessWidget {
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                  color: Colors.red.shade50,
+                                  color: context.adapt(SoftPalette.pink100m),
                                   borderRadius: BorderRadius.circular(4),
                                   border:
-                                      Border.all(color: Colors.red.shade100)),
+                                      Border.all(color: context.adapt(SoftPalette.red200))),
                               child: Text(fmtVal(ch['old']),
                                   style: TextStyle(
                                       fontSize: 11,
-                                      color: Colors.red.shade700,
+                                      color: context.adapt(SoftPalette.red500),
                                       decoration: TextDecoration.lineThrough)),
                             ),
-                            const Padding(
+                            Padding(
                               padding: EdgeInsets.symmetric(horizontal: 4),
                               child: Icon(Icons.arrow_forward_rounded,
-                                  size: 12, color: AppColors.gray400),
+                                  size: 12, color: context.adapt(AppColors.gray400)),
                             ),
                             Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                  color: Colors.green.shade50,
+                                  color: context.adapt(SoftPalette.green100m),
                                   borderRadius: BorderRadius.circular(4),
                                   border:
-                                      Border.all(color: Colors.green.shade100)),
+                                      Border.all(color: context.adapt(SoftPalette.green200))),
                               child: Text(fmtVal(ch['new']),
                                   style: TextStyle(
                                       fontSize: 11,
-                                      color: Colors.green.shade700,
+                                      color: context.adapt(SoftPalette.green500),
                                       fontWeight: FontWeight.w600)),
                             ),
                           ]),

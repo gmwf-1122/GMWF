@@ -7,6 +7,9 @@
 //   • Branch name shown properly in PDF receipt
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../constants/colors.dart';
 import '../../../models/donation_models.dart';
@@ -68,14 +71,14 @@ class _TransactionCardState extends State<TransactionCard> {
           border: Border.all(
             color: _isHovered
                 ? displayColor.withValues(alpha: 0.5)
-                : (isEdited ? Colors.orange.shade300 : t.bgRule),
+                : (isEdited ? SoftPalette.amber300 : t.bgRule),
             width: _isHovered || isEdited ? 1.5 : 1.0,
           ),
           boxShadow: [
             BoxShadow(
               color: _isHovered
                   ? displayColor.withValues(alpha: 0.08)
-                  : Colors.black.withValues(alpha: 0.04),
+                  : SoftPalette.gray900.withValues(alpha: 0.04),
               blurRadius: _isHovered ? 12 : 6,
               offset: Offset(0, _isHovered ? 4 : 2),
             ),
@@ -214,14 +217,14 @@ class _TransactionCardState extends State<TransactionCard> {
   Widget _statusPill(String status) {
     final isReceived = status == DonationStatus.received;
     final Color bgColor = isReceived 
-        ? const Color(0xFF10B981).withValues(alpha: 0.08)
-        : const Color(0xFFF59E0B).withValues(alpha: 0.08);
+        ? SoftPalette.emerald350.withValues(alpha: 0.08)
+        : SoftPalette.amber300.withValues(alpha: 0.08);
     final Color borderClr = isReceived
-        ? const Color(0xFF10B981).withValues(alpha: 0.2)
-        : const Color(0xFFF59E0B).withValues(alpha: 0.2);
+        ? SoftPalette.emerald350.withValues(alpha: 0.2)
+        : SoftPalette.amber300.withValues(alpha: 0.2);
     final Color textClr = isReceived
-        ? const Color(0xFF065F46)
-        : const Color(0xFFB45309);
+        ? context.adapt(SoftPalette.emerald600)
+        : context.adapt(SoftPalette.orange500);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
@@ -304,14 +307,14 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
   Widget _statusPill(String status) {
     final isReceived = status == DonationStatus.received;
     final Color bgColor = isReceived 
-        ? const Color(0xFF10B981).withOpacity(0.06)
-        : const Color(0xFFF59E0B).withOpacity(0.06);
+        ? SoftPalette.emerald350.withOpacity(0.06)
+        : SoftPalette.amber300.withOpacity(0.06);
     final Color borderClr = isReceived
-        ? const Color(0xFF10B981).withOpacity(0.15)
-        : const Color(0xFFF59E0B).withOpacity(0.15);
+        ? SoftPalette.emerald350.withOpacity(0.15)
+        : SoftPalette.amber300.withOpacity(0.15);
     final Color textClr = isReceived
-        ? const Color(0xFF047857)
-        : const Color(0xFFD97706);
+        ? context.adapt(SoftPalette.emerald550)
+        : context.adapt(SoftPalette.orange400);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
@@ -408,14 +411,18 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
     final d = _donation;
     final isEdited = d.isEdited;
 
+    final screenWidth = MediaQuery.of(context).size.width;
+    final isCompact = screenWidth < 460;
+
     return Dialog(
+      insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       elevation: 16,
       backgroundColor: Colors.transparent,
       child: Container(
         width: 460,
         constraints: const BoxConstraints(maxHeight: 720),
-        padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
+        padding: EdgeInsets.symmetric(horizontal: isCompact ? 18 : 28, vertical: 24),
         decoration: BoxDecoration(
           color: t.bgCard,
           borderRadius: BorderRadius.circular(20),
@@ -432,10 +439,10 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: d.isGoods ? Colors.blue.withOpacity(0.06) : t.accent.withOpacity(0.08),
+                      color: d.isGoods ? SoftPalette.blue400.withOpacity(0.06) : t.accent.withOpacity(0.08),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: d.isGoods ? Colors.blue.withOpacity(0.15) : t.accent.withOpacity(0.2),
+                        color: d.isGoods ? SoftPalette.blue400.withOpacity(0.15) : t.accent.withOpacity(0.2),
                         width: 1,
                       ),
                     ),
@@ -444,7 +451,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 9, 
                         fontWeight: FontWeight.w800, 
-                        color: d.isGoods ? Colors.blue : t.accent, 
+                        color: d.isGoods ? SoftPalette.blue400 : t.accent, 
                         letterSpacing: 1.0,
                       ),
                     ),
@@ -518,24 +525,24 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      color: Colors.orange.shade50,
+                      color: context.adapt(SoftPalette.amber100m),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.orange.shade200),
+                      border: Border.all(color: context.adapt(SoftPalette.amber200)),
                     ),
                     child: Row(children: [
-                      Icon(Icons.edit_rounded, size: 13, color: Colors.orange.shade700),
+                      Icon(Icons.edit_rounded, size: 13, color: context.adapt(SoftPalette.orange350)),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text('This donation was edited', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Colors.orange.shade800)),
+                          Text('This donation was edited', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.adapt(SoftPalette.orange400))),
                           if (d.editReason?.isNotEmpty == true)
-                            Text('Reason: ${d.editReason}', style: TextStyle(fontSize: 10, color: Colors.orange.shade700)),
+                            Text('Reason: ${d.editReason}', style: TextStyle(fontSize: 10, color: context.adapt(SoftPalette.orange350))),
                           if (d.editedBy?.isNotEmpty == true)
                             Text('By ${d.editedBy} ${d.editedAt != null ? "on ${DateFormat('dd MMM yyyy').format(DateTime.tryParse(d.editedAt!) ?? DateTime.now())}" : ""}',
-                                style: TextStyle(fontSize: 10, color: Colors.orange.shade600)),
+                                style: TextStyle(fontSize: 10, color: context.adapt(SoftPalette.orange350))),
                         ]),
                       ),
-                      Icon(_showHistory ? Icons.expand_less_rounded : Icons.expand_more_rounded, size: 16, color: Colors.orange.shade700),
+                      Icon(_showHistory ? Icons.expand_less_rounded : Icons.expand_more_rounded, size: 16, color: context.adapt(SoftPalette.orange350)),
                     ]),
                   ),
                 ),
@@ -592,10 +599,15 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: t.accent.withValues(alpha: 0.15)),
                     ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    child: Wrap(
+                      alignment: WrapAlignment.spaceBetween,
+                      runAlignment: WrapAlignment.center,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      spacing: 8,
+                      runSpacing: 4,
                       children: [
                         Row(
+                          mainAxisSize: MainAxisSize.min,
                           children: [
                             Icon(Icons.volunteer_activism_rounded, size: 16, color: t.accent),
                             const SizedBox(width: 8),
@@ -610,7 +622,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                           ],
                         ),
                         Text(
-                          'PKR ${NumberFormat('#,##0').format(lifetimeTotal)} ($lifetimeCount total gifts)',
+                          'PKR ${NumberFormat('#,##0').format(lifetimeTotal)} ($lifetimeCount total ${lifetimeCount == 1 ? "gift" : "gifts"})',
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 12,
                             fontWeight: FontWeight.w800,
@@ -630,7 +642,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                 children: [
                   _actionBtn(Icons.share_rounded, 'Share', AppColors.primary, () => showReceiptShareSheet(context, d.toMap())),
                   const SizedBox(width: 8),
-                  _actionBtn(Icons.picture_as_pdf_rounded, 'PDF', Colors.redAccent, () => downloadReceiptPdf(d, context)),
+                  _actionBtn(Icons.picture_as_pdf_rounded, 'PDF', SoftPalette.red400, () => downloadReceiptPdf(d, context)),
                   const Spacer(),
                   // 3-dot overflow menu for remaining actions
                   PopupMenuButton<String>(
@@ -645,7 +657,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                           await DonationsLocalStorage.updateDonationStatus(
                             branchId: d.branchId, localId: d.localId, date: d.date, newStatus: DonationStatus.received, firestoreId: d.firestoreId,
                           );
-                          if (context.mounted) { Navigator.pop(context); ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Marked as Received'))); }
+                          if (context.mounted) { Navigator.pop(context); AppToast.showSnackBar(context, const SnackBar(content: Text('Marked as Received'))); }
                           break;
                         case 'edit_donor':
                           Navigator.pop(context);
@@ -654,7 +666,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                           if (matches.isNotEmpty && context.mounted) {
                             showEditDonorDialog(context, matches.first);
                           } else if (context.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Donor details not available locally')));
+                            AppToast.showSnackBar(context, const SnackBar(content: Text('Donor details not available locally')));
                           }
                           break;
                         case 'edit':
@@ -682,7 +694,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                         PopupMenuItem(
                           value: 'received',
                           child: Row(children: [
-                            Icon(Icons.check_circle_rounded, size: 16, color: Colors.green),
+                            Icon(Icons.check_circle_rounded, size: 16, color: SoftPalette.green400),
                             const SizedBox(width: 10),
                             Text('Mark Received', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600)),
                           ]),
@@ -691,7 +703,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                         PopupMenuItem(
                           value: 'edit_donor',
                           child: Row(children: [
-                            Icon(Icons.person_rounded, size: 16, color: Colors.indigo),
+                            Icon(Icons.person_rounded, size: 16, color: context.adapt(SoftPalette.indigo600)),
                             const SizedBox(width: 10),
                             Text('Edit Donor', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600)),
                           ]),
@@ -700,7 +712,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                         PopupMenuItem(
                           value: 'edit',
                           child: Row(children: [
-                            Icon(Icons.edit_rounded, size: 16, color: Colors.orange.shade700),
+                            Icon(Icons.edit_rounded, size: 16, color: SoftPalette.orange350),
                             const SizedBox(width: 10),
                             Text('Edit Donation', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600)),
                           ]),
@@ -709,18 +721,18 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                         PopupMenuItem(
                           value: 'delete',
                           child: Row(children: [
-                            const Icon(Icons.delete_forever_rounded, size: 16, color: Colors.red),
+                            const Icon(Icons.delete_forever_rounded, size: 16, color: SoftPalette.red400),
                             const SizedBox(width: 10),
-                            Text('Delete', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.red)),
+                            Text('Delete', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600, color: SoftPalette.red400)),
                           ]),
                         ),
                       const PopupMenuDivider(),
                       PopupMenuItem(
                         value: 'close',
                         child: Row(children: [
-                          Icon(Icons.close_rounded, size: 16, color: AppColors.gray500),
+                          Icon(Icons.close_rounded, size: 16, color: context.adapt(AppColors.gray500)),
                           const SizedBox(width: 10),
-                          Text('Close', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.gray500)),
+                          Text('Close', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600, color: context.adapt(AppColors.gray500))),
                         ]),
                       ),
                     ],
@@ -767,8 +779,8 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
             onPressed: () async {
               final reason = reasonController.text.trim();
               if (reason.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Please provide a reason for deletion'), backgroundColor: Colors.orange),
+                AppToast.showSnackBar(context, 
+                  const SnackBar(content: Text('Please provide a reason for deletion'), backgroundColor: SoftPalette.amber300),
                 );
                 return;
               }
@@ -785,12 +797,12 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
               );
               
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Donation deleted successfully'), backgroundColor: Colors.red),
+                AppToast.showSnackBar(context, 
+                  const SnackBar(content: Text('Donation deleted successfully'), backgroundColor: SoftPalette.red400),
                 );
               }
             },
-            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            style: TextButton.styleFrom(foregroundColor: SoftPalette.red400),
             child: const Text('DELETE'),
           ),
         ],

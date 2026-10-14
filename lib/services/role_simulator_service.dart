@@ -1,6 +1,7 @@
 // lib/services/role_simulator_service.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 
 class RoleSimulatorService {
   static final ValueNotifier<String?> activeSimulationRole = ValueNotifier<String?>(null);
@@ -33,7 +34,7 @@ class RoleSimulatorService {
   static void showRoleSelectorModal(BuildContext context) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF0F172A),
+      backgroundColor: SoftPalette.slate900,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -46,15 +47,15 @@ class RoleSimulatorService {
             children: [
               Row(
                 children: [
-                  const Icon(Icons.preview_rounded, color: Colors.amberAccent, size: 24),
+                  const Icon(Icons.preview_rounded, color: SoftPalette.yellow200, size: 24),
                   const SizedBox(width: 10),
                   const Text(
                     'Live Role Simulator',
-                    style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                    style: TextStyle(color: SoftPalette.gray50, fontSize: 18, fontWeight: FontWeight.bold),
                   ),
                   const Spacer(),
                   IconButton(
-                    icon: const Icon(Icons.close, color: Colors.white70),
+                    icon: const Icon(Icons.close, color: SoftPalette.gray50A70),
                     onPressed: () => Navigator.pop(ctx),
                   ),
                 ],
@@ -62,29 +63,29 @@ class RoleSimulatorService {
               const SizedBox(height: 6),
               const Text(
                 'Select any role below to preview how that user experiences the GMWF system in real-time, without logging out.',
-                style: TextStyle(color: Colors.white60, fontSize: 12),
+                style: TextStyle(color: SoftPalette.gray50A60, fontSize: 12),
               ),
               const SizedBox(height: 16),
               Flexible(
                 child: ListView(
                   shrinkWrap: true,
                   children: [
-                    _buildRoleOption(ctx, 'chairman', '👑 Chairman (God Mode Dashboard)', 'Full unrestricted foundation access', Colors.amber),
-                    _buildRoleOption(ctx, 'ceo', '💼 CEO / HQ Executive', 'Global modular executive hub', Colors.blueAccent),
-                    _buildRoleOption(ctx, 'branch manager', '🏢 Branch Manager', 'Branch modular dashboard & operational overview', Colors.cyan),
-                    _buildRoleOption(ctx, 'supervisor', '👔 Supervisor', 'Supervisory overview of branch activities', Colors.blueGrey),
-                    _buildRoleOption(ctx, 'doctor', '🩺 Doctor', 'Consultation room, patient queue & prescriptions', Colors.teal),
-                    _buildRoleOption(ctx, 'receptionist', '📋 Receptionist', 'Patient registration, search & token issuing', Colors.lightBlue),
-                    _buildRoleOption(ctx, 'dispenser', '💊 Dispensary / Pharmacist', 'Medicine stock, dispensing & serial status', Colors.green),
-                    _buildRoleOption(ctx, 'donations', '🤝 Donations Officer', 'Receipt issuing, donors & Zakat book', Colors.orange),
-                    _buildRoleOption(ctx, 'finance', '💼 Finance & Payroll Officer', 'Double-entry ledger, salaries & loan repayments', Colors.purpleAccent),
-                    _buildRoleOption(ctx, 'office boy', '🍲 Office Boy (Food Tokens)', 'Food distribution tokens & ration vouchers', Colors.deepOrange),
-                    _buildRoleOption(ctx, 'kitchen', '🍳 Dasterkhwaan (Kitchen)', 'Meal cooking queues & daily headcount', Colors.amber),
-                    _buildRoleOption(ctx, 'madrassa admin', '📖 Madrassa Principal / Admin', 'Madrassa Management Hub, student records, daily logs & attendance', Colors.indigoAccent),
-                    _buildRoleOption(ctx, 'madrassa teacher', '📖 Madrassa Teacher', 'Teacher attendance, student grading & Quranic classes', Colors.indigo),
-                    _buildRoleOption(ctx, 'madrassa parent', '👪 Madrassa Guardian / Parent', 'Parent portal for student progress & attendance', Colors.deepPurpleAccent),
-                    _buildRoleOption(ctx, 'school admin', '🏫 School Admin / Principal', 'GMWF Model School principal dashboard', Colors.pink),
-                    _buildRoleOption(ctx, 'school teacher', '👩‍🏫 School Teacher', 'Classroom management & student attendance', Colors.pinkAccent),
+                    _buildRoleOption(ctx, 'chairman', '👑 Chairman (God Mode Dashboard)', 'Full unrestricted foundation access', SoftPalette.amber200),
+                    _buildRoleOption(ctx, 'ceo', '💼 CEO / HQ Executive', 'Global modular executive hub', SoftPalette.blue400),
+                    _buildRoleOption(ctx, 'branch manager', '🏢 Branch Manager', 'Branch modular dashboard & operational overview', SoftPalette.cyan350),
+                    _buildRoleOption(ctx, 'supervisor', '👔 Supervisor', 'Supervisory overview of branch activities', SoftPalette.slate500),
+                    _buildRoleOption(ctx, 'doctor', '🩺 Doctor', 'Consultation room, patient queue & prescriptions', SoftPalette.teal500),
+                    _buildRoleOption(ctx, 'receptionist', '📋 Receptionist', 'Patient registration, search & token issuing', SoftPalette.sky350),
+                    _buildRoleOption(ctx, 'dispenser', '💊 Dispensary / Pharmacist', 'Medicine stock, dispensing & serial status', SoftPalette.green400),
+                    _buildRoleOption(ctx, 'donations', '🤝 Donations Officer', 'Receipt issuing, donors & Zakat book', SoftPalette.amber300),
+                    _buildRoleOption(ctx, 'finance', '💼 Finance & Payroll Officer', 'Double-entry ledger, salaries & loan repayments', SoftPalette.purple400),
+                    _buildRoleOption(ctx, 'office boy', '🍲 Office Boy (Food Tokens)', 'Food distribution tokens & ration vouchers', SoftPalette.red400),
+                    _buildRoleOption(ctx, 'kitchen', '🍳 Dasterkhwaan (Kitchen)', 'Meal cooking queues & daily headcount', SoftPalette.amber200),
+                    _buildRoleOption(ctx, 'madrassa admin', '📖 Madrassa Principal / Admin', 'Madrassa Management Hub, student records, daily logs & attendance', SoftPalette.indigo500),
+                    _buildRoleOption(ctx, 'madrassa teacher', '📖 Madrassa Teacher', 'Teacher attendance, student grading & Quranic classes', SoftPalette.indigo600),
+                    _buildRoleOption(ctx, 'madrassa parent', '👪 Madrassa Guardian / Parent', 'Parent portal for student progress & attendance', SoftPalette.violet500),
+                    _buildRoleOption(ctx, 'school admin', '🏫 School Admin / Principal', 'GMWF Model School principal dashboard', SoftPalette.red500),
+                    _buildRoleOption(ctx, 'school teacher', '👩‍🏫 School Teacher', 'Classroom management & student attendance', SoftPalette.pink400),
 
                   ],
                 ),
@@ -106,9 +107,9 @@ class RoleSimulatorService {
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E293B),
+        color: SoftPalette.slate800,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white12),
+        border: Border.all(color: SoftPalette.gray50A12),
       ),
       child: ListTile(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -124,9 +125,9 @@ class RoleSimulatorService {
           ),
           child: Icon(Icons.verified_user_rounded, color: accent, size: 20),
         ),
-        title: Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-        subtitle: Text(subtitle, style: const TextStyle(color: Colors.white60, fontSize: 11)),
-        trailing: const Icon(Icons.arrow_forward_ios_rounded, color: Colors.white38, size: 14),
+        title: Text(title, style: const TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 13)),
+        subtitle: Text(subtitle, style: const TextStyle(color: SoftPalette.gray50A60, fontSize: 11)),
+        trailing: const Icon(Icons.arrow_forward_ios_rounded, color: SoftPalette.gray50A38, size: 14),
       ),
     );
   }

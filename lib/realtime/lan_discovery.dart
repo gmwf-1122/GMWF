@@ -45,6 +45,9 @@ class LanDiscovery {
   static Future<void> _tryMdns(Completer<DiscoveredServer?> c, void Function(String)? s) async {
     try {
       final d = BonsoirDiscovery(type: '_gmwftoken._tcp');
+      // bonsoir 6 requires initialize() before start(); without it every discovery round
+      // failed with an 'isReady' assertion (the repeated "mDNS error" in the terminal).
+      await d.initialize();
       await d.start();
       d.eventStream?.listen((e) {
         if (c.isCompleted) return;
@@ -58,7 +61,11 @@ class LanDiscovery {
             try { d.stop(); } catch (_) {}
           }
         }
-      });
+      }, onError: (Object e) {
+        // No mDNS plugin on this platform (MissingPluginException on Windows): UDP and the
+        // subnet scan still find the server. Unhandled, this filled gmwf_crash.log.
+        debugPrint('mDNS unavailable: $e');
+      }, cancelOnError: true);
       Future.delayed(const Duration(seconds: 8), () {
         try { d.stop(); } catch (_) {}
       });
@@ -103,6 +110,8 @@ class LanDiscovery {
     }
   }
 
+  static int _scanRound = 0;
+
   static Future<void> _tryScan(Completer<DiscoveredServer?> c, void Function(String)? s) async {
     try {
       if (c.isCompleted) return;
@@ -134,6 +143,13 @@ class LanDiscovery {
 
       final allSubnets = <String>{...detectedSubnets, ...standardSubnets}.toList();
 
+      // The standard subnets are usually not this PC's network: probing all 254 addresses
+      // of each (about 1,800 connection attempts per search) loaded the PC and the network
+      // every time a client looked for the server. Each round checks their likely server
+      // addresses; every 5th round (or when this PC's own subnet is unknown) scans them fully.
+      _scanRound++;
+      final fullScanStandard = detectedSubnets.isEmpty || _scanRound % 5 == 1;
+
       for (final subnet in allSubnets) {
         if (c.isCompleted) return;
         s?.call('Scanning $subnet.*...');
@@ -142,6 +158,7 @@ class LanDiscovery {
         final priorityOctets = [1, 15, 9, 100, 2, 10, 50, 200, 254, 3, 4, 5, 20, 25, 30, 40, 55, 60, 70, 80, 90];
         await Future.wait(priorityOctets.map((oct) => _probe('$subnet.$oct', port, c)));
         if (c.isCompleted) return;
+        if (!detectedSubnets.contains(subnet) && !fullScanStandard) continue;
 
         // Priority 2: Remaining IPs in fast chunks of 40
         final remaining = <int>[];
@@ -177,7 +194,7 @@ class LanDiscovery {
   static Future<bool> isReachable(String ip, int port) async {
     if (kIsWeb) return true;
     try {
-      final s = await Socket.connect(ip, port, timeout: const Duration(milliseconds: 500));
+      final s = await Socket.connect(ip, port, timeout: const Duration(milliseconds: 1200));
       s.destroy();
       return true;
     } catch (_) {

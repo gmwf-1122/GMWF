@@ -6,6 +6,7 @@
 //   3. read the per-device results and where the report files were saved
 
 import 'dart:async';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -245,7 +246,7 @@ class _ResultDialog extends StatelessWidget {
             Text(v,
                 style: TextStyle(
                   fontWeight: FontWeight.w600,
-                  color: ok ? Colors.green.shade700 : Colors.orange.shade800,
+                  color: ok ? SoftPalette.green500 : SoftPalette.orange400,
                 )),
           ]),
           const SizedBox(height: 4),

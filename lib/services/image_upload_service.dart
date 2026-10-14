@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -31,12 +33,12 @@ class ImageUploadService {
               ),
             ),
             ListTile(
-              leading: const Icon(Icons.camera_alt_outlined, color: Color(0xFF008080)),
+              leading: Icon(Icons.camera_alt_outlined, color: ctx.adapt(SoftPalette.teal550)),
               title: const Text('Capture (Camera)'),
               onTap: () => Navigator.pop(ctx, ImageSource.camera),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF008080)),
+              leading: Icon(Icons.photo_library_outlined, color: ctx.adapt(SoftPalette.teal550)),
               title: const Text('Browse (Gallery / File)'),
               onTap: () => Navigator.pop(ctx, ImageSource.gallery),
             ),

@@ -1,6 +1,8 @@
 // lib/pages/dispensary/dispensar/medicine_ledger.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
@@ -31,17 +33,17 @@ class MedicineLedgerPage extends StatefulWidget {
 
 class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
   // ── Palette ───────────────────────────────────────────────────────────────
-  static const _teal       = Color(0xFF00695C);
-  static const _tealDark   = Color(0xFF004D40);
-  static const _emerald    = Color(0xFF00875A);
-  static const _indigo     = Color(0xFF4338CA);
-  static const _amber      = Color(0xFFD97706);
-  static const _red        = Color(0xFFD32F2F);
-  static const _bg         = Color(0xFFF0F4F4);
-  static const _white      = Colors.white;
-  static const _textDark   = Color(0xFF1B2631);
-  static const _textMid    = Color(0xFF4A5568);
-  static const _textLight  = Color(0xFF718096);
+  static const _teal       = SoftPalette.teal600;
+  static const _tealDark   = SoftPalette.teal700;
+  static const _emerald    = SoftPalette.emerald550;
+  static const _indigo     = SoftPalette.indigo600;
+  static const _amber      = SoftPalette.orange400;
+  static const _red        = SoftPalette.red500;
+  static const _bg         = SoftPalette.gray100;
+  static const _white      = SoftPalette.gray50;
+  static const _textDark   = SoftPalette.slate800;
+  static const _textMid    = SoftPalette.slate600;
+  static const _textLight  = SoftPalette.slate500;
 
   bool get _isDark {
     try {
@@ -551,10 +553,10 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
     if (widget.isEmbedded || isWrapped) return content;
 
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0F172A) : _bg,
+      backgroundColor: isDark ? SoftPalette.slate900 : _bg,
       appBar: AppBar(
-        backgroundColor: isDark ? const Color(0xFF1E293B) : _teal,
-        foregroundColor: Colors.white,
+        backgroundColor: isDark ? SoftPalette.slate800 : _teal,
+        foregroundColor: SoftPalette.gray50,
         elevation: 0,
         title: Text(
           _selectedMed != null ? '${_selectedMed!['name']} Ledger' : 'Dispensary Medicine Ledger',
@@ -596,10 +598,10 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         border: Border(
           bottom: BorderSide(
-            color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+            color: isDark ? SoftPalette.slate700 : SoftPalette.slate150,
           ),
         ),
       ),
@@ -615,15 +617,15 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F8F6),
+                      color: isDark ? SoftPalette.slate900 : SoftPalette.teal100t,
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(
-                        color: isDark ? const Color(0xFF334155) : const Color(0xFFB2DFDB),
+                        color: isDark ? SoftPalette.slate700 : SoftPalette.teal200,
                       ),
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.medication_rounded, size: 16, color: isDark ? const Color(0xFF38BDF8) : _teal),
+                        Icon(Icons.medication_rounded, size: 16, color: isDark ? SoftPalette.sky350 : _teal),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -631,12 +633,12 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.bold,
-                              color: isDark ? Colors.white : _textDark,
+                              color: isDark ? SoftPalette.gray50 : _textDark,
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        Icon(Icons.arrow_drop_down, size: 18, color: isDark ? const Color(0xFF38BDF8) : _teal),
+                        Icon(Icons.arrow_drop_down, size: 18, color: isDark ? SoftPalette.sky350 : _teal),
                       ],
                     ),
                   ),
@@ -674,7 +676,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               IconButton(
-                icon: Icon(Icons.chevron_left_rounded, color: isDark ? const Color(0xFF38BDF8) : _teal),
+                icon: Icon(Icons.chevron_left_rounded, color: isDark ? SoftPalette.sky350 : _teal),
                 onPressed: () {
                   setState(() {
                     _selectedMonth = DateTime(_selectedMonth.year, _selectedMonth.month - 1);
@@ -704,23 +706,23 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF0F766E).withValues(alpha: 0.2) : _teal.withValues(alpha: 0.08),
+                    color: isDark ? SoftPalette.teal550.withValues(alpha: 0.2) : _teal.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: isDark ? const Color(0xFF0F766E).withValues(alpha: 0.4) : _teal.withValues(alpha: 0.2),
+                      color: isDark ? SoftPalette.teal550.withValues(alpha: 0.4) : _teal.withValues(alpha: 0.2),
                     ),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.calendar_month_rounded, size: 14, color: isDark ? const Color(0xFF38BDF8) : _teal),
+                      Icon(Icons.calendar_month_rounded, size: 14, color: isDark ? SoftPalette.sky350 : _teal),
                       const SizedBox(width: 6),
                       Text(
                         monthLabel,
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.bold,
-                          color: isDark ? const Color(0xFF38BDF8) : _tealDark,
+                          color: isDark ? SoftPalette.sky350 : _tealDark,
                         ),
                       ),
                     ],
@@ -728,7 +730,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                 ),
               ),
               IconButton(
-                icon: Icon(Icons.chevron_right_rounded, color: isDark ? const Color(0xFF38BDF8) : _teal),
+                icon: Icon(Icons.chevron_right_rounded, color: isDark ? SoftPalette.sky350 : _teal),
                 onPressed: _selectedMonth.year == DateTime.now().year && _selectedMonth.month == DateTime.now().month
                     ? null
                     : () {
@@ -764,12 +766,12 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
           child: Row(
             children: [
-              Icon(Icons.history_rounded, size: 18, color: _isDark ? const Color(0xFF38BDF8) : _teal),
+              Icon(Icons.history_rounded, size: 18, color: _isDark ? SoftPalette.sky350 : _teal),
               const SizedBox(width: 8),
               Text(
                 'Audit & Dispensation History (${logs.length})',
                 style: TextStyle(
-                  color: _isDark ? Colors.white : _tealDark,
+                  color: _isDark ? SoftPalette.gray50 : _tealDark,
                   fontWeight: FontWeight.bold,
                   fontSize: 15,
                 ),
@@ -783,7 +785,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
             child: Center(
               child: Text(
                 'No transactions recorded for this period',
-                style: TextStyle(color: _isDark ? const Color(0xFF94A3B8) : _textLight),
+                style: TextStyle(color: _isDark ? SoftPalette.slate350 : _textLight),
               ),
             ),
           )
@@ -810,7 +812,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
           value: '+${added.toStringAsFixed(0)}',
           icon: Icons.add_circle_outline_rounded,
           bgGradientStart: _emerald,
-          bgGradientEnd: const Color(0xFF00704A),
+          bgGradientEnd: SoftPalette.emerald600,
           glowColor: _emerald,
         );
         final c2 = _solidSummaryCard(
@@ -818,7 +820,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
           value: '-${removed.toStringAsFixed(0)}',
           icon: Icons.medication_outlined,
           bgGradientStart: _indigo,
-          bgGradientEnd: const Color(0xFF3730A3),
+          bgGradientEnd: SoftPalette.indigo700,
           glowColor: _indigo,
         );
         final c3 = _solidSummaryCard(
@@ -826,7 +828,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
           value: '${adjusted.toStringAsFixed(0)}',
           icon: Icons.tune_rounded,
           bgGradientStart: _amber,
-          bgGradientEnd: const Color(0xFFB45309),
+          bgGradientEnd: SoftPalette.orange500,
           glowColor: _amber,
         );
         final c4 = _solidSummaryCard(
@@ -834,7 +836,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
           value: net >= 0 ? '+${net.toStringAsFixed(0)}' : net.toStringAsFixed(0),
           icon: Icons.account_balance_wallet_outlined,
           bgGradientStart: _teal,
-          bgGradientEnd: const Color(0xFF0D5A50),
+          bgGradientEnd: SoftPalette.teal600,
           glowColor: _teal,
         );
 
@@ -883,10 +885,10 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+          color: isDark ? SoftPalette.slate700 : SoftPalette.slate150,
         ),
       ),
       child: Row(
@@ -897,7 +899,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
               color: _teal.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: Icon(Icons.inventory_2_rounded, size: 20, color: isDark ? const Color(0xFF38BDF8) : _teal),
+            child: Icon(Icons.inventory_2_rounded, size: 20, color: isDark ? SoftPalette.sky350 : _teal),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -909,12 +911,12 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : _textDark,
+                    color: isDark ? SoftPalette.gray50 : _textDark,
                   ),
                 ),
                 Text(
                   'Branch: ${widget.branchId.toUpperCase()}${_selectedCampFilter != 'all' ? ' • Camp: ${(CampSessionService.getCampLabel(_selectedCampFilter).toUpperCase().contains('KAPAY') ? 'SADDAR' : CampSessionService.getCampLabel(_selectedCampFilter).toUpperCase())}' : ' • All Camps'}',
-                  style: TextStyle(fontSize: 11, color: isDark ? const Color(0xFF94A3B8) : _textLight),
+                  style: TextStyle(fontSize: 11, color: isDark ? SoftPalette.slate350 : _textLight),
                 ),
               ],
             ),
@@ -924,7 +926,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
             style: TextStyle(
               fontSize: 22,
               fontWeight: FontWeight.w900,
-              color: isDark ? const Color(0xFF38BDF8) : _teal,
+              color: isDark ? SoftPalette.sky350 : _teal,
             ),
           ),
         ],
@@ -975,10 +977,10 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
     final isDark = _isDark;
     return Card(
       elevation: 0,
-      color: isDark ? const Color(0xFF1E293B) : Colors.white,
+      color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+        side: BorderSide(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
       ),
       // Own storage bucket: the tile's open/closed state otherwise collides with the parent
       // ListView's saved scroll offset in PageStorage ("double is not a subtype of bool?").
@@ -989,10 +991,10 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
         child: ExpansionTile(
           key: const ValueKey('ledger_breakdown_tile'),
           initiallyExpanded: false,
-          leading: Icon(Icons.analytics_rounded, color: isDark ? const Color(0xFF38BDF8) : _teal),
+          leading: Icon(Icons.analytics_rounded, color: isDark ? SoftPalette.sky350 : _teal),
           title: Text(
             'Medicine Breakdown Summary',
-            style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : _tealDark, fontSize: 14),
+            style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50 : _tealDark, fontSize: 14),
           ),
           subtitle: Text('${groups.length} medicines moved this period', style: const TextStyle(fontSize: 11)),
           children: [
@@ -1019,7 +1021,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                         children: [
                           Text(
                             name,
-                            style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : _textDark, fontSize: 13),
+                            style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50 : _textDark, fontSize: 13),
                           ),
                           const SizedBox(height: 3),
                           Row(
@@ -1041,7 +1043,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                                     color: _indigo.withValues(alpha: 0.12),
                                     borderRadius: BorderRadius.circular(4),
                                   ),
-                                  child: Text('-${removed.toStringAsFixed(0)} (${patientSet.length} pts)', style: const TextStyle(color: _indigo, fontSize: 10, fontWeight: FontWeight.bold)),
+                                  child: Text('-${removed.toStringAsFixed(0)} (${patientSet.length} pts)', style: TextStyle(color: context.adapt(_indigo), fontSize: 10, fontWeight: FontWeight.bold)),
                                 ),
                             ],
                           ),
@@ -1085,15 +1087,15 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
       margin: const EdgeInsets.symmetric(vertical: 5),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: isDark ? const Color(0xFF334155) : Colors.grey.shade200,
+          color: isDark ? SoftPalette.slate700 : SoftPalette.gray100,
           width: 1,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.03),
+            color: SoftPalette.gray900.withValues(alpha: isDark ? 0.2 : 0.03),
             blurRadius: 6,
             offset: const Offset(0, 2),
           ),
@@ -1119,8 +1121,8 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                       ? (isProforma ? Icons.inventory_2_rounded : Icons.add_circle_outline_rounded)
                       : Icons.medication_outlined,
                   color: isAdded
-                      ? (isProforma ? _emerald : (isDark ? const Color(0xFF2DD4BF) : _teal))
-                      : _indigo,
+                      ? (isProforma ? _emerald : (isDark ? SoftPalette.teal300 : _teal))
+                      : context.adapt(_indigo),
                   size: 16,
                 ),
               ),
@@ -1133,7 +1135,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                       : '$medName • ${log['patientName'] ?? 'Unknown Patient'}',
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : _textDark,
+                    color: isDark ? SoftPalette.gray50 : _textDark,
                     fontSize: 13,
                   ),
                   maxLines: 2,
@@ -1145,7 +1147,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
               Text(
                 '${isAdded ? "+" : "-"}${log['qty']}',
                 style: TextStyle(
-                  color: isAdded ? (isDark ? const Color(0xFF4ADE80) : _emerald) : (isDark ? const Color(0xFF818CF8) : _indigo),
+                  color: isAdded ? (isDark ? SoftPalette.green300 : _emerald) : (isDark ? SoftPalette.indigo400 : _indigo),
                   fontWeight: FontWeight.w900,
                   fontSize: 15,
                 ),
@@ -1168,36 +1170,36 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                   ),
                   child: Text(
                     '#${log['serial']}',
-                    style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: _indigo),
+                    style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: context.adapt(_indigo)),
                   ),
                 ),
               if (!isAdded && log['patientCnic'] != null && log['patientCnic'].toString().isNotEmpty)
                 Text(
                   'CNIC: ${log['patientCnic']}',
-                  style: TextStyle(fontSize: 11, color: isDark ? const Color(0xFF94A3B8) : _textLight),
+                  style: TextStyle(fontSize: 11, color: isDark ? SoftPalette.slate350 : _textLight),
                 ),
               if (!isAdded && log['days'] != null)
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                   decoration: BoxDecoration(
-                    color: Colors.deepOrange.withValues(alpha: 0.12),
+                    color: SoftPalette.red400.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
                     '${log['days']}d supply',
-                    style: const TextStyle(fontSize: 10, color: Colors.deepOrange, fontWeight: FontWeight.bold),
+                    style: const TextStyle(fontSize: 10, color: SoftPalette.red400, fontWeight: FontWeight.bold),
                   ),
                 ),
               if (campTag.isNotEmpty && campTag != 'ALL')
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                   decoration: BoxDecoration(
-                    color: campTag.contains('HAJI') ? const Color(0xFF6366F1) : const Color(0xFF0D9488),
+                    color: campTag.contains('HAJI') ? SoftPalette.indigo500 : SoftPalette.teal500,
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
                     '📍 $campTag',
-                    style: const TextStyle(color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.bold),
+                    style: const TextStyle(color: SoftPalette.gray50, fontSize: 9.5, fontWeight: FontWeight.bold),
                   ),
                 ),
             ],
@@ -1211,7 +1213,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                 child: Text(
                   'By: ${log['user'] ?? 'System'}',
                   style: TextStyle(
-                    color: isDark ? const Color(0xFF64748B) : _textLight,
+                    color: isDark ? SoftPalette.slate550 : _textLight,
                     fontSize: 10.5,
                   ),
                   overflow: TextOverflow.ellipsis,
@@ -1219,7 +1221,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
               ),
               Text(
                 DateFormat('dd MMM, hh:mm a').format(date),
-                style: TextStyle(color: isDark ? const Color(0xFF94A3B8) : _textLight, fontSize: 10.5, fontWeight: FontWeight.w500),
+                style: TextStyle(color: isDark ? SoftPalette.slate350 : _textLight, fontSize: 10.5, fontWeight: FontWeight.w500),
               ),
             ],
           ),
@@ -1246,7 +1248,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
         ),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: Colors.white.withValues(alpha: 0.25),
+          color: SoftPalette.gray50.withValues(alpha: 0.25),
           width: 1.0,
         ),
         boxShadow: [
@@ -1262,7 +1264,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
         children: [
           Row(
             children: [
-              Icon(icon, size: 14, color: Colors.white.withValues(alpha: 0.90)),
+              Icon(icon, size: 14, color: SoftPalette.gray50.withValues(alpha: 0.90)),
               const SizedBox(width: 4),
               Expanded(
                 child: Text(
@@ -1270,7 +1272,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                   style: TextStyle(
                     fontSize: 10.5,
                     fontWeight: FontWeight.w600,
-                    color: Colors.white.withValues(alpha: 0.95),
+                    color: SoftPalette.gray50.withValues(alpha: 0.95),
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -1283,7 +1285,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
             style: const TextStyle(
               fontSize: 17,
               fontWeight: FontWeight.bold,
-              color: Colors.white,
+              color: SoftPalette.gray50,
             ),
           ),
         ],
@@ -1301,10 +1303,10 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
       height: 34,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F8F6),
+        color: isDark ? SoftPalette.slate900 : SoftPalette.teal100t,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: isDark ? const Color(0xFF334155) : const Color(0xFFB2DFDB),
+          color: isDark ? SoftPalette.slate700 : SoftPalette.teal200,
         ),
       ),
       child: DropdownButtonHideUnderline(
@@ -1312,12 +1314,12 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
           value: items.any((i) => i['id'] == value) ? value : items.first['id'],
           isDense: true,
           icon: Icon(Icons.arrow_drop_down,
-              size: 16, color: isDark ? const Color(0xFF38BDF8) : _teal),
-          dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+              size: 16, color: isDark ? SoftPalette.sky350 : _teal),
+          dropdownColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w600,
-            color: isDark ? Colors.white : Colors.black87,
+            color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87,
           ),
           items: items.map((i) {
             return DropdownMenuItem<String>(
@@ -1327,7 +1329,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white : Colors.black87,
+                  color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87,
                 ),
               ),
             );
@@ -1347,7 +1349,7 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
       builder: (_) => Container(
         height: MediaQuery.of(context).size.height * 0.7,
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1E293B) : _white,
+          color: isDark ? SoftPalette.slate800 : _white,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         ),
         child: Column(
@@ -1357,12 +1359,12 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
               width: 40,
               height: 4,
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF475569) : Colors.grey[300],
+                color: isDark ? SoftPalette.slate600 : SoftPalette.gray150,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
             Text('Select Medicine for Ledger',
-                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? Colors.white : _tealDark)),
+                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? SoftPalette.gray50 : _tealDark)),
             const SizedBox(height: 12),
             Expanded(
               child: ListView.builder(
@@ -1419,9 +1421,9 @@ class _MedicineLedgerPageState extends State<MedicineLedgerPage> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.query_stats_rounded, size: 64, color: isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+          Icon(Icons.query_stats_rounded, size: 64, color: isDark ? SoftPalette.slate700 : SoftPalette.gray150),
           const SizedBox(height: 12),
-          Text(msg, style: TextStyle(color: isDark ? const Color(0xFF94A3B8) : _textLight, fontSize: 14)),
+          Text(msg, style: TextStyle(color: isDark ? SoftPalette.slate350 : _textLight, fontSize: 14)),
         ],
       ),
     );

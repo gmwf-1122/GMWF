@@ -1,5 +1,7 @@
 // lib/widgets/read_only_document_tile.dart
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import '../services/image_upload_service.dart';
 
 /// Read-only document tile for displaying student and guardian documents (B-Form, CNIC, etc.).
@@ -24,7 +26,7 @@ class ReadOnlyDocumentTile extends StatelessWidget {
     showDialog(
       context: context,
       builder: (ctx) => Dialog(
-        backgroundColor: Colors.black,
+        backgroundColor: SoftPalette.gray900,
         insetPadding: const EdgeInsets.all(12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         child: ClipRRect(
@@ -34,18 +36,18 @@ class ReadOnlyDocumentTile extends StatelessWidget {
             children: [
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                color: Colors.black,
+                color: SoftPalette.gray900,
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Row(
                       children: [
-                        Icon(icon, color: Colors.white, size: 20),
+                        Icon(icon, color: SoftPalette.gray50, size: 20),
                         const SizedBox(width: 8),
                         Text(
                           label,
                           style: const TextStyle(
-                            color: Colors.white,
+                            color: SoftPalette.gray50,
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
                           ),
@@ -53,7 +55,7 @@ class ReadOnlyDocumentTile extends StatelessWidget {
                       ],
                     ),
                     IconButton(
-                      icon: const Icon(Icons.close_rounded, color: Colors.white),
+                      icon: const Icon(Icons.close_rounded, color: SoftPalette.gray50),
                       onPressed: () => Navigator.pop(ctx),
                     ),
                   ],
@@ -72,10 +74,10 @@ class ReadOnlyDocumentTile extends StatelessWidget {
               ),
               Container(
                 padding: const EdgeInsets.all(12),
-                color: Colors.black,
+                color: SoftPalette.gray900,
                 child: const Text(
                   'Pinch or double tap to zoom • Read Only',
-                  style: TextStyle(color: Colors.white54, fontSize: 11),
+                  style: TextStyle(color: SoftPalette.gray50A54, fontSize: 11),
                 ),
               ),
             ],
@@ -101,9 +103,9 @@ class ReadOnlyDocumentTile extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.broken_image_rounded, color: Colors.white54, size: 64),
+              Icon(Icons.broken_image_rounded, color: SoftPalette.gray50A54, size: 64),
               SizedBox(height: 8),
-              Text('Unable to display image', style: TextStyle(color: Colors.white70)),
+              Text('Unable to display image', style: TextStyle(color: SoftPalette.gray50A70)),
             ],
           ),
         ),
@@ -111,17 +113,17 @@ class ReadOnlyDocumentTile extends StatelessWidget {
     );
   }
 
-  Widget _buildThumbnail() {
+  Widget _buildThumbnail(BuildContext context) {
     if (!_hasDoc) {
       return Container(
         width: 48,
         height: 48,
         decoration: BoxDecoration(
-          color: Colors.grey.shade100,
+          color: context.adapt(SoftPalette.gray100),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: Colors.grey.shade300),
+          border: Border.all(color: context.adapt(SoftPalette.gray150)),
         ),
-        child: Icon(icon, color: Colors.grey.shade400, size: 24),
+        child: Icon(icon, color: context.adapt(SoftPalette.gray300), size: 24),
       );
     }
 
@@ -132,7 +134,7 @@ class ReadOnlyDocumentTile extends StatelessWidget {
       if (bytes != null) {
         imageWidget = Image.memory(bytes, fit: BoxFit.cover, width: 48, height: 48);
       } else {
-        imageWidget = Icon(icon, color: Colors.grey, size: 24);
+        imageWidget = Icon(icon, color: context.adapt(SoftPalette.gray350), size: 24);
       }
     } else {
       imageWidget = Image.network(
@@ -140,7 +142,7 @@ class ReadOnlyDocumentTile extends StatelessWidget {
         fit: BoxFit.cover,
         width: 48,
         height: 48,
-        errorBuilder: (_, __, ___) => Icon(icon, color: Colors.grey, size: 24),
+        errorBuilder: (_, __, ___) => Icon(icon, color: context.adapt(SoftPalette.gray350), size: 24),
       );
     }
 
@@ -150,7 +152,7 @@ class ReadOnlyDocumentTile extends StatelessWidget {
         width: 48,
         height: 48,
         decoration: BoxDecoration(
-          border: Border.all(color: Colors.grey.shade300),
+          border: Border.all(color: context.adapt(SoftPalette.gray150)),
           borderRadius: BorderRadius.circular(10),
         ),
         child: imageWidget,
@@ -163,13 +165,13 @@ class ReadOnlyDocumentTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.adapt(SoftPalette.gray50),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(color: context.adapt(SoftPalette.slate150)),
       ),
       child: Row(
         children: [
-          _buildThumbnail(),
+          _buildThumbnail(context),
           const SizedBox(width: 14),
           Expanded(
             child: Column(
@@ -177,10 +179,10 @@ class ReadOnlyDocumentTile extends StatelessWidget {
               children: [
                 Text(
                   label,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 13,
-                    color: Color(0xFF1E293B),
+                    color: context.adapt(SoftPalette.slate800),
                   ),
                 ),
                 const SizedBox(height: 2),
@@ -188,7 +190,7 @@ class ReadOnlyDocumentTile extends StatelessWidget {
                   _hasDoc ? 'Document available (Tap to Enlarge)' : 'No document uploaded',
                   style: TextStyle(
                     fontSize: 11,
-                    color: _hasDoc ? const Color(0xFF059669) : Colors.grey.shade500,
+                    color: _hasDoc ? context.adapt(SoftPalette.emerald500) : context.adapt(SoftPalette.gray350),
                     fontWeight: _hasDoc ? FontWeight.w600 : FontWeight.normal,
                   ),
                 ),
@@ -202,21 +204,21 @@ class ReadOnlyDocumentTile extends StatelessWidget {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF4C4DDC).withValues(alpha: 0.08),
+                  color: context.adapt(SoftPalette.indigo550).withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFF4C4DDC).withValues(alpha: 0.2)),
+                  border: Border.all(color: context.adapt(SoftPalette.indigo550).withValues(alpha: 0.2)),
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.zoom_in_rounded, size: 16, color: Color(0xFF4C4DDC)),
+                    Icon(Icons.zoom_in_rounded, size: 16, color: context.adapt(SoftPalette.indigo550)),
                     SizedBox(width: 4),
                     Text(
                       'Enlarge',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
-                        color: Color(0xFF4C4DDC),
+                        color: context.adapt(SoftPalette.indigo550),
                       ),
                     ),
                   ],

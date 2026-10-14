@@ -1,6 +1,9 @@
 // lib/pages/dispensary/user_settings_dialog.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -70,7 +73,7 @@ class DispensaryUserSettingsDialog {
                         children: [
                           CircleAvatar(
                             radius: 22,
-                            backgroundColor: Colors.teal.shade100,
+                            backgroundColor: SoftPalette.teal200,
                             backgroundImage: (photoUrl != null && photoUrl.isNotEmpty)
                                 ? NetworkImage(photoUrl)
                                 : null,
@@ -79,7 +82,7 @@ class DispensaryUserSettingsDialog {
                                     initialName.isNotEmpty ? initialName[0].toUpperCase() : 'U',
                                     style: TextStyle(
                                       fontWeight: FontWeight.bold,
-                                      color: Colors.teal.shade900,
+                                      color: SoftPalette.teal700,
                                       fontSize: 18,
                                     ),
                                   )
@@ -96,7 +99,7 @@ class DispensaryUserSettingsDialog {
                                 ),
                                 Text(
                                   'Change name & password',
-                                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                  style: TextStyle(fontSize: 12, color: ctx.adapt(SoftPalette.gray500)),
                                 ),
                               ],
                             ),
@@ -197,8 +200,8 @@ class DispensaryUserSettingsDialog {
                           Expanded(
                             child: ElevatedButton(
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.teal.shade700,
-                                foregroundColor: Colors.white,
+                                backgroundColor: SoftPalette.teal550,
+                                foregroundColor: SoftPalette.gray50,
                                 padding: const EdgeInsets.symmetric(vertical: 14),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                               ),
@@ -312,18 +315,18 @@ class DispensaryUserSettingsDialog {
                                         if (ctx.mounted) Navigator.pop(ctx);
                                         if (onUserUpdated != null) onUserUpdated();
 
-                                        ScaffoldMessenger.of(context).showSnackBar(
+                                        AppToast.showSnackBar(context, 
                                           const SnackBar(
                                             content: Text('Account settings updated successfully!'),
-                                            backgroundColor: Colors.teal,
+                                            backgroundColor: SoftPalette.teal500,
                                           ),
                                         );
                                       } catch (e) {
                                         setS(() => isSubmitting = false);
-                                        ScaffoldMessenger.of(ctx).showSnackBar(
+                                        AppToast.showSnackBar(ctx, 
                                           SnackBar(
                                             content: Text('Error: ${e.toString().replaceAll('Exception: ', '')}'),
-                                            backgroundColor: Colors.red,
+                                            backgroundColor: SoftPalette.red400,
                                           ),
                                         );
                                       }
@@ -332,7 +335,7 @@ class DispensaryUserSettingsDialog {
                                   ? const SizedBox(
                                       width: 18,
                                       height: 18,
-                                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                      child: CircularProgressIndicator(color: SoftPalette.gray50, strokeWidth: 2),
                                     )
                                   : const Text('Save Changes', style: TextStyle(fontWeight: FontWeight.bold)),
                             ),

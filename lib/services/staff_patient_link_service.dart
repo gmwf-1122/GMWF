@@ -1,6 +1,7 @@
 // lib/services/staff_patient_link_service.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:gmwf/services/local_storage_service.dart';
 import 'package:gmwf/pages/dispensary/doctor/patient_history.dart';
@@ -269,10 +270,10 @@ class StaffPatientLinkService {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E3A8A).withValues(alpha: 0.5) : const Color(0xFFEFF6FF),
+        color: isDark ? SoftPalette.blue700.withValues(alpha: 0.5) : SoftPalette.slate100,
         borderRadius: BorderRadius.circular(6),
         border: Border.all(
-          color: isDark ? const Color(0xFF60A5FA).withValues(alpha: 0.6) : const Color(0xFF3B82F6),
+          color: isDark ? SoftPalette.blue350.withValues(alpha: 0.6) : SoftPalette.blue500,
           width: 0.9,
         ),
       ),
@@ -282,7 +283,7 @@ class StaffPatientLinkService {
           Icon(
             Icons.badge_rounded,
             size: 11,
-            color: isDark ? const Color(0xFF93C5FD) : const Color(0xFF2563EB),
+            color: isDark ? SoftPalette.blue300 : SoftPalette.blue550,
           ),
           const SizedBox(width: 4),
           Text(
@@ -290,7 +291,7 @@ class StaffPatientLinkService {
             style: TextStyle(
               fontSize: 10.5,
               fontWeight: FontWeight.w700,
-              color: isDark ? const Color(0xFF93C5FD) : const Color(0xFF1D4ED8),
+              color: isDark ? SoftPalette.blue300 : SoftPalette.blue550,
               letterSpacing: 0.2,
             ),
           ),

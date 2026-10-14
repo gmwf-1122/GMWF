@@ -1,12 +1,13 @@
 // lib/pages/dispensary/dispensar/dispensar_screen.dart
 
 import 'dart:async';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:another_flushbar/flushbar.dart';
+import 'package:gmwf/design/components/flushbar_compat.dart';
 
 import 'package:gmwf/services/local_storage_service.dart';
 import 'package:gmwf/services/sync_service.dart';
@@ -24,19 +25,38 @@ import '../user_settings_dialog.dart';
 import 'inventory.dart';
 import 'patient_form.dart';
 import 'patient_list.dart';
+import 'dispense_queue.dart';
 import 'package:gmwf/design/design_system.dart';
+import '../widgets/connection_status_same.dart';
 
 class DispensarScreen extends StatefulWidget {
   final String branchId;
   final String? dispenserId;
   final String? dispenserName;
   final bool isEmbedded;
+
+  /// Hybrid "Pharmacy" tab: no UI, only the dispenser's realtime work (writing
+  /// prescriptions/entries/dispense events locally, keeping the open patient fresh,
+  /// "Prescription ready" popups). The host shows the dispense form itself.
+  /// Restock requests are left to the host (the Hybrid desk already listens).
+  final bool headless;
+
+  /// Headless only: the patient open in the host's dispense form.
+  final Map<String, dynamic>? selectedEntry;
+
+  /// Headless only: that patient was updated (new prescription) or dispensed
+  /// elsewhere (null).
+  final ValueChanged<Map<String, dynamic>?>? onSelectedEntryChanged;
+
   const DispensarScreen({
     super.key,
     required this.branchId,
     this.dispenserId,
     this.dispenserName,
     this.isEmbedded = false,
+    this.headless = false,
+    this.selectedEntry,
+    this.onSelectedEntryChanged,
   });
 
   @override
@@ -81,7 +101,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
     });
   }
 
-  static const Color _teal = Color(0xFF00695C);
+  static const Color _teal = SoftPalette.teal600;
 
   StreamSubscription? _restockSub;
   List<Map<String, dynamic>> _pendingRestockAlerts = [];
@@ -90,13 +110,20 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
   void initState() {
     super.initState();
     _dispenserName = _resolveInitialDispenserName();
+    if (widget.headless) _selectedQueueEntry = widget.selectedEntry;
     LocalStorageService.ensureDoctorBoxesOpen();
     if (!widget.isEmbedded) {
       SyncService().start(widget.branchId, moduleScope: 'dispensary');
     }
-    _listenConnectivity();
+    if (!widget.headless) {
+      _listenConnectivity();
+    }
     _startLiveInventoryListener();
-    _listenPendingRestockRequests();
+    // Embedded (Hybrid desk): the host owns restock requests and this screen hides
+    // its banner, so a second Firestore listener would only cost reads and CPU.
+    if (!widget.isEmbedded) {
+      _listenPendingRestockRequests();
+    }
 
     // [FIX-USERNAME] Load/refresh name and start ConnectionManager with it.
     _fetchDispenserName();
@@ -104,7 +131,10 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
 
     _connectionStatus = ConnectionManager().status;
     _connectionSub = ConnectionManager().statusStream.listen((status) {
-      if (mounted) setState(() => _connectionStatus = status);
+      // The status is only shown in the standalone app bar; skip repeats and embedded rebuilds.
+      final changed = !status.sameAs(_connectionStatus);
+      _connectionStatus = status;
+      if (mounted && changed && !widget.isEmbedded) setState(() {});
       // [BUG-12] Debounce: only trigger sync after 300 ms of stable connection
       if (status.isConnected && !widget.isEmbedded) {
         _syncDebounce?.cancel();
@@ -130,6 +160,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
   @override
   void didUpdateWidget(DispensarScreen oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.headless) _selectedQueueEntry = widget.selectedEntry;
     if (widget.dispenserName != null &&
         widget.dispenserName!.trim().isNotEmpty &&
         widget.dispenserName != oldWidget.dispenserName) {
@@ -357,12 +388,12 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
 
       // In the Hybrid Desk restock requests are shown only in Stock & Inventory.
       if (mounted && !widget.isEmbedded) {
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.hideCurrent();
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Row(
               children: [
-                const Icon(Icons.warning_amber_rounded, color: Colors.amberAccent, size: 28),
+                const Icon(Icons.warning_amber_rounded, color: SoftPalette.yellow200, size: 28),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -371,23 +402,23 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
                     children: [
                       Text(
                         'RESTOCK ALERT: $medName',
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: SoftPalette.gray50),
                       ),
                       Text(
                         '$doctor reported low stock (Current: $currentQty). Please restock soon!${notes.isNotEmpty ? ' ($notes)' : ''}',
-                        style: const TextStyle(fontSize: 12, color: Colors.white70),
+                        style: const TextStyle(fontSize: 12, color: SoftPalette.gray50A70),
                       ),
                     ],
                   ),
                 ),
               ],
             ),
-            backgroundColor: const Color(0xFFB91C1C),
+            backgroundColor: SoftPalette.red550,
             behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 8),
             action: SnackBarAction(
               label: 'OPEN INVENTORY',
-              textColor: Colors.amberAccent,
+              textColor: SoftPalette.yellow200,
               onPressed: () {
                 Navigator.push(
                   context,
@@ -489,13 +520,24 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
         if (data['campId'] != null) updated['campId'] = data['campId'];
         if (data['dispensaryTag'] != null) updated['dispensaryTag'] = data['dispensaryTag'];
 
+        // A replayed/stale prescription event must never bring a dispensed token back
+        // to "waiting" (the first key found may be an old duplicate copy).
+        final variantKeys = {'$normBranch-$cleanSerial', '$normBranch-$upperSerial', '$normBranch-$normSerial', cleanSerial, upperSerial, normSerial};
+        DispenseQueue.keepDispensedState(updated, variantKeys.map(box.get));
+
+        // Write the found key and the canonical key; only refresh other variants that
+        // already exist (creating new duplicate keys let stale copies resurface).
         final writeKey = actualKey ?? '$normBranch-$upperSerial';
         box.put(writeKey, updated);
-        box.put('$normBranch-$upperSerial', updated);
-        box.put('$normBranch-$normSerial', updated);
+        if ('$normBranch-$upperSerial' != writeKey) box.put('$normBranch-$upperSerial', updated);
+        final lowerKey = '$normBranch-$normSerial';
+        if (lowerKey != writeKey && lowerKey != '$normBranch-$upperSerial' && box.containsKey(lowerKey)) {
+          box.put(lowerKey, updated);
+        }
 
         if (cleanSerial.toUpperCase() == (_selectedQueueEntry?['serial'] ?? _selectedQueueEntry?['id'] ?? '').toString().toUpperCase()) {
           _selectedQueueEntry = updated;
+          if (widget.headless) widget.onSelectedEntryChanged?.call(updated);
         }
       }
       _scheduleRefresh();
@@ -507,14 +549,15 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
       final dt = rawTime != null ? DateTime.tryParse(rawTime.toString()) : null;
       final isRecent = dt == null || DateTime.now().difference(dt).inMinutes <= 3;
 
-      // Hybrid Desk: the Dispenser tab badge shows waiting patients instead of a popup each.
-      if (!widget.isEmbedded && !isReplay && isToday && !isAlreadyDispensed && isRecent && matchesActiveCamp) {
+      // Hybrid Desk: the Dispenser tab badge shows waiting patients instead of a popup each;
+      // the Pharmacy tab (headless engine) shows the popup like the standalone Dispenser.
+      if ((!widget.isEmbedded || widget.headless) && !isReplay && isToday && !isAlreadyDispensed && isRecent && matchesActiveCamp) {
         if (NotificationDeduper.shouldShow('dispenser_presc_${widget.branchId}_$serial', window: const Duration(minutes: 5))) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) {
               Flushbar(
                 message: '💊 Prescription ready for #$serial',
-                backgroundColor: Colors.blue.shade700,
+                backgroundColor: SoftPalette.blue500,
                 duration: const Duration(seconds: 5),
               ).show(context);
             }
@@ -541,7 +584,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
             if (mounted) {
               Flushbar(
                 message: '🎟️ New token: #$serial',
-                backgroundColor: Colors.green.shade700,
+                backgroundColor: SoftPalette.green500,
                 duration: const Duration(seconds: 4),
               ).show(context);
             }
@@ -580,6 +623,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
           _selectedQueueEntry = null;
           _showingForm = false;
         });
+        if (widget.headless) widget.onSelectedEntryChanged?.call(null);
       }
       _scheduleRefresh();
     }
@@ -622,7 +666,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
           if (mounted) {
             Flushbar(
               message: isOnline ? 'Internet restored — syncing...' : 'Offline (LAN still works)',
-              backgroundColor: isOnline ? Colors.green.shade700 : Colors.orange.shade700,
+              backgroundColor: isOnline ? SoftPalette.green500 : SoftPalette.orange350,
               duration: const Duration(seconds: 4),
             ).show(context);
           }
@@ -652,7 +696,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
         if (mounted) {
           Flushbar(
             message: _online ? 'Full sync completed (LAN & Cloud)' : 'LAN Sync completed (Outbox flushed)',
-            backgroundColor: Colors.green.shade700,
+            backgroundColor: SoftPalette.green500,
             duration: const Duration(seconds: 4),
           ).show(context);
         }
@@ -660,7 +704,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
     } catch (e) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) {
-          Flushbar(message: 'Sync failed: $e', backgroundColor: Colors.red.shade700, duration: const Duration(seconds: 5)).show(context);
+          Flushbar(message: 'Sync failed: $e', backgroundColor: SoftPalette.red500, duration: const Duration(seconds: 5)).show(context);
         }
       });
     } finally {
@@ -670,6 +714,8 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
 
   Future<void> _logout() async {
     if (_isLoggingOut) return;
+    final confirm = await showLogoutDialog(context);
+    if (confirm != true || !mounted) return;
     if (mounted) setState(() => _isLoggingOut = true);
     try { _connectionSub?.cancel(); _connSub?.cancel(); _realtimeSub?.cancel(); } catch (_) {}
     ConnectionManager().stop().catchError((_) {});
@@ -731,6 +777,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
   @override
   Widget build(BuildContext context) {
     super.build(context);
+    if (widget.headless) return const SizedBox.shrink();
     final isMobile = GBreakpoint.isMobile(context);
 
     return ValueListenableBuilder<Box>(
@@ -744,8 +791,8 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
               colors: isDark
-                  ? const [Color(0xFF0F172A), Color(0xFF1E293B)]
-                  : const [Color(0xFFE8F5E9), Color(0xFFF1F8E9)],
+                  ? const [SoftPalette.slate900, SoftPalette.slate800]
+                  : const [SoftPalette.green100m, SoftPalette.lime100m],
             ),
           ),
           child: Column(
@@ -762,7 +809,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
         if (widget.isEmbedded) return bodyContent;
 
         return Scaffold(
-          backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F8F5),
+          backgroundColor: isDark ? SoftPalette.slate900 : SoftPalette.emerald100t,
           appBar: _buildAppBar(isMobile),
           body: bodyContent,
         );
@@ -774,24 +821,24 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
     if (_showingForm && _selectedQueueEntry != null) {
       return Column(children: [
         Container(
-          color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+          color: _isDark ? SoftPalette.slate800 : SoftPalette.gray50,
           child: Row(children: [
             TextButton.icon(
               onPressed: () => setState(() { _showingForm = false; }),
-              icon: Icon(Icons.arrow_back, color: _isDark ? const Color(0xFF38BDF8) : _teal),
-              label: Text('Queue', style: TextStyle(color: _isDark ? const Color(0xFF38BDF8) : _teal)),
+              icon: Icon(Icons.arrow_back, color: _isDark ? SoftPalette.sky350 : _teal),
+              label: Text('Queue', style: TextStyle(color: _isDark ? SoftPalette.sky350 : _teal)),
             ),
             const Spacer(),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 12),
               child: Text(
                 '#${_selectedQueueEntry!['serial'] ?? ''}',
-                style: TextStyle(fontWeight: FontWeight.bold, color: _isDark ? Colors.white : _teal),
+                style: TextStyle(fontWeight: FontWeight.bold, color: _isDark ? SoftPalette.gray50 : _teal),
               ),
             ),
           ]),
         ),
-        Divider(height: 1, color: _isDark ? const Color(0xFF334155) : null),
+        Divider(height: 1, color: _isDark ? SoftPalette.slate700 : null),
         Expanded(
           child: PatientForm(
             key: ValueKey(_selectedQueueEntry!['serial'] ?? _selectedQueueEntry!['id']),
@@ -852,7 +899,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
             Expanded(
               child: Card(
                 elevation: 10,
-                color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+                color: _isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(28),
                 ),
@@ -866,8 +913,8 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
                               Icons.medication_liquid_rounded,
                               size: 80,
                               color: _isDark
-                                  ? const Color(0xFF475569)
-                                  : Colors.grey.shade300,
+                                  ? SoftPalette.slate600
+                                  : SoftPalette.gray150,
                             ),
                             const SizedBox(height: 16),
                             Text(
@@ -876,8 +923,8 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
                                 fontSize: 18,
                                 fontWeight: FontWeight.w600,
                                 color: _isDark
-                                    ? const Color(0xFF94A3B8)
-                                    : Colors.grey.shade600,
+                                    ? SoftPalette.slate350
+                                    : SoftPalette.gray500,
                               ),
                               textAlign: TextAlign.center,
                             ),
@@ -1025,12 +1072,12 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
       margin: const EdgeInsets.fromLTRB(16, 10, 16, 0),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF451A03) : const Color(0xFFFFFBEB),
+        color: isDark ? SoftPalette.orange800 : SoftPalette.yellow50m,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFF59E0B), width: 1.2),
+        border: Border.all(color: SoftPalette.amber300, width: 1.2),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: SoftPalette.gray900.withValues(alpha: 0.05),
             blurRadius: 4,
             offset: const Offset(0, 2),
           ),
@@ -1038,7 +1085,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
       ),
       child: Row(
         children: [
-          const Icon(Icons.warning_amber_rounded, color: Color(0xFFD97706), size: 24),
+          const Icon(Icons.warning_amber_rounded, color: SoftPalette.orange400, size: 24),
           const SizedBox(width: 10),
           Expanded(
             child: Column(
@@ -1052,14 +1099,14 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 13,
-                    color: isDark ? const Color(0xFFFDE68A) : const Color(0xFF92400E),
+                    color: isDark ? SoftPalette.yellow150 : SoftPalette.orange600,
                   ),
                 ),
                 Text(
                   '$doctor reported stock is running low. Please restock soon.',
                   style: TextStyle(
                     fontSize: 11.5,
-                    color: isDark ? const Color(0xFFD1D5DB) : const Color(0xFF78350F),
+                    color: isDark ? SoftPalette.slate200 : SoftPalette.orange700,
                   ),
                 ),
               ],
@@ -1079,8 +1126,8 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
               );
             },
             style: TextButton.styleFrom(
-              backgroundColor: const Color(0xFFD97706),
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.orange400,
+              foregroundColor: SoftPalette.gray50,
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
@@ -1089,7 +1136,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
           const SizedBox(width: 4),
           IconButton(
             icon: const Icon(Icons.close, size: 18),
-            color: isDark ? Colors.white70 : Colors.black54,
+            color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A54,
             tooltip: 'Dismiss alert',
             onPressed: () {
               final id = first['id']?.toString();

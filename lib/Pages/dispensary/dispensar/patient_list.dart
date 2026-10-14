@@ -1,19 +1,19 @@
 // lib/pages/dispensary/dispensar/patient_list.dart
 
 import 'dart:async';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:intl/intl.dart';
 
 import 'package:gmwf/services/local_storage_service.dart';
 import 'package:gmwf/services/camp_session_service.dart';
-import 'package:gmwf/services/serials_service.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
 import 'package:gmwf/realtime/connection_manager.dart';
 import 'package:gmwf/design/design_system.dart';
+import 'dispense_queue.dart';
 
 class PatientList extends StatefulWidget {
   final String branchId;
@@ -36,10 +36,10 @@ class PatientList extends StatefulWidget {
 }
 
 class _PatientListState extends State<PatientList> {
-  static const Color _teal   = Color(0xFF00695C);
-  static const Color _emerald = Color(0xFF00875A);
-  static const Color _indigo  = Color(0xFF4338CA);
-  static const Color _amber   = Color(0xFFD97706);
+  static const Color _teal   = SoftPalette.teal600;
+  static const Color _emerald = SoftPalette.emerald550;
+  static const Color _indigo  = SoftPalette.indigo600;
+  static const Color _amber   = SoftPalette.orange400;
 
   bool get _isDark {
     try {
@@ -64,66 +64,6 @@ class _PatientListState extends State<PatientList> {
   bool _sortNewestFirst = false;
   bool _isSyncingQueue = false;
   String _dispenseFilter = 'all'; // 'all', 'pending', 'dispensed'
-
-  bool _isEffectivelyToday(Map<String, dynamic> e, String currentTodayKey, String todayIso) {
-    final status = (e['status'] ?? '').toString().toLowerCase().trim();
-    final dispenseStatus = (e['dispenseStatus'] ?? '').toString().toLowerCase().trim();
-    final isTerminal = status == 'completed' ||
-        status == 'dispensed' ||
-        status == 'cancelled' ||
-        status == 'expired' ||
-        status == 'reversed' ||
-        status == 'deleted' ||
-        dispenseStatus == 'dispensed';
-
-    final serial = (e['serial'] ?? e['id'] ?? '').toString().trim();
-    final serialDk = CampSessionService.getDateKeyFromSerial(serial);
-    final dk = (e['dateKey'] ?? '').toString().trim();
-    final rawTime = e['timestamp'] ?? e['createdAt'] ?? e['date'] ?? e['dispensedAt'] ?? e['completedAt'] ?? e['time'];
-
-    // 1. Exact match with today's dateKey or ISO date string
-    bool isTodayExact = false;
-    if (dk == currentTodayKey || (serialDk.isNotEmpty && serialDk == currentTodayKey)) {
-      isTodayExact = true;
-    } else if (rawTime != null) {
-      final rawStr = rawTime.toString();
-      if (rawStr.startsWith(todayIso)) {
-        isTodayExact = true;
-      } else {
-        final dt = DateTime.tryParse(rawStr);
-        if (dt != null) {
-          final dtKey = CampSessionService.resolveShiftAndDateKey(dt, widget.branchId).dateKey;
-          if (dtKey == currentTodayKey) isTodayExact = true;
-        }
-      }
-    } else if (dk.isEmpty && serialDk.isEmpty) {
-      isTodayExact = true;
-    }
-
-    if (isTodayExact) return true;
-
-    // 2. Shift/Rollover Tolerance: If non-terminal, accept previous day / within 24h
-    if (!isTerminal) {
-      final prevDateKey = DateFormat('ddMMyy').format(DateTime.now().subtract(const Duration(days: 1)));
-      final prevTodayIso = DateFormat('yyyy-MM-dd').format(DateTime.now().subtract(const Duration(days: 1)));
-
-      if (dk == prevDateKey || (serialDk.isNotEmpty && serialDk == prevDateKey)) {
-        return true;
-      }
-      if (rawTime != null) {
-        final rawStr = rawTime.toString();
-        if (rawStr.startsWith(prevTodayIso)) {
-          return true;
-        }
-        final dt = DateTime.tryParse(rawStr);
-        if (dt != null && DateTime.now().difference(dt).inHours < 24) {
-          return true;
-        }
-      }
-    }
-
-    return false;
-  }
 
   StreamSubscription<Map<String, dynamic>>? _realtimeSub;
   StreamSubscription<BoxEvent>? _entriesBoxSub;
@@ -242,12 +182,32 @@ class _PatientListState extends State<PatientList> {
               if (data['campId'] != null) updated['campId'] = data['campId'];
               if (data['campName'] != null) updated['campName'] = data['campName'];
               if (data['session'] != null) updated['session'] = data['session'];
-              if (data['dispenseStatus'] != null) updated['dispenseStatus'] = data['dispenseStatus'];
+              // Never downgrade a dispensed token. Prescriptions are re-sent over LAN (doctor
+              // reconnects, server catch-ups) carrying the doctor's 'pending', which flipped
+              // dispensed patients back to "not dispensed" again and again.
+              final wasDispensed = (updated['dispenseStatus'] ?? '').toString().toLowerCase() == 'dispensed';
+              if (data['dispenseStatus'] != null && !wasDispensed) updated['dispenseStatus'] = data['dispenseStatus'];
+              // The first key found may be an old duplicate; any dispensed copy wins.
+              DispenseQueue.keepDispensedState(updated, [
+                '$normBranch-$serial', '$normBranch-$upperSerial', '$normBranch-$lowerSerial',
+                serial, upperSerial, lowerSerial,
+              ].map(eBox.get));
 
+              // One write, and none when nothing changed (each put wakes every
+              // entries-box listener; three puts per event tripled the rebuilds).
               final writeKey = existingKey ?? '$normBranch-$upperSerial';
-              await eBox.put(writeKey, updated);
-              await eBox.put('$normBranch-$upperSerial', updated);
-              await eBox.put('$normBranch-$serial', updated);
+              if (existing is! Map || !_sameEntry(existing, updated)) {
+                await eBox.put(writeKey, updated);
+              }
+              // Keep any other existing key variant of this serial in sync (never
+              // create new duplicates) so a stale copy can't win the de-duplication.
+              for (final k in ['$normBranch-$upperSerial', '$normBranch-$serial']) {
+                if (k == writeKey) continue;
+                final other = eBox.get(k);
+                if (other is Map && !_sameEntry(other, updated)) {
+                  await eBox.put(k, updated);
+                }
+              }
             } catch (_) {}
           }
         }
@@ -341,6 +301,19 @@ class _PatientListState extends State<PatientList> {
     super.dispose();
   }
 
+  /// Shallow equality of two entry maps (nested maps compared by their string form).
+  static bool _sameEntry(Map a, Map b) {
+    if (a.length != b.length) return false;
+    for (final k in a.keys) {
+      if (!b.containsKey(k)) return false;
+      final va = a[k], vb = b[k];
+      if (va == vb) continue;
+      if ((va is Map || va is List) && va.toString() == vb.toString()) continue;
+      return false;
+    }
+    return true;
+  }
+
   void _onLanReconnected() {
     if (!mounted) return;
     debugPrint('[PatientList] 🔄 LAN reconnected — requesting catch-up from server');
@@ -356,7 +329,7 @@ class _PatientListState extends State<PatientList> {
     if (_lastCloudPullTime != null &&
         DateTime.now().difference(_lastCloudPullTime!) < const Duration(seconds: 30)) {
       if (showToast && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           const SnackBar(
             content: Text('Please wait 30 seconds between cloud syncs.'),
             duration: Duration(seconds: 2),
@@ -370,7 +343,7 @@ class _PatientListState extends State<PatientList> {
     if (widget.branchId.isEmpty) return;
 
     if (showToast && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         const SnackBar(
           content: Text('Syncing today\'s patient list from cloud...'),
           duration: Duration(seconds: 2),
@@ -419,10 +392,10 @@ class _PatientListState extends State<PatientList> {
       if (hasChanges && mounted) {
         _debouncedRebuild();
         if (showToast) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          AppToast.showSnackBar(context, 
             const SnackBar(
               content: Text('Cloud sync complete.'),
-              backgroundColor: Color(0xFF00695C),
+              backgroundColor: SoftPalette.teal600,
               duration: Duration(seconds: 2),
             ),
           );
@@ -431,11 +404,6 @@ class _PatientListState extends State<PatientList> {
     } catch (e) {
       debugPrint('[PatientList] manualCloudPull error: $e');
     }
-  }
-
-  int _extractSerialNumber(Map<String, dynamic> p) {
-    final s = (p['serial'] ?? p['id'] ?? '').toString();
-    return parseSequenceFromSerial(s);
   }
 
   Map<String, dynamic> _getUserData() {
@@ -495,254 +463,15 @@ class _PatientListState extends State<PatientList> {
     return result;
   }
 
-  List<Map<String, dynamic>> _computeSortedQueue({String? filterOverride}) {
-    final activeShift = CampSessionService.getCurrentSession(null, widget.branchId);
-    final userData = _getUserData();
-    final scheduledCamps = CampSessionService.getMatchingScheduledCamps(userData);
-    final effectiveCamp = _hasMultiCamps
-        ? ((_selectedCampFilter != null && _selectedCampFilter!.isNotEmpty && _selectedCampFilter != 'all')
-            ? _selectedCampFilter
-            : (scheduledCamps.isNotEmpty
-                ? scheduledCamps.first
-                : CampSessionService.getActiveCamp(widget.branchId)))
-        : null;
-
-    final allList = List<Map<String, dynamic>>.from(LocalStorageService.getLocalEntries(widget.branchId));
-    final todayIso = DateFormat('yyyy-MM-dd').format(DateTime.now());
-
-    var all = allList.where((e) {
-      final serial = (e['serial'] ?? e['id'] ?? '').toString().trim();
-
-      if (!CampSessionService.isSerialMatchingBranch(serial, widget.branchId)) {
-        return false;
-      }
-
-      if (!_isEffectivelyToday(e, _todayKey, todayIso)) return false;
-
-      final presc = (e['prescription'] is Map && (e['prescription'] as Map).isNotEmpty)
-          ? Map<String, dynamic>.from(e['prescription'] as Map)
-          : (serial.isNotEmpty && Hive.isBoxOpen(LocalStorageService.prescriptionsBox)
-              ? (() {
-                  final pBox = Hive.box(LocalStorageService.prescriptionsBox);
-                  final raw = pBox.get(serial) ?? pBox.get(serial.toLowerCase()) ?? pBox.get(serial.toUpperCase());
-                  return raw is Map ? Map<String, dynamic>.from(raw) : null;
-                })()
-              : null);
-      final status = (e['status'] ?? '').toString().toLowerCase();
-      final isDisp = (e['dispenseStatus'] ?? '').toString().toLowerCase() == 'dispensed' || status == 'dispensed';
-      final hasPresc = presc != null && (
-        (presc['prescriptions'] is List && (presc['prescriptions'] as List).isNotEmpty) ||
-        (presc['medicines'] is List && (presc['medicines'] as List).isNotEmpty) ||
-        (presc['isVitalsOnly'] == true && presc['completedAt'] != null)
+  // Queue rules live in DispenseQueue (shared with the Hybrid Pharmacy tab).
+  List<Map<String, dynamic>> _computeSortedQueue({String? filterOverride}) => DispenseQueue.compute(
+        branchId: widget.branchId,
+        sessionFilter: _selectedSessionFilter,
+        campFilter: _selectedCampFilter,
+        searchQuery: _searchQuery,
+        newestFirst: _sortNewestFirst,
+        filter: filterOverride ?? _dispenseFilter,
       );
-
-      var name = (e['patientName'] ?? e['name'] ?? '').toString().trim().toLowerCase();
-      var cnic = (e['patientCnic'] ?? e['cnic'] ?? e['guardianCnic'] ?? '').toString().trim();
-
-      // Fall back to prescription details if entry name/cnic is missing
-      if ((name.isEmpty || name == 'unknown patient' || name == 'unknown') && presc != null) {
-        final prName = (presc['patientName'] ?? presc['name'])?.toString().trim();
-        if (prName != null && prName.isNotEmpty && prName.toLowerCase() != 'unknown' && prName.toLowerCase() != 'unknown patient') {
-          name = prName.toLowerCase();
-          e['patientName'] = prName;
-        }
-        final prCnic = (presc['patientCnic'] ?? presc['cnic'] ?? presc['guardianCnic'])?.toString().trim();
-        if (prCnic != null && prCnic.isNotEmpty) {
-          cnic = prCnic;
-          e['cnic'] = prCnic;
-        }
-      }
-
-      if ((name.isEmpty || name == 'unknown patient' || name == 'unknown') && cnic.isEmpty) {
-        if (serial.isNotEmpty && Hive.isBoxOpen(LocalStorageService.entriesBox)) {
-          final box = Hive.box(LocalStorageService.entriesBox);
-          final raw = box.get('${widget.branchId}-$serial') ?? box.get(serial) ?? box.get(serial.toUpperCase());
-          if (raw is Map) {
-            final rName = (raw['patientName'] ?? raw['name'] ?? '').toString().trim();
-            final rCnic = (raw['patientCnic'] ?? raw['cnic'] ?? raw['guardianCnic'] ?? '').toString().trim();
-            if (rName.isNotEmpty && rName.toLowerCase() != 'unknown' && rName.toLowerCase() != 'unknown patient') {
-              name = rName.toLowerCase();
-              e['patientName'] = rName;
-            }
-            if (rCnic.isNotEmpty) {
-              cnic = rCnic;
-              e['cnic'] = rCnic;
-            }
-          }
-        }
-        if ((name.isEmpty || name == 'unknown patient' || name == 'unknown') && cnic.isEmpty) {
-          // If token has prescription or completed status, NEVER hide it from dispenser!
-          if (hasPresc || status == 'completed' || status == 'dispensed' || isDisp) {
-            name = 'token #$serial';
-            e['patientName'] = 'Token #$serial';
-          } else {
-            return false;
-          }
-        }
-      }
-
-      // Camp matching in multi-camp branches
-      if (_hasMultiCamps && effectiveCamp != null && effectiveCamp.isNotEmpty && effectiveCamp != 'all') {
-        final matches = CampSessionService.matchesCamp(
-          selectedCamp: effectiveCamp,
-          dispensaryId: e['dispensaryId']?.toString(),
-          campId: e['campId']?.toString(),
-          dispensaryTag: e['dispensaryTag']?.toString(),
-          serial: serial,
-        );
-        if (!matches) return false;
-      }
-
-      return (status == 'completed' || status == 'dispensed' || status == 'prescribed' || isDisp || hasPresc);
-    }).toList();
-
-    // Deduplicate by normalized serial (stripping branch prefix so 'branch-001' and '001' never appear as two patients)
-    final Map<String, Map<String, dynamic>> uniqueBySerial = {};
-    for (final e in all) {
-      String s = (e['serial'] ?? e['id'] ?? '').toString().trim().toUpperCase();
-      final branchPrefix = '${widget.branchId.trim().toUpperCase()}-';
-      if (s.startsWith(branchPrefix)) {
-        s = s.substring(branchPrefix.length);
-      }
-      if (s.isEmpty) continue;
-      if (!uniqueBySerial.containsKey(s)) {
-        uniqueBySerial[s] = Map<String, dynamic>.from(e);
-      } else {
-        final target = uniqueBySerial[s]!;
-        e.forEach((k, v) {
-          if (v != null && v != '' && v != 'unknown') {
-            final old = target[k];
-            if (old == null || old == '' || old == 'unknown') {
-              target[k] = v;
-            }
-          }
-        });
-        final eDisp = (e['dispenseStatus'] ?? e['status'] ?? '').toString().toLowerCase();
-        final tDisp = (target['dispenseStatus'] ?? target['status'] ?? '').toString().toLowerCase();
-        if (eDisp == 'dispensed' || tDisp == 'dispensed') {
-          target['dispenseStatus'] = 'dispensed';
-          target['status'] = 'completed';
-        }
-      }
-    }
-    all = uniqueBySerial.values.toList();
-
-    final currentRealShift = CampSessionService.getCurrentSession(null, widget.branchId);
-    final targetShift = _selectedSessionFilter == 'auto' ? currentRealShift : _selectedSessionFilter;
-
-    // Strictly isolate to the active session
-    if (targetShift != 'all') {
-      all = all.where((entry) {
-        String resolved = (entry['session'] ?? entry['shift'] ?? entry['campSession'] ?? entry['slot'] ?? '').toString().toLowerCase().trim();
-
-        // Only infer session from createdAt if explicit session is missing/unknown
-        if (resolved.isEmpty || resolved == 'unknown' || resolved == 'all' || resolved == 'auto') {
-          final rawTime = entry['createdAt'] ?? entry['time'] ?? entry['timestamp'] ?? entry['date'];
-          if (rawTime != null) {
-            DateTime? dt;
-            if (rawTime is Timestamp) {
-              dt = rawTime.toDate().toLocal();
-            } else if (rawTime is DateTime) {
-              dt = rawTime.toLocal();
-            } else {
-              dt = DateTime.tryParse(rawTime.toString())?.toLocal();
-            }
-            if (dt != null) {
-              final hasNight = _allowedSessions.contains('night');
-              if (dt.hour >= 6 && dt.hour < 14) {
-                resolved = 'morning';
-              } else if (dt.hour >= 14 && (dt.hour < 22 || !hasNight)) {
-                resolved = 'evening';
-              } else if (hasNight && (dt.hour >= 22 || dt.hour < 6)) {
-                resolved = 'night';
-              } else {
-                resolved = CampSessionService.getCurrentSession(dt, widget.branchId);
-              }
-            }
-          }
-        }
-
-        if (_selectedSessionFilter == 'auto') {
-          return true;
-        }
-
-        if (resolved.isNotEmpty) {
-          return resolved == targetShift;
-        }
-        return true;
-      }).toList();
-    }
-
-    // Search query filter
-    if (_searchQuery.isNotEmpty) {
-      final q = _searchQuery.toLowerCase();
-      all = all.where((e) {
-        final s = (e['serial'] ?? e['id'] ?? '').toString().toLowerCase();
-        final n = (e['patientName'] ?? e['name'] ?? '').toString().toLowerCase();
-        final c = (e['patientCnic'] ?? e['cnic'] ?? e['guardianCnic'] ?? '').toString().toLowerCase();
-        final phone = (e['phone'] ?? '').toString().toLowerCase();
-        return s.contains(q) || n.contains(q) || c.contains(q) || phone.contains(q);
-      }).toList();
-    }
-
-    final pending   = <Map<String, dynamic>>[];
-    final onHold    = <Map<String, dynamic>>[];
-    final dispensed = <Map<String, dynamic>>[];
-
-    for (final e in all) {
-      String ds = (e['dispenseStatus'] ?? '').toString().toLowerCase();
-      final st = (e['status'] ?? '').toString().toLowerCase();
-
-      if (ds != 'dispensed' && st != 'dispensed') {
-        final s = (e['serial'] ?? e['id'] ?? '').toString().trim();
-        final dKey = (e['dateKey'] ?? _todayKey).toString().trim();
-        if (s.isNotEmpty && Hive.isBoxOpen(LocalStorageService.dispensaryBox)) {
-          final dBox = Hive.box(LocalStorageService.dispensaryBox);
-          final dispRec = dBox.get('${widget.branchId}_${dKey}_$s') ??
-              dBox.get('${widget.branchId}-$s') ??
-              dBox.get(s);
-          if (dispRec is Map) {
-            final recStatus = (dispRec['dispenseStatus'] ?? dispRec['status'] ?? '').toString().toLowerCase();
-            if (recStatus == 'dispensed' || recStatus == 'completed') {
-              ds = 'dispensed';
-              e['dispenseStatus'] = 'dispensed';
-            }
-          }
-        }
-      }
-
-      if (ds == 'dispensed' || st == 'dispensed') {
-        dispensed.add(e);
-      } else if (ds == 'on_hold' || ds == 'hold') {
-        onHold.add(e);
-      } else {
-        pending.add(e);
-      }
-    }
-
-    int compareTokens(Map<String, dynamic> a, Map<String, dynamic> b) {
-      final numA = _extractSerialNumber(a);
-      final numB = _extractSerialNumber(b);
-      if (numA != numB) {
-        return _sortNewestFirst ? numB.compareTo(numA) : numA.compareTo(numB);
-      }
-      final dtA = a['createdAt']?.toString() ?? '';
-      final dtB = b['createdAt']?.toString() ?? '';
-      return _sortNewestFirst ? dtB.compareTo(dtA) : dtA.compareTo(dtB);
-    }
-
-    pending.sort(compareTokens);
-    onHold.sort(compareTokens);
-    dispensed.sort(compareTokens);
-
-    final effFilter = filterOverride ?? _dispenseFilter;
-    if (effFilter == 'pending') {
-      return [...pending, ...onHold];
-    } else if (effFilter == 'dispensed') {
-      return dispensed;
-    }
-    return [...pending, ...onHold, ...dispensed];
-  }
 
   void _tryAutoSelectSmallestPending() {
     if (!mounted) return;
@@ -797,7 +526,7 @@ class _PatientListState extends State<PatientList> {
         return const Center(
           child: Padding(
             padding: EdgeInsets.all(24),
-            child: CircularProgressIndicator(color: Color(0xFF00875A)),
+            child: CircularProgressIndicator(color: SoftPalette.emerald550),
           ),
         );
       },
@@ -842,7 +571,7 @@ class _PatientListState extends State<PatientList> {
                       value: '$waitingCount',
                       icon: Icons.hourglass_top_rounded,
                       bgGradientStart: _amber,
-                      bgGradientEnd: const Color(0xFFB45309),
+                      bgGradientEnd: SoftPalette.orange500,
                       glowColor: _amber,
                       isSelected: _dispenseFilter == 'pending',
                       onTap: () => setState(() => _dispenseFilter = _dispenseFilter == 'pending' ? 'all' : 'pending'),
@@ -855,7 +584,7 @@ class _PatientListState extends State<PatientList> {
                       value: '$dispensedCount',
                       icon: Icons.check_circle_outline_rounded,
                       bgGradientStart: _emerald,
-                      bgGradientEnd: const Color(0xFF00704A),
+                      bgGradientEnd: SoftPalette.emerald600,
                       glowColor: _emerald,
                       isSelected: _dispenseFilter == 'dispensed',
                       onTap: () => setState(() => _dispenseFilter = _dispenseFilter == 'dispensed' ? 'all' : 'dispensed'),
@@ -868,7 +597,7 @@ class _PatientListState extends State<PatientList> {
                       value: '$totalCount',
                       icon: Icons.people_alt_rounded,
                       bgGradientStart: _teal,
-                      bgGradientEnd: const Color(0xFF0D5A50),
+                      bgGradientEnd: SoftPalette.teal600,
                       glowColor: _teal,
                       isSelected: _dispenseFilter == 'all',
                       onTap: () => setState(() => _dispenseFilter = 'all'),
@@ -882,7 +611,7 @@ class _PatientListState extends State<PatientList> {
             Expanded(
               child: Card(
                 elevation: 8,
-                color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+                color: _isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(24),
                 ),
@@ -900,10 +629,10 @@ class _PatientListState extends State<PatientList> {
                           angle: -0.16,
                           child: Opacity(
                             opacity: _isDark ? 0.22 : 0.32,
-                            child: Image.asset(
+                            child: GDecorativeImage.asset(
                               'assets/images/1.webp',
                               fit: BoxFit.contain,
-                              color: _isDark ? const Color(0xFFF6C358) : const Color(0xFFD4AF37),
+                              color: _isDark ? SoftPalette.amber200 : SoftPalette.yellow300,
                               colorBlendMode: BlendMode.srcIn,
                             ),
                           ),
@@ -922,7 +651,7 @@ class _PatientListState extends State<PatientList> {
                             children: [
                               Icon(
                                 Icons.list_alt_rounded,
-                                color: _isDark ? const Color(0xFF38BDF8) : _teal,
+                                color: _isDark ? SoftPalette.sky350 : _teal,
                                 size: 24,
                               ),
                               const SizedBox(width: 10),
@@ -931,7 +660,7 @@ class _PatientListState extends State<PatientList> {
                                 style: TextStyle(
                                   fontSize: 18,
                                   fontWeight: FontWeight.bold,
-                                  color: _isDark ? Colors.white : _teal,
+                                  color: _isDark ? SoftPalette.gray50 : _teal,
                                 ),
                               ),
                               const Spacer(),
@@ -940,7 +669,7 @@ class _PatientListState extends State<PatientList> {
                                   _sortNewestFirst
                                       ? Icons.arrow_downward_rounded
                                       : Icons.arrow_upward_rounded,
-                                  color: _isDark ? const Color(0xFF38BDF8) : _teal,
+                                  color: _isDark ? SoftPalette.sky350 : _teal,
                                   size: 20,
                                 ),
                                 onPressed: () => setState(() => _sortNewestFirst = !_sortNewestFirst),
@@ -952,13 +681,13 @@ class _PatientListState extends State<PatientList> {
                                         width: 18,
                                         height: 18,
                                         child: CircularProgressIndicator(
-                                          color: _isDark ? const Color(0xFF38BDF8) : _teal,
+                                          color: _isDark ? SoftPalette.sky350 : _teal,
                                           strokeWidth: 2,
                                         ),
                                       )
                                     : Icon(
                                         Icons.refresh_rounded,
-                                        color: _isDark ? const Color(0xFF38BDF8) : _teal,
+                                        color: _isDark ? SoftPalette.sky350 : _teal,
                                         size: 22,
                                       ),
                                 onPressed: _isSyncingQueue
@@ -1021,7 +750,7 @@ class _PatientListState extends State<PatientList> {
                               Text(
                                 '$totalCount patients',
                                 style: TextStyle(
-                                  color: _isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700,
+                                  color: _isDark ? SoftPalette.slate350 : SoftPalette.gray550,
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -1040,14 +769,14 @@ class _PatientListState extends State<PatientList> {
                                         Icon(
                                           Icons.assignment_turned_in_outlined,
                                           size: 56,
-                                          color: _isDark ? const Color(0xFF475569) : Colors.grey.shade400,
+                                          color: _isDark ? SoftPalette.slate600 : SoftPalette.gray300,
                                         ),
                                         const SizedBox(height: 12),
                                         Text(
                                           "No completed prescriptions in queue",
                                           style: TextStyle(
                                             fontSize: 14,
-                                            color: _isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
+                                            color: _isDark ? SoftPalette.slate350 : SoftPalette.gray500,
                                           ),
                                           textAlign: TextAlign.center,
                                         ),
@@ -1059,7 +788,7 @@ class _PatientListState extends State<PatientList> {
                                     itemCount: patients.length,
                                     separatorBuilder: (_, _) => Divider(
                                       height: 1,
-                                      color: _isDark ? const Color(0xFF334155) : Colors.grey.shade200,
+                                      color: _isDark ? SoftPalette.slate700 : SoftPalette.gray100,
                                     ),
                                     itemBuilder: (context, index) {
                                       final patient = patients[index];
@@ -1101,28 +830,28 @@ class _PatientListState extends State<PatientList> {
     String displayType;
     if (_isKarachi) {
       if (queueTypeRaw == 'gmwf') {
-        badgeColor = const Color(0xFFD97706);
+        badgeColor = SoftPalette.orange400;
         displayType = 'GMWF';
       } else {
-        badgeColor = const Color(0xFF00875A);
+        badgeColor = SoftPalette.emerald550;
         displayType = 'PKR 20';
       }
     } else {
       switch (queueTypeRaw) {
         case 'zakat':
-          badgeColor = const Color(0xFF00875A);
+          badgeColor = SoftPalette.emerald550;
           displayType = 'Zakat';
           break;
         case 'non-zakat':
-          badgeColor = const Color(0xFF4338CA);
+          badgeColor = SoftPalette.indigo600;
           displayType = 'Non-Zakat';
           break;
         case 'gmwf':
-          badgeColor = const Color(0xFFD97706);
+          badgeColor = SoftPalette.orange400;
           displayType = 'GMWF';
           break;
         default:
-          badgeColor = const Color(0xFF00875A);
+          badgeColor = SoftPalette.emerald550;
           displayType = 'Zakat';
       }
     }
@@ -1135,18 +864,18 @@ class _PatientListState extends State<PatientList> {
 
     if (isDispensed) {
       statusLabel = 'Dispensed';
-      statusBg = _isDark ? const Color(0xFF14532D) : Colors.green.shade50;
-      statusText = _isDark ? const Color(0xFF86EFAC) : Colors.green.shade800;
+      statusBg = _isDark ? SoftPalette.green700 : SoftPalette.green100m;
+      statusText = _isDark ? SoftPalette.emerald200 : SoftPalette.green550;
       statusIcon = Icons.check_circle_outline_rounded;
     } else if (isOnHold) {
       statusLabel = 'On Hold';
-      statusBg = _isDark ? const Color(0xFF451A03) : Colors.amber.shade50;
-      statusText = _isDark ? const Color(0xFFFCD34D) : Colors.amber.shade900;
+      statusBg = _isDark ? SoftPalette.orange800 : SoftPalette.yellow50;
+      statusText = _isDark ? SoftPalette.yellow200 : SoftPalette.orange350;
       statusIcon = Icons.pause_circle_outline_rounded;
     } else {
       statusLabel = 'Waiting to Dispense';
-      statusBg = _isDark ? const Color(0xFF1E3A5F) : Colors.blue.shade50;
-      statusText = _isDark ? const Color(0xFF93C5FD) : Colors.blue.shade800;
+      statusBg = _isDark ? SoftPalette.blue750 : SoftPalette.slate100;
+      statusText = _isDark ? SoftPalette.blue300 : SoftPalette.blue550;
       statusIcon = Icons.medication_outlined;
     }
 
@@ -1169,6 +898,19 @@ class _PatientListState extends State<PatientList> {
       color: Colors.transparent,
       child: InkWell(
         onTap: () {
+          // STRICT ENFORCEMENT: Only the smallest pending token can be selected.
+          final activePending = _cachedAllPatients
+              .where((p) {
+                final ds = (p['dispenseStatus'] ?? '').toString().toLowerCase();
+                return ds != 'dispensed' && ds != 'on_hold' && ds != 'hold';
+              })
+              .toList();
+          final smallestSerial = activePending.isNotEmpty
+              ? (activePending.first['serial'] ?? activePending.first['id'] ?? '').toString().trim().toUpperCase()
+              : null;
+          if (smallestSerial != null && serial.trim().toUpperCase() != smallestSerial) {
+            return;
+          }
           widget.onPatientSelected(e);
         },
         borderRadius: BorderRadius.circular(10),
@@ -1180,13 +922,13 @@ class _PatientListState extends State<PatientList> {
           ),
           decoration: BoxDecoration(
             color: isSelected
-                ? (_isDark ? const Color(0xFF134E4A).withValues(alpha: 0.5) : const Color(0xFFE6FFFA))
-                : (_isDark ? const Color(0xFF1E293B) : Colors.white),
+                ? (_isDark ? SoftPalette.teal700.withValues(alpha: 0.5) : SoftPalette.teal50)
+                : (_isDark ? SoftPalette.slate800 : SoftPalette.gray50),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
               color: isSelected
-                  ? (_isDark ? const Color(0xFF2DD4BF) : _teal)
-                  : (_isDark ? const Color(0xFF334155) : Colors.grey.shade200),
+                  ? (_isDark ? SoftPalette.teal300 : _teal)
+                  : (_isDark ? SoftPalette.slate700 : SoftPalette.gray100),
               width: isSelected ? 1.8 : 1.0,
             ),
           ),
@@ -1196,13 +938,13 @@ class _PatientListState extends State<PatientList> {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: isDispensed ? Colors.grey.shade500 : badgeColor,
+                  color: isDispensed ? SoftPalette.gray350 : badgeColor,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
                   '#$seqNumber',
                   style: const TextStyle(
-                    color: Colors.white,
+                    color: SoftPalette.gray50,
                     fontWeight: FontWeight.bold,
                     fontSize: 13,
                   ),
@@ -1225,8 +967,8 @@ class _PatientListState extends State<PatientList> {
                               fontWeight: FontWeight.bold,
                               fontSize: isMobile ? 13 : 14,
                               color: isDispensed
-                                  ? Colors.grey.shade500
-                                  : (_isDark ? Colors.white : Colors.black87),
+                                  ? SoftPalette.gray350
+                                  : (_isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -1236,13 +978,13 @@ class _PatientListState extends State<PatientList> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                             decoration: BoxDecoration(
-                              color: Colors.deepOrange,
+                              color: SoftPalette.red400,
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Text(
                               '${days}d',
                               style: const TextStyle(
-                                color: Colors.white,
+                                color: SoftPalette.gray50,
                                 fontSize: 10,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -1258,7 +1000,7 @@ class _PatientListState extends State<PatientList> {
                           GestureDetector(
                             onTap: () {
                               Clipboard.setData(ClipboardData(text: cnic));
-                              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                              AppToast.showSnackBar(context, 
                                 SnackBar(
                                   content: Text('Copied CNIC: $cnic'),
                                   duration: const Duration(seconds: 1),
@@ -1272,14 +1014,14 @@ class _PatientListState extends State<PatientList> {
                                   cnic,
                                   style: TextStyle(
                                     fontSize: 11,
-                                    color: _isDark ? const Color(0xFF38BDF8) : _teal,
+                                    color: _isDark ? SoftPalette.sky350 : _teal,
                                     decoration: TextDecoration.underline,
                                   ),
                                 ),
                                 const SizedBox(width: 3),
                                 Icon(Icons.copy_rounded,
                                     size: 11,
-                                    color: _isDark ? const Color(0xFF38BDF8) : _teal),
+                                    color: _isDark ? SoftPalette.sky350 : _teal),
                               ],
                             ),
                           ),
@@ -1290,14 +1032,14 @@ class _PatientListState extends State<PatientList> {
                             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                             decoration: BoxDecoration(
                               color: campTag.contains('HAJI')
-                                  ? const Color(0xFF6366F1)
-                                  : const Color(0xFF0D9488),
+                                  ? SoftPalette.indigo500
+                                  : SoftPalette.teal500,
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
                               '📍 $campTag',
                               style: const TextStyle(
-                                color: Colors.white,
+                                color: SoftPalette.gray50,
                                 fontSize: 9,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -1395,7 +1137,7 @@ class _PatientListState extends State<PatientList> {
             ),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: isSelected ? Colors.white : Colors.white.withValues(alpha: 0.25),
+              color: isSelected ? SoftPalette.gray50 : SoftPalette.gray50.withValues(alpha: 0.25),
               width: isSelected ? 2.2 : 1.0,
             ),
             boxShadow: [
@@ -1411,7 +1153,7 @@ class _PatientListState extends State<PatientList> {
             children: [
               Row(
                 children: [
-                  Icon(icon, size: 14, color: Colors.white.withValues(alpha: 0.90)),
+                  Icon(icon, size: 14, color: SoftPalette.gray50.withValues(alpha: 0.90)),
                   const SizedBox(width: 5),
                   Expanded(
                     child: Text(
@@ -1419,7 +1161,7 @@ class _PatientListState extends State<PatientList> {
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-                        color: Colors.white.withValues(alpha: 0.95),
+                        color: SoftPalette.gray50.withValues(alpha: 0.95),
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -1432,7 +1174,7 @@ class _PatientListState extends State<PatientList> {
                 style: const TextStyle(
                   fontSize: 19,
                   fontWeight: FontWeight.bold,
-                  color: Colors.white,
+                  color: SoftPalette.gray50,
                 ),
               ),
             ],
@@ -1452,10 +1194,10 @@ class _PatientListState extends State<PatientList> {
       height: 30,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF334155) : Colors.grey.shade100,
+        color: isDark ? SoftPalette.slate700 : SoftPalette.gray100,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: isDark ? const Color(0xFF475569) : Colors.grey.shade300,
+          color: isDark ? SoftPalette.slate600 : SoftPalette.gray150,
         ),
       ),
       child: DropdownButtonHideUnderline(
@@ -1463,12 +1205,12 @@ class _PatientListState extends State<PatientList> {
           value: items.any((i) => i['id'] == value) ? value : items.first['id'],
           isDense: true,
           icon: Icon(Icons.arrow_drop_down,
-              size: 16, color: isDark ? const Color(0xFF38BDF8) : _teal),
-          dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+              size: 16, color: isDark ? SoftPalette.sky350 : _teal),
+          dropdownColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w600,
-            color: isDark ? Colors.white : Colors.black87,
+            color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87,
           ),
           items: items.map((i) {
             return DropdownMenuItem<String>(
@@ -1478,7 +1220,7 @@ class _PatientListState extends State<PatientList> {
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white : Colors.black87,
+                  color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87,
                 ),
               ),
             );
@@ -1497,10 +1239,10 @@ class _PatientListState extends State<PatientList> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: isSelected ? _teal : (isDark ? const Color(0xFF1E293B) : Colors.white),
+          color: isSelected ? _teal : (isDark ? SoftPalette.slate800 : SoftPalette.gray50),
           borderRadius: BorderRadius.circular(10),
           border: Border.all(
-            color: isSelected ? _teal : (isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
+            color: isSelected ? _teal : (isDark ? SoftPalette.slate700 : SoftPalette.slate200),
             width: 1,
           ),
           boxShadow: isSelected
@@ -1512,7 +1254,7 @@ class _PatientListState extends State<PatientList> {
           style: TextStyle(
             fontSize: 11,
             fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-            color: isSelected ? Colors.white : (isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155)),
+            color: isSelected ? SoftPalette.gray50 : (isDark ? SoftPalette.slate200 : SoftPalette.slate700),
           ),
         ),
       ),

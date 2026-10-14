@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
@@ -67,10 +68,48 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
     return 'dispensary';
   }
 
+  static String _normalizeDateKey(String raw, [String? createdAt]) {
+    final s = raw.trim();
+    if (s.length == 6 && RegExp(r'^\d{6}$').hasMatch(s)) {
+      final d = int.tryParse(s.substring(0, 2)) ?? 1;
+      final m = int.tryParse(s.substring(2, 4)) ?? 1;
+      final y = 2000 + (int.tryParse(s.substring(4, 6)) ?? 26);
+      return '${y.toString().padLeft(4, '0')}-${m.toString().padLeft(2, '0')}-${d.toString().padLeft(2, '0')}';
+    }
+    if (s.length >= 10 && RegExp(r'^\d{4}-\d{2}-\d{2}').hasMatch(s)) {
+      return s.substring(0, 10);
+    }
+    if (createdAt != null && createdAt.isNotEmpty) {
+      final dt = DateTime.tryParse(createdAt);
+      if (dt != null) {
+        return DateFormat('yyyy-MM-dd').format(dt);
+      }
+    }
+    return s.isNotEmpty ? s : 'unknown';
+  }
+
+  static String _formatDisplayDate(String normDate) {
+    try {
+      final dt = DateTime.tryParse(normDate);
+      if (dt != null) {
+        final now = DateTime.now();
+        if (dt.year == now.year && dt.month == now.month && dt.day == now.day) {
+          return 'Today (${DateFormat('d MMM').format(dt)})';
+        }
+        final yesterday = now.subtract(const Duration(days: 1));
+        if (dt.year == yesterday.year && dt.month == yesterday.month && dt.day == yesterday.day) {
+          return 'Yesterday (${DateFormat('d MMM').format(dt)})';
+        }
+        return DateFormat('d MMM yyyy').format(dt);
+      }
+    } catch (_) {}
+    return normDate;
+  }
+
   void _showEntryDetails(BuildContext context, Map<String, dynamic> entry) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF1F2937),
+      backgroundColor: SoftPalette.slate800,
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -94,12 +133,12 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                   Expanded(
                     child: Text(
                       '#$serial - $name',
-                      style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                      style: const TextStyle(color: SoftPalette.gray50, fontSize: 18, fontWeight: FontWeight.bold),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   IconButton(
-                    icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                    icon: const Icon(Icons.close_rounded, color: SoftPalette.gray50A70),
                     onPressed: () => Navigator.pop(ctx),
                   ),
                 ],
@@ -109,34 +148,34 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                 children: [
                   Chip(
                     avatar: Text(_categories.firstWhere((c) => c['id'] == category)['icon'] ?? '📁'),
-                    label: Text(category.toUpperCase(), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
-                    backgroundColor: Colors.blueAccent.withValues(alpha: 0.2),
-                    side: BorderSide(color: Colors.blueAccent.withValues(alpha: 0.4)),
+                    label: Text(category.toUpperCase(), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: SoftPalette.gray50)),
+                    backgroundColor: SoftPalette.blue400.withValues(alpha: 0.2),
+                    side: BorderSide(color: SoftPalette.blue400.withValues(alpha: 0.4)),
                   ),
                   const SizedBox(width: 8),
                   Chip(
-                    label: Text(status.toUpperCase(), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.white)),
-                    backgroundColor: status == 'completed' ? Colors.green.withValues(alpha: 0.2) : Colors.orange.withValues(alpha: 0.2),
-                    side: BorderSide(color: status == 'completed' ? Colors.green : Colors.orange),
+                    label: Text(status.toUpperCase(), style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: SoftPalette.gray50)),
+                    backgroundColor: status == 'completed' ? SoftPalette.green400.withValues(alpha: 0.2) : SoftPalette.amber300.withValues(alpha: 0.2),
+                    side: BorderSide(color: status == 'completed' ? SoftPalette.green400 : SoftPalette.amber300),
                   ),
                 ],
               ),
-              const Divider(color: Colors.white10, height: 24),
-              const Text('RAW RECORD PAYLOAD:', style: TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold)),
+              const Divider(color: SoftPalette.gray50A10, height: 24),
+              const Text('RAW RECORD PAYLOAD:', style: TextStyle(color: SoftPalette.gray50A54, fontSize: 12, fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
               Expanded(
                 child: Container(
                   width: double.infinity,
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF0B0F19),
+                    color: SoftPalette.slate900,
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: Colors.white10),
+                    border: Border.all(color: SoftPalette.gray50A10),
                   ),
                   child: SingleChildScrollView(
                     child: SelectableText(
                       prettyJson,
-                      style: const TextStyle(color: Color(0xFF10B981), fontFamily: 'monospace', fontSize: 13, height: 1.4),
+                      style: const TextStyle(color: SoftPalette.emerald350, fontFamily: 'monospace', fontSize: 13, height: 1.4),
                     ),
                   ),
                 ),
@@ -153,24 +192,24 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF070D18) : const Color(0xFFF1F5F9),
+      backgroundColor: isDark ? SoftPalette.slate900 : SoftPalette.slate100,
       appBar: AppBar(
-        backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
+        backgroundColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
         elevation: 0,
         scrolledUnderElevation: 0,
         title: Text(
           'Server Data Archive',
           style: TextStyle(
             fontWeight: FontWeight.bold,
-            color: isDark ? Colors.white : const Color(0xFF0F172A),
+            color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
           ),
         ),
-        iconTheme: IconThemeData(color: isDark ? Colors.white : const Color(0xFF0F172A)),
+        iconTheme: IconThemeData(color: isDark ? SoftPalette.gray50 : SoftPalette.slate900),
         actions: [
           IconButton(
             icon: Icon(
               _sortNewestFirst ? Icons.sort_rounded : Icons.history_rounded,
-              color: isDark ? Colors.white70 : const Color(0xFF475569),
+              color: isDark ? SoftPalette.gray50A70 : SoftPalette.slate600,
             ),
             tooltip: _sortNewestFirst ? 'Sorting: Newest First' : 'Sorting: Oldest First',
             onPressed: () {
@@ -197,10 +236,12 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
             } catch (_) {}
           }
 
-          // Group by dateKey
+          // Group by normalized dateKey
           final Map<String, List<Map<String, dynamic>>> grouped = {};
           for (final entry in allEntries) {
-            final dk = entry['dateKey']?.toString() ?? 'unknown';
+            final rawDk = entry['dateKey']?.toString() ?? '';
+            final cAt = entry['createdAt']?.toString() ?? entry['timestamp']?.toString();
+            final dk = _normalizeDateKey(rawDk, cAt);
             grouped.putIfAbsent(dk, () => []).add(entry);
           }
 
@@ -210,7 +251,7 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
             return Center(
               child: Text(
                 'No data saved on this server yet.',
-                style: TextStyle(color: isDark ? Colors.white54 : const Color(0xFF94A3B8), fontSize: 16),
+                style: TextStyle(color: isDark ? SoftPalette.gray50A54 : SoftPalette.slate350, fontSize: 16),
               ),
             );
           }
@@ -250,10 +291,10 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
               // Top Bar Filters: Category Chips + Search Bar
               Container(
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                  color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                   border: Border(
                     bottom: BorderSide(
-                      color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                      color: isDark ? SoftPalette.slate800 : SoftPalette.slate150,
                       width: 1,
                     ),
                   ),
@@ -264,14 +305,14 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                     // Search Bar
                     TextField(
                       controller: _searchController,
-                      style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A), fontSize: 14),
+                      style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.slate900, fontSize: 14),
                       decoration: InputDecoration(
                         hintText: 'Search by serial #, patient, staff, or category...',
-                        hintStyle: TextStyle(color: isDark ? Colors.white38 : const Color(0xFF94A3B8), fontSize: 13),
-                        prefixIcon: Icon(Icons.search_rounded, color: isDark ? Colors.white54 : const Color(0xFF64748B), size: 20),
+                        hintStyle: TextStyle(color: isDark ? SoftPalette.gray50A38 : SoftPalette.slate350, fontSize: 13),
+                        prefixIcon: Icon(Icons.search_rounded, color: isDark ? SoftPalette.gray50A54 : SoftPalette.slate550, size: 20),
                         suffixIcon: _searchQuery.isNotEmpty
                             ? IconButton(
-                                icon: Icon(Icons.clear_rounded, color: isDark ? Colors.white54 : const Color(0xFF64748B), size: 18),
+                                icon: Icon(Icons.clear_rounded, color: isDark ? SoftPalette.gray50A54 : SoftPalette.slate550, size: 18),
                                 onPressed: () {
                                   _searchController.clear();
                                   setState(() => _searchQuery = '');
@@ -279,15 +320,15 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                               )
                             : null,
                         filled: true,
-                        fillColor: isDark ? const Color(0xFF070D18) : const Color(0xFFF8FAFC),
+                        fillColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                         border: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0)),
+                          borderSide: BorderSide(color: isDark ? SoftPalette.slate800 : SoftPalette.slate150),
                         ),
                         enabledBorder: OutlineInputBorder(
                           borderRadius: BorderRadius.circular(12),
-                          borderSide: BorderSide(color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0)),
+                          borderSide: BorderSide(color: isDark ? SoftPalette.slate800 : SoftPalette.slate150),
                         ),
                       ),
                       onChanged: (val) {
@@ -311,19 +352,19 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                               cat['label']!,
                               style: TextStyle(
                                 color: isSelected
-                                    ? (isDark ? Colors.white : const Color(0xFF065F46))
-                                    : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569)),
+                                    ? (isDark ? SoftPalette.gray50 : SoftPalette.emerald600)
+                                    : (isDark ? SoftPalette.slate350 : SoftPalette.slate600),
                                 fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                                 fontSize: 12,
                               ),
                             ),
                             selected: isSelected,
-                            selectedColor: isDark ? const Color(0xFF0F766E).withOpacity(0.35) : const Color(0xFFECFDF5),
-                            backgroundColor: isDark ? const Color(0xFF070D18) : const Color(0xFFF1F5F9),
+                            selectedColor: isDark ? SoftPalette.teal550.withOpacity(0.35) : SoftPalette.emerald50,
+                            backgroundColor: isDark ? SoftPalette.slate900 : SoftPalette.slate100,
                             side: BorderSide(
                               color: isSelected
-                                  ? const Color(0xFF10B981)
-                                  : (isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
+                                  ? SoftPalette.emerald350
+                                  : (isDark ? SoftPalette.slate700 : SoftPalette.slate200),
                             ),
                             onSelected: (_) {
                               setState(() => _selectedCategory = cat['id']!);
@@ -343,7 +384,7 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                     // Sidebar for Dates
                     Container(
                       width: 230,
-                      color: isDark ? const Color(0xFF0A101D) : Colors.white,
+                      color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                       child: ListView.builder(
                         itemCount: sortedDates.length,
                         itemBuilder: (context, index) {
@@ -354,11 +395,11 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                           return ListTile(
                             dense: true,
                             title: Text(
-                              date,
+                              _formatDisplayDate(date),
                               style: TextStyle(
                                 color: isSelected
-                                    ? (isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7))
-                                    : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF334155)),
+                                    ? (isDark ? SoftPalette.sky350 : SoftPalette.sky500)
+                                    : (isDark ? SoftPalette.slate350 : SoftPalette.slate700),
                                 fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                               ),
                             ),
@@ -366,26 +407,26 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
                                 color: isSelected
-                                    ? const Color(0xFF0284C7).withOpacity(0.15)
-                                    : (isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
+                                    ? SoftPalette.sky500.withOpacity(0.15)
+                                    : (isDark ? SoftPalette.slate800 : SoftPalette.slate100),
                                 borderRadius: BorderRadius.circular(12),
                                 border: Border.all(
-                                  color: isSelected ? const Color(0xFF0284C7).withOpacity(0.4) : Colors.transparent,
+                                  color: isSelected ? SoftPalette.sky500.withOpacity(0.4) : Colors.transparent,
                                 ),
                               ),
                               child: Text(
                                 '$count',
                                 style: TextStyle(
                                   color: isSelected
-                                      ? (isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7))
-                                      : (isDark ? const Color(0xFF64748B) : const Color(0xFF64748B)),
+                                      ? (isDark ? SoftPalette.sky350 : SoftPalette.sky500)
+                                      : (isDark ? SoftPalette.slate550 : SoftPalette.slate550),
                                   fontSize: 11,
                                   fontWeight: FontWeight.bold,
                                 ),
                               ),
                             ),
                             selected: isSelected,
-                            selectedTileColor: isDark ? const Color(0xFF0284C7).withOpacity(0.1) : const Color(0xFFF0F9FF),
+                            selectedTileColor: isDark ? SoftPalette.sky500.withOpacity(0.1) : SoftPalette.slate50,
                             onTap: () {
                               setState(() {
                                 _selectedDateKey = date;
@@ -395,7 +436,7 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                         },
                       ),
                     ),
-                    VerticalDivider(width: 1, color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0)),
+                    VerticalDivider(width: 1, color: isDark ? SoftPalette.slate800 : SoftPalette.slate150),
 
                     // Content Area for Selected Date & Filters
                     Expanded(
@@ -404,13 +445,13 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                               child: Column(
                                 mainAxisAlignment: MainAxisAlignment.center,
                                 children: [
-                                  Icon(Icons.folder_open_rounded, size: 48, color: isDark ? Colors.white24 : const Color(0xFFCBD5E1)),
+                                  Icon(Icons.folder_open_rounded, size: 48, color: isDark ? SoftPalette.gray50A24 : SoftPalette.slate200),
                                   const SizedBox(height: 12),
                                   Text(
                                     _searchQuery.isNotEmpty
                                         ? 'No records matching "$_searchQuery"'
                                         : 'No records found for this category/date.',
-                                    style: TextStyle(color: isDark ? Colors.white54 : const Color(0xFF64748B), fontSize: 14),
+                                    style: TextStyle(color: isDark ? SoftPalette.gray50A54 : SoftPalette.slate550, fontSize: 14),
                                   ),
                                 ],
                               ),
@@ -444,8 +485,8 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                                   } catch (_) {}
                                 }
 
-                                Color statusColor = const Color(0xFFF59E0B);
-                                if (status == 'completed' || status == 'dispensed') statusColor = const Color(0xFF10B981);
+                                Color statusColor = SoftPalette.amber300;
+                                if (status == 'completed' || status == 'dispensed') statusColor = SoftPalette.emerald350;
 
                                 final catIcon = _categories.firstWhere((c) => c['id'] == category, orElse: () => _categories.first)['icon']!;
 
@@ -453,14 +494,14 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                                   onTap: () => _showEntryDetails(context, entry),
                                   borderRadius: BorderRadius.circular(14),
                                   child: Card(
-                                    color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                                    color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                                     margin: const EdgeInsets.only(bottom: 10),
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(14),
-                                      side: BorderSide(color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0)),
+                                      side: BorderSide(color: isDark ? SoftPalette.slate800 : SoftPalette.slate150),
                                     ),
                                     elevation: isDark ? 0 : 1,
-                                    shadowColor: Colors.black.withOpacity(0.04),
+                                    shadowColor: SoftPalette.gray900.withOpacity(0.04),
                                     child: Padding(
                                       padding: const EdgeInsets.all(16),
                                       child: Column(
@@ -473,13 +514,13 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                                               Container(
                                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                                 decoration: BoxDecoration(
-                                                  color: const Color(0xFF0284C7).withOpacity(0.12),
+                                                  color: SoftPalette.sky500.withOpacity(0.12),
                                                   borderRadius: BorderRadius.circular(6),
-                                                  border: Border.all(color: const Color(0xFF0284C7).withOpacity(0.35)),
+                                                  border: Border.all(color: SoftPalette.sky500.withOpacity(0.35)),
                                                 ),
                                                 child: Text(
                                                   '#$serial',
-                                                  style: const TextStyle(color: Color(0xFF0284C7), fontWeight: FontWeight.bold, fontSize: 12),
+                                                  style: const TextStyle(color: SoftPalette.sky500, fontWeight: FontWeight.bold, fontSize: 12),
                                                 ),
                                               ),
                                               const SizedBox(width: 12),
@@ -487,7 +528,7 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                                                 child: Text(
                                                   name,
                                                   style: TextStyle(
-                                                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                                    color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                                                     fontSize: 15,
                                                     fontWeight: FontWeight.w600,
                                                   ),
@@ -509,23 +550,23 @@ class _ServerDataViewerState extends State<ServerDataViewer> {
                                             ],
                                           ),
                                           const SizedBox(height: 12),
-                                          const Divider(color: Colors.white10, height: 1),
+                                          const Divider(color: SoftPalette.gray50A10, height: 1),
                                           const SizedBox(height: 10),
                                           Row(
                                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                             children: [
                                               Row(
                                                 children: [
-                                                  const Icon(Icons.person_outline_rounded, size: 14, color: Colors.white54),
+                                                  const Icon(Icons.person_outline_rounded, size: 14, color: SoftPalette.gray50A54),
                                                   const SizedBox(width: 4),
-                                                  Text('By: $by', style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                                                  Text('By: $by', style: const TextStyle(color: SoftPalette.gray50A54, fontSize: 12)),
                                                 ],
                                               ),
                                               Row(
                                                 children: [
-                                                  const Icon(Icons.access_time_rounded, size: 14, color: Colors.white54),
+                                                  const Icon(Icons.access_time_rounded, size: 14, color: SoftPalette.gray50A54),
                                                   const SizedBox(width: 4),
-                                                  Text(displayTime, style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                                                  Text(displayTime, style: const TextStyle(color: SoftPalette.gray50A54, fontSize: 12)),
                                                 ],
                                               ),
                                             ],

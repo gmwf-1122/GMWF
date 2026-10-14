@@ -1,6 +1,7 @@
 // lib/pages/office/bulk_individual_attendance_dialog.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/design_system.dart';
 import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
@@ -30,14 +31,14 @@ class BulkIndividualAttendanceDialog {
     String statusMessage = '';
 
     // Modern Color Palette Overrides
-    const dialogBg = Colors.white;
-    const cardBg = Color(0xFFF8FAFC);
-    const cardBorder = Color(0xFFE2E8F0);
-    const inputBg = Colors.white;
-    const inputBorder = Color(0xFFCBD5E1);
-    const textPrimary = Color(0xFF0F172A);
-    const textSecondary = Color(0xFF475569);
-    const textTertiary = Color(0xFF94A3B8);
+    final dialogBg = context.adapt(SoftPalette.gray50);
+    final cardBg = context.adapt(SoftPalette.gray50);
+    final cardBorder = context.adapt(SoftPalette.slate150);
+    final inputBg = context.adapt(SoftPalette.gray50);
+    final inputBorder = context.adapt(SoftPalette.slate200);
+    final textPrimary = context.adapt(SoftPalette.slate900);
+    final textSecondary = context.adapt(SoftPalette.slate600);
+    final textTertiary = context.adapt(SoftPalette.slate350);
 
     final employees = FinanceLocalStorage.getEmployees(branchId).where((e) => e['isActive'] == true).toList();
     if (employees.isNotEmpty) {
@@ -250,7 +251,7 @@ class BulkIndividualAttendanceDialog {
                   border: Border.all(color: t.accent.withOpacity(0.18), width: 1.5),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
+                      color: SoftPalette.gray900.withOpacity(0.1),
                       blurRadius: 30,
                       offset: const Offset(0, 10),
                     ),
@@ -270,7 +271,7 @@ class BulkIndividualAttendanceDialog {
                             const SizedBox(width: 12),
                             Text(
                               'Individual Bulk Attendance',
-                              style: const TextStyle(color: textPrimary, fontWeight: FontWeight.bold, fontSize: 16),
+                              style: TextStyle(color: textPrimary, fontWeight: FontWeight.bold, fontSize: 16),
                             ),
                           ],
                         ),
@@ -283,7 +284,7 @@ class BulkIndividualAttendanceDialog {
                           child: Row(
                             children: [
                               IconButton(
-                                icon: const Icon(Icons.chevron_left, color: textPrimary, size: 18),
+                                icon: Icon(Icons.chevron_left, color: textPrimary, size: 18),
                                 padding: EdgeInsets.zero,
                                 constraints: const BoxConstraints.tightFor(width: 28, height: 28),
                                 onPressed: () => setDiagState(() {
@@ -295,10 +296,10 @@ class BulkIndividualAttendanceDialog {
                               ),
                               Text(
                                 DateFormat('MMM yyyy').format(selectedMonth),
-                                style: const TextStyle(color: textPrimary, fontWeight: FontWeight.bold, fontSize: 12),
+                                style: TextStyle(color: textPrimary, fontWeight: FontWeight.bold, fontSize: 12),
                               ),
                               IconButton(
-                                icon: const Icon(Icons.chevron_right, color: textPrimary, size: 18),
+                                icon: Icon(Icons.chevron_right, color: textPrimary, size: 18),
                                 padding: EdgeInsets.zero,
                                 constraints: const BoxConstraints.tightFor(width: 28, height: 28),
                                 onPressed: DateFormat('yyyy-MM').format(selectedMonth) == DateFormat('yyyy-MM').format(DateTime.now())
@@ -318,19 +319,19 @@ class BulkIndividualAttendanceDialog {
                     const SizedBox(height: 16),
 
                     // Employee Dropdown
-                    const Text('Select Employee', style: TextStyle(color: textSecondary, fontSize: 11, fontWeight: FontWeight.bold)),
+                    Text('Select Employee', style: TextStyle(color: textSecondary, fontSize: 11, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 6),
                     DropdownButtonFormField<String>(
                       value: selectedEmployeeId,
                       dropdownColor: dialogBg,
-                      style: const TextStyle(color: textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
+                      style: TextStyle(color: textPrimary, fontSize: 13, fontWeight: FontWeight.w600),
                       decoration: InputDecoration(
                         isDense: true,
                         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
                         filled: true,
                         fillColor: inputBg,
                         enabledBorder: OutlineInputBorder(
-                          borderSide: const BorderSide(color: inputBorder, width: 1.2),
+                          borderSide: BorderSide(color: inputBorder, width: 1.2),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         focusedBorder: OutlineInputBorder(
@@ -341,7 +342,7 @@ class BulkIndividualAttendanceDialog {
                       items: employees
                           .map((emp) => DropdownMenuItem(
                                 value: emp['localId']?.toString(),
-                                child: Text(emp['name']?.toString() ?? '', style: const TextStyle(color: textPrimary)),
+                                child: Text(emp['name']?.toString() ?? '', style: TextStyle(color: textPrimary)),
                               ))
                           .toList(),
                       onChanged: (val) {
@@ -357,14 +358,14 @@ class BulkIndividualAttendanceDialog {
                       Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: statusMessage.startsWith('✓') ? Colors.green.withOpacity(0.08) : Colors.red.withOpacity(0.08),
+                          color: statusMessage.startsWith('✓') ? SoftPalette.green400.withOpacity(0.08) : SoftPalette.red400.withOpacity(0.08),
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: statusMessage.startsWith('✓') ? Colors.green.withOpacity(0.2) : Colors.red.withOpacity(0.2)),
+                          border: Border.all(color: statusMessage.startsWith('✓') ? SoftPalette.green400.withOpacity(0.2) : SoftPalette.red400.withOpacity(0.2)),
                         ),
                         child: Text(
                           statusMessage,
                           style: TextStyle(
-                            color: statusMessage.startsWith('✓') ? Colors.green[800] : Colors.red[800],
+                            color: statusMessage.startsWith('✓') ? SoftPalette.green550 : SoftPalette.red550,
                             fontSize: 12,
                             fontWeight: FontWeight.bold,
                           ),
@@ -380,20 +381,20 @@ class BulkIndividualAttendanceDialog {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Working/Presents', style: TextStyle(color: textSecondary, fontSize: 11, fontWeight: FontWeight.bold)),
+                              Text('Working/Presents', style: TextStyle(color: textSecondary, fontSize: 11, fontWeight: FontWeight.bold)),
                               const SizedBox(height: 6),
                               TextField(
                                 controller: presentCtrl,
                                 keyboardType: TextInputType.number,
                                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                                style: const TextStyle(color: textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
+                                style: TextStyle(color: textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
                                 decoration: InputDecoration(
                                   isDense: true,
                                   contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                                   filled: true,
                                   fillColor: inputBg,
                                   enabledBorder: OutlineInputBorder(
-                                    borderSide: const BorderSide(color: inputBorder, width: 1.2),
+                                    borderSide: BorderSide(color: inputBorder, width: 1.2),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
                                   focusedBorder: OutlineInputBorder(
@@ -410,20 +411,20 @@ class BulkIndividualAttendanceDialog {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Weekends/Holidays', style: TextStyle(color: textSecondary, fontSize: 11, fontWeight: FontWeight.bold)),
+                              Text('Weekends/Holidays', style: TextStyle(color: textSecondary, fontSize: 11, fontWeight: FontWeight.bold)),
                               const SizedBox(height: 6),
                               TextField(
                                 controller: weekendCtrl,
                                 keyboardType: TextInputType.number,
                                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                                style: const TextStyle(color: textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
+                                style: TextStyle(color: textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
                                 decoration: InputDecoration(
                                   isDense: true,
                                   contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                                   filled: true,
                                   fillColor: inputBg,
                                   enabledBorder: OutlineInputBorder(
-                                    borderSide: const BorderSide(color: inputBorder, width: 1.2),
+                                    borderSide: BorderSide(color: inputBorder, width: 1.2),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
                                   focusedBorder: OutlineInputBorder(
@@ -445,20 +446,20 @@ class BulkIndividualAttendanceDialog {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Absent Days', style: TextStyle(color: textSecondary, fontSize: 11, fontWeight: FontWeight.bold)),
+                              Text('Absent Days', style: TextStyle(color: textSecondary, fontSize: 11, fontWeight: FontWeight.bold)),
                               const SizedBox(height: 6),
                               TextField(
                                 controller: absentCtrl,
                                 keyboardType: TextInputType.number,
                                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                                style: const TextStyle(color: textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
+                                style: TextStyle(color: textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
                                 decoration: InputDecoration(
                                   isDense: true,
                                   contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                                   filled: true,
                                   fillColor: inputBg,
                                   enabledBorder: OutlineInputBorder(
-                                    borderSide: const BorderSide(color: inputBorder, width: 1.2),
+                                    borderSide: BorderSide(color: inputBorder, width: 1.2),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
                                   focusedBorder: OutlineInputBorder(
@@ -475,20 +476,20 @@ class BulkIndividualAttendanceDialog {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              const Text('Leave Days', style: TextStyle(color: textSecondary, fontSize: 11, fontWeight: FontWeight.bold)),
+                              Text('Leave Days', style: TextStyle(color: textSecondary, fontSize: 11, fontWeight: FontWeight.bold)),
                               const SizedBox(height: 6),
                               TextField(
                                 controller: leaveCtrl,
                                 keyboardType: TextInputType.number,
                                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                                style: const TextStyle(color: textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
+                                style: TextStyle(color: textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
                                 decoration: InputDecoration(
                                   isDense: true,
                                   contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
                                   filled: true,
                                   fillColor: inputBg,
                                   enabledBorder: OutlineInputBorder(
-                                    borderSide: const BorderSide(color: inputBorder, width: 1.2),
+                                    borderSide: BorderSide(color: inputBorder, width: 1.2),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
                                   focusedBorder: OutlineInputBorder(
@@ -505,19 +506,19 @@ class BulkIndividualAttendanceDialog {
                     const SizedBox(height: 12),
 
                     // Leave Type Dropdown
-                    const Text('Leave Type (if leaves > 0)', style: TextStyle(color: textSecondary, fontSize: 11, fontWeight: FontWeight.bold)),
+                    Text('Leave Type (if leaves > 0)', style: TextStyle(color: textSecondary, fontSize: 11, fontWeight: FontWeight.bold)),
                     const SizedBox(height: 6),
                     DropdownButtonFormField<String>(
                       value: leaveType,
                       dropdownColor: dialogBg,
-                      style: const TextStyle(color: textPrimary, fontSize: 12, fontWeight: FontWeight.w600),
+                      style: TextStyle(color: textPrimary, fontSize: 12, fontWeight: FontWeight.w600),
                       decoration: InputDecoration(
                         isDense: true,
                         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                         filled: true,
                         fillColor: inputBg,
                         enabledBorder: OutlineInputBorder(
-                          borderSide: const BorderSide(color: inputBorder, width: 1.2),
+                          borderSide: BorderSide(color: inputBorder, width: 1.2),
                           borderRadius: BorderRadius.circular(10),
                         ),
                         focusedBorder: OutlineInputBorder(
@@ -528,7 +529,7 @@ class BulkIndividualAttendanceDialog {
                       items: ['sick', 'casual', 'annual', 'unpaid']
                           .map((lt) => DropdownMenuItem(
                                 value: lt,
-                                child: Text(lt.toUpperCase(), style: const TextStyle(color: textPrimary, fontSize: 11)),
+                                child: Text(lt.toUpperCase(), style: TextStyle(color: textPrimary, fontSize: 11)),
                               ))
                           .toList(),
                       onChanged: (val) => setDiagState(() => leaveType = val ?? 'sick'),
@@ -541,13 +542,13 @@ class BulkIndividualAttendanceDialog {
                       children: [
                         TextButton(
                           onPressed: isSaving ? null : () => Navigator.pop(ctx),
-                          child: const Text('Cancel', style: TextStyle(color: textSecondary, fontWeight: FontWeight.w600)),
+                          child: Text('Cancel', style: TextStyle(color: textSecondary, fontWeight: FontWeight.w600)),
                         ),
                         const SizedBox(width: 12),
                         ElevatedButton(
                           style: ElevatedButton.styleFrom(
                             backgroundColor: t.accent,
-                            foregroundColor: Colors.white,
+                            foregroundColor: SoftPalette.gray50,
                             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             elevation: 0,

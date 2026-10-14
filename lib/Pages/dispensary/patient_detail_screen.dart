@@ -1,6 +1,9 @@
 // lib/pages/patient_detail_screen.dart — Role-Theme Aware + Full Mobile Responsive
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive/hive.dart';
 import 'package:intl/intl.dart';
@@ -62,9 +65,9 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
   late Animation<double> _fadeAnim;
 
   static const Map<String, Color> _statusColors = {
-    'Zakat': Color(0xFF1565C0),
-    'Non-Zakat': Color(0xFF6A1B9A),
-    'GMWF': Color(0xFF2E7D32),
+    'Zakat': SoftPalette.blue550,
+    'Non-Zakat': SoftPalette.purple600,
+    'GMWF': SoftPalette.green550,
   };
 
   @override
@@ -196,7 +199,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                     _snack('Wrong password', error: true);
                   }
                 },
-                style: ElevatedButton.styleFrom(backgroundColor: t.accent, foregroundColor: Colors.white,
+                style: ElevatedButton.styleFrom(backgroundColor: t.accent, foregroundColor: SoftPalette.gray50,
                     padding: const EdgeInsets.symmetric(vertical: 13),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
                 child: const Text('Verify', style: TextStyle(fontWeight: FontWeight.w700)),
@@ -237,11 +240,11 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
               padding: const EdgeInsets.fromLTRB(20, 18, 16, 18),
               decoration: BoxDecoration(color: t.accent, borderRadius: const BorderRadius.vertical(top: Radius.circular(24))),
               child: Row(children: [
-                const Icon(Icons.edit_rounded, color: Colors.white, size: 20),
+                const Icon(Icons.edit_rounded, color: SoftPalette.gray50, size: 20),
                 const SizedBox(width: 10),
-                const Expanded(child: Text('Edit Patient', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.w800))),
+                const Expanded(child: Text('Edit Patient', style: TextStyle(color: SoftPalette.gray50, fontSize: 17, fontWeight: FontWeight.w800))),
                 IconButton(onPressed: () => Navigator.pop(ctx),
-                    icon: const Icon(Icons.close_rounded, color: Colors.white70, size: 20), padding: EdgeInsets.zero),
+                    icon: const Icon(Icons.close_rounded, color: SoftPalette.gray50A70, size: 20), padding: EdgeInsets.zero),
               ]),
             ),
             Flexible(
@@ -323,7 +326,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                   icon: const Icon(Icons.save_rounded, size: 17),
                   label: const Text('Save Changes', style: TextStyle(fontWeight: FontWeight.w700)),
                   onPressed: () async => _savePatient(ctx, editKey, isAdult),
-                  style: ElevatedButton.styleFrom(backgroundColor: t.accent, foregroundColor: Colors.white,
+                  style: ElevatedButton.styleFrom(backgroundColor: t.accent, foregroundColor: SoftPalette.gray50,
                       padding: const EdgeInsets.symmetric(vertical: 13),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
                 )),
@@ -438,7 +441,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
             const SizedBox(width: 12),
             Expanded(child: ElevatedButton(
               onPressed: () => Navigator.pop(ctx, true),
-              style: ElevatedButton.styleFrom(backgroundColor: t.danger, foregroundColor: Colors.white,
+              style: ElevatedButton.styleFrom(backgroundColor: t.danger, foregroundColor: SoftPalette.gray50,
                   padding: const EdgeInsets.symmetric(vertical: 13),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)), elevation: 0),
               child: const Text('Delete', style: TextStyle(fontWeight: FontWeight.w700)),
@@ -474,14 +477,14 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
 
   void _snack(String msg, {bool error = false, bool success = false}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    AppToast.showSnackBar(context, SnackBar(
       content: Row(children: [
         Icon(error ? Icons.error_outline : success ? Icons.check_circle_outline : Icons.info_outline,
-            color: Colors.white, size: 18),
+            color: SoftPalette.gray50, size: 18),
         const SizedBox(width: 10),
         Expanded(child: Text(msg, style: const TextStyle(fontSize: 13))),
       ]),
-      backgroundColor: error ? const Color(0xFFB00020) : success ? const Color(0xFF2E7D32) : const Color(0xFF37474F),
+      backgroundColor: error ? SoftPalette.red600 : success ? SoftPalette.green550 : SoftPalette.slate700,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       margin: const EdgeInsets.all(16),
@@ -610,7 +613,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
     final age = data['age']?.toString() ?? '?';
     final gender = data['gender'] ?? 'N/A';
     final status = data['status'] as String? ?? 'Zakat';
-    final statusColor = _statusColors[status] ?? t.accent;
+    final statusColor = _statusColors[status] != null ? context.adapt(_statusColors[status]!) : t.accent;
 
     return AppBar(
       elevation: 0,
@@ -645,7 +648,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
             alignment: Alignment.center,
             child: Text(
               name.trim().isEmpty ? '?' : name.trim().split(' ').map((w) => w[0]).take(2).join().toUpperCase(),
-              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w900),
+              style: const TextStyle(color: SoftPalette.gray50, fontSize: 16, fontWeight: FontWeight.w900),
             ),
           ),
           const SizedBox(width: 12),
@@ -774,7 +777,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
         border: Border.all(color: t.bgRule, width: 1),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
+            color: SoftPalette.gray900.withValues(alpha: 0.04),
             blurRadius: 10,
             offset: const Offset(0, 3),
           ),
@@ -861,7 +864,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
                 onPressed: _addPrescription,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: t.accent,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   elevation: 0,
@@ -953,7 +956,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
       final cnic = data['cnic']?.toString();
       final localChildren = _getLocalChildren(cnic);
       if (localChildren.isNotEmpty) {
-        return _card(t, 'Family Members', Icons.family_restroom_rounded, const Color(0xFF1565C0),
+        return _card(t, 'Family Members', Icons.family_restroom_rounded, context.adapt(SoftPalette.blue550),
             localChildren.map((d) {
               return _infoRow(t, '${d['name'] ?? 'N/A'} (${d['age'] ?? '?'} yrs)', '${d['gender'] ?? 'N/A'}',
                   Icons.person_outline_rounded);
@@ -964,7 +967,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
         stream: _childrenStream(cnic),
         builder: (ctx, snap) {
           if (!snap.hasData || snap.data!.docs.isEmpty) return const SizedBox.shrink();
-          return _card(t, 'Family Members', Icons.family_restroom_rounded, const Color(0xFF1565C0),
+          return _card(t, 'Family Members', Icons.family_restroom_rounded, context.adapt(SoftPalette.blue550),
               snap.data!.docs.map((doc) {
                 final d = doc.data() as Map<String, dynamic>;
                 return _infoRow(t, '${d['name'] ?? 'N/A'} (${d['age'] ?? '?'} yrs)', '${d['gender'] ?? 'N/A'}',
@@ -976,7 +979,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
       final guardianCnic = data['guardianCnic']?.toString();
       final localGuardian = _getLocalGuardian(guardianCnic);
       if (localGuardian != null) {
-        return _card(t, 'Guardian Details', Icons.shield_outlined, const Color(0xFF6A1B9A), [
+        return _card(t, 'Guardian Details', Icons.shield_outlined, context.adapt(SoftPalette.purple600), [
           _infoRow(t, 'Guardian Name', localGuardian['name'] ?? 'N/A', Icons.person_outline_rounded),
           _infoRow(t, 'Age', '${localGuardian['age'] ?? '?'} yrs', Icons.calendar_today_outlined),
           _infoRow(t, 'Gender', localGuardian['gender'] ?? 'N/A', Icons.wc_rounded),
@@ -988,12 +991,12 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
         future: _getGuardian(guardianCnic),
         builder: (ctx, snap) {
           if (!snap.hasData || snap.data == null) {
-            return _card(t, 'Guardian Details', Icons.shield_outlined, const Color(0xFF6A1B9A), [
+            return _card(t, 'Guardian Details', Icons.shield_outlined, context.adapt(SoftPalette.purple600), [
               _infoRow(t, 'Status', 'Ungrouped Child', Icons.info_outline_rounded),
             ]);
           }
           final gd = snap.data!.data() as Map<String, dynamic>;
-          return _card(t, 'Guardian Details', Icons.shield_outlined, const Color(0xFF6A1B9A), [
+          return _card(t, 'Guardian Details', Icons.shield_outlined, context.adapt(SoftPalette.purple600), [
             _infoRow(t, 'Guardian Name', gd['name'] ?? 'N/A', Icons.person_outline_rounded),
             _infoRow(t, 'Age', '${gd['age'] ?? '?'} yrs', Icons.calendar_today_outlined),
             _infoRow(t, 'Gender', gd['gender'] ?? 'N/A', Icons.wc_rounded),
@@ -1011,7 +1014,7 @@ class _PatientDetailScreenState extends State<PatientDetailScreen>
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: t.bgRule, width: 1),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.03), blurRadius: 8, offset: const Offset(0, 2)),
+          BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.03), blurRadius: 8, offset: const Offset(0, 2)),
         ],
       ),
       child: Column(

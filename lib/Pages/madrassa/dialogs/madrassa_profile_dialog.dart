@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../../services/auth_service.dart';
@@ -181,10 +183,10 @@ class _MadrassaProfileDialogState extends State<MadrassaProfileDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final bg = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final textPrimary = isDark ? Colors.white : const Color(0xFF0F172A);
-    final textMuted = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
-    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
+    final bg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.slate900;
+    final textMuted = isDark ? SoftPalette.slate350 : SoftPalette.slate550;
+    final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.slate150;
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -204,10 +206,10 @@ class _MadrassaProfileDialogState extends State<MadrassaProfileDialog> {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0F766E).withValues(alpha: 0.12),
+                      color: context.adapt(SoftPalette.teal550).withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Icon(Icons.manage_accounts_rounded, color: Color(0xFF0F766E), size: 24),
+                    child: Icon(Icons.manage_accounts_rounded, color: context.adapt(SoftPalette.teal550), size: 24),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -252,9 +254,9 @@ class _MadrassaProfileDialogState extends State<MadrassaProfileDialog> {
                 decoration: InputDecoration(
                   hintText: context.isUrdu ? 'اپنا نام درج کریں' : 'Enter your name',
                   errorText: _nameError,
-                  prefixIcon: const Icon(Icons.person_outline_rounded, size: 20, color: Color(0xFF0F766E)),
+                  prefixIcon: Icon(Icons.person_outline_rounded, size: 20, color: context.adapt(SoftPalette.teal550)),
                   filled: true,
-                  fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                  fillColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                   contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: borderColor)),
                   enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: borderColor)),
@@ -266,7 +268,7 @@ class _MadrassaProfileDialogState extends State<MadrassaProfileDialog> {
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                  color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: borderColor),
                 ),
@@ -275,7 +277,7 @@ class _MadrassaProfileDialogState extends State<MadrassaProfileDialog> {
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.lock_reset_rounded, size: 18, color: Color(0xFF0F766E)),
+                        Icon(Icons.lock_reset_rounded, size: 18, color: context.adapt(SoftPalette.teal550)),
                         const SizedBox(width: 8),
                         Text(
                           context.isUrdu ? 'پاس ورڈ تبدیل کریں (اختیاری)' : 'Change Password (Optional)',
@@ -351,7 +353,7 @@ class _MadrassaProfileDialogState extends State<MadrassaProfileDialog> {
                   ElevatedButton.icon(
                     onPressed: _isSaving ? null : _handleSave,
                     icon: _isSaving
-                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50))
                         : const Icon(Icons.check_circle_rounded, size: 16),
                     label: Text(
                       _isSaving
@@ -360,8 +362,8 @@ class _MadrassaProfileDialogState extends State<MadrassaProfileDialog> {
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF0F766E),
-                      foregroundColor: Colors.white,
+                      backgroundColor: SoftPalette.teal550,
+                      foregroundColor: SoftPalette.gray50,
                       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),

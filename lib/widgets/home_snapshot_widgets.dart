@@ -6,9 +6,12 @@
 // public API (BranchStats, DS, fmtNum, fmtPKR, RoleThemeData).
 
 import 'dart:async';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'dart:math';
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/components/app_toast.dart';
+import 'package:gmwf/design/components/decorative_image.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lottie/lottie.dart';
@@ -84,7 +87,7 @@ class _HomeStatTileState extends State<HomeStatTile> with SingleTickerProviderSt
     final isUp = hasDelta && widget.deltaPct! >= 0;
     final deltaColor = !hasDelta
         ? DS.neutral
-        : (isUp ? const Color(0xFF16A34A) : const Color(0xFFDC2626));
+        : (isUp ? SoftPalette.green400 : SoftPalette.red500);
     final isDark = t.isDarkCanvas;
 
     final Color categoryColor = widget.color;
@@ -107,7 +110,7 @@ class _HomeStatTileState extends State<HomeStatTile> with SingleTickerProviderSt
             offset: Offset(0, _hov ? 8 : 4),
           ),
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.30 : 0.03),
+            color: SoftPalette.gray900.withValues(alpha: isDark ? 0.30 : 0.03),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -115,8 +118,8 @@ class _HomeStatTileState extends State<HomeStatTile> with SingleTickerProviderSt
       ),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(22),
-        child: BackdropFilter(
-          filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          // No BackdropFilter here: up to 11 live blurs per frame pinned the HD 520 GPU; the
+          // tile gradient was raised a little in opacity instead.
           child: Container(
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(22),
@@ -125,20 +128,20 @@ class _HomeStatTileState extends State<HomeStatTile> with SingleTickerProviderSt
                 end: Alignment.bottomRight,
                 colors: isDark
                     ? [
-                        const Color(0xFF1E293B).withValues(alpha: _hov ? 0.88 : 0.68),
-                        const Color(0xFF0F172A).withValues(alpha: _hov ? 0.82 : 0.60),
+                        SoftPalette.slate800.withValues(alpha: _hov ? 0.92 : 0.80),
+                        SoftPalette.slate900.withValues(alpha: _hov ? 0.88 : 0.74),
                       ]
                     : [
-                        Colors.white.withValues(alpha: _hov ? 0.95 : 0.85),
-                        Colors.white.withValues(alpha: _hov ? 0.85 : 0.70),
+                        SoftPalette.gray50.withValues(alpha: _hov ? 0.97 : 0.92),
+                        SoftPalette.gray50.withValues(alpha: _hov ? 0.92 : 0.84),
                       ],
               ),
               border: Border.all(
                 color: _hov
                     ? categoryColor.withValues(alpha: isDark ? 0.65 : 0.50)
                     : (isDark
-                        ? Colors.white.withValues(alpha: 0.14)
-                        : Colors.white.withValues(alpha: 0.65)),
+                        ? SoftPalette.gray50.withValues(alpha: 0.14)
+                        : SoftPalette.gray50.withValues(alpha: 0.65)),
                 width: 1.0,
               ),
             ),
@@ -181,7 +184,7 @@ class _HomeStatTileState extends State<HomeStatTile> with SingleTickerProviderSt
                             borderRadius: BorderRadius.circular(13),
                             gradient: categoryGradient,
                             border: Border.all(
-                              color: Colors.white.withValues(alpha: 0.35),
+                              color: SoftPalette.gray50.withValues(alpha: 0.35),
                               width: 0.9,
                             ),
                             boxShadow: [
@@ -191,7 +194,7 @@ class _HomeStatTileState extends State<HomeStatTile> with SingleTickerProviderSt
                                 offset: const Offset(0, 3),
                               ),
                               BoxShadow(
-                                color: Colors.white.withValues(alpha: 0.20),
+                                color: SoftPalette.gray50.withValues(alpha: 0.20),
                                 blurRadius: 1,
                                 offset: const Offset(-1, -1),
                               ),
@@ -199,7 +202,7 @@ class _HomeStatTileState extends State<HomeStatTile> with SingleTickerProviderSt
                           ),
                           child: Icon(
                             widget.icon,
-                            color: Colors.white,
+                            color: SoftPalette.gray50,
                             size: 16,
                           ),
                         ),
@@ -216,7 +219,7 @@ class _HomeStatTileState extends State<HomeStatTile> with SingleTickerProviderSt
                             Text(
                               widget.label,
                               style: TextStyle(
-                                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
                                 fontSize: 10.5,
                                 fontWeight: FontWeight.w700,
                                 letterSpacing: -0.1,
@@ -248,7 +251,7 @@ class _HomeStatTileState extends State<HomeStatTile> with SingleTickerProviderSt
                                     child: Text(
                                       widget.value,
                                       style: TextStyle(
-                                        color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                                        color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                                         fontSize: 16.5,
                                         fontWeight: FontWeight.w900,
                                         letterSpacing: -0.5,
@@ -303,7 +306,6 @@ class _HomeStatTileState extends State<HomeStatTile> with SingleTickerProviderSt
               ],
             ),
           ),
-        ),
       ),
     );
 
@@ -394,7 +396,7 @@ class _FlatDonutPainter extends CustomPainter {
       ..strokeCap = StrokeCap.butt;
 
     if (total == 0) {
-      paint.color = Colors.grey.withValues(alpha: 0.18);
+      paint.color = SoftPalette.gray350.withValues(alpha: 0.18);
       canvas.drawArc(Rect.fromCircle(center: center, radius: radius), 0, 2 * pi, false, paint);
       return;
     }
@@ -475,7 +477,7 @@ class HomePatientDonutCard extends StatelessWidget {
 
     final values = total == 0 ? [0.0] : [s.zakat.toDouble(), s.nonZakat.toDouble(), s.gmwf.toDouble()];
     final colors = total == 0 
-        ? [Colors.grey.shade300] 
+        ? [SoftPalette.gray150] 
         : [t.zakat, t.nonZakat, t.gmwf];
 
     return Container(
@@ -502,11 +504,11 @@ class HomePatientDonutCard extends StatelessWidget {
             ]),
           );
           final legend = Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            _flatLegendRow(total == 0 ? Colors.grey.shade400 : t.zakat, 'Zakat', s.zakat, zPct),
+            _flatLegendRow(total == 0 ? SoftPalette.gray300 : t.zakat, 'Zakat', s.zakat, zPct),
             const SizedBox(height: 10),
-            _flatLegendRow(total == 0 ? Colors.grey.shade400 : t.nonZakat, 'Non-Zakat', s.nonZakat, nPct),
+            _flatLegendRow(total == 0 ? SoftPalette.gray300 : t.nonZakat, 'Non-Zakat', s.nonZakat, nPct),
             const SizedBox(height: 10),
-            _flatLegendRow(total == 0 ? Colors.grey.shade400 : t.gmwf, 'GMWF', s.gmwf, gPct),
+            _flatLegendRow(total == 0 ? SoftPalette.gray300 : t.gmwf, 'GMWF', s.gmwf, gPct),
           ]);
           if (isWide) {
             return Row(children: [donut, const SizedBox(width: DS.s3), Expanded(child: legend)]);
@@ -520,7 +522,7 @@ class HomePatientDonutCard extends StatelessWidget {
   Widget _flatLegendRow(Color color, String label, int count, int pct) => Row(children: [
         Container(width: 8, height: 8, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
         const SizedBox(width: 8),
-        Expanded(child: Text(label, style: TextStyle(color: color == Colors.grey.shade400 ? Colors.grey.shade500 : const Color(0xFF374151), fontSize: 12, fontWeight: FontWeight.w600))),
+        Expanded(child: Text(label, style: TextStyle(color: color == SoftPalette.gray300 ? SoftPalette.gray350 : SoftPalette.slate700, fontSize: 12, fontWeight: FontWeight.w600))),
         Text('$count', style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w800)),
         const SizedBox(width: 6),
         Text('$pct%', style: const TextStyle(color: DS.neutral, fontSize: 11)),
@@ -559,8 +561,6 @@ class HomeBranchPerformanceTable extends StatelessWidget {
 
     return ClipRRect(
       borderRadius: BorderRadius.circular(24),
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
         child: Container(
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
@@ -570,23 +570,23 @@ class HomeBranchPerformanceTable extends StatelessWidget {
               end: Alignment.bottomRight,
               colors: isDark
                   ? [
-                      const Color(0xFF1E293B).withValues(alpha: 0.85),
-                      const Color(0xFF0F172A).withValues(alpha: 0.72),
+                      SoftPalette.slate800.withValues(alpha: 0.90),
+                      SoftPalette.slate900.withValues(alpha: 0.82),
                     ]
                   : [
-                      Colors.white.withValues(alpha: 0.94),
-                      Colors.white.withValues(alpha: 0.82),
+                      SoftPalette.gray50.withValues(alpha: 0.94),
+                      SoftPalette.gray50.withValues(alpha: 0.82),
                     ],
             ),
             border: Border.all(
               color: isDark
-                  ? Colors.white.withValues(alpha: 0.14)
-                  : Colors.white.withValues(alpha: 0.65),
+                  ? SoftPalette.gray50.withValues(alpha: 0.14)
+                  : SoftPalette.gray50.withValues(alpha: 0.65),
               width: 1.0,
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.04),
+                color: SoftPalette.gray900.withValues(alpha: isDark ? 0.35 : 0.04),
                 blurRadius: 16,
                 offset: const Offset(0, 4),
               ),
@@ -601,7 +601,7 @@ class HomeBranchPerformanceTable extends StatelessWidget {
                   Text(
                     'Dispensaries & Camps Performance Today',
                     style: TextStyle(
-                      color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                      color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                       fontSize: 14,
                       fontWeight: FontWeight.w800,
                       letterSpacing: -0.3,
@@ -610,17 +610,17 @@ class HomeBranchPerformanceTable extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0EA5E9).withValues(alpha: isDark ? 0.20 : 0.10),
+                      color: SoftPalette.sky400.withValues(alpha: isDark ? 0.20 : 0.10),
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
-                        color: const Color(0xFF0EA5E9).withValues(alpha: 0.3),
+                        color: SoftPalette.sky400.withValues(alpha: 0.3),
                         width: 0.8,
                       ),
                     ),
                     child: const Text(
                       'LIVE FEED',
                       style: TextStyle(
-                        color: Color(0xFF0EA5E9),
+                        color: SoftPalette.sky400,
                         fontSize: 9,
                         fontWeight: FontWeight.w900,
                         letterSpacing: 0.6,
@@ -635,27 +635,27 @@ class HomeBranchPerformanceTable extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 10),
                 decoration: BoxDecoration(
                   color: isDark
-                      ? Colors.white.withValues(alpha: 0.05)
-                      : const Color(0xFFF1F5F9).withValues(alpha: 0.8),
+                      ? SoftPalette.gray50.withValues(alpha: 0.05)
+                      : SoftPalette.slate100.withValues(alpha: 0.8),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: const Row(
                   children: [
                     Expanded(
                       flex: 5,
-                      child: Text('Dispensary / Camp', style: TextStyle(color: Color(0xFF64748B), fontSize: 10.5, fontWeight: FontWeight.w700, letterSpacing: 0.4)),
+                      child: Text('Dispensary / Camp', style: TextStyle(color: SoftPalette.slate550, fontSize: 10.5, fontWeight: FontWeight.w700, letterSpacing: 0.4)),
                     ),
                     Expanded(
                       flex: 2,
-                      child: Center(child: Text('Donations', style: TextStyle(color: Color(0xFF64748B), fontSize: 10.5, fontWeight: FontWeight.w700))),
+                      child: Center(child: Text('Donations', style: TextStyle(color: SoftPalette.slate550, fontSize: 10.5, fontWeight: FontWeight.w700))),
                     ),
                     Expanded(
                       flex: 2,
-                      child: Center(child: Text('Patients', style: TextStyle(color: Color(0xFF64748B), fontSize: 10.5, fontWeight: FontWeight.w700))),
+                      child: Center(child: Text('Patients', style: TextStyle(color: SoftPalette.slate550, fontSize: 10.5, fontWeight: FontWeight.w700))),
                     ),
                     Expanded(
                       flex: 2,
-                      child: Center(child: Text('Revenue', style: TextStyle(color: Color(0xFF64748B), fontSize: 10.5, fontWeight: FontWeight.w700))),
+                      child: Center(child: Text('Revenue', style: TextStyle(color: SoftPalette.slate550, fontSize: 10.5, fontWeight: FontWeight.w700))),
                     ),
                   ],
                 ),
@@ -666,7 +666,7 @@ class HomeBranchPerformanceTable extends StatelessWidget {
                     ? const Center(
                         child: Text(
                           'No dispensaries or camps to show',
-                          style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12),
+                          style: TextStyle(color: SoftPalette.slate350, fontSize: 12),
                         ),
                       )
                     : SingleChildScrollView(
@@ -736,7 +736,6 @@ class HomeBranchPerformanceTable extends StatelessWidget {
             ],
           ),
         ),
-      ),
     );
   }
 }
@@ -791,7 +790,7 @@ class _BranchPerformanceRowState extends State<_BranchPerformanceRow> {
           padding: const EdgeInsets.symmetric(vertical: 7, horizontal: 8),
           decoration: BoxDecoration(
             color: _hov
-                ? (isDark ? Colors.white.withValues(alpha: 0.08) : Colors.black.withValues(alpha: 0.04))
+                ? (isDark ? SoftPalette.gray50.withValues(alpha: 0.08) : SoftPalette.gray900.withValues(alpha: 0.04))
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
           ),
@@ -812,7 +811,7 @@ class _BranchPerformanceRowState extends State<_BranchPerformanceRow> {
                           Text(
                             widget.name,
                             style: TextStyle(
-                              color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                              color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                               fontSize: 12,
                               fontWeight: FontWeight.w700,
                             ),
@@ -825,7 +824,7 @@ class _BranchPerformanceRowState extends State<_BranchPerformanceRow> {
                               child: Text(
                                 widget.subtitle!,
                                 style: const TextStyle(
-                                  color: Color(0xFF64748B),
+                                  color: SoftPalette.slate550,
                                   fontSize: 10,
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -849,7 +848,7 @@ class _BranchPerformanceRowState extends State<_BranchPerformanceRow> {
                       Text(
                         fmtNum(widget.don),
                         style: TextStyle(
-                          color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                          color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                           fontSize: 12.5,
                           fontWeight: FontWeight.w800,
                         ),
@@ -869,7 +868,7 @@ class _BranchPerformanceRowState extends State<_BranchPerformanceRow> {
                       Text(
                         fmtNum(widget.pats),
                         style: TextStyle(
-                          color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                          color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                           fontSize: 12.5,
                           fontWeight: FontWeight.w800,
                         ),
@@ -889,7 +888,7 @@ class _BranchPerformanceRowState extends State<_BranchPerformanceRow> {
                       Text(
                         fmtNum(widget.rev),
                         style: TextStyle(
-                          color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                          color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                           fontSize: 12.5,
                           fontWeight: FontWeight.w800,
                         ),
@@ -908,7 +907,7 @@ class _BranchPerformanceRowState extends State<_BranchPerformanceRow> {
 
   Widget _deltaIndicator(double delta, bool isDark) {
     final isUp = delta >= 0;
-    final color = isUp ? const Color(0xFF10B981) : const Color(0xFFEF4444);
+    final color = isUp ? SoftPalette.emerald350 : SoftPalette.red400;
     return Container(
       margin: const EdgeInsets.only(top: 2),
       padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1),
@@ -944,23 +943,23 @@ class _RankBadge extends StatelessWidget {
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           gradient: const LinearGradient(
-            colors: [Color(0xFFFEF08A), Color(0xFFF59E0B), Color(0xFFD97706)],
+            colors: [SoftPalette.yellow150, SoftPalette.amber300, SoftPalette.orange400],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFFF59E0B).withValues(alpha: 0.50),
+              color: SoftPalette.amber300.withValues(alpha: 0.50),
               blurRadius: 7,
               offset: const Offset(0, 2),
             ),
           ],
-          border: Border.all(color: Colors.white.withValues(alpha: 0.75), width: 1.2),
+          border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.75), width: 1.2),
         ),
         child: const Center(
           child: Icon(
             Icons.emoji_events_rounded,
-            color: Colors.white,
+            color: SoftPalette.gray50,
             size: 15,
           ),
         ),
@@ -974,23 +973,23 @@ class _RankBadge extends StatelessWidget {
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           gradient: const LinearGradient(
-            colors: [Color(0xFFF8FAFC), Color(0xFF94A3B8), Color(0xFF64748B)],
+            colors: [SoftPalette.gray50, SoftPalette.slate350, SoftPalette.slate550],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFF94A3B8).withValues(alpha: 0.40),
+              color: SoftPalette.slate350.withValues(alpha: 0.40),
               blurRadius: 6,
               offset: const Offset(0, 2),
             ),
           ],
-          border: Border.all(color: Colors.white.withValues(alpha: 0.75), width: 1.2),
+          border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.75), width: 1.2),
         ),
         child: const Center(
           child: Icon(
             Icons.emoji_events_rounded,
-            color: Colors.white,
+            color: SoftPalette.gray50,
             size: 14,
           ),
         ),
@@ -1004,23 +1003,23 @@ class _RankBadge extends StatelessWidget {
         decoration: BoxDecoration(
           shape: BoxShape.circle,
           gradient: const LinearGradient(
-            colors: [Color(0xFFFFEDD5), Color(0xFFD97706), Color(0xFF9A3412)],
+            colors: [SoftPalette.amber100, SoftPalette.orange400, SoftPalette.red600],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
           boxShadow: [
             BoxShadow(
-              color: const Color(0xFFD97706).withValues(alpha: 0.40),
+              color: SoftPalette.orange400.withValues(alpha: 0.40),
               blurRadius: 6,
               offset: const Offset(0, 2),
             ),
           ],
-          border: Border.all(color: Colors.white.withValues(alpha: 0.75), width: 1.2),
+          border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.75), width: 1.2),
         ),
         child: const Center(
           child: Icon(
             Icons.emoji_events_rounded,
-            color: Colors.white,
+            color: SoftPalette.gray50,
             size: 13,
           ),
         ),
@@ -1032,9 +1031,9 @@ class _RankBadge extends StatelessWidget {
       height: 24,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
-        color: const Color(0xFF64748B).withValues(alpha: 0.12),
+        color: SoftPalette.slate550.withValues(alpha: 0.12),
         border: Border.all(
-          color: const Color(0xFF64748B).withValues(alpha: 0.25),
+          color: SoftPalette.slate550.withValues(alpha: 0.25),
           width: 0.8,
         ),
       ),
@@ -1042,7 +1041,7 @@ class _RankBadge extends StatelessWidget {
         child: Text(
           '$rank',
           style: const TextStyle(
-            color: Color(0xFF64748B),
+            color: SoftPalette.slate550,
             fontSize: 10.5,
             fontWeight: FontWeight.w800,
           ),
@@ -1100,7 +1099,7 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
             borderRadius: BorderRadius.circular(24),
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFFF59E0B).withValues(
+                color: SoftPalette.amber300.withValues(
                   alpha: _hov
                       ? (isDark ? 0.35 : 0.22)
                       : (isDark ? 0.18 : 0.12),
@@ -1111,8 +1110,8 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
               ),
               BoxShadow(
                 color: isDark
-                    ? Colors.black.withValues(alpha: 0.45)
-                    : const Color(0xFF0F172A).withValues(alpha: 0.06),
+                    ? SoftPalette.gray900.withValues(alpha: 0.45)
+                    : SoftPalette.slate900.withValues(alpha: 0.06),
                 blurRadius: 10,
                 offset: const Offset(0, 2),
               ),
@@ -1120,8 +1119,6 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
           ),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(24),
-            child: BackdropFilter(
-              filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
               child: Container(
                 padding: const EdgeInsets.all(18),
                 decoration: BoxDecoration(
@@ -1131,20 +1128,20 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
                     end: Alignment.bottomRight,
                     colors: isDark
                         ? [
-                            const Color(0xFF1E293B).withValues(alpha: 0.95),
-                            const Color(0xFF0F172A).withValues(alpha: 0.98),
+                            SoftPalette.slate800.withValues(alpha: 0.95),
+                            SoftPalette.slate900.withValues(alpha: 0.98),
                           ]
                         : [
-                            const Color(0xFFFFFBEB).withValues(alpha: 0.98),
-                            Colors.white.withValues(alpha: 0.98),
+                            SoftPalette.yellow50m.withValues(alpha: 0.98),
+                            SoftPalette.gray50.withValues(alpha: 0.98),
                           ],
                   ),
                   border: Border.all(
                     color: _hov
-                        ? const Color(0xFFF59E0B).withValues(alpha: 0.85)
+                        ? SoftPalette.amber300.withValues(alpha: 0.85)
                         : (isDark
-                            ? const Color(0xFFF59E0B).withValues(alpha: 0.38)
-                            : const Color(0xFFF59E0B).withValues(alpha: 0.50)),
+                            ? SoftPalette.amber300.withValues(alpha: 0.38)
+                            : SoftPalette.amber300.withValues(alpha: 0.50)),
                     width: _hov ? 1.5 : 1.2,
                   ),
                 ),
@@ -1162,8 +1159,8 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
                             shape: BoxShape.circle,
                             gradient: RadialGradient(
                               colors: [
-                                const Color(0xFFF59E0B).withValues(alpha: isDark ? 0.30 : 0.18),
-                                const Color(0xFFF59E0B).withValues(alpha: 0.0),
+                                SoftPalette.amber300.withValues(alpha: isDark ? 0.30 : 0.18),
+                                SoftPalette.amber300.withValues(alpha: 0.0),
                               ],
                             ),
                           ),
@@ -1188,12 +1185,12 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
                                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                         decoration: BoxDecoration(
                                           gradient: const LinearGradient(
-                                            colors: [Color(0xFFF59E0B), Color(0xFFD97706)],
+                                            colors: [SoftPalette.amber300, SoftPalette.orange400],
                                           ),
                                           borderRadius: BorderRadius.circular(12),
                                           boxShadow: [
                                             BoxShadow(
-                                              color: const Color(0xFFF59E0B).withValues(alpha: 0.30),
+                                              color: SoftPalette.amber300.withValues(alpha: 0.30),
                                               blurRadius: 6,
                                               offset: const Offset(0, 2),
                                             ),
@@ -1202,12 +1199,12 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
                                         child: const Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
-                                            Icon(Icons.star_rounded, color: Colors.white, size: 11),
+                                            Icon(Icons.star_rounded, color: SoftPalette.gray50, size: 11),
                                             SizedBox(width: 3),
                                             Text(
                                               '#1 TOP PERFORMER',
                                               style: TextStyle(
-                                                color: Colors.white,
+                                                color: SoftPalette.gray50,
                                                 fontSize: 9,
                                                 fontWeight: FontWeight.w900,
                                                 letterSpacing: 0.6,
@@ -1222,7 +1219,7 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
                                   Text(
                                     widget.branchName,
                                     style: TextStyle(
-                                      color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                                      color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                                       fontSize: 16.5,
                                       fontWeight: FontWeight.w900,
                                       letterSpacing: -0.4,
@@ -1246,28 +1243,31 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
                                 padding: const EdgeInsets.all(4),
                                 decoration: BoxDecoration(
                                   color: isDark
-                                      ? const Color(0xFF0F172A).withValues(alpha: 0.85)
-                                      : const Color(0xFFFFFBEB),
+                                      ? SoftPalette.slate900.withValues(alpha: 0.85)
+                                      : SoftPalette.yellow50m,
                                   shape: BoxShape.circle,
                                   border: Border.all(
-                                    color: const Color(0xFFF59E0B).withValues(alpha: isDark ? 0.55 : 0.70),
+                                    color: SoftPalette.amber300.withValues(alpha: isDark ? 0.55 : 0.70),
                                     width: 1.5,
                                   ),
                                   boxShadow: [
                                     BoxShadow(
-                                      color: const Color(0xFFF59E0B).withValues(alpha: isDark ? 0.35 : 0.25),
+                                      color: SoftPalette.amber300.withValues(alpha: isDark ? 0.35 : 0.25),
                                       blurRadius: 10,
                                       offset: const Offset(0, 3),
                                     ),
                                   ],
                                 ),
-                                child: Lottie.asset(
+                                child: RepaintBoundary(
+                                  child: Lottie.asset(
                                   'assets/animations/Trophy.json',
                                   fit: BoxFit.contain,
+                                  repeat: !GDecor.reduceMotion, // reduce motion: play once, no endless loop
                                   errorBuilder: (_, __, ___) => const Icon(
                                     Icons.emoji_events_rounded,
-                                    color: Color(0xFFF59E0B),
+                                    color: SoftPalette.amber300,
                                     size: 28,
+                                  ),
                                   ),
                                 ),
                               ),
@@ -1281,7 +1281,7 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
                             gradient: LinearGradient(
                               colors: [
                                 Colors.transparent,
-                                isDark ? Colors.white.withValues(alpha: 0.15) : const Color(0xFFF59E0B).withValues(alpha: 0.30),
+                                isDark ? SoftPalette.gray50.withValues(alpha: 0.15) : SoftPalette.amber300.withValues(alpha: 0.30),
                                 Colors.transparent,
                               ],
                             ),
@@ -1293,9 +1293,9 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                             children: [
-                              _metricRow(Icons.payments_rounded, 'Revenue', fmtPKR(widget.revenue), isDark, valueColor: const Color(0xFF10B981)),
-                              _metricRow(Icons.volunteer_activism_rounded, 'Donations', fmtPKR(widget.donations), isDark, valueColor: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706)),
-                              _metricRow(Icons.people_alt_rounded, 'Patients', widget.patients.toString(), isDark, valueColor: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7)),
+                              _metricRow(Icons.payments_rounded, 'Revenue', fmtPKR(widget.revenue), isDark, valueColor: SoftPalette.emerald350),
+                              _metricRow(Icons.volunteer_activism_rounded, 'Donations', fmtPKR(widget.donations), isDark, valueColor: isDark ? SoftPalette.amber200 : SoftPalette.orange400),
+                              _metricRow(Icons.people_alt_rounded, 'Patients', widget.patients.toString(), isDark, valueColor: isDark ? SoftPalette.sky350 : SoftPalette.sky500),
                               _metricRow(
                                 isUp ? Icons.trending_up_rounded : (hasGrowth ? Icons.trending_down_rounded : Icons.trending_up_rounded),
                                 'Growth',
@@ -1304,8 +1304,8 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
                                     : (widget.revenue > 0 || widget.patients > 0 ? '+100% (Active Today)' : 'Steady (0%)'),
                                 isDark,
                                 valueColor: hasGrowth
-                                    ? (isUp ? const Color(0xFF10B981) : const Color(0xFFEF4444))
-                                    : (widget.revenue > 0 || widget.patients > 0 ? const Color(0xFF10B981) : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B))),
+                                    ? (isUp ? SoftPalette.emerald350 : SoftPalette.red400)
+                                    : (widget.revenue > 0 || widget.patients > 0 ? SoftPalette.emerald350 : (isDark ? SoftPalette.slate350 : SoftPalette.slate550)),
                               ),
                             ],
                           ),
@@ -1315,7 +1315,6 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
                   ],
                 ),
               ),
-            ),
           ),
         ),
       ),
@@ -1326,17 +1325,17 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5.5),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A).withValues(alpha: 0.60) : Colors.white,
+        color: isDark ? SoftPalette.slate900.withValues(alpha: 0.60) : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFFDE68A).withValues(alpha: 0.85),
+          color: isDark ? SoftPalette.gray50.withValues(alpha: 0.08) : SoftPalette.yellow150.withValues(alpha: 0.85),
           width: 0.9,
         ),
         boxShadow: isDark
             ? []
             : [
                 BoxShadow(
-                  color: const Color(0xFF0F172A).withValues(alpha: 0.03),
+                  color: SoftPalette.slate900.withValues(alpha: 0.03),
                   blurRadius: 4,
                   offset: const Offset(0, 1.5),
                 ),
@@ -1346,14 +1345,14 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
         children: [
           Icon(
             icon,
-            color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706),
+            color: isDark ? SoftPalette.amber200 : SoftPalette.orange400,
             size: 14,
           ),
           const SizedBox(width: 8),
           Text(
             label,
             style: TextStyle(
-              color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+              color: isDark ? SoftPalette.slate200 : SoftPalette.slate600,
               fontSize: 11,
               fontWeight: FontWeight.w600,
             ),
@@ -1362,7 +1361,7 @@ class _HomeBestBranchSpotlightState extends State<HomeBestBranchSpotlight> {
           Text(
             value,
             style: TextStyle(
-              color: valueColor ?? (isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A)),
+              color: valueColor ?? (isDark ? SoftPalette.gray50 : SoftPalette.slate900),
               fontSize: 12,
               fontWeight: FontWeight.w800,
             ),
@@ -1386,8 +1385,6 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
     
     return ClipRRect(
       borderRadius: BorderRadius.circular(24),
-      child: BackdropFilter(
-        filter: ui.ImageFilter.blur(sigmaX: 20, sigmaY: 20),
         child: Container(
           padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
@@ -1397,23 +1394,23 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
               end: Alignment.bottomRight,
               colors: isDark
                   ? [
-                      const Color(0xFF1E293B).withValues(alpha: 0.85),
-                      const Color(0xFF0F172A).withValues(alpha: 0.72),
+                      SoftPalette.slate800.withValues(alpha: 0.90),
+                      SoftPalette.slate900.withValues(alpha: 0.82),
                     ]
                   : [
-                      Colors.white.withValues(alpha: 0.98),
-                      const Color(0xFFF8FAFC).withValues(alpha: 0.90),
+                      SoftPalette.gray50.withValues(alpha: 0.98),
+                      SoftPalette.gray50.withValues(alpha: 0.90),
                     ],
             ),
             border: Border.all(
               color: isDark
-                  ? Colors.white.withValues(alpha: 0.14)
-                  : const Color(0xFFE2E8F0).withValues(alpha: 0.85),
+                  ? SoftPalette.gray50.withValues(alpha: 0.14)
+                  : SoftPalette.slate150.withValues(alpha: 0.85),
               width: 1.0,
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.04),
+                color: SoftPalette.gray900.withValues(alpha: isDark ? 0.35 : 0.04),
                 blurRadius: 16,
                 offset: const Offset(0, 4),
               ),
@@ -1428,7 +1425,7 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
                   Text(
                     'Patients by Category',
                     style: TextStyle(
-                      color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                      color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                       fontSize: 14,
                       fontWeight: FontWeight.w800,
                       letterSpacing: -0.3,
@@ -1437,17 +1434,17 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF10B981).withValues(alpha: isDark ? 0.20 : 0.12),
+                      color: SoftPalette.emerald350.withValues(alpha: isDark ? 0.20 : 0.12),
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
-                        color: const Color(0xFF10B981).withValues(alpha: isDark ? 0.35 : 0.30),
+                        color: SoftPalette.emerald350.withValues(alpha: isDark ? 0.35 : 0.30),
                         width: 0.8,
                       ),
                     ),
                     child: Text(
                       '$total TOTAL',
                       style: const TextStyle(
-                        color: Color(0xFF10B981),
+                        color: SoftPalette.emerald350,
                         fontSize: 9,
                         fontWeight: FontWeight.w900,
                         letterSpacing: 0.5,
@@ -1460,7 +1457,7 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
               Expanded(
                 child: total == 0
                     ? const Center(
-                        child: Text('No patient data in this period', style: TextStyle(color: Color(0xFF94A3B8), fontSize: 12)),
+                        child: Text('No patient data in this period', style: TextStyle(color: SoftPalette.slate350, fontSize: 12)),
                       )
                     : Row(
                         children: [
@@ -1471,9 +1468,9 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
                               mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                _donutLegendItem('Zakat', s.zakat, total, const Color(0xFF10B981), Icons.assignment_ind_rounded, isDark),
-                                _donutLegendItem('Non-Zakat', s.nonZakat, total, const Color(0xFF3B82F6), Icons.badge_rounded, isDark),
-                                _donutLegendItem('GMWF', s.gmwf, total, const Color(0xFFF59E0B), Icons.child_care_rounded, isDark),
+                                _donutLegendItem('Zakat', s.zakat, total, SoftPalette.emerald350, Icons.assignment_ind_rounded, isDark),
+                                _donutLegendItem('Non-Zakat', s.nonZakat, total, SoftPalette.blue500, Icons.badge_rounded, isDark),
+                                _donutLegendItem('GMWF', s.gmwf, total, SoftPalette.amber300, Icons.child_care_rounded, isDark),
                               ],
                             ),
                           ),
@@ -1498,7 +1495,7 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
                                       Text(
                                         total.toString(),
                                         style: TextStyle(
-                                          color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                                          color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                                           fontSize: 22,
                                           fontWeight: FontWeight.w900,
                                           letterSpacing: -0.5,
@@ -1509,7 +1506,7 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
                                       Text(
                                         'Total Patients',
                                         style: TextStyle(
-                                          color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                          color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
                                           fontSize: 9.5,
                                           fontWeight: FontWeight.w700,
                                         ),
@@ -1526,7 +1523,6 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
             ],
           ),
         ),
-      ),
     );
   }
 
@@ -1535,7 +1531,7 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
       decoration: BoxDecoration(
-        color: isDark ? color.withValues(alpha: 0.12) : Colors.white.withValues(alpha: 0.90),
+        color: isDark ? color.withValues(alpha: 0.12) : SoftPalette.gray50.withValues(alpha: 0.90),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: color.withValues(alpha: isDark ? 0.25 : 0.20),
@@ -1570,7 +1566,7 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
                 ),
               ],
             ),
-            child: Icon(icon, color: Colors.white, size: 12),
+            child: Icon(icon, color: SoftPalette.gray50, size: 12),
           ),
           const SizedBox(width: 8),
           Expanded(
@@ -1581,7 +1577,7 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
                 Text(
                   label,
                   style: TextStyle(
-                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                    color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
                     fontSize: 9.5,
                     fontWeight: FontWeight.w700,
                   ),
@@ -1590,7 +1586,7 @@ class HomePatientsByCategoryDonut extends StatelessWidget {
                 Text(
                   val.toString(),
                   style: TextStyle(
-                    color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                    color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                     fontSize: 13.5,
                     fontWeight: FontWeight.w900,
                   ),
@@ -1642,7 +1638,7 @@ class _DonutChartPainter extends CustomPainter {
     
     // Background track ring
     final paintTrack = Paint()
-      ..color = isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE2E8F0)
+      ..color = isDark ? SoftPalette.gray50.withValues(alpha: 0.08) : SoftPalette.slate150
       ..style = PaintingStyle.stroke
       ..strokeWidth = 14
       ..strokeCap = StrokeCap.round;
@@ -1652,19 +1648,19 @@ class _DonutChartPainter extends CustomPainter {
     if (total == 0) return;
 
     final paintZ = Paint()
-      ..color = const Color(0xFF10B981)
+      ..color = SoftPalette.emerald350
       ..style = PaintingStyle.stroke
       ..strokeWidth = 14
       ..strokeCap = StrokeCap.round;
 
     final paintNz = Paint()
-      ..color = const Color(0xFF3B82F6)
+      ..color = SoftPalette.blue500
       ..style = PaintingStyle.stroke
       ..strokeWidth = 14
       ..strokeCap = StrokeCap.round;
 
     final paintGm = Paint()
-      ..color = const Color(0xFFF59E0B)
+      ..color = SoftPalette.amber300
       ..style = PaintingStyle.stroke
       ..strokeWidth = 14
       ..strokeCap = StrokeCap.round;
@@ -1712,11 +1708,11 @@ class HomeRecentDonationsTable extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(DS.s2 + 4),
       decoration: BoxDecoration(
-        color: isDark ? t.bgCard : Colors.white,
+        color: isDark ? t.bgCard : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(DS.r2),
         border: Border.all(color: isDark ? t.bgRule : DS.border),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4)),
+          BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4)),
         ],
       ),
       child: Column(
@@ -1726,7 +1722,7 @@ class HomeRecentDonationsTable extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text('Recent Donations',
-                  style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+                  style: TextStyle(color: isDark ? t.textPrimary : SoftPalette.slate900, fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
               Text('View all', style: TextStyle(color: t.accent, fontSize: 10, fontWeight: FontWeight.w700)),
             ],
           ),
@@ -1763,12 +1759,12 @@ class HomeRecentDonationsTable extends StatelessWidget {
                   children: [
                     Expanded(
                       flex: 3,
-                      child: Text(donorName, style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 11.5, fontWeight: FontWeight.w700), overflow: TextOverflow.ellipsis),
+                      child: Text(donorName, style: TextStyle(color: isDark ? t.textPrimary : SoftPalette.slate900, fontSize: 11.5, fontWeight: FontWeight.w700), overflow: TextOverflow.ellipsis),
                     ),
                     Expanded(
                       flex: 2,
                       child: Center(
-                        child: Text('Rs ${fmtNum(amt.toInt())}', style: const TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.w800)),
+                        child: Text('Rs ${fmtNum(amt.toInt())}', style: const TextStyle(color: SoftPalette.emerald350, fontSize: 11, fontWeight: FontWeight.w800)),
                       ),
                     ),
                     Expanded(
@@ -1805,11 +1801,11 @@ class HomeRecentPatientsTable extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(DS.s2 + 4),
       decoration: BoxDecoration(
-        color: isDark ? t.bgCard : Colors.white,
+        color: isDark ? t.bgCard : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(DS.r2),
         border: Border.all(color: isDark ? t.bgRule : DS.border),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4)),
+          BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4)),
         ],
       ),
       child: Column(
@@ -1819,7 +1815,7 @@ class HomeRecentPatientsTable extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text('Recent Patients',
-                  style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+                  style: TextStyle(color: isDark ? t.textPrimary : SoftPalette.slate900, fontSize: 13, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
               Text('View all', style: TextStyle(color: t.accent, fontSize: 10, fontWeight: FontWeight.w700)),
             ],
           ),
@@ -1853,14 +1849,14 @@ class HomeRecentPatientsTable extends StatelessWidget {
               
               final timeStr = DateFormat('hh:mm a').format(a.timestamp);
 
-              Color badgeBg = isDark ? const Color(0xFF064E3B) : const Color(0xFFECFDF5);
-              Color badgeText = isDark ? const Color(0xFF34D399) : const Color(0xFF047857);
+              Color badgeBg = isDark ? SoftPalette.emerald700 : SoftPalette.emerald50;
+              Color badgeText = isDark ? SoftPalette.emerald300 : SoftPalette.emerald550;
               if (category.toLowerCase() == 'non-zakat') {
-                badgeBg = isDark ? const Color(0xFF1E3A8A) : const Color(0xFFEFF6FF);
-                badgeText = isDark ? const Color(0xFF60A5FA) : const Color(0xFF1D4ED8);
+                badgeBg = isDark ? SoftPalette.blue700 : SoftPalette.slate100;
+                badgeText = isDark ? SoftPalette.blue350 : SoftPalette.blue550;
               } else if (category.toLowerCase() == 'gmwf') {
-                badgeBg = isDark ? const Color(0xFF78350F) : const Color(0xFFFEF3C7);
-                badgeText = isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
+                badgeBg = isDark ? SoftPalette.orange700 : SoftPalette.yellow100;
+                badgeText = isDark ? SoftPalette.amber200 : SoftPalette.orange400;
               }
 
               return Container(
@@ -1873,7 +1869,7 @@ class HomeRecentPatientsTable extends StatelessWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(pId, style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 11, fontWeight: FontWeight.w700)),
+                          Text(pId, style: TextStyle(color: isDark ? t.textPrimary : SoftPalette.slate900, fontSize: 11, fontWeight: FontWeight.w700)),
                           Text(pName, style: const TextStyle(color: DS.neutral, fontSize: 9, fontWeight: FontWeight.w500), overflow: TextOverflow.ellipsis),
                         ],
                       ),
@@ -1936,7 +1932,7 @@ class _HomeRevenueLineChartState extends State<HomeRevenueLineChart> {
       return Container(
         height: 250,
         decoration: BoxDecoration(
-          color: widget.t.isDarkCanvas ? const Color(0xFF1E232D) : Colors.white,
+          color: widget.t.isDarkCanvas ? SoftPalette.slate800 : SoftPalette.gray50,
           borderRadius: BorderRadius.circular(DS.r2),
           border: Border.all(color: DS.border),
         ),
@@ -1975,11 +1971,11 @@ class _HomeRevenueLineChartState extends State<HomeRevenueLineChart> {
     return Container(
       padding: const EdgeInsets.all(DS.s2 + 4),
       decoration: BoxDecoration(
-        color: isDark ? widget.t.bgCard : Colors.white,
+        color: isDark ? widget.t.bgCard : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(DS.r2),
         border: Border.all(color: isDark ? widget.t.bgRule : DS.border),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4)),
+          BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4)),
         ],
       ),
       child: Column(
@@ -1993,7 +1989,7 @@ class _HomeRevenueLineChartState extends State<HomeRevenueLineChart> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Monthly Progress Trends',
-                        style: TextStyle(color: isDark ? widget.t.textPrimary : const Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+                        style: TextStyle(color: isDark ? widget.t.textPrimary : SoftPalette.slate900, fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
                     const SizedBox(height: 2),
                     const Text('Metrics for the last 5 months',
                         style: TextStyle(color: DS.neutral, fontSize: 11, fontWeight: FontWeight.w500)),
@@ -2009,18 +2005,18 @@ class _HomeRevenueLineChartState extends State<HomeRevenueLineChart> {
                       children: [
                         Text(
                           DateFormat('MMM yyyy').format(pt.date),
-                          style: TextStyle(color: isDark ? widget.t.textPrimary : const Color(0xFF111827), fontSize: 11, fontWeight: FontWeight.w700),
+                          style: TextStyle(color: isDark ? widget.t.textPrimary : SoftPalette.slate900, fontSize: 11, fontWeight: FontWeight.w700),
                         ),
                         const SizedBox(height: 4),
                         Row(
                           children: [
-                            _hoverPill('Donations', fmtPKR(pt.donations), const Color(0xFF10B981)),
+                            _hoverPill('Donations', fmtPKR(pt.donations), SoftPalette.emerald350),
                             const SizedBox(width: 4),
                             _hoverPill('Patients Rev', fmtPKR(pt.patientsRevenue), widget.t.accent),
                             const SizedBox(width: 4),
-                            _hoverPill('Tokens', pt.tokens.toString(), const Color(0xFF3B82F6)),
+                            _hoverPill('Tokens', pt.tokens.toString(), SoftPalette.blue500),
                             const SizedBox(width: 4),
-                            _hoverPill('Staff', pt.employeesPresent.toString(), const Color(0xFF8B5CF6)),
+                            _hoverPill('Staff', pt.employeesPresent.toString(), SoftPalette.violet500),
                           ],
                         ),
                       ],
@@ -2086,13 +2082,13 @@ class _HomeRevenueLineChartState extends State<HomeRevenueLineChart> {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _legendItem('Donations', const Color(0xFF10B981)),
+                _legendItem('Donations', SoftPalette.emerald350),
                 const SizedBox(width: 12),
                 _legendItem('Patients Revenue', widget.t.accent),
                 const SizedBox(width: 12),
-                _legendItem('Tokens Issued', const Color(0xFF3B82F6)),
+                _legendItem('Tokens Issued', SoftPalette.blue500),
                 const SizedBox(width: 12),
-                _legendItem('Employees Present', const Color(0xFF8B5CF6)),
+                _legendItem('Employees Present', SoftPalette.violet500),
               ],
             ),
           ),
@@ -2192,9 +2188,9 @@ class _MultiLineChartPainter extends CustomPainter {
       canvas.drawLine(Offset(0, y), Offset(width, y), gridPaint);
     }
 
-    final donColor = const Color(0xFF10B981);
-    final tokColor = const Color(0xFF3B82F6);
-    final empColor = const Color(0xFF8B5CF6);
+    final donColor = SoftPalette.emerald350;
+    final tokColor = SoftPalette.blue500;
+    final empColor = SoftPalette.violet500;
 
     // 2. Draw Lines (Donations, Patients Rev, Tokens, Employees)
     _drawLine(canvas, points.map((p) => p.donations.toDouble()).toList(), donColor, stepX, chartHeight, maxMoney);
@@ -2375,18 +2371,18 @@ class HomePatientsByBranchBarChart extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(DS.s2 + 4),
       decoration: BoxDecoration(
-        color: isDark ? t.bgCard : Colors.white,
+        color: isDark ? t.bgCard : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(DS.r2),
         border: Border.all(color: isDark ? t.bgRule : DS.border),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4)),
+          BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4)),
         ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Patients by Branch (Last 7 Days)',
-              style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+              style: TextStyle(color: isDark ? t.textPrimary : SoftPalette.slate900, fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
           const SizedBox(height: DS.s2),
           if (sortedRows.isEmpty)
             const Expanded(
@@ -2414,7 +2410,7 @@ class HomePatientsByBranchBarChart extends StatelessWidget {
                         width: 110,
                         child: Text(
                           row.name,
-                          style: TextStyle(color: isDark ? t.textSecondary : const Color(0xFF4B5563), fontSize: 11, fontWeight: FontWeight.w700),
+                          style: TextStyle(color: isDark ? t.textSecondary : SoftPalette.slate600, fontSize: 11, fontWeight: FontWeight.w700),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -2428,7 +2424,7 @@ class HomePatientsByBranchBarChart extends StatelessWidget {
                                 Container(
                                   height: 10,
                                   decoration: BoxDecoration(
-                                    color: isDark ? t.bg : const Color(0xFFF3F4F6),
+                                    color: isDark ? t.bg : SoftPalette.gray100,
                                     borderRadius: BorderRadius.circular(5),
                                   ),
                                 ),
@@ -2439,7 +2435,7 @@ class HomePatientsByBranchBarChart extends StatelessWidget {
                                     height: 10,
                                     decoration: BoxDecoration(
                                       gradient: const LinearGradient(
-                                        colors: [Color(0xFF0F766E), Color(0xFF0D9488)],
+                                        colors: [SoftPalette.teal550, SoftPalette.teal500],
                                       ),
                                       borderRadius: BorderRadius.circular(5),
                                     ),
@@ -2456,7 +2452,7 @@ class HomePatientsByBranchBarChart extends StatelessWidget {
                         width: 24,
                         child: Text(
                           val.toString(),
-                          style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 12, fontWeight: FontWeight.w900),
+                          style: TextStyle(color: isDark ? t.textPrimary : SoftPalette.slate900, fontSize: 12, fontWeight: FontWeight.w900),
                           textAlign: TextAlign.right,
                         ),
                       ),
@@ -2496,11 +2492,11 @@ class HomeRecentActivityFeed extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(DS.s2 + 4),
       decoration: BoxDecoration(
-        color: isDark ? t.bgCard : Colors.white,
+        color: isDark ? t.bgCard : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(DS.r2),
         border: Border.all(color: isDark ? t.bgRule : DS.border),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4)),
+          BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4)),
         ],
       ),
       child: Column(
@@ -2510,7 +2506,7 @@ class HomeRecentActivityFeed extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text('Recent Activity',
-                  style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+                  style: TextStyle(color: isDark ? t.textPrimary : SoftPalette.slate900, fontSize: 14, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
               InkWell(
                 onTap: () {
                   final reportsModule = availableModules.firstWhere(
@@ -2542,17 +2538,17 @@ class HomeRecentActivityFeed extends StatelessWidget {
                   final isToken = act.type == 'token';
                   
                   // Configure color and icons to match the mockup
-                  Color iconColor = const Color(0xFF3B82F6); // Blue for Token/Default
+                  Color iconColor = SoftPalette.blue500; // Blue for Token/Default
                   IconData iconData = Icons.confirmation_number_rounded;
                   
                   if (isDon) {
-                    iconColor = const Color(0xFF10B981); // Green for Donations
+                    iconColor = SoftPalette.emerald350; // Green for Donations
                     iconData = Icons.volunteer_activism_rounded;
                   } else if (act.type == 'reception' || act.title.contains('Register') || act.title.contains('Patient')) {
-                    iconColor = const Color(0xFF8B5CF6); // Purple for Patient Register
+                    iconColor = SoftPalette.violet500; // Purple for Patient Register
                     iconData = Icons.person_add_rounded;
                   } else if (act.type == 'revenue' || act.title.contains('Revenue') || act.title.contains('Record')) {
-                    iconColor = const Color(0xFFF59E0B); // Orange for Revenue
+                    iconColor = SoftPalette.amber300; // Orange for Revenue
                     iconData = Icons.payments_rounded;
                   }
 
@@ -2593,7 +2589,7 @@ class HomeRecentActivityFeed extends StatelessWidget {
                               children: [
                                 Text(
                                   act.title,
-                                  style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 11.5, fontWeight: FontWeight.w700),
+                                  style: TextStyle(color: isDark ? t.textPrimary : SoftPalette.slate900, fontSize: 11.5, fontWeight: FontWeight.w700),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -2660,18 +2656,18 @@ class QuickActionsRow extends StatelessWidget {
     } catch (_) {}
 
     final List<Map<String, dynamic>> targetActions = [
-      {'id': 'branches', 'label': 'Branches', 'icon': Icons.store_outlined, 'color': const Color(0xFF0D9488)},
-      {'id': 'employees', 'label': 'Staff Attendance', 'icon': Icons.badge_outlined, 'color': const Color(0xFF6366F1)},
-      {'id': 'madrassa_attendance', 'label': 'Madrassa Attend.', 'icon': Icons.how_to_reg_rounded, 'color': const Color(0xFFEC4899)},
-      {'id': 'madrassa_students', 'label': 'Madrassa Students', 'icon': Icons.groups_rounded, 'color': const Color(0xFF14B8A6)},
-      {'id': 'school_attendance', 'label': 'School Students', 'icon': Icons.school_rounded, 'color': const Color(0xFF10B981)},
-      {'id': 'school_teacher_attendance', 'label': 'School Faculty', 'icon': Icons.co_present_rounded, 'color': const Color(0xFF8B5CF6)},
-      {'id': 'office_boy', 'label': todayFoodTokens > 0 ? 'Food Tokens ($todayFoodTokens)' : 'Food Tokens', 'icon': Icons.room_service_rounded, 'color': const Color(0xFFF59E0B)},
-      {'id': 'dasterkhwaan_inventory', 'label': 'Dasterkhwaan', 'icon': Icons.inventory_2_outlined, 'color': const Color(0xFFD97706)},
-      {'id': 'inventory', 'label': 'Med Inventory', 'icon': Icons.medication_liquid_rounded, 'color': const Color(0xFF0284C7)},
-      {'id': 'finance', 'label': 'Finance & HR', 'icon': Icons.monetization_on_rounded, 'color': const Color(0xFFEF4444)},
-      {'id': 'donations', 'label': 'Add Donation', 'icon': Icons.volunteer_activism_rounded, 'color': const Color(0xFF059669)},
-      {'id': 'patients_registration', 'label': 'Add Patient', 'icon': Icons.person_add_rounded, 'color': const Color(0xFF7C3AED)},
+      {'id': 'branches', 'label': 'Branches', 'icon': Icons.store_outlined, 'color': SoftPalette.teal500},
+      {'id': 'employees', 'label': 'Staff Attendance', 'icon': Icons.badge_outlined, 'color': SoftPalette.indigo500},
+      {'id': 'madrassa_attendance', 'label': 'Madrassa Attend.', 'icon': Icons.how_to_reg_rounded, 'color': SoftPalette.pink400},
+      {'id': 'madrassa_students', 'label': 'Madrassa Students', 'icon': Icons.groups_rounded, 'color': SoftPalette.teal350},
+      {'id': 'school_attendance', 'label': 'School Students', 'icon': Icons.school_rounded, 'color': SoftPalette.emerald350},
+      {'id': 'school_teacher_attendance', 'label': 'School Faculty', 'icon': Icons.co_present_rounded, 'color': SoftPalette.violet500},
+      {'id': 'office_boy', 'label': todayFoodTokens > 0 ? 'Food Tokens ($todayFoodTokens)' : 'Food Tokens', 'icon': Icons.room_service_rounded, 'color': SoftPalette.amber300},
+      {'id': 'dasterkhwaan_inventory', 'label': 'Dasterkhwaan', 'icon': Icons.inventory_2_outlined, 'color': SoftPalette.orange400},
+      {'id': 'inventory', 'label': 'Med Inventory', 'icon': Icons.medication_liquid_rounded, 'color': SoftPalette.sky500},
+      {'id': 'finance', 'label': 'Finance & HR', 'icon': Icons.monetization_on_rounded, 'color': SoftPalette.red400},
+      {'id': 'donations', 'label': 'Add Donation', 'icon': Icons.volunteer_activism_rounded, 'color': SoftPalette.emerald500},
+      {'id': 'patients_registration', 'label': 'Add Patient', 'icon': Icons.person_add_rounded, 'color': SoftPalette.violet550},
     ];
 
     final activeActions = targetActions.where((action) {
@@ -2692,11 +2688,11 @@ class QuickActionsRow extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(DS.s2),
       decoration: BoxDecoration(
-        color: isDark ? t.bgCard : Colors.white,
+        color: isDark ? t.bgCard : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(DS.r2),
         border: Border.all(color: isDark ? t.bgRule : DS.border),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4)),
+          BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 4)),
         ],
       ),
       child: LayoutBuilder(
@@ -2713,7 +2709,7 @@ class QuickActionsRow extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text('Quick Actions',
-                  style: TextStyle(color: isDark ? t.textPrimary : const Color(0xFF111827), fontSize: 15, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+                  style: TextStyle(color: isDark ? t.textPrimary : SoftPalette.slate900, fontSize: 15, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
               const SizedBox(height: DS.s2),
               Expanded(
                 child: GridView.builder(
@@ -2860,7 +2856,7 @@ class QuickActionsRow extends StatelessWidget {
                               overflow: TextOverflow.ellipsis,
                               textAlign: TextAlign.center,
                               style: TextStyle(
-                                color: isDark ? (Color.lerp(color, Colors.white, 0.25) ?? color) : color,
+                                color: isDark ? (Color.lerp(color, SoftPalette.gray50, 0.25) ?? color) : color,
                                 fontSize: 11,
                                 fontWeight: FontWeight.w700,
                                 height: 1.15,
@@ -2954,16 +2950,16 @@ class _BranchManagerTrophyBannerState extends State<BranchManagerTrophyBanner>
             : 'Proud of ${widget.branchName} team for securing a top-3 spot in yesterday\'s performance!');
 
     final goldColor = isTop
-        ? const Color(0xFFF59E0B)
-        : (isSecond ? const Color(0xFF60A5FA) : const Color(0xFFFB923C));
+        ? SoftPalette.amber300
+        : (isSecond ? SoftPalette.blue350 : SoftPalette.orange350);
 
     final bannerBg = widget.isDark
-        ? const Color(0xFF1E293B)
-        : (isTop ? const Color(0xFFFFFBEB) : const Color(0xFFF8FAFC));
+        ? SoftPalette.slate800
+        : (isTop ? SoftPalette.yellow50m : SoftPalette.gray50);
 
     final bannerBorder = isTop
-        ? const Color(0xFFF59E0B)
-        : (isSecond ? const Color(0xFF93C5FD) : const Color(0xFFFDBA74));
+        ? SoftPalette.amber300
+        : (isSecond ? SoftPalette.blue300 : SoftPalette.amber200);
 
     return FadeTransition(
       opacity: _fadeAnim,
@@ -2990,10 +2986,11 @@ class _BranchManagerTrophyBannerState extends State<BranchManagerTrophyBanner>
               SizedBox(
                 width: 58,
                 height: 58,
-                child: isTop
+                child: RepaintBoundary(child: isTop
                     ? Lottie.asset(
                         'assets/animations/Trophy.json',
                         fit: BoxFit.contain,
+                        repeat: !GDecor.reduceMotion,
                         errorBuilder: (_, __, ___) => Icon(
                           Icons.emoji_events_rounded,
                           size: 38,
@@ -3011,6 +3008,7 @@ class _BranchManagerTrophyBannerState extends State<BranchManagerTrophyBanner>
                             child: Lottie.asset(
                               'assets/animations/Trophy.json',
                               fit: BoxFit.contain,
+                              repeat: !GDecor.reduceMotion,
                               errorBuilder: (_, __, ___) => Icon(
                                 Icons.workspace_premium_rounded,
                                 size: 38,
@@ -3028,13 +3026,14 @@ class _BranchManagerTrophyBannerState extends State<BranchManagerTrophyBanner>
                             child: Lottie.asset(
                               'assets/animations/Trophy.json',
                               fit: BoxFit.contain,
+                              repeat: !GDecor.reduceMotion,
                               errorBuilder: (_, __, ___) => Icon(
                                 Icons.military_tech_rounded,
                                 size: 38,
                                 color: goldColor,
                               ),
                             ),
-                          )),
+                          ))),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -3057,7 +3056,7 @@ class _BranchManagerTrophyBannerState extends State<BranchManagerTrophyBanner>
                       style: TextStyle(
                         fontSize: 11.5,
                         fontWeight: FontWeight.w500,
-                        color: widget.isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
+                        color: widget.isDark ? SoftPalette.slate350 : SoftPalette.slate600,
                       ),
                     ),
                   ],
@@ -3066,7 +3065,7 @@ class _BranchManagerTrophyBannerState extends State<BranchManagerTrophyBanner>
               const SizedBox(width: 8),
               IconButton(
                 icon: const Icon(Icons.close_rounded, size: 18),
-                color: widget.isDark ? Colors.white54 : Colors.grey.shade600,
+                color: widget.isDark ? SoftPalette.gray50A54 : SoftPalette.gray500,
                 tooltip: 'Close',
                 onPressed: _handleManualClose,
               ),
@@ -3118,16 +3117,16 @@ class AppreciationTrophyDialog extends StatelessWidget {
     // Rank 2: Silver / Sky Blue
     // Rank 3: Warm Bronze / Copper
     final primaryColor = isTop
-        ? const Color(0xFFF59E0B)
-        : (isSecond ? const Color(0xFF0284C7) : const Color(0xFFEA580C));
+        ? SoftPalette.amber300
+        : (isSecond ? SoftPalette.sky500 : SoftPalette.orange400);
 
     final badgeBg = isTop
-        ? const Color(0xFFFEF3C7)
-        : (isSecond ? const Color(0xFFE0F2FE) : const Color(0xFFFFEDD5));
+        ? SoftPalette.yellow100
+        : (isSecond ? SoftPalette.slate100 : SoftPalette.amber100);
 
     final cardBg = isDark
-        ? (isTop ? const Color(0xFF1E293B) : (isSecond ? const Color(0xFF0F172A) : const Color(0xFF1C1917)))
-        : (isTop ? const Color(0xFFFFFBEB) : (isSecond ? const Color(0xFFF0F9FF) : const Color(0xFFFFF7ED)));
+        ? (isTop ? SoftPalette.slate800 : (isSecond ? SoftPalette.slate900 : SoftPalette.gray900))
+        : (isTop ? SoftPalette.yellow50m : (isSecond ? SoftPalette.slate50 : SoftPalette.amber50m));
 
     return Dialog(
       backgroundColor: Colors.transparent,
@@ -3172,10 +3171,11 @@ class AppreciationTrophyDialog extends StatelessWidget {
                       SizedBox(
                         width: 130,
                         height: 130,
-                        child: isTop
+                        child: RepaintBoundary(child: isTop
                             ? Lottie.asset(
                                 'assets/animations/Trophy.json',
                                 fit: BoxFit.contain,
+                                repeat: !GDecor.reduceMotion,
                                 errorBuilder: (_, __, ___) => Icon(
                                   Icons.emoji_events_rounded,
                                   size: 80,
@@ -3193,6 +3193,7 @@ class AppreciationTrophyDialog extends StatelessWidget {
                                     child: Lottie.asset(
                                       'assets/animations/Trophy.json',
                                       fit: BoxFit.contain,
+                                      repeat: !GDecor.reduceMotion,
                                       errorBuilder: (_, __, ___) => Icon(
                                         Icons.workspace_premium_rounded,
                                         size: 80,
@@ -3210,13 +3211,14 @@ class AppreciationTrophyDialog extends StatelessWidget {
                                     child: Lottie.asset(
                                       'assets/animations/Trophy.json',
                                       fit: BoxFit.contain,
+                                      repeat: !GDecor.reduceMotion,
                                       errorBuilder: (_, __, ___) => Icon(
                                         Icons.military_tech_rounded,
                                         size: 80,
                                         color: primaryColor,
                                       ),
                                     ),
-                                  )),
+                                  ))),
                       ),
                       const SizedBox(height: 12),
                       Container(
@@ -3242,7 +3244,7 @@ class AppreciationTrophyDialog extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 22,
                           fontWeight: FontWeight.w900,
-                          color: isDark ? Colors.white : const Color(0xFF0F172A),
+                          color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                           letterSpacing: -0.5,
                         ),
                         textAlign: TextAlign.center,
@@ -3263,7 +3265,7 @@ class AppreciationTrophyDialog extends StatelessWidget {
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w500,
-                          color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569),
+                          color: isDark ? SoftPalette.slate350 : SoftPalette.slate600,
                           height: 1.4,
                         ),
                         textAlign: TextAlign.center,
@@ -3273,10 +3275,10 @@ class AppreciationTrophyDialog extends StatelessWidget {
                         width: double.infinity,
                         child: ElevatedButton.icon(
                           onPressed: () => Navigator.of(context).pop(),
-                          icon: const Icon(Icons.celebration_rounded, size: 18, color: Colors.white),
+                          icon: const Icon(Icons.celebration_rounded, size: 18, color: SoftPalette.gray50),
                           label: const Text(
                             'View Performance',
-                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white),
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: SoftPalette.gray50),
                           ),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: primaryColor,
@@ -3297,15 +3299,18 @@ class AppreciationTrophyDialog extends StatelessWidget {
                   child: SizedBox(
                     width: 520,
                     height: 520,
-                    child: Lottie.asset(
+                    // 520x520 vector animation: own layer, and one burst only when reduce-motion is on.
+                    child: RepaintBoundary(
+                      child: Lottie.asset(
                       'assets/animations/party_celebration.json',
                       fit: BoxFit.contain,
-                      repeat: true,
+                      repeat: !GDecor.reduceMotion,
                       errorBuilder: (_, __, ___) => Lottie.asset(
                         'assets/animations/Party  Celebration.json',
                         fit: BoxFit.contain,
-                        repeat: true,
+                        repeat: !GDecor.reduceMotion,
                         errorBuilder: (_, __, ___) => const SizedBox.shrink(),
+                      ),
                       ),
                     ),
                   ),
@@ -4067,7 +4072,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.error_outline_rounded, size: 40, color: Colors.redAccent),
+                    const Icon(Icons.error_outline_rounded, size: 40, color: SoftPalette.red400),
                     const SizedBox(height: 12),
                     Text('Failed to load snapshot dashboard: $err',
                         style: const TextStyle(color: DS.neutral, fontSize: 13), textAlign: TextAlign.center),
@@ -4105,7 +4110,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                   width: 180,
                   height: 22,
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF1E293B) : Colors.grey.shade200,
+                    color: isDark ? SoftPalette.slate800 : SoftPalette.gray100,
                     borderRadius: BorderRadius.circular(6),
                   ),
                 ),
@@ -4122,7 +4127,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                     child: Container(
                       margin: EdgeInsets.only(right: index == (widget.isDesktop ? 4 : 1) ? 0 : 12),
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF1E293B) : Colors.grey.shade200,
+                        color: isDark ? SoftPalette.slate800 : SoftPalette.gray100,
                         borderRadius: BorderRadius.circular(22),
                       ),
                       padding: const EdgeInsets.all(14),
@@ -4136,7 +4141,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                                 width: 28,
                                 height: 28,
                                 decoration: BoxDecoration(
-                                  color: isDark ? const Color(0xFF334155) : Colors.grey.shade300,
+                                  color: isDark ? SoftPalette.slate700 : SoftPalette.gray150,
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                               ),
@@ -4144,7 +4149,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                                 width: 44,
                                 height: 16,
                                 decoration: BoxDecoration(
-                                  color: isDark ? const Color(0xFF334155) : Colors.grey.shade300,
+                                  color: isDark ? SoftPalette.slate700 : SoftPalette.gray150,
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                               ),
@@ -4155,7 +4160,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                             width: 60,
                             height: 18,
                             decoration: BoxDecoration(
-                              color: isDark ? const Color(0xFF334155) : Colors.grey.shade300,
+                              color: isDark ? SoftPalette.slate700 : SoftPalette.gray150,
                               borderRadius: BorderRadius.circular(4),
                             ),
                           ),
@@ -4164,7 +4169,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                             width: 80,
                             height: 10,
                             decoration: BoxDecoration(
-                              color: isDark ? const Color(0xFF334155) : Colors.grey.shade300,
+                              color: isDark ? SoftPalette.slate700 : SoftPalette.gray150,
                               borderRadius: BorderRadius.circular(4),
                             ),
                           ),
@@ -4180,7 +4185,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
             Container(
               height: 260,
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF1E293B) : Colors.grey.shade200,
+                color: isDark ? SoftPalette.slate800 : SoftPalette.gray100,
                 borderRadius: BorderRadius.circular(24),
               ),
             ),
@@ -4335,10 +4340,10 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                       target.startsWith(userBranchId)));
 
           if (!isAllowed) {
-            ScaffoldMessenger.of(context).showSnackBar(
+            AppToast.showSnackBar(context, 
               SnackBar(
                 content: Text('⚠️ Access restricted to your assigned branch (${RecentActivityService.resolveBranchName(userBranchId)}).'),
-                backgroundColor: Colors.orange.shade800,
+                backgroundColor: SoftPalette.orange400,
                 behavior: SnackBarBehavior.floating,
                 duration: const Duration(seconds: 3),
               ),
@@ -4370,7 +4375,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           value: fmtNum(today.donations),
           prefix: 'Rs ',
           icon: Icons.volunteer_activism_rounded,
-          color: const Color(0xFF10B981),
+          color: SoftPalette.emerald350,
           deltaPct: yesterday.donations == 0 ? null : ((today.donations - yesterday.donations) / yesterday.donations) * 100,
           onTap: () => tryOpenModule('donations'),
         );
@@ -4379,7 +4384,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           label: 'Patients Today',
           value: fmtNum(today.zakat + today.nonZakat + today.gmwf),
           icon: Icons.people_alt_rounded,
-          color: const Color(0xFF8B5CF6),
+          color: SoftPalette.violet500,
           deltaPct: (yesterday.zakat + yesterday.nonZakat + yesterday.gmwf) == 0 
               ? null 
               : (((today.zakat + today.nonZakat + today.gmwf) - (yesterday.zakat + yesterday.nonZakat + yesterday.gmwf)) / 
@@ -4396,7 +4401,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           label: 'Madrassa Attendance',
           value: fmtNum(data.madrassaPresentCount),
           icon: Icons.menu_book_rounded,
-          color: const Color(0xFF0D9488),
+          color: SoftPalette.teal500,
           deltaPct: data.madrassaYesterdayPresentCount == 0
               ? null
               : (((data.madrassaPresentCount - data.madrassaYesterdayPresentCount) / data.madrassaYesterdayPresentCount) * 100),
@@ -4407,7 +4412,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           label: 'Staff Attendance',
           value: fmtNum(data.empPresentCount),
           icon: Icons.co_present_rounded,
-          color: const Color(0xFF3F82F6),
+          color: SoftPalette.blue500,
           onTap: () => tryOpenModule('employees'),
         );
 
@@ -4415,7 +4420,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           label: 'School Students',
           value: fmtNum(data.studentPresentCount),
           icon: Icons.school_rounded,
-          color: const Color(0xFF2D9B83),
+          color: SoftPalette.teal500,
           onTap: () => tryOpenModule('school_attendance'),
         );
 
@@ -4423,7 +4428,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           label: 'School Teachers',
           value: fmtNum(data.teacherPresentCount),
           icon: Icons.record_voice_over_rounded,
-          color: const Color(0xFF8B5CF6),
+          color: SoftPalette.violet500,
           onTap: () => tryOpenModule('school_teacher_attendance'),
         );
 
@@ -4432,7 +4437,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           label: isBranchManager ? 'Top Camp Today' : 'Top Branch Today',
           value: topRow != null ? topRow.name : RecentActivityService.resolveBranchName(userBranchId.isNotEmpty ? userBranchId : 'Karachi'),
           icon: Icons.emoji_events_rounded,
-          color: const Color(0xFF0D9488),
+          color: SoftPalette.teal500,
           onTap: () => openBranchInBranchesModule(topBranchId),
         );
 
@@ -4440,7 +4445,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           label: 'Top Branch Today',
           value: topRow != null ? topRow.name : (bestBranch != null ? bestBranch.name : 'Karachi'),
           icon: Icons.emoji_events_rounded,
-          color: const Color(0xFF0D9488),
+          color: SoftPalette.teal500,
           onTap: () => openBranchInBranchesModule(topBranchId),
         );
 
@@ -4448,7 +4453,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           label: 'Food Tokens',
           value: fmtNum(today.dasterkhwaan),
           icon: Icons.room_service_rounded,
-          color: const Color(0xFFF59E0B),
+          color: SoftPalette.amber300,
           deltaPct: yesterday.dasterkhwaan == 0 ? null : ((today.dasterkhwaan - yesterday.dasterkhwaan) / yesterday.dasterkhwaan) * 100,
           onTap: () => tryOpenModule('office_boy'),
         );
@@ -4457,7 +4462,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           label: 'Food Tokens Served',
           value: fmtNum(today.dasterkhwaanServed),
           icon: Icons.restaurant_rounded,
-          color: const Color(0xFF10B981),
+          color: SoftPalette.emerald350,
           deltaPct: yesterday.dasterkhwaanServed == 0 ? null : ((today.dasterkhwaanServed - yesterday.dasterkhwaanServed) / yesterday.dasterkhwaanServed) * 100,
           onTap: () => tryOpenModule('office_boy'),
         );
@@ -4466,7 +4471,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
           label: 'Dasterkhawaan Stock',
           value: 'Stock',
           icon: Icons.inventory_2_outlined,
-          color: const Color(0xFFD97706),
+          color: SoftPalette.orange400,
           onTap: () => tryOpenModule('dasterkhwaan_inventory'),
         );
 
@@ -4686,14 +4691,14 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                                 value: fmtNum(activeStats.totalRevenue),
                                 prefix: 'Rs ',
                                 icon: Icons.payments_rounded,
-                                color: const Color(0xFF10B981),
+                                color: SoftPalette.emerald350,
                               ),
                               HomeStatTile(
                                 label: 'Donations',
                                 value: fmtNum(activeStats.donations),
                                 prefix: 'Rs ',
                                 icon: Icons.volunteer_activism_rounded,
-                                color: const Color(0xFF0D9488),
+                                color: SoftPalette.teal500,
                                 onTap: () => tryOpenModule('donations'),
                               ),
                               HomeStatTile(
@@ -4701,38 +4706,38 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
                                 value: fmtNum(activeStats.dispensaryRevenue),
                                 prefix: 'Rs ',
                                 icon: Icons.local_pharmacy_rounded,
-                                color: const Color(0xFF3F82F6),
+                                color: SoftPalette.blue500,
                               ),
                               HomeStatTile(
                                 label: 'Patients Treated',
                                 value: fmtNum(activeStats.tokens),
                                 icon: Icons.people_alt_rounded,
-                                color: const Color(0xFF8B5CF6),
+                                color: SoftPalette.violet500,
                               ),
                               HomeStatTile(
                                 label: 'Zakat Patients',
                                 value: fmtNum(activeStats.zakat),
                                 icon: Icons.assignment_ind_rounded,
-                                color: const Color(0xFFD97706),
+                                color: SoftPalette.orange400,
                               ),
                               HomeStatTile(
                                 label: 'Non-Zakat Patients',
                                 value: fmtNum(activeStats.nonZakat),
                                 icon: Icons.badge_rounded,
-                                color: const Color(0xFF06B6D4),
+                                color: SoftPalette.cyan350,
                               ),
                               HomeStatTile(
                                 label: 'Food Tokens Issued',
                                 value: fmtNum(activeStats.dasterkhwaan),
                                 icon: Icons.room_service_rounded,
-                                color: const Color(0xFFF59E0B),
+                                color: SoftPalette.amber300,
                                 onTap: () => tryOpenModule('office_boy'),
                               ),
                               HomeStatTile(
                                 label: 'Food Tokens Served',
                                 value: fmtNum(activeStats.dasterkhwaanServed),
                                 icon: Icons.restaurant_rounded,
-                                color: const Color(0xFF10B981),
+                                color: SoftPalette.emerald350,
                               ),
                             ];
 
@@ -4986,7 +4991,7 @@ class _KarachiCampSnapshotWidgetState extends State<KarachiCampSnapshotWidget> {
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.location_city_rounded, color: Color(0xFF0D9488), size: 20),
+                      const Icon(Icons.location_city_rounded, color: SoftPalette.teal500, size: 20),
                       const SizedBox(width: 8),
                       Text(
                         'Karachi Branch — Dual Dispensary Camps Breakdown',
@@ -5002,13 +5007,13 @@ class _KarachiCampSnapshotWidgetState extends State<KarachiCampSnapshotWidget> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0D9488).withValues(alpha: 0.12),
+                      color: SoftPalette.teal500.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Text(
                       'Combined: ${data.totalPatients} Patients Today',
                       style: const TextStyle(
-                        color: Color(0xFF0D9488),
+                        color: SoftPalette.teal500,
                         fontSize: 11.5,
                         fontWeight: FontWeight.w800,
                       ),
@@ -5035,7 +5040,7 @@ class _KarachiCampSnapshotWidgetState extends State<KarachiCampSnapshotWidget> {
                       eveningZakat: data.kapayaEveningZakat,
                       eveningNonZakat: data.kapayaEveningNonZakat,
                       eveningGmwf: data.kapayaEveningGmwf,
-                      badgeColor: const Color(0xFF7C3AED),
+                      badgeColor: SoftPalette.violet550,
                       icon: Icons.local_hospital_rounded,
                       isDark: isDark,
                     ),
@@ -5057,7 +5062,7 @@ class _KarachiCampSnapshotWidgetState extends State<KarachiCampSnapshotWidget> {
                       eveningZakat: data.hajiCampEveningZakat,
                       eveningNonZakat: data.hajiCampEveningNonZakat,
                       eveningGmwf: data.hajiCampEveningGmwf,
-                      badgeColor: const Color(0xFF2563EB),
+                      badgeColor: SoftPalette.blue550,
                       icon: Icons.campaign_rounded,
                       isDark: isDark,
                     ),
@@ -5108,7 +5113,7 @@ class _KarachiCampSnapshotWidgetState extends State<KarachiCampSnapshotWidget> {
                 child: Text(
                   title,
                   style: TextStyle(
-                    color: isDark ? Colors.white : const Color(0xFF1E293B),
+                    color: isDark ? SoftPalette.gray50 : SoftPalette.slate800,
                     fontSize: 13,
                     fontWeight: FontWeight.bold,
                   ),
@@ -5132,7 +5137,7 @@ class _KarachiCampSnapshotWidgetState extends State<KarachiCampSnapshotWidget> {
               Text(
                 'Rs $revenue',
                 style: const TextStyle(
-                  color: Color(0xFF10B981),
+                  color: SoftPalette.emerald350,
                   fontSize: 14,
                   fontWeight: FontWeight.w800,
                 ),
@@ -5143,9 +5148,9 @@ class _KarachiCampSnapshotWidgetState extends State<KarachiCampSnapshotWidget> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
             decoration: BoxDecoration(
-              color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03),
+              color: isDark ? SoftPalette.gray50.withValues(alpha: 0.05) : SoftPalette.gray900.withValues(alpha: 0.03),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: isDark ? Colors.white10 : Colors.black12),
+              border: Border.all(color: isDark ? SoftPalette.gray50A10 : SoftPalette.gray900A12),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -5156,17 +5161,17 @@ class _KarachiCampSnapshotWidgetState extends State<KarachiCampSnapshotWidget> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: Colors.amber.withValues(alpha: 0.15),
+                        color: SoftPalette.amber200.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: const Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.wb_sunny_rounded, color: Colors.amber, size: 13),
+                          Icon(Icons.wb_sunny_rounded, color: SoftPalette.amber200, size: 13),
                           SizedBox(width: 3),
                           Text(
                             'Morning',
-                            style: TextStyle(color: Colors.amber, fontSize: 10.5, fontWeight: FontWeight.w800),
+                            style: TextStyle(color: SoftPalette.amber200, fontSize: 10.5, fontWeight: FontWeight.w800),
                           ),
                         ],
                       ),
@@ -5175,7 +5180,7 @@ class _KarachiCampSnapshotWidgetState extends State<KarachiCampSnapshotWidget> {
                     Text(
                       '$morningTotal Patients',
                       style: TextStyle(
-                        color: isDark ? Colors.white : const Color(0xFF1E293B),
+                        color: isDark ? SoftPalette.gray50 : SoftPalette.slate800,
                         fontSize: 11.5,
                         fontWeight: FontWeight.w800,
                       ),
@@ -5184,13 +5189,13 @@ class _KarachiCampSnapshotWidgetState extends State<KarachiCampSnapshotWidget> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: isDark ? Colors.white10 : Colors.grey.shade200,
+                        color: isDark ? SoftPalette.gray50A10 : SoftPalette.gray100,
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
                         'Z: $morningZakat   NZ: $morningNonZakat   G: $morningGmwf',
                         style: TextStyle(
-                          color: isDark ? Colors.grey.shade300 : const Color(0xFF475569),
+                          color: isDark ? SoftPalette.gray150 : SoftPalette.slate600,
                           fontSize: 10.5,
                           fontWeight: FontWeight.w700,
                         ),
@@ -5199,7 +5204,7 @@ class _KarachiCampSnapshotWidgetState extends State<KarachiCampSnapshotWidget> {
                   ],
                 ),
                 const SizedBox(height: 6),
-                const Divider(height: 1, color: Colors.black12),
+                const Divider(height: 1, color: SoftPalette.gray900A12),
                 const SizedBox(height: 6),
                 // Evening Session Row
                 Row(
@@ -5207,17 +5212,17 @@ class _KarachiCampSnapshotWidgetState extends State<KarachiCampSnapshotWidget> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: Colors.indigo.withValues(alpha: 0.15),
+                        color: SoftPalette.indigo600.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: const Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.nights_stay_rounded, color: Colors.indigoAccent, size: 13),
+                          Icon(Icons.nights_stay_rounded, color: SoftPalette.indigo500, size: 13),
                           SizedBox(width: 3),
                           Text(
                             'Evening',
-                            style: TextStyle(color: Colors.indigoAccent, fontSize: 10.5, fontWeight: FontWeight.w800),
+                            style: TextStyle(color: SoftPalette.indigo500, fontSize: 10.5, fontWeight: FontWeight.w800),
                           ),
                         ],
                       ),
@@ -5226,7 +5231,7 @@ class _KarachiCampSnapshotWidgetState extends State<KarachiCampSnapshotWidget> {
                     Text(
                       '$eveningTotal Patients',
                       style: TextStyle(
-                        color: isDark ? Colors.white : const Color(0xFF1E293B),
+                        color: isDark ? SoftPalette.gray50 : SoftPalette.slate800,
                         fontSize: 11.5,
                         fontWeight: FontWeight.w800,
                       ),
@@ -5235,13 +5240,13 @@ class _KarachiCampSnapshotWidgetState extends State<KarachiCampSnapshotWidget> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: isDark ? Colors.white10 : Colors.grey.shade200,
+                        color: isDark ? SoftPalette.gray50A10 : SoftPalette.gray100,
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
                         'Z: $eveningZakat   NZ: $eveningNonZakat   G: $eveningGmwf',
                         style: TextStyle(
-                          color: isDark ? Colors.grey.shade300 : const Color(0xFF475569),
+                          color: isDark ? SoftPalette.gray150 : SoftPalette.slate600,
                           fontSize: 10.5,
                           fontWeight: FontWeight.w700,
                         ),
@@ -5260,7 +5265,7 @@ class _KarachiCampSnapshotWidgetState extends State<KarachiCampSnapshotWidget> {
               Text(
                 'Total Categories: ',
                 style: TextStyle(
-                  color: isDark ? Colors.grey.shade400 : Colors.grey.shade600,
+                  color: isDark ? SoftPalette.gray300 : SoftPalette.gray500,
                   fontSize: 10,
                   fontWeight: FontWeight.w600,
                 ),

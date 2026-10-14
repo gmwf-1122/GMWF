@@ -1,6 +1,7 @@
 // lib/pages/school/views/school_teacher_management_view.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/design_system.dart';
 import '../../../services/image_upload_service.dart';
 import '../dialogs/school_teacher_dialog.dart';
 import '../models/school_teacher.dart';
@@ -52,15 +53,15 @@ class _SchoolTeacherManagementViewState extends State<SchoolTeacherManagementVie
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: SchoolTheme.bgLight,
+      backgroundColor: context.adapt(SchoolTheme.bgLight),
       body: Column(
         children: [
           // Search & Action Toolbar
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
             decoration: BoxDecoration(
-              color: Colors.white,
-              border: Border(bottom: BorderSide(color: SchoolTheme.borderLight)),
+              color: context.adapt(SoftPalette.gray50),
+              border: Border(bottom: BorderSide(color: context.adapt(SchoolTheme.borderLight))),
             ),
             child: Row(
               children: [
@@ -72,20 +73,20 @@ class _SchoolTeacherManagementViewState extends State<SchoolTeacherManagementVie
                       hintText: _isTeacher
                           ? 'My Faculty Profile Record...'
                           : 'Search faculty by name, employee ID, or subject...',
-                      prefixIcon: const Icon(Icons.search_rounded, color: SchoolTheme.primary, size: 20),
+                      prefixIcon: Icon(Icons.search_rounded, color: context.adapt(SchoolTheme.primary), size: 20),
                       filled: true,
-                      fillColor: const Color(0xFFF8FAFC),
+                      fillColor: context.adapt(SoftPalette.gray50),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide(color: SchoolTheme.borderLight),
+                        borderSide: BorderSide(color: context.adapt(SchoolTheme.borderLight)),
                       ),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide(color: SchoolTheme.borderLight),
+                        borderSide: BorderSide(color: context.adapt(SchoolTheme.borderLight)),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: const BorderSide(color: SchoolTheme.primary, width: 1.5),
+                        borderSide: BorderSide(color: context.adapt(SchoolTheme.primary), width: 1.5),
                       ),
                       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
                     ),
@@ -99,7 +100,7 @@ class _SchoolTeacherManagementViewState extends State<SchoolTeacherManagementVie
                     label: const Text('Register Faculty', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: SchoolTheme.primary,
-                      foregroundColor: Colors.white,
+                      foregroundColor: SoftPalette.gray50,
                       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       elevation: 0,
@@ -143,17 +144,17 @@ class _SchoolTeacherManagementViewState extends State<SchoolTeacherManagementVie
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.badge_outlined, size: 56, color: Colors.grey.shade300),
+                        Icon(Icons.badge_outlined, size: 56, color: context.adapt(SoftPalette.gray150)),
                         const SizedBox(height: 12),
                         Text(
                           _isTeacher
                               ? 'No faculty profile found for user @${widget.userName}.'
                               : 'No faculty members found in registry.',
-                          style: const TextStyle(color: SchoolTheme.textMid, fontSize: 15, fontWeight: FontWeight.bold),
+                          style: TextStyle(color: context.adapt(SchoolTheme.textMid), fontSize: 15, fontWeight: FontWeight.bold),
                         ),
                         if (!_isTeacher) ...[
                           const SizedBox(height: 6),
-                          const Text('Click "+ Register Faculty" to onboard new teachers.', style: TextStyle(color: Colors.grey, fontSize: 12)),
+                          Text('Click "+ Register Faculty" to onboard new teachers.', style: TextStyle(color: context.adapt(SoftPalette.gray350), fontSize: 12)),
                         ],
                       ],
                     ),
@@ -169,9 +170,9 @@ class _SchoolTeacherManagementViewState extends State<SchoolTeacherManagementVie
                     return Container(
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: context.adapt(SoftPalette.gray50),
                         borderRadius: SchoolTheme.radius16,
-                        border: Border.all(color: SchoolTheme.borderLight),
+                        border: Border.all(color: context.adapt(SchoolTheme.borderLight)),
                         boxShadow: SchoolTheme.cardShadow,
                       ),
                       child: Column(
@@ -186,7 +187,7 @@ class _SchoolTeacherManagementViewState extends State<SchoolTeacherManagementVie
                                 child: Container(
                                   width: 52,
                                   height: 52,
-                                  color: SchoolTheme.primaryLight,
+                                  color: context.adapt(SchoolTheme.primaryLight),
                                   child: _buildTeacherAvatar(t),
                                 ),
                               ),
@@ -201,16 +202,16 @@ class _SchoolTeacherManagementViewState extends State<SchoolTeacherManagementVie
                                       children: [
                                         Text(
                                           t.name,
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             fontSize: 16,
                                             fontWeight: FontWeight.bold,
-                                            color: SchoolTheme.textDark,
+                                            color: context.adapt(SchoolTheme.textDark),
                                           ),
                                         ),
                                         const SizedBox(width: 8),
                                         SchoolBadge(
                                           label: t.designation,
-                                          color: SchoolTheme.primary,
+                                          color: context.adapt(SchoolTheme.primary),
                                           fontSize: 11,
                                         ),
                                       ],
@@ -218,8 +219,8 @@ class _SchoolTeacherManagementViewState extends State<SchoolTeacherManagementVie
                                     const SizedBox(height: 4),
                                     Text(
                                       'ID: ${t.employeeId.isNotEmpty ? t.employeeId : "N/A"} • ${t.department}',
-                                      style: const TextStyle(
-                                        color: SchoolTheme.textMuted,
+                                      style: TextStyle(
+                                        color: context.adapt(SchoolTheme.textMuted),
                                         fontSize: 12.5,
                                       ),
                                     ),
@@ -227,7 +228,7 @@ class _SchoolTeacherManagementViewState extends State<SchoolTeacherManagementVie
                                       const SizedBox(height: 4),
                                       Row(
                                         children: [
-                                          const Icon(Icons.star_rounded, size: 14, color: Colors.amber),
+                                          const Icon(Icons.star_rounded, size: 14, color: SoftPalette.amber200),
                                           const SizedBox(width: 4),
                                           Text(
                                             'Homeroom In-charge: Grade ${t.homeroomGrade} (Sec ${t.homeroomSection.isNotEmpty ? t.homeroomSection : "A"})',
@@ -247,7 +248,7 @@ class _SchoolTeacherManagementViewState extends State<SchoolTeacherManagementVie
                               // Edit Button (Admins/Principals only)
                               if (!_isTeacher)
                                 IconButton(
-                                  icon: const Icon(Icons.edit_rounded, color: SchoolTheme.primary, size: 20),
+                                  icon: Icon(Icons.edit_rounded, color: context.adapt(SchoolTheme.primary), size: 20),
                                   tooltip: 'Edit Faculty Record',
                                   onPressed: () => _openTeacherDialog(t),
                                 ),
@@ -279,8 +280,8 @@ class _SchoolTeacherManagementViewState extends State<SchoolTeacherManagementVie
                               if (t.degree.isNotEmpty)
                                 SchoolBadge(
                                   label: t.degree,
-                                  color: SchoolTheme.textMid,
-                                  backgroundColor: SchoolTheme.primaryLight,
+                                  color: context.adapt(SchoolTheme.textMid),
+                                  backgroundColor: context.adapt(SchoolTheme.primaryLight),
                                   fontSize: 11,
                                 ),
                             ],
@@ -300,23 +301,23 @@ class _SchoolTeacherManagementViewState extends State<SchoolTeacherManagementVie
 
   Widget _buildTeacherAvatar(SchoolTeacher t) {
     if (t.photoUrl.isEmpty) {
-      return const Icon(Icons.person_rounded, size: 28, color: SchoolTheme.primary);
+      return Icon(Icons.person_rounded, size: 28, color: context.adapt(SchoolTheme.primary));
     }
     final bytes = ImageUploadService.decodeBase64ToBytes(t.photoUrl);
     if (bytes != null && bytes.isNotEmpty) {
       return Image.memory(
         bytes,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => const Icon(Icons.person_rounded, size: 28, color: SchoolTheme.primary),
+        errorBuilder: (_, __, ___) => Icon(Icons.person_rounded, size: 28, color: context.adapt(SchoolTheme.primary)),
       );
     }
     if (t.photoUrl.startsWith('http')) {
       return Image.network(
         t.photoUrl,
         fit: BoxFit.cover,
-        errorBuilder: (_, __, ___) => const Icon(Icons.person_rounded, size: 28, color: SchoolTheme.primary),
+        errorBuilder: (_, __, ___) => Icon(Icons.person_rounded, size: 28, color: context.adapt(SchoolTheme.primary)),
       );
     }
-    return const Icon(Icons.person_rounded, size: 28, color: SchoolTheme.primary);
+    return Icon(Icons.person_rounded, size: 28, color: context.adapt(SchoolTheme.primary));
   }
 }

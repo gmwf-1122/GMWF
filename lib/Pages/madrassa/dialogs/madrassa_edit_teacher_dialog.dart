@@ -5,7 +5,10 @@
 // shift/sessions, active status, profile picture, ID doc, and optional password reset.
 
 import 'dart:convert';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 
@@ -74,8 +77,8 @@ class _MadrassaEditTeacherDialogState extends State<MadrassaEditTeacherDialog>
   late final AnimationController _anim;
   late final Animation<double> _fade;
 
-  static const _emerald = Color(0xFF0F766E);
-  static const _danger = Color(0xFFEF4444);
+  static const _emerald = SoftPalette.teal550;
+  static const _danger = SoftPalette.red400;
 
   @override
   void initState() {
@@ -135,11 +138,11 @@ class _MadrassaEditTeacherDialogState extends State<MadrassaEditTeacherDialog>
   }
 
   bool _isDark(BuildContext ctx) => Theme.of(ctx).brightness == Brightness.dark;
-  Color _bg(BuildContext ctx) => _isDark(ctx) ? const Color(0xFF0F172A) : Colors.white;
-  Color _card(BuildContext ctx) => _isDark(ctx) ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC);
-  Color _bord(BuildContext ctx) => _isDark(ctx) ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
-  Color _text(BuildContext ctx) => _isDark(ctx) ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A);
-  Color _muted(BuildContext ctx) => _isDark(ctx) ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+  Color _bg(BuildContext ctx) => _isDark(ctx) ? SoftPalette.slate900 : SoftPalette.gray50;
+  Color _card(BuildContext ctx) => _isDark(ctx) ? SoftPalette.slate800 : SoftPalette.gray50;
+  Color _bord(BuildContext ctx) => _isDark(ctx) ? SoftPalette.slate700 : SoftPalette.slate150;
+  Color _text(BuildContext ctx) => _isDark(ctx) ? SoftPalette.slate100 : SoftPalette.slate900;
+  Color _muted(BuildContext ctx) => _isDark(ctx) ? SoftPalette.slate350 : SoftPalette.slate550;
 
   Future<void> _pickPhoto() async {
     try {
@@ -174,17 +177,17 @@ class _MadrassaEditTeacherDialogState extends State<MadrassaEditTeacherDialog>
 
   void _snack(String msg, {bool error = false, bool success = false}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    AppToast.showSnackBar(context, SnackBar(
       content: Row(children: [
         Icon(
           error ? Icons.error_outline : success ? Icons.check_circle_outline : Icons.info_outline,
-          color: Colors.white,
+          color: SoftPalette.gray50,
           size: 17,
         ),
         const SizedBox(width: 9),
         Expanded(child: Text(msg, style: const TextStyle(fontSize: 13))),
       ]),
-      backgroundColor: error ? _danger : success ? _emerald : const Color(0xFF37474F),
+      backgroundColor: error ? _danger : success ? _emerald : SoftPalette.slate700,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       margin: const EdgeInsets.all(16),
@@ -380,7 +383,7 @@ class _MadrassaEditTeacherDialogState extends State<MadrassaEditTeacherDialog>
                               text: text,
                               muted: muted,
                               icon: Icons.contact_phone_outlined,
-                              accent: const Color(0xFF7C3AED),
+                              accent: context.adapt(SoftPalette.violet550),
                               title: 'Personal Details & Contact',
                               child: Column(
                                 children: [
@@ -430,7 +433,7 @@ class _MadrassaEditTeacherDialogState extends State<MadrassaEditTeacherDialog>
                               text: text,
                               muted: muted,
                               icon: Icons.menu_book_rounded,
-                              accent: const Color(0xFF0D9488),
+                              accent: context.adapt(SoftPalette.teal500),
                               title: 'Teaching Specialization',
                               child: _teachingTypeSelector(dark, bord, text, muted),
                             ),
@@ -442,7 +445,7 @@ class _MadrassaEditTeacherDialogState extends State<MadrassaEditTeacherDialog>
                               text: text,
                               muted: muted,
                               icon: Icons.access_time_rounded,
-                              accent: const Color(0xFF0284C7),
+                              accent: context.adapt(SoftPalette.sky500),
                               title: 'Teaching Shift',
                               child: _sessionSelector(dark, bord, text, muted),
                             ),
@@ -454,7 +457,7 @@ class _MadrassaEditTeacherDialogState extends State<MadrassaEditTeacherDialog>
                               text: text,
                               muted: muted,
                               icon: Icons.toggle_on_outlined,
-                              accent: _isActive ? Colors.green : Colors.grey,
+                              accent: _isActive ? context.adapt(SoftPalette.green400) : context.adapt(SoftPalette.gray350),
                               title: 'Account Status',
                               child: SwitchListTile(
                                 contentPadding: EdgeInsets.zero,
@@ -463,7 +466,7 @@ class _MadrassaEditTeacherDialogState extends State<MadrassaEditTeacherDialog>
                                   style: TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.bold,
-                                    color: _isActive ? Colors.green : Colors.red,
+                                    color: _isActive ? context.adapt(SoftPalette.green400) : context.adapt(SoftPalette.red400),
                                   ),
                                 ),
                                 subtitle: Text(
@@ -485,7 +488,7 @@ class _MadrassaEditTeacherDialogState extends State<MadrassaEditTeacherDialog>
                               text: text,
                               muted: muted,
                               icon: Icons.folder_outlined,
-                              accent: const Color(0xFFD97706),
+                              accent: context.adapt(SoftPalette.orange400),
                               title: 'Documents & CNIC Attachment',
                               child: _docTile(dark, bord, text, muted),
                             ),
@@ -495,7 +498,7 @@ class _MadrassaEditTeacherDialogState extends State<MadrassaEditTeacherDialog>
                               child: ElevatedButton.icon(
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: _emerald,
-                                  foregroundColor: Colors.white,
+                                  foregroundColor: SoftPalette.gray50,
                                   elevation: 2,
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                                 ),
@@ -504,7 +507,7 @@ class _MadrassaEditTeacherDialogState extends State<MadrassaEditTeacherDialog>
                                     ? const SizedBox(
                                         width: 18,
                                         height: 18,
-                                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                        child: CircularProgressIndicator(color: SoftPalette.gray50, strokeWidth: 2),
                                       )
                                     : const Icon(Icons.check_circle_rounded, size: 20),
                                 label: Text(
@@ -602,7 +605,7 @@ class _MadrassaEditTeacherDialogState extends State<MadrassaEditTeacherDialog>
                   shape: BoxShape.circle,
                   border: Border.all(color: _bg(context), width: 2),
                 ),
-                child: const Icon(Icons.camera_alt_rounded, size: 16, color: Colors.white),
+                child: const Icon(Icons.camera_alt_rounded, size: 16, color: SoftPalette.gray50),
               ),
             ),
           ),
@@ -675,7 +678,7 @@ class _MadrassaEditTeacherDialogState extends State<MadrassaEditTeacherDialog>
         hintText: hint,
         prefixIcon: Icon(icon, size: 18, color: muted),
         filled: true,
-        fillColor: dark ? const Color(0xFF0F172A) : Colors.white,
+        fillColor: dark ? SoftPalette.slate900 : SoftPalette.gray50,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(color: bord),
@@ -712,7 +715,7 @@ class _MadrassaEditTeacherDialogState extends State<MadrassaEditTeacherDialog>
           onPressed: () => setState(() => _obscurePass = !_obscurePass),
         ),
         filled: true,
-        fillColor: dark ? const Color(0xFF0F172A) : Colors.white,
+        fillColor: dark ? SoftPalette.slate900 : SoftPalette.gray50,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide(color: bord),
@@ -760,9 +763,9 @@ class _MadrassaEditTeacherDialogState extends State<MadrassaEditTeacherDialog>
       label: Text(label),
       selected: selected,
       selectedColor: _emerald,
-      backgroundColor: _isDark(context) ? const Color(0xFF0F172A) : Colors.white,
+      backgroundColor: _isDark(context) ? SoftPalette.slate900 : SoftPalette.gray50,
       labelStyle: TextStyle(
-        color: selected ? Colors.white : _text(context),
+        color: selected ? SoftPalette.gray50 : _text(context),
         fontWeight: selected ? FontWeight.bold : FontWeight.normal,
         fontSize: 12,
       ),
@@ -778,7 +781,7 @@ class _MadrassaEditTeacherDialogState extends State<MadrassaEditTeacherDialog>
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         decoration: BoxDecoration(
-          color: dark ? const Color(0xFF0F172A) : Colors.white,
+          color: dark ? SoftPalette.slate900 : SoftPalette.gray50,
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: bord),
         ),
@@ -802,7 +805,7 @@ class _MadrassaEditTeacherDialogState extends State<MadrassaEditTeacherDialog>
             ),
             if (hasDoc)
               IconButton(
-                icon: const Icon(Icons.close_rounded, size: 16, color: Colors.grey),
+                icon: Icon(Icons.close_rounded, size: 16, color: context.adapt(SoftPalette.gray350)),
                 onPressed: () => setState(() => _idDocBase64 = null),
               ),
           ],

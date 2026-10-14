@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import '../models/madrassa_config.dart';
@@ -191,11 +192,11 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                   valueListenable: UserThemeService.listenable(widget.username),
                   builder: (context, _, __) {
                     final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.username);
-                    final scaffoldBg = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8F9FD);
-                    final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-                    final textPrimary = isDark ? Colors.white : const Color(0xFF1A1C1E);
-                    final textMuted = isDark ? const Color(0xFF94A3B8) : const Color(0xFF454749);
-                    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7);
+                    final scaffoldBg = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+                    final cardBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+                    final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.gray900;
+                    final textMuted = isDark ? SoftPalette.slate350 : SoftPalette.gray700;
+                    final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.slate150;
 
                     return Scaffold(
                       backgroundColor: scaffoldBg,
@@ -214,13 +215,13 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                   decoration: BoxDecoration(
-                                    color: isDark ? const Color(0xFF451A03).withValues(alpha: 0.5) : Colors.amber.shade50,
+                                    color: isDark ? SoftPalette.orange800.withValues(alpha: 0.5) : SoftPalette.yellow50,
                                     borderRadius: BorderRadius.circular(8),
-                                    border: Border.all(color: isDark ? const Color(0xFF78350F) : Colors.amber.shade200),
+                                    border: Border.all(color: isDark ? SoftPalette.orange700 : SoftPalette.yellow150),
                                   ),
                                   child: Row(
                                     children: [
-                                      Icon(Icons.warning_amber_rounded, color: isDark ? const Color(0xFFFBBF24) : Colors.amber.shade900, size: 16),
+                                      Icon(Icons.warning_amber_rounded, color: isDark ? SoftPalette.amber200 : SoftPalette.orange350, size: 16),
                                       const SizedBox(width: 8),
                                       Expanded(
                                         child: Text(
@@ -228,7 +229,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                               ? 'آرکائیو اور مکمل شدہ طلباء کو بلک ڈاؤن لوڈ سے خارج کر دیا گیا ہے۔ ان کی رپورٹس دستی طور پر ڈاؤن لوڈ کریں۔'
                                               : 'Archived and Completed students are excluded from bulk downloads and must be downloaded manually.',
                                           style: TextStyle(
-                                            color: isDark ? const Color(0xFFFBBF24) : Colors.amber.shade900,
+                                            color: isDark ? SoftPalette.amber200 : SoftPalette.orange350,
                                             fontSize: 11,
                                             fontWeight: FontWeight.bold,
                                             fontFamily: context.isUrdu ? 'Noori' : null,
@@ -248,7 +249,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                   decoration: InputDecoration(
                                     hintText: context.isUrdu ? 'طالب علم تلاش کریں (نام یا رول نمبر)...' : 'Search student by name or roll number...',
                                     hintStyle: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null, color: textMuted),
-                                    prefixIcon: Icon(Icons.search, color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080)),
+                                    prefixIcon: Icon(Icons.search, color: isDark ? SoftPalette.teal300 : SoftPalette.teal550),
                                     filled: true,
                                     fillColor: cardBg,
                                     isDense: true,
@@ -260,7 +261,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                     ),
                                     focusedBorder: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(12),
-                                      borderSide: const BorderSide(color: Color(0xFF008080), width: 2),
+                                      borderSide: BorderSide(color: context.adapt(SoftPalette.teal550), width: 2),
                                     ),
                                   ),
                                   onChanged: (val) {
@@ -337,9 +338,9 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
   }
 
   Widget _buildEmptyState(BuildContext context, bool isDark) {
-    final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7);
-    final textMuted = isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600;
+    final cardBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.slate150;
+    final textMuted = isDark ? SoftPalette.slate350 : SoftPalette.gray500;
 
     return Container(
       decoration: BoxDecoration(
@@ -352,7 +353,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.search_off_rounded, size: 36, color: isDark ? const Color(0xFF64748B) : Colors.grey.shade400),
+          Icon(Icons.search_off_rounded, size: 36, color: isDark ? SoftPalette.slate550 : SoftPalette.gray300),
           const SizedBox(height: 10),
           Text('No students match your search', style: TextStyle(color: textMuted, fontSize: 13)),
         ],
@@ -373,8 +374,8 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
     bool showDetail,
     bool isDark,
   ) {
-    final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7);
+    final cardBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.slate150;
 
     final rows = List.generate(filteredStudents.length, (i) {
       final s = filteredStudents[i];
@@ -398,7 +399,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: borderColor),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4)),
+          BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4)),
         ],
       ),
       clipBehavior: Clip.antiAlias,
@@ -418,7 +419,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                   decoration: BoxDecoration(
                     border: Border(right: BorderSide(color: borderColor, width: 1)),
                     boxShadow: [
-                      BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 6, offset: const Offset(2, 0)),
+                      BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.05), blurRadius: 6, offset: const Offset(2, 0)),
                     ],
                   ),
                   child: Column(
@@ -505,8 +506,8 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
   }
 
   Widget _frozenHeaderRow(BuildContext context, bool isDark) {
-    final headingBg = isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9);
-    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
+    final headingBg = isDark ? SoftPalette.slate900 : SoftPalette.slate100;
+    final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.slate150;
 
     return Container(
       height: _kHeaderHeight,
@@ -526,11 +527,11 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
 
   Widget _frozenDataRow(BuildContext context, int index, Map<String, dynamic> data, bool isDark) {
     final isEven = index.isEven;
-    final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final altBg = isDark ? const Color(0xFF182234) : const Color(0xFFFAFBFE);
-    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9);
-    final textPrimary = isDark ? Colors.white : const Color(0xFF1A1C1E);
-    final textMuted = isDark ? const Color(0xFF94A3B8) : Colors.grey[600];
+    final cardBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final altBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.slate100;
+    final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.gray900;
+    final textMuted = isDark ? SoftPalette.slate350 : SoftPalette.gray500;
 
     return Container(
       height: _kRowHeight,
@@ -555,7 +556,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF0D9488).withValues(alpha: 0.2) : const Color(0xFFF0FDFC),
+                color: isDark ? SoftPalette.teal500.withValues(alpha: 0.2) : SoftPalette.teal50t,
                 borderRadius: BorderRadius.circular(6),
               ),
               child: Text(
@@ -563,7 +564,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 12,
-                  color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF0F766E),
+                  color: isDark ? SoftPalette.teal300 : SoftPalette.teal550,
                 ),
               ),
             ),
@@ -581,8 +582,8 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
     Map<String, double> widths,
     bool isDark,
   ) {
-    final headingBg = isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9);
-    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
+    final headingBg = isDark ? SoftPalette.slate900 : SoftPalette.slate100;
+    final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.slate150;
 
     return Container(
       height: _kHeaderHeight,
@@ -593,21 +594,21 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
       child: Row(
         children: [
           _colCell(Text(context.l.activeWorkingDays, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))), widths['days']!, center: true),
-          _colCell(Text(context.l.present[0], style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF2E7D32), fontSize: 13))), widths['p']!, center: true),
-          _colCell(Text(context.l.leave[0], style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFFED6C02), fontSize: 13))), widths['l']!, center: true),
-          _colCell(Text(context.l.absent[0], style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFFD32F2F), fontSize: 13))), widths['a']!, center: true),
+          _colCell(Text(context.l.present[0], style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.green550), fontSize: 13))), widths['p']!, center: true),
+          _colCell(Text(context.l.leave[0], style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.orange400), fontSize: 13))), widths['l']!, center: true),
+          _colCell(Text(context.l.absent[0], style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.red500), fontSize: 13))), widths['a']!, center: true),
           if (showDetail && isFeeEnabled)
             _colCell(Text(context.l.attendanceSavings, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))), widths['att']!, center: true),
-          _colCell(Text(context.l.uniform[0], style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080), fontSize: 13))), widths['uni']!, center: true),
+          _colCell(Text(context.l.uniform[0], style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? SoftPalette.teal300 : SoftPalette.teal550, fontSize: 13))), widths['uni']!, center: true),
           if (showDetail && isFeeEnabled)
             _colCell(Text(context.l.uniformSavings, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))), widths['uniRs']!, center: true),
-          _colCell(Text(context.l.message[0], style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFFED6C02), fontSize: 13))), widths['msg']!, center: true),
+          _colCell(Text(context.l.message[0], style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.orange400), fontSize: 13))), widths['msg']!, center: true),
           _colCell(Text(context.l.ptm, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13))), widths['ptm']!, center: true),
           if (isFeeEnabled) ...[
-            _colCell(Text(context.l.savings, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF2E7D32), fontSize: 13))), widths['savings']!, center: true),
-            _colCell(Text(context.l.due, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFFD32F2F), fontSize: 13))), widths['due']!, center: true),
+            _colCell(Text(context.l.savings, style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.green550), fontSize: 13))), widths['savings']!, center: true),
+            _colCell(Text(context.l.due, style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.red500), fontSize: 13))), widths['due']!, center: true),
           ],
-          _colCell(Text(context.l.legendPresent, style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080), fontSize: 13))), widths['actions']!, center: true),
+          _colCell(Text(context.l.legendPresent, style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? SoftPalette.teal300 : SoftPalette.teal550, fontSize: 13))), widths['actions']!, center: true),
         ],
       ),
     );
@@ -633,10 +634,10 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
     final sId = s is DocumentSnapshot ? s.id : s['id'].toString();
     final isEven = index.isEven;
     final due = ((fee['amountDue'] as num?) ?? 0.0).toDouble();
-    final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final altBg = isDark ? const Color(0xFF182234) : const Color(0xFFFAFBFE);
-    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9);
-    final textPrimary = isDark ? Colors.white : const Color(0xFF1A1C1E);
+    final cardBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final altBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.slate100;
+    final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.gray900;
 
     return Container(
       height: _kRowHeight,
@@ -648,22 +649,22 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: [
           _colCell(Text('${fee['activeWorkingDays']}', style: TextStyle(fontSize: 12, color: textPrimary)), widths['days']!, center: true),
-          _colCell(Text('${fee['present']}', style: const TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.bold, fontSize: 12)), widths['p']!, center: true),
-          _colCell(Text('${fee['leave']}', style: const TextStyle(color: Color(0xFFED6C02), fontWeight: FontWeight.bold, fontSize: 12)), widths['l']!, center: true),
-          _colCell(Text('${fee['absent']}', style: const TextStyle(color: Color(0xFFD32F2F), fontWeight: FontWeight.bold, fontSize: 12)), widths['a']!, center: true),
+          _colCell(Text('${fee['present']}', style: TextStyle(color: context.adapt(SoftPalette.green550), fontWeight: FontWeight.bold, fontSize: 12)), widths['p']!, center: true),
+          _colCell(Text('${fee['leave']}', style: TextStyle(color: context.adapt(SoftPalette.orange400), fontWeight: FontWeight.bold, fontSize: 12)), widths['l']!, center: true),
+          _colCell(Text('${fee['absent']}', style: TextStyle(color: context.adapt(SoftPalette.red500), fontWeight: FontWeight.bold, fontSize: 12)), widths['a']!, center: true),
           if (showDetail && isFeeEnabled)
-            _colCell(Text(((fee['attSavings'] as num?) ?? 0).toStringAsFixed(0), style: const TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.bold, fontSize: 12)), widths['att']!, center: true),
-          _colCell(Text('${fee['uniform']}', style: TextStyle(color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080), fontWeight: FontWeight.bold, fontSize: 12)), widths['uni']!, center: true),
+            _colCell(Text(((fee['attSavings'] as num?) ?? 0).toStringAsFixed(0), style: TextStyle(color: context.adapt(SoftPalette.green550), fontWeight: FontWeight.bold, fontSize: 12)), widths['att']!, center: true),
+          _colCell(Text('${fee['uniform']}', style: TextStyle(color: isDark ? SoftPalette.teal300 : SoftPalette.teal550, fontWeight: FontWeight.bold, fontSize: 12)), widths['uni']!, center: true),
           if (showDetail && isFeeEnabled)
-            _colCell(Text(((fee['uniSavings'] as num?) ?? 0).toStringAsFixed(0), style: const TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.bold, fontSize: 12)), widths['uniRs']!, center: true),
-          _colCell(Text('${fee['message']}/${fee['activeWorkingDays']}', style: const TextStyle(color: Color(0xFFED6C02), fontWeight: FontWeight.bold, fontSize: 12)), widths['msg']!, center: true),
+            _colCell(Text(((fee['uniSavings'] as num?) ?? 0).toStringAsFixed(0), style: TextStyle(color: context.adapt(SoftPalette.green550), fontWeight: FontWeight.bold, fontSize: 12)), widths['uniRs']!, center: true),
+          _colCell(Text('${fee['message']}/${fee['activeWorkingDays']}', style: TextStyle(color: context.adapt(SoftPalette.orange400), fontWeight: FontWeight.bold, fontSize: 12)), widths['msg']!, center: true),
           _colCell(_tag(
             fee['ptm'] ? 'J' : 'M',
-            isDark ? (fee['ptm'] ? const Color(0xFF064E3B) : const Color(0xFF7F1D1D)) : (fee['ptm'] ? const Color(0xFFE8F5E9) : const Color(0xFFFFEBEE)),
-            isDark ? (fee['ptm'] ? const Color(0xFF6EE7B7) : const Color(0xFFFCA5A5)) : (fee['ptm'] ? const Color(0xFF2E7D32) : const Color(0xFFD32F2F)),
+            isDark ? (fee['ptm'] ? SoftPalette.emerald700 : SoftPalette.red700) : (fee['ptm'] ? SoftPalette.green100m : SoftPalette.pink100m),
+            isDark ? (fee['ptm'] ? SoftPalette.emerald200 : SoftPalette.red300) : (fee['ptm'] ? SoftPalette.green550 : SoftPalette.red500),
           ), widths['ptm']!, center: true),
           if (isFeeEnabled) ...[
-            _colCell(Text(((fee['totalSavings'] as num?) ?? 0).toStringAsFixed(0), style: const TextStyle(color: Color(0xFF2E7D32), fontWeight: FontWeight.bold, fontSize: 12)), widths['savings']!, center: true),
+            _colCell(Text(((fee['totalSavings'] as num?) ?? 0).toStringAsFixed(0), style: TextStyle(color: context.adapt(SoftPalette.green550), fontWeight: FontWeight.bold, fontSize: 12)), widths['savings']!, center: true),
             _colCell(
               _buildDuesCell(
                 context: context,
@@ -685,11 +686,11 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
           _colCell(
             StudentExportMenu(
               onPdf: () {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Preparing report for ${data['name'] ?? 'student'}...')));
+                AppToast.showSnackBar(context, SnackBar(content: Text('Preparing report for ${data['name'] ?? 'student'}...')));
                 MadrassaReportHelper.exportIndividualPdf(config: config, studentId: sId, studentData: data, logs: logs, holidays: holidays);
               },
               onExcel: () {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Preparing Excel report for ${data['name'] ?? 'student'}...')));
+                AppToast.showSnackBar(context, SnackBar(content: Text('Preparing Excel report for ${data['name'] ?? 'student'}...')));
                 MadrassaReportHelper.exportIndividualExcel(config: config, studentId: sId, studentData: data, logs: logs, holidays: holidays);
               },
               onWhatsApp: () {
@@ -727,18 +728,18 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
     final IconData? icon;
 
     if (isPaid) {
-      bg = isDark ? const Color(0xFF064E3B) : const Color(0xFFE8F5E9);
-      fg = isDark ? const Color(0xFF6EE7B7) : const Color(0xFF2E7D32);
+      bg = isDark ? SoftPalette.emerald700 : SoftPalette.green100m;
+      fg = isDark ? SoftPalette.emerald200 : SoftPalette.green550;
       text = 'PAID (Rs. ${amountPaid.toInt()})';
       icon = Icons.check_circle_rounded;
     } else if (due <= 0) {
-      bg = isDark ? const Color(0xFF064E3B) : const Color(0xFFE8F5E9);
-      fg = isDark ? const Color(0xFF6EE7B7) : const Color(0xFF2E7D32);
+      bg = isDark ? SoftPalette.emerald700 : SoftPalette.green100m;
+      fg = isDark ? SoftPalette.emerald200 : SoftPalette.green550;
       text = '0 (No Due)';
       icon = null;
     } else {
-      bg = isDark ? const Color(0xFF7F1D1D) : const Color(0xFFFFEBEE);
-      fg = isDark ? const Color(0xFFFCA5A5) : const Color(0xFFD32F2F);
+      bg = isDark ? SoftPalette.red700 : SoftPalette.pink100m;
+      fg = isDark ? SoftPalette.red300 : SoftPalette.red500;
       text = 'Rs. ${due.toInt()}';
       icon = canManage ? Icons.edit_note_rounded : null;
     }
@@ -932,25 +933,25 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                   Navigator.pop(dialogCtx);
                 }
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  AppToast.showSnackBar(context, 
                     SnackBar(
                       content: Text('Recorded payment for ${itemsToPay.length} month(s) (Total: Rs. ${itemsToPay.fold<double>(0.0, (s, e) => s + (e['amountDue'] as double)).toInt()}).'),
-                      backgroundColor: const Color(0xFF0F766E),
+                      backgroundColor: SoftPalette.teal550,
                     ),
                   );
                 }
               } catch (e) {
                 setDialogState(() => isSaving = false);
                 if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Error saving payments: $e'), backgroundColor: Colors.red),
+                  AppToast.showSnackBar(context, 
+                    SnackBar(content: Text('Error saving payments: $e'), backgroundColor: SoftPalette.red400),
                   );
                 }
               }
             }
 
             return Dialog(
-              backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+              backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
               insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
               child: ConstrainedBox(
@@ -967,10 +968,10 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                           Container(
                             padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF0F766E).withValues(alpha: 0.12),
+                              color: context.adapt(SoftPalette.teal550).withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(12),
                             ),
-                            child: const Icon(Icons.account_balance_wallet_rounded, color: Color(0xFF0F766E), size: 22),
+                            child: Icon(Icons.account_balance_wallet_rounded, color: context.adapt(SoftPalette.teal550), size: 22),
                           ),
                           const SizedBox(width: 14),
                           Expanded(
@@ -982,7 +983,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                   style: TextStyle(
                                     fontSize: 16,
                                     fontWeight: FontWeight.bold,
-                                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                    color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                                   ),
                                   overflow: TextOverflow.ellipsis,
                                 ),
@@ -991,7 +992,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                   'Roll #$rollNumber • Monthly Dues Breakdown',
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                                    color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
                                   ),
                                 ),
                               ],
@@ -1012,13 +1013,13 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                         decoration: BoxDecoration(
                           color: totalUnpaidDues > 0
-                              ? (isDark ? const Color(0xFF450A0A) : const Color(0xFFFEF2F2))
-                              : (isDark ? const Color(0xFF064E3B) : const Color(0xFFECFDF5)),
+                              ? (isDark ? SoftPalette.red800 : SoftPalette.red100t)
+                              : (isDark ? SoftPalette.emerald700 : SoftPalette.emerald50),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
                             color: totalUnpaidDues > 0
-                                ? const Color(0xFFDC2626).withValues(alpha: 0.3)
-                                : const Color(0xFF059669).withValues(alpha: 0.3),
+                                ? context.adapt(SoftPalette.red500).withValues(alpha: 0.3)
+                                : context.adapt(SoftPalette.emerald500).withValues(alpha: 0.3),
                           ),
                         ),
                         child: Row(
@@ -1031,7 +1032,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                   'Total Outstanding Dues',
                                   style: TextStyle(
                                     fontSize: 11,
-                                    color: isDark ? Colors.white70 : Colors.grey.shade700,
+                                    color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray550,
                                     fontWeight: FontWeight.w600,
                                   ),
                                 ),
@@ -1041,7 +1042,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                   style: TextStyle(
                                     fontSize: 18,
                                     fontWeight: FontWeight.bold,
-                                    color: totalUnpaidDues > 0 ? const Color(0xFFDC2626) : const Color(0xFF059669),
+                                    color: totalUnpaidDues > 0 ? context.adapt(SoftPalette.red500) : context.adapt(SoftPalette.emerald500),
                                   ),
                                 ),
                               ],
@@ -1050,8 +1051,8 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                               decoration: BoxDecoration(
                                 color: totalUnpaidDues > 0
-                                    ? const Color(0xFFDC2626).withValues(alpha: 0.15)
-                                    : const Color(0xFF059669).withValues(alpha: 0.15),
+                                    ? context.adapt(SoftPalette.red500).withValues(alpha: 0.15)
+                                    : context.adapt(SoftPalette.emerald500).withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Text(
@@ -1059,7 +1060,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
                                   fontSize: 12,
-                                  color: totalUnpaidDues > 0 ? const Color(0xFFDC2626) : const Color(0xFF059669),
+                                  color: totalUnpaidDues > 0 ? context.adapt(SoftPalette.red500) : context.adapt(SoftPalette.emerald500),
                                 ),
                               ),
                             ),
@@ -1080,7 +1081,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                 style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.bold,
-                                  color: isDark ? Colors.white70 : const Color(0xFF334155),
+                                  color: isDark ? SoftPalette.gray50A70 : SoftPalette.slate700,
                                 ),
                               ),
                               InkWell(
@@ -1101,7 +1102,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                     children: [
                                       Checkbox(
                                         value: allUnpaidSelected,
-                                        activeColor: const Color(0xFF0F766E),
+                                        activeColor: context.adapt(SoftPalette.teal550),
                                         materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                         visualDensity: VisualDensity.compact,
                                         onChanged: (val) {
@@ -1120,7 +1121,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                         style: TextStyle(
                                           fontSize: 12,
                                           fontWeight: FontWeight.w600,
-                                          color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF0F766E),
+                                          color: isDark ? SoftPalette.teal300 : SoftPalette.teal550,
                                         ),
                                       ),
                                     ],
@@ -1137,7 +1138,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                             ? Center(
                                 child: Text(
                                   'No monthly fee records found.',
-                                  style: TextStyle(color: isDark ? Colors.white54 : Colors.grey.shade500),
+                                  style: TextStyle(color: isDark ? SoftPalette.gray50A54 : SoftPalette.gray350),
                                 ),
                               )
                             : ListView.separated(
@@ -1154,15 +1155,15 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                                     decoration: BoxDecoration(
                                       color: isItemPaid
-                                          ? (isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC))
+                                          ? (isDark ? SoftPalette.slate900 : SoftPalette.gray50)
                                           : (isSelected
-                                              ? (isDark ? const Color(0xFF1E3A8A).withValues(alpha: 0.3) : const Color(0xFFEFF6FF))
-                                              : (isDark ? const Color(0xFF1E293B) : Colors.white)),
+                                              ? (isDark ? SoftPalette.blue700.withValues(alpha: 0.3) : SoftPalette.slate100)
+                                              : (isDark ? SoftPalette.slate800 : SoftPalette.gray50)),
                                       borderRadius: BorderRadius.circular(12),
                                       border: Border.all(
                                         color: isSelected && !isItemPaid
-                                            ? const Color(0xFF3B82F6)
-                                            : (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                                            ? ctx.adapt(SoftPalette.blue500)
+                                            : (isDark ? SoftPalette.slate700 : SoftPalette.slate150),
                                         width: isSelected && !isItemPaid ? 1.5 : 1.0,
                                       ),
                                     ),
@@ -1171,7 +1172,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                         if (canEdit && !isItemPaid && dueVal > 0)
                                           Checkbox(
                                             value: isSelected,
-                                            activeColor: const Color(0xFF0F766E),
+                                            activeColor: ctx.adapt(SoftPalette.teal550),
                                             onChanged: (val) {
                                               setDialogState(() {
                                                 item['isSelected'] = val ?? false;
@@ -1184,7 +1185,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                             child: Icon(
                                               isItemPaid ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
                                               size: 18,
-                                              color: isItemPaid ? const Color(0xFF059669) : Colors.grey.shade400,
+                                              color: isItemPaid ? ctx.adapt(SoftPalette.emerald500) : ctx.adapt(SoftPalette.gray300),
                                             ),
                                           ),
                                         Expanded(
@@ -1199,15 +1200,15 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                                     style: TextStyle(
                                                       fontWeight: FontWeight.bold,
                                                       fontSize: 13,
-                                                      color: isDark ? Colors.white : const Color(0xFF1E293B),
+                                                      color: isDark ? SoftPalette.gray50 : SoftPalette.slate800,
                                                     ),
                                                   ),
                                                   Container(
                                                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                                     decoration: BoxDecoration(
                                                       color: isItemPaid
-                                                          ? const Color(0xFF10B981).withValues(alpha: 0.15)
-                                                          : const Color(0xFFEF4444).withValues(alpha: 0.15),
+                                                          ? ctx.adapt(SoftPalette.emerald350).withValues(alpha: 0.15)
+                                                          : ctx.adapt(SoftPalette.red400).withValues(alpha: 0.15),
                                                       borderRadius: BorderRadius.circular(6),
                                                     ),
                                                     child: Text(
@@ -1215,7 +1216,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                                       style: TextStyle(
                                                         fontSize: 11,
                                                         fontWeight: FontWeight.bold,
-                                                        color: isItemPaid ? const Color(0xFF059669) : const Color(0xFFDC2626),
+                                                        color: isItemPaid ? ctx.adapt(SoftPalette.emerald500) : ctx.adapt(SoftPalette.red500),
                                                       ),
                                                     ),
                                                   ),
@@ -1228,7 +1229,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                                     'P: ${item['present']} • L: ${item['leave']} • A: ${item['absent']}',
                                                     style: TextStyle(
                                                       fontSize: 11,
-                                                      color: isDark ? Colors.white54 : Colors.grey.shade600,
+                                                      color: isDark ? SoftPalette.gray50A54 : SoftPalette.gray500,
                                                     ),
                                                   ),
                                                   if ((item['note'] as String).isNotEmpty) ...[
@@ -1239,7 +1240,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                                         style: TextStyle(
                                                           fontSize: 11,
                                                           fontStyle: FontStyle.italic,
-                                                          color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF0F766E),
+                                                          color: isDark ? SoftPalette.teal300 : SoftPalette.teal550,
                                                         ),
                                                         overflow: TextOverflow.ellipsis,
                                                       ),
@@ -1253,7 +1254,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                         if (canEdit && isItemPaid)
                                           IconButton(
                                             tooltip: 'Mark as Unpaid',
-                                            icon: const Icon(Icons.undo_rounded, size: 16, color: Colors.orange),
+                                            icon: Icon(Icons.undo_rounded, size: 16, color: ctx.adapt(SoftPalette.amber300)),
                                             onPressed: () async {
                                               await MadrassaLocalStorage.saveFeePaymentLocalAndSync(
                                                 branchId: _effectiveBranch,
@@ -1299,13 +1300,13 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                             if (selectedItems.isNotEmpty) ...[
                               ElevatedButton.icon(
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF0F766E),
-                                  foregroundColor: Colors.white,
+                                  backgroundColor: SoftPalette.teal550,
+                                  foregroundColor: SoftPalette.gray50,
                                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                 ),
                                 icon: isSaving
-                                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50))
                                     : const Icon(Icons.check_box_rounded, size: 16),
                                 label: Text(
                                   'Pay Selected (${selectedItems.length} • Rs. ${totalSelectedDues.toInt()})',
@@ -1318,13 +1319,13 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                             if (unpaidItems.isNotEmpty && totalUnpaidDues > 0)
                               ElevatedButton.icon(
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: const Color(0xFF059669),
-                                  foregroundColor: Colors.white,
+                                  backgroundColor: SoftPalette.emerald500,
+                                  foregroundColor: SoftPalette.gray50,
                                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                 ),
                                 icon: isSaving
-                                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                    ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50))
                                     : const Icon(Icons.done_all_rounded, size: 16),
                                 label: Text(
                                   'Pay All Dues (Rs. ${totalUnpaidDues.toInt()})',
@@ -1372,10 +1373,10 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
     final p = fee['present'];
     final l = fee['leave'];
     final a = fee['absent'];
-    final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7);
-    final textPrimary = isDark ? Colors.white : const Color(0xFF1A1C1E);
-    final textMuted = isDark ? const Color(0xFF94A3B8) : Colors.grey[600];
+    final cardBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.slate150;
+    final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.gray900;
+    final textMuted = isDark ? SoftPalette.slate350 : SoftPalette.gray500;
 
     final isPaid = payment != null && payment['status'] == 'paid';
 
@@ -1388,7 +1389,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
         border: Border.all(color: borderColor),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.02),
+            color: SoftPalette.gray900.withValues(alpha: 0.02),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -1414,12 +1415,12 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                           decoration: BoxDecoration(
-                            color: isDark ? const Color(0xFF0D9488).withValues(alpha: 0.2) : const Color(0xFFF0FDFC),
+                            color: isDark ? SoftPalette.teal500.withValues(alpha: 0.2) : SoftPalette.teal50t,
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
                             'Roll ${data['rollNumber'] ?? '?'}',
-                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF0F766E)),
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: isDark ? SoftPalette.teal300 : SoftPalette.teal550),
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -1435,17 +1436,17 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                              color: context.adapt(SoftPalette.emerald350).withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(6),
                             ),
-                            child: const Row(
+                            child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.check_circle_rounded, size: 11, color: Color(0xFF059669)),
+                                Icon(Icons.check_circle_rounded, size: 11, color: context.adapt(SoftPalette.emerald500)),
                                 SizedBox(width: 3),
                                 Text(
                                   'PAID',
-                                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF059669)),
+                                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.emerald500)),
                                 ),
                               ],
                             ),
@@ -1458,11 +1459,11 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
               ),
               StudentExportMenu(
                 onPdf: () {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Preparing report for ${data['name'] ?? 'student'}...')));
+                  AppToast.showSnackBar(context, SnackBar(content: Text('Preparing report for ${data['name'] ?? 'student'}...')));
                   MadrassaReportHelper.exportIndividualPdf(config: config, studentId: sId, studentData: data, logs: logs, holidays: holidays);
                 },
                 onExcel: () {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Preparing Excel report for ${data['name'] ?? 'student'}...')));
+                  AppToast.showSnackBar(context, SnackBar(content: Text('Preparing Excel report for ${data['name'] ?? 'student'}...')));
                   MadrassaReportHelper.exportIndividualExcel(config: config, studentId: sId, studentData: data, logs: logs, holidays: holidays);
                 },
                 onWhatsApp: () {
@@ -1477,10 +1478,10 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              _statPill(context.l.present[0], '$p', const Color(0xFF2E7D32)),
-              _statPill(context.l.leave[0], '$l', const Color(0xFFED6C02)),
-              _statPill(context.l.absent[0], '$a', const Color(0xFFD32F2F)),
-              _statPill(context.l.ptm, fee['ptm'] ? 'J' : 'M', fee['ptm'] ? const Color(0xFF2E7D32) : const Color(0xFFD32F2F)),
+              _statPill(context.l.present[0], '$p', context.adapt(SoftPalette.green550)),
+              _statPill(context.l.leave[0], '$l', context.adapt(SoftPalette.orange400)),
+              _statPill(context.l.absent[0], '$a', context.adapt(SoftPalette.red500)),
+              _statPill(context.l.ptm, fee['ptm'] ? 'J' : 'M', fee['ptm'] ? context.adapt(SoftPalette.green550) : context.adapt(SoftPalette.red500)),
             ],
           ),
           if (config.enableFees) ...[
@@ -1493,7 +1494,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                   children: [
                     Text('Savings', style: context.urduStyle(style: TextStyle(fontSize: 10, color: textMuted))),
                     const SizedBox(height: 2),
-                    Text('Rs. $savings', style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF2E7D32), fontSize: 14)),
+                    Text('Rs. $savings', style: TextStyle(fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.green550), fontSize: 14)),
                   ],
                 ),
                 Column(
@@ -1561,10 +1562,10 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
   ) {
     final monthName = DateFormat('MMMM yyyy').format(DateTime(year, month));
     final isMobile = GBreakpoint.isMobile(context);
-    final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7);
-    final textPrimary = isDark ? Colors.white : const Color(0xFF1A1C1E);
-    final textMuted = isDark ? const Color(0xFF94A3B8) : const Color(0xFF454749);
+    final cardBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.slate150;
+    final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.gray900;
+    final textMuted = isDark ? SoftPalette.slate350 : SoftPalette.gray700;
 
     final headerInfo = Row(
       children: [
@@ -1572,10 +1573,10 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
           width: 44,
           height: 44,
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF0D9488).withValues(alpha: 0.2) : const Color(0xFFE0F2F1),
+            color: isDark ? SoftPalette.teal500.withValues(alpha: 0.2) : SoftPalette.teal100m,
             borderRadius: BorderRadius.circular(12),
           ),
-          child: Icon(Icons.analytics_rounded, color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080), size: 24),
+          child: Icon(Icons.analytics_rounded, color: isDark ? SoftPalette.teal300 : SoftPalette.teal550, size: 24),
         ),
         const SizedBox(width: 12),
         Column(
@@ -1604,7 +1605,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
 
     final monthPicker = Container(
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+        color: isDark ? SoftPalette.slate900 : SoftPalette.slate100,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: borderColor),
       ),
@@ -1655,16 +1656,16 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
         PopupMenuButton<String>(
           tooltip: 'Export Report',
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+          color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
           elevation: 4,
           onSelected: (val) {
             if (val == 'pdf') {
-              ScaffoldMessenger.of(context).showSnackBar(
+              AppToast.showSnackBar(context, 
                 const SnackBar(content: Text('Preparing bulk PDF report...'), duration: Duration(seconds: 2)),
               );
               MadrassaReportHelper.exportMonthlyPdf(config: displayConfig, students: students, logs: logs, holidays: holidays);
             } else if (val == 'excel') {
-              ScaffoldMessenger.of(context).showSnackBar(
+              AppToast.showSnackBar(context, 
                 const SnackBar(content: Text('Preparing bulk Excel report...'), duration: Duration(seconds: 2)),
               );
               MadrassaReportHelper.exportMonthlyExcel(config: displayConfig, students: students, logs: logs, holidays: holidays);
@@ -1678,10 +1679,10 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                   Container(
                     padding: const EdgeInsets.all(6),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFEF4444).withValues(alpha: 0.12),
+                      color: ctx.adapt(SoftPalette.red400).withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(Icons.picture_as_pdf_rounded, color: Color(0xFFEF4444), size: 18),
+                    child: Icon(Icons.picture_as_pdf_rounded, color: ctx.adapt(SoftPalette.red400), size: 18),
                   ),
                   const SizedBox(width: 10),
                   Text(
@@ -1689,7 +1690,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
                       fontSize: 13,
-                      color: isDark ? Colors.white : const Color(0xFF1E293B),
+                      color: isDark ? SoftPalette.gray50 : SoftPalette.slate800,
                     ),
                   ),
                 ],
@@ -1702,10 +1703,10 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                   Container(
                     padding: const EdgeInsets.all(6),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                      color: ctx.adapt(SoftPalette.emerald350).withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(Icons.table_chart_rounded, color: Color(0xFF10B981), size: 18),
+                    child: Icon(Icons.table_chart_rounded, color: ctx.adapt(SoftPalette.emerald350), size: 18),
                   ),
                   const SizedBox(width: 10),
                   Text(
@@ -1713,7 +1714,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                     style: TextStyle(
                       fontWeight: FontWeight.w600,
                       fontSize: 13,
-                      color: isDark ? Colors.white : const Color(0xFF1E293B),
+                      color: isDark ? SoftPalette.gray50 : SoftPalette.slate800,
                     ),
                   ),
                 ],
@@ -1724,14 +1725,14 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                colors: [Color(0xFF008080), Color(0xFF0D9488)],
+                colors: [SoftPalette.teal550, SoftPalette.teal500],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(10),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF008080).withValues(alpha: 0.25),
+                  color: SoftPalette.teal550.withValues(alpha: 0.25),
                   blurRadius: 8,
                   offset: const Offset(0, 3),
                 ),
@@ -1740,18 +1741,18 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.file_download_outlined, color: Colors.white, size: 18),
+                const Icon(Icons.file_download_outlined, color: SoftPalette.gray50, size: 18),
                 const SizedBox(width: 6),
                 Text(
                   context.isUrdu ? 'رپورٹ برآمد کریں' : 'Export',
                   style: const TextStyle(
-                    color: Colors.white,
+                    color: SoftPalette.gray50,
                     fontWeight: FontWeight.bold,
                     fontSize: 13,
                   ),
                 ),
                 const SizedBox(width: 4),
-                const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white70, size: 16),
+                const Icon(Icons.keyboard_arrow_down_rounded, color: SoftPalette.gray50A70, size: 16),
               ],
             ),
           ),
@@ -1761,7 +1762,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
           IconButton(
             icon: Icon(
               showDetail ? Icons.unfold_less_rounded : Icons.unfold_more_rounded,
-              color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF008080),
+              color: isDark ? SoftPalette.teal300 : SoftPalette.teal550,
               size: 20,
             ),
             tooltip: showDetail ? 'Compact View' : 'Detailed View',
@@ -1840,7 +1841,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
 
     if (phone.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('No guardian contact found for student')));
+        AppToast.showSnackBar(context, const SnackBar(content: Text('No guardian contact found for student')));
       }
       return;
     }
@@ -1931,12 +1932,12 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       } else {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Could not launch WhatsApp')));
+          AppToast.showSnackBar(context, const SnackBar(content: Text('Could not launch WhatsApp')));
         }
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error launching WhatsApp: $e')));
+        AppToast.showSnackBar(context, SnackBar(content: Text('Error launching WhatsApp: $e')));
       }
     }
   }

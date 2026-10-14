@@ -1,6 +1,9 @@
 // lib/pages/user_detail_screen.dart — Role-Theme Aware
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
@@ -165,13 +168,13 @@ class _UserDetailScreenState extends State<UserDetailScreen>
   late Animation<double> _fadeAnim;
 
   // Fallback palette (used inside dialogs where theme context may vary)
-  static const Color _dialogAccent = Color(0xFF3949AB);
-  static const Color _divider = Color(0xFFE9ECEF);
-  static const Color _surface = Color(0xFFFFFFFF);
-  static const Color _bg = Color(0xFFF5F6FA);
-  static const Color _ink = Color(0xFF1C1F26);
-  static const Color _inkMid = Color(0xFF5A6072);
-  static const Color _inkLight = Color(0xFFADB5BD);
+  static const Color _dialogAccent = SoftPalette.indigo600;
+  static const Color _divider = SoftPalette.gray150;
+  static const Color _surface = SoftPalette.gray50;
+  static const Color _bg = SoftPalette.gray100;
+  static const Color _ink = SoftPalette.slate900;
+  static const Color _inkMid = SoftPalette.slate550;
+  static const Color _inkLight = SoftPalette.slate300;
 
   Map<String, dynamic>? _remoteUserData;
   bool _isLoadingRemote = true;
@@ -390,7 +393,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                       onPressed: onVerify,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: t.accent,
-                        foregroundColor: Colors.white,
+                        foregroundColor: SoftPalette.gray50,
                         padding: const EdgeInsets.symmetric(vertical: 13),
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12)),
@@ -616,18 +619,18 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                   ),
                   child: Row(children: [
                     const Icon(Icons.edit_rounded,
-                        color: Colors.white, size: 22),
+                        color: SoftPalette.gray50, size: 22),
                     const SizedBox(width: 12),
                     const Expanded(
                         child: Text('Edit User',
                             style: TextStyle(
-                                color: Colors.white,
+                                color: SoftPalette.gray50,
                                 fontSize: 18,
                                 fontWeight: FontWeight.w800))),
                     IconButton(
                       onPressed: () => Navigator.pop(ctx),
                       icon: const Icon(Icons.close_rounded,
-                          color: Colors.white70, size: 22),
+                          color: SoftPalette.gray50A70, size: 22),
                       padding: EdgeInsets.zero,
                     ),
                   ]),
@@ -982,13 +985,13 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                                                                     child: Container(
                                                                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                                                                       decoration: BoxDecoration(
-                                                                        border: Border.all(color: Colors.grey.shade400),
+                                                                        border: Border.all(color: context.adapt(SoftPalette.gray300)),
                                                                         borderRadius: BorderRadius.circular(8),
                                                                       ),
                                                                       child: Column(
                                                                         crossAxisAlignment: CrossAxisAlignment.start,
                                                                         children: [
-                                                                          Text('Start Time', style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+                                                                          Text('Start Time', style: TextStyle(fontSize: 10, color: context.adapt(SoftPalette.gray500))),
                                                                           const SizedBox(height: 2),
                                                                           Row(
                                                                             children: [
@@ -1010,13 +1013,13 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                                                                     child: Container(
                                                                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                                                                       decoration: BoxDecoration(
-                                                                        border: Border.all(color: Colors.grey.shade400),
+                                                                        border: Border.all(color: context.adapt(SoftPalette.gray300)),
                                                                         borderRadius: BorderRadius.circular(8),
                                                                       ),
                                                                       child: Column(
                                                                         crossAxisAlignment: CrossAxisAlignment.start,
                                                                         children: [
-                                                                          Text('End Time', style: TextStyle(fontSize: 10, color: Colors.grey.shade600)),
+                                                                          Text('End Time', style: TextStyle(fontSize: 10, color: context.adapt(SoftPalette.gray500))),
                                                                           const SizedBox(height: 2),
                                                                           Row(
                                                                             children: [
@@ -1138,7 +1141,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                               children: [
                                 Row(
                                   children: [
-                                    Icon(Icons.menu_book_rounded, color: const Color(0xFF7E22CE), size: 20),
+                                    Icon(Icons.menu_book_rounded, color: SoftPalette.violet550, size: 20),
                                     const SizedBox(width: 8),
                                     Text(
                                       'Teaching Specialization & Focus',
@@ -1158,22 +1161,22 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                                     FilterChip(
                                       label: const Text('📖 Nazra (نَظْرَة)'),
                                       selected: editedTeachingType == 'nazra',
-                                      selectedColor: const Color(0xFF10B981).withValues(alpha: 0.2),
-                                      checkmarkColor: const Color(0xFF10B981),
+                                      selectedColor: SoftPalette.emerald350.withValues(alpha: 0.2),
+                                      checkmarkColor: SoftPalette.emerald350,
                                       onSelected: (s) => setS(() => editedTeachingType = 'nazra'),
                                     ),
                                     FilterChip(
                                       label: const Text('🕋 Hifz (حِفْظ)'),
                                       selected: editedTeachingType == 'hifz',
-                                      selectedColor: const Color(0xFF7E22CE).withValues(alpha: 0.2),
-                                      checkmarkColor: const Color(0xFF7E22CE),
+                                      selectedColor: SoftPalette.violet550.withValues(alpha: 0.2),
+                                      checkmarkColor: SoftPalette.violet550,
                                       onSelected: (s) => setS(() => editedTeachingType = 'hifz'),
                                     ),
                                     FilterChip(
                                       label: const Text('✨ Both (حِفْظ + نَظْرَة)'),
                                       selected: editedTeachingType == 'both',
-                                      selectedColor: const Color(0xFF0284C7).withValues(alpha: 0.2),
-                                      checkmarkColor: const Color(0xFF0284C7),
+                                      selectedColor: SoftPalette.sky500.withValues(alpha: 0.2),
+                                      checkmarkColor: SoftPalette.sky500,
                                       onSelected: (s) => setS(() => editedTeachingType = 'both'),
                                     ),
                                   ],
@@ -1194,7 +1197,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                               children: [
                                 Row(
                                   children: [
-                                    Icon(Icons.schedule_rounded, color: const Color(0xFF8B5CF6), size: 20),
+                                    Icon(Icons.schedule_rounded, color: SoftPalette.violet500, size: 20),
                                     const SizedBox(width: 8),
                                     Text(
                                       'Teaching Shift / Session',
@@ -1214,29 +1217,29 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                                     FilterChip(
                                       label: const Text('☀️ Morning (8 AM – 2 PM)'),
                                       selected: editedMadrassaSession == 'morning',
-                                      selectedColor: const Color(0xFFF59E0B).withValues(alpha: 0.2),
-                                      checkmarkColor: const Color(0xFFF59E0B),
+                                      selectedColor: SoftPalette.amber300.withValues(alpha: 0.2),
+                                      checkmarkColor: SoftPalette.amber300,
                                       onSelected: (s) => setS(() => editedMadrassaSession = 'morning'),
                                     ),
                                     FilterChip(
                                       label: const Text('🌅 Evening (2 PM – 8 PM)'),
                                       selected: editedMadrassaSession == 'evening',
-                                      selectedColor: const Color(0xFF0284C7).withValues(alpha: 0.2),
-                                      checkmarkColor: const Color(0xFF0284C7),
+                                      selectedColor: SoftPalette.sky500.withValues(alpha: 0.2),
+                                      checkmarkColor: SoftPalette.sky500,
                                       onSelected: (s) => setS(() => editedMadrassaSession = 'evening'),
                                     ),
                                     FilterChip(
                                       label: const Text('🌙 Night (8 PM – 8 AM)'),
                                       selected: editedMadrassaSession == 'night',
-                                      selectedColor: const Color(0xFF6366F1).withValues(alpha: 0.2),
-                                      checkmarkColor: const Color(0xFF6366F1),
+                                      selectedColor: SoftPalette.indigo500.withValues(alpha: 0.2),
+                                      checkmarkColor: SoftPalette.indigo500,
                                       onSelected: (s) => setS(() => editedMadrassaSession = 'night'),
                                     ),
                                     FilterChip(
                                       label: const Text('📑 All Shifts (Full Day)'),
                                       selected: editedMadrassaSession == 'all',
-                                      selectedColor: const Color(0xFF8B5CF6).withValues(alpha: 0.2),
-                                      checkmarkColor: const Color(0xFF8B5CF6),
+                                      selectedColor: SoftPalette.violet500.withValues(alpha: 0.2),
+                                      checkmarkColor: SoftPalette.violet500,
                                       onSelected: (s) => setS(() => editedMadrassaSession = 'all'),
                                     ),
                                   ],
@@ -1321,7 +1324,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                                 height: 18,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2,
-                                  color: Colors.white,
+                                  color: SoftPalette.gray50,
                                 ),
                               )
                             : const Icon(Icons.save_rounded, size: 18),
@@ -1349,7 +1352,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                               },
                         style: ElevatedButton.styleFrom(
                           backgroundColor: t.accent,
-                          foregroundColor: Colors.white,
+                          foregroundColor: SoftPalette.gray50,
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(12)),
@@ -1737,7 +1740,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                     onPressed: () => Navigator.pop(ctx, true),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: t.danger,
-                      foregroundColor: Colors.white,
+                      foregroundColor: SoftPalette.gray50,
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(12)),
@@ -1868,7 +1871,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
   void _snack(String msg,
       {bool error = false, bool success = false}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    AppToast.showSnackBar(context, SnackBar(
       content: Row(children: [
         Icon(
             error
@@ -1876,7 +1879,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                 : success
                     ? Icons.check_circle_outline
                     : Icons.info_outline,
-            color: Colors.white,
+            color: SoftPalette.gray50,
             size: 18),
         const SizedBox(width: 10),
         Expanded(
@@ -1884,10 +1887,10 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                 style: const TextStyle(fontSize: 13))),
       ]),
       backgroundColor: error
-          ? const Color(0xFFB00020)
+          ? SoftPalette.red600
           : success
-              ? const Color(0xFF2E7D32)
-              : const Color(0xFF37474F),
+              ? SoftPalette.green550
+              : SoftPalette.slate700,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12)),
@@ -2123,7 +2126,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
         border: Border.all(color: t.bgRule, width: 0.9),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
+            color: SoftPalette.gray900.withValues(alpha: 0.04),
             blurRadius: 14,
             offset: const Offset(0, 3),
           ),
@@ -2179,9 +2182,9 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                   decoration: BoxDecoration(
-                    color: (isRevoked ? const Color(0xFFEF4444) : const Color(0xFF10B981)).withValues(alpha: 0.15),
+                    color: (isRevoked ? SoftPalette.red400 : SoftPalette.emerald350).withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: isRevoked ? const Color(0xFFEF4444) : const Color(0xFF10B981), width: 0.8),
+                    border: Border.all(color: isRevoked ? SoftPalette.red400 : SoftPalette.emerald350, width: 0.8),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
@@ -2191,14 +2194,14 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                         height: 6,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: isRevoked ? const Color(0xFFEF4444) : const Color(0xFF10B981),
+                          color: isRevoked ? SoftPalette.red400 : SoftPalette.emerald350,
                         ),
                       ),
                       const SizedBox(width: 5),
                       Text(
                         isRevoked ? 'REVOKED' : 'ACTIVE',
                         style: TextStyle(
-                          color: isRevoked ? const Color(0xFFEF4444) : const Color(0xFF10B981),
+                          color: isRevoked ? SoftPalette.red400 : SoftPalette.emerald350,
                           fontSize: 10,
                           fontWeight: FontWeight.w900,
                         ),
@@ -2220,15 +2223,15 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                   runSpacing: 6,
                   children: [
                     _overviewChip(icon: Icons.badge_outlined, label: role, color: t.accent),
-                    _overviewChip(icon: Icons.location_on_outlined, label: branch, color: const Color(0xFF0284C7)),
+                    _overviewChip(icon: Icons.location_on_outlined, label: branch, color: SoftPalette.sky500),
                     if (isHrLinked)
-                      _overviewChip(icon: Icons.fingerprint_rounded, label: 'HR LINKED', color: const Color(0xFF10B981))
+                      _overviewChip(icon: Icons.fingerprint_rounded, label: 'HR LINKED', color: SoftPalette.emerald350)
                     else
-                      _overviewChip(icon: Icons.link_off_rounded, label: 'UNLINKED', color: Colors.amber.shade800),
+                      _overviewChip(icon: Icons.link_off_rounded, label: 'UNLINKED', color: SoftPalette.orange350),
                     if (isOnline)
-                      _overviewChip(icon: Icons.wifi_rounded, label: 'ONLINE NOW', color: const Color(0xFF22C55E)),
+                      _overviewChip(icon: Icons.wifi_rounded, label: 'ONLINE NOW', color: SoftPalette.green350),
                     if (isKashif)
-                      _overviewChip(icon: Icons.local_hospital_rounded, label: 'KARACHI DISPENSARY', color: const Color(0xFF0D9488)),
+                      _overviewChip(icon: Icons.local_hospital_rounded, label: 'KARACHI DISPENSARY', color: SoftPalette.teal500),
                   ],
                 ),
                 const SizedBox(height: 14),
@@ -2259,7 +2262,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                         _actionButton(
                           icon: Icons.healing_rounded,
                           label: 'Heal Kashif',
-                          color: Colors.amber.shade800,
+                          color: SoftPalette.orange350,
                           onTap: () async {
                             await LocalStorageService.healKashifAccount(syncToCloud: true);
                             await _refreshUser();
@@ -2270,7 +2273,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                     _actionButton(
                       icon: Icons.medical_services_outlined,
                       label: 'Medical File',
-                      color: const Color(0xFF0D9488),
+                      color: SoftPalette.teal500,
                       onTap: () => StaffPatientLinkService.openStaffMedicalHistory(
                         context,
                         name: resolveUserDisplayName(data),
@@ -2373,17 +2376,17 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       t,
       'Dispensary Sessions & Camp Shifts',
       Icons.local_hospital_rounded,
-      const Color(0xFF0D9488),
+      SoftPalette.teal500,
       trailing: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
         decoration: BoxDecoration(
-          color: const Color(0xFF0D9488).withValues(alpha: 0.15),
+          color: SoftPalette.teal500.withValues(alpha: 0.15),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: const Color(0xFF0D9488).withValues(alpha: 0.3)),
+          border: Border.all(color: SoftPalette.teal500.withValues(alpha: 0.3)),
         ),
         child: Text(
           isMorning ? 'MORNING SHIFT ACTIVE' : 'EVENING SHIFT ACTIVE',
-          style: const TextStyle(color: Color(0xFF0D9488), fontSize: 10, fontWeight: FontWeight.w800),
+          style: const TextStyle(color: SoftPalette.teal500, fontSize: 10, fontWeight: FontWeight.w800),
         ),
       ),
       [
@@ -2392,13 +2395,13 @@ class _UserDetailScreenState extends State<UserDetailScreen>
           width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
-            color: const Color(0xFF0D9488).withValues(alpha: 0.08),
+            color: SoftPalette.teal500.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: const Color(0xFF0D9488).withValues(alpha: 0.25)),
+            border: Border.all(color: SoftPalette.teal500.withValues(alpha: 0.25)),
           ),
           child: Row(
             children: [
-              const Icon(Icons.access_time_filled_rounded, size: 18, color: Color(0xFF0D9488)),
+              const Icon(Icons.access_time_filled_rounded, size: 18, color: SoftPalette.teal500),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -2421,10 +2424,10 @@ class _UserDetailScreenState extends State<UserDetailScreen>
             return Container(
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
-                color: isCurrent ? const Color(0xFF0D9488).withValues(alpha: 0.15) : t.bgCardAlt,
+                color: isCurrent ? SoftPalette.teal500.withValues(alpha: 0.15) : t.bgCardAlt,
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
-                  color: isCurrent ? const Color(0xFF0D9488) : t.bgRule,
+                  color: isCurrent ? SoftPalette.teal500 : t.bgRule,
                   width: isCurrent ? 1.4 : 0.8,
                 ),
               ),
@@ -2434,13 +2437,13 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                   Icon(
                     isCurrent ? Icons.check_circle_rounded : Icons.location_on_outlined,
                     size: 15,
-                    color: isCurrent ? const Color(0xFF0D9488) : t.textSecondary,
+                    color: isCurrent ? SoftPalette.teal500 : t.textSecondary,
                   ),
                   const SizedBox(width: 6),
                   Text(
                     CampSessionService.getCampLabel(cid),
                     style: TextStyle(
-                      color: isCurrent ? const Color(0xFF0D9488) : t.textPrimary,
+                      color: isCurrent ? SoftPalette.teal500 : t.textPrimary,
                       fontWeight: isCurrent ? FontWeight.w800 : FontWeight.w600,
                       fontSize: 12.5,
                     ),
@@ -2450,10 +2453,10 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF0D9488),
+                        color: SoftPalette.teal500,
                         borderRadius: BorderRadius.circular(6),
                       ),
-                      child: const Text('ACTIVE', style: TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.w900)),
+                      child: const Text('ACTIVE', style: TextStyle(color: SoftPalette.gray50, fontSize: 9, fontWeight: FontWeight.w900)),
                     ),
                   ],
                 ],
@@ -2480,14 +2483,14 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                 decoration: BoxDecoration(
                   color: t.bgCardAlt.withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: isCurrent ? const Color(0xFF0D9488).withValues(alpha: 0.5) : t.bgRule, width: 0.8),
+                  border: Border.all(color: isCurrent ? SoftPalette.teal500.withValues(alpha: 0.5) : t.bgRule, width: 0.8),
                 ),
                 child: Row(
                   children: [
                     Icon(
                       session.toLowerCase() == 'morning' ? Icons.wb_sunny_rounded : Icons.nightlight_round,
                       size: 16,
-                      color: session.toLowerCase() == 'morning' ? Colors.amber.shade700 : Colors.indigo.shade400,
+                      color: session.toLowerCase() == 'morning' ? SoftPalette.amber300 : SoftPalette.indigo500,
                     ),
                     const SizedBox(width: 10),
                     Text(
@@ -2556,18 +2559,18 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       expandedHeight: 235,
       pinned: true,
       backgroundColor: t.accent,
-      foregroundColor: Colors.white,
+      foregroundColor: SoftPalette.gray50,
       elevation: 0,
       actions: [
         IconButton(
           icon: Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.16),
+                color: SoftPalette.gray50.withValues(alpha: 0.16),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.25), width: 0.8)),
+                border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.25), width: 0.8)),
             child: const Icon(Icons.refresh_rounded,
-                size: 18, color: Colors.white),
+                size: 18, color: SoftPalette.gray50),
           ),
           tooltip: 'Refresh User Data',
           onPressed: _refreshUser,
@@ -2581,16 +2584,16 @@ class _UserDetailScreenState extends State<UserDetailScreen>
               icon: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
                 decoration: BoxDecoration(
-                  color: Colors.amber.shade800.withValues(alpha: 0.4),
+                  color: SoftPalette.orange350.withValues(alpha: 0.4),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.amber.shade300, width: 0.9),
+                  border: Border.all(color: SoftPalette.yellow200, width: 0.9),
                 ),
                 child: const Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.healing_rounded, size: 16, color: Colors.amberAccent),
+                    Icon(Icons.healing_rounded, size: 16, color: SoftPalette.yellow200),
                     SizedBox(width: 5),
-                    Text('Heal Kashif', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                    Text('Heal Kashif', style: TextStyle(color: SoftPalette.gray50, fontSize: 12, fontWeight: FontWeight.bold)),
                   ],
                 ),
               ),
@@ -2607,11 +2610,11 @@ class _UserDetailScreenState extends State<UserDetailScreen>
             icon: Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.16),
+                  color: SoftPalette.gray50.withValues(alpha: 0.16),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.25), width: 0.8)),
+                  border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.25), width: 0.8)),
               child: const Icon(Icons.edit_rounded,
-                  size: 18, color: Colors.white),
+                  size: 18, color: SoftPalette.gray50),
             ),
             tooltip: 'Edit Profile & Credentials',
             onPressed: () => _showEditDialog(data, t),
@@ -2621,16 +2624,16 @@ class _UserDetailScreenState extends State<UserDetailScreen>
               icon: Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                    color: isRevoked ? Colors.green.withValues(alpha: 0.3) : Colors.red.withValues(alpha: 0.3),
+                    color: isRevoked ? SoftPalette.green400.withValues(alpha: 0.3) : SoftPalette.red400.withValues(alpha: 0.3),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                      color: isRevoked ? Colors.green.withValues(alpha: 0.5) : Colors.red.withValues(alpha: 0.5),
+                      color: isRevoked ? SoftPalette.green400.withValues(alpha: 0.5) : SoftPalette.red400.withValues(alpha: 0.5),
                       width: 0.8,
                     )),
                 child: Icon(
                   isRevoked ? Icons.lock_open_rounded : Icons.lock_person_rounded,
                   size: 18,
-                  color: Colors.white,
+                  color: SoftPalette.gray50,
                 ),
               ),
               tooltip: isRevoked ? 'Restore Access' : 'Revoke Access',
@@ -2640,11 +2643,11 @@ class _UserDetailScreenState extends State<UserDetailScreen>
             icon: Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.16),
+                  color: SoftPalette.gray50.withValues(alpha: 0.16),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.25), width: 0.8)),
+                  border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.25), width: 0.8)),
               child: const Icon(Icons.medical_services_outlined,
-                  size: 18, color: Colors.white),
+                  size: 18, color: SoftPalette.gray50),
             ),
             tooltip: 'Medical History',
             onPressed: () => StaffPatientLinkService.openStaffMedicalHistory(
@@ -2659,11 +2662,11 @@ class _UserDetailScreenState extends State<UserDetailScreen>
             icon: Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                  color: Colors.red.withValues(alpha: 0.25),
+                  color: SoftPalette.red400.withValues(alpha: 0.25),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.red.withValues(alpha: 0.5), width: 0.8)),
+                  border: Border.all(color: SoftPalette.red400.withValues(alpha: 0.5), width: 0.8)),
               child: const Icon(Icons.delete_outline_rounded,
-                  size: 18, color: Colors.white),
+                  size: 18, color: SoftPalette.gray50),
             ),
             tooltip: 'Delete User Permanently',
             onPressed: () => _deleteUser(data, t),
@@ -2678,8 +2681,8 @@ class _UserDetailScreenState extends State<UserDetailScreen>
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                t.bg == const Color(0xFF080C14)
-                    ? const Color(0xFF0F172A)
+                t.bg == SoftPalette.slate900
+                    ? SoftPalette.slate900
                     : t.accent.withValues(alpha: 0.95),
                 t.accent,
                 t.accentLight,
@@ -2709,7 +2712,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                               height: 84,
                               decoration: BoxDecoration(
                                 shape: BoxShape.circle,
-                                color: Colors.white.withValues(alpha: 0.2),
+                                color: SoftPalette.gray50.withValues(alpha: 0.2),
                                 image: (photoUrl != null && photoUrl.isNotEmpty)
                                     ? DecorationImage(
                                         image: (photoUrl.startsWith('http://') || photoUrl.startsWith('https://'))
@@ -2718,12 +2721,12 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                                         fit: BoxFit.cover)
                                     : null,
                                 border: Border.all(
-                                  color: Colors.white,
+                                  color: SoftPalette.gray50,
                                   width: 3.0,
                                 ),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.25),
+                                    color: SoftPalette.gray900.withValues(alpha: 0.25),
                                     blurRadius: 12,
                                     offset: const Offset(0, 4),
                                   ),
@@ -2733,7 +2736,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                               child: (photoUrl == null || photoUrl.isEmpty)
                                   ? Text(initials,
                                       style: const TextStyle(
-                                          color: Colors.white,
+                                          color: SoftPalette.gray50,
                                           fontSize: 28,
                                           fontWeight: FontWeight.w900))
                                   : null,
@@ -2746,11 +2749,11 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                                   width: 18,
                                   height: 18,
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFF22C55E),
+                                    color: SoftPalette.green350,
                                     shape: BoxShape.circle,
-                                    border: Border.all(color: Colors.white, width: 2.5),
+                                    border: Border.all(color: SoftPalette.gray50, width: 2.5),
                                     boxShadow: const [
-                                      BoxShadow(color: Color(0x6622C55E), blurRadius: 6, spreadRadius: 1),
+                                      BoxShadow(color: SoftPalette.green350A40, blurRadius: 6, spreadRadius: 1),
                                     ],
                                   ),
                                 ),
@@ -2769,7 +2772,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                         Text(
                           username,
                           style: const TextStyle(
-                            color: Colors.white,
+                            color: SoftPalette.gray50,
                             fontSize: 22,
                             fontWeight: FontWeight.w900,
                             letterSpacing: -0.4,
@@ -2782,7 +2785,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                           Text(
                             '@$handle',
                             style: TextStyle(
-                              color: Colors.white.withValues(alpha: 0.8),
+                              color: SoftPalette.gray50.withValues(alpha: 0.8),
                               fontSize: 13,
                               fontWeight: FontWeight.w500,
                             ),
@@ -2796,18 +2799,18 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3.5),
                               decoration: BoxDecoration(
-                                color: Colors.white.withValues(alpha: 0.22),
+                                color: SoftPalette.gray50.withValues(alpha: 0.22),
                                 borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: Colors.white.withValues(alpha: 0.35), width: 0.7),
+                                border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.35), width: 0.7),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(Icons.badge_outlined, size: 12, color: Colors.white),
+                                  const Icon(Icons.badge_outlined, size: 12, color: SoftPalette.gray50),
                                   const SizedBox(width: 4),
                                   Text(
                                     role,
-                                    style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800),
+                                    style: const TextStyle(color: SoftPalette.gray50, fontSize: 11, fontWeight: FontWeight.w800),
                                   ),
                                 ],
                               ),
@@ -2816,12 +2819,12 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                               padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3.5),
                               decoration: BoxDecoration(
                                 color: isRevoked
-                                    ? const Color(0xFFEF4444)
-                                    : const Color(0xFF10B981),
+                                    ? SoftPalette.red400
+                                    : SoftPalette.emerald350,
                                 borderRadius: BorderRadius.circular(10),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: (isRevoked ? const Color(0xFFEF4444) : const Color(0xFF10B981)).withValues(alpha: 0.35),
+                                    color: (isRevoked ? SoftPalette.red400 : SoftPalette.emerald350).withValues(alpha: 0.35),
                                     blurRadius: 6,
                                   ),
                                 ],
@@ -2829,7 +2832,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                               child: Text(
                                 isRevoked ? 'REVOKED' : 'ACTIVE',
                                 style: const TextStyle(
-                                  color: Colors.white,
+                                  color: SoftPalette.gray50,
                                   fontSize: 10.5,
                                   fontWeight: FontWeight.w900,
                                 ),
@@ -2839,33 +2842,33 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF22C55E).withValues(alpha: 0.3),
+                                  color: SoftPalette.green350.withValues(alpha: 0.3),
                                   borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(color: const Color(0xFF22C55E), width: 0.8),
+                                  border: Border.all(color: SoftPalette.green350, width: 0.8),
                                 ),
                                 child: const Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(Icons.circle, size: 6, color: Color(0xFF4ADE80)),
+                                    Icon(Icons.circle, size: 6, color: SoftPalette.green300),
                                     SizedBox(width: 4),
-                                    Text('ONLINE', style: TextStyle(color: Color(0xFF4ADE80), fontSize: 10, fontWeight: FontWeight.w800)),
+                                    Text('ONLINE', style: TextStyle(color: SoftPalette.green300, fontSize: 10, fontWeight: FontWeight.w800)),
                                   ],
                                 ),
                               ),
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
                               decoration: BoxDecoration(
-                                color: Colors.black.withValues(alpha: 0.2),
+                                color: SoftPalette.gray900.withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(Icons.location_on_outlined, size: 11, color: Colors.white.withValues(alpha: 0.8)),
+                                  Icon(Icons.location_on_outlined, size: 11, color: SoftPalette.gray50.withValues(alpha: 0.8)),
                                   const SizedBox(width: 3),
                                   Text(
                                     (branchName ?? widget.branchId).toUpperCase(),
-                                    style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 10.5, fontWeight: FontWeight.w600),
+                                    style: TextStyle(color: SoftPalette.gray50.withValues(alpha: 0.85), fontSize: 10.5, fontWeight: FontWeight.w600),
                                   ),
                                 ],
                               ),
@@ -2964,7 +2967,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       t,
       'Contact & Location',
       Icons.contact_phone_rounded,
-      const Color(0xFF00695C),
+      SoftPalette.teal600,
       [
         LayoutBuilder(
           builder: (context, constraints) {
@@ -3020,7 +3023,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       t,
       'HR Employee & Attendance Link',
       Icons.badge_outlined,
-      const Color(0xFF0284C7),
+      SoftPalette.sky500,
       [
         if (isLinked) ...[
           _infoRow(t, 'Employee ID', emp['id']?.toString() ?? emp['localId']?.toString() ?? linkedEmpId ?? 'N/A', Icons.fingerprint_rounded),
@@ -3040,8 +3043,8 @@ class _UserDetailScreenState extends State<UserDetailScreen>
               Expanded(
                 child: OutlinedButton.icon(
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF0284C7),
-                    side: const BorderSide(color: Color(0xFF0284C7)),
+                    foregroundColor: SoftPalette.sky500,
+                    side: const BorderSide(color: SoftPalette.sky500),
                     padding: const EdgeInsets.symmetric(vertical: 10),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
@@ -3070,14 +3073,14 @@ class _UserDetailScreenState extends State<UserDetailScreen>
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: Colors.amber.withValues(alpha: 0.08),
+              color: SoftPalette.amber200.withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+              border: Border.all(color: SoftPalette.amber200.withValues(alpha: 0.3)),
             ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.warning_amber_rounded, color: Colors.amber.shade700, size: 22),
+                Icon(Icons.warning_amber_rounded, color: SoftPalette.amber300, size: 22),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -3086,7 +3089,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                       Text(
                         'No Linked HR Profile',
                         style: TextStyle(
-                          color: Colors.amber.shade900,
+                          color: SoftPalette.orange350,
                           fontWeight: FontWeight.w800,
                           fontSize: 13,
                         ),
@@ -3108,8 +3111,8 @@ class _UserDetailScreenState extends State<UserDetailScreen>
               Expanded(
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF0284C7),
-                    foregroundColor: Colors.white,
+                    backgroundColor: SoftPalette.sky500,
+                    foregroundColor: SoftPalette.gray50,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     elevation: 0,
@@ -3124,7 +3127,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                 child: ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: t.accent,
-                    foregroundColor: Colors.white,
+                    foregroundColor: SoftPalette.gray50,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     elevation: 0,
@@ -3163,7 +3166,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
             title: Row(
               children: [
-                const Icon(Icons.link_rounded, color: Color(0xFF0284C7)),
+                const Icon(Icons.link_rounded, color: SoftPalette.sky500),
                 const SizedBox(width: 8),
                 Text('Link User to Employee', style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 16)),
               ],
@@ -3201,22 +3204,22 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                               return Container(
                                 margin: const EdgeInsets.only(bottom: 6),
                                 decoration: BoxDecoration(
-                                  color: isSelected ? const Color(0xFF0284C7).withValues(alpha: 0.12) : t.bgCardAlt,
+                                  color: isSelected ? SoftPalette.sky500.withValues(alpha: 0.12) : t.bgCardAlt,
                                   borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: isSelected ? const Color(0xFF0284C7) : t.bgRule),
+                                  border: Border.all(color: isSelected ? SoftPalette.sky500 : t.bgRule),
                                 ),
                                 child: ListTile(
                                   dense: true,
                                   leading: CircleAvatar(
-                                    backgroundColor: isSelected ? const Color(0xFF0284C7) : t.textTertiary.withValues(alpha: 0.2),
+                                    backgroundColor: isSelected ? SoftPalette.sky500 : t.textTertiary.withValues(alpha: 0.2),
                                     child: Text(
                                       (emp['name']?.toString() ?? '?').isNotEmpty ? (emp['name']?.toString() ?? '?')[0].toUpperCase() : '?',
-                                      style: TextStyle(color: isSelected ? Colors.white : t.textPrimary, fontWeight: FontWeight.bold, fontSize: 12),
+                                      style: TextStyle(color: isSelected ? SoftPalette.gray50 : t.textPrimary, fontWeight: FontWeight.bold, fontSize: 12),
                                     ),
                                   ),
                                   title: Text(emp['name']?.toString() ?? 'Unnamed', style: TextStyle(fontWeight: FontWeight.bold, color: t.textPrimary, fontSize: 13)),
                                   subtitle: Text('${emp['department'] ?? 'General'} • ${emp['designation'] ?? emp['role'] ?? 'Staff'} (ID: $empId)', style: TextStyle(color: t.textSecondary, fontSize: 11)),
-                                  trailing: isSelected ? const Icon(Icons.check_circle, color: Color(0xFF0284C7), size: 20) : null,
+                                  trailing: isSelected ? const Icon(Icons.check_circle, color: SoftPalette.sky500, size: 20) : null,
                                   onTap: () => setDState(() => selectedId = empId),
                                 ),
                               );
@@ -3233,8 +3236,8 @@ class _UserDetailScreenState extends State<UserDetailScreen>
               ),
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0284C7),
-                  foregroundColor: Colors.white,
+                  backgroundColor: SoftPalette.sky500,
+                  foregroundColor: SoftPalette.gray50,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
                 onPressed: selectedId == null
@@ -3384,7 +3387,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
               ElevatedButton(
                 style: ElevatedButton.styleFrom(
                   backgroundColor: t.accent,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 ),
                 onPressed: () async {
@@ -3466,7 +3469,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: t.danger,
-              foregroundColor: Colors.white,
+              foregroundColor: SoftPalette.gray50,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
             onPressed: () => Navigator.pop(dialogCtx, true),
@@ -3497,7 +3500,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       Map<String, dynamic> data, RoleThemeData t) {
     return _card(t, 'Financial',
         Icons.account_balance_wallet_outlined,
-        const Color(0xFF6A1B9A), [
+        SoftPalette.purple600, [
       _infoRow(t, 'Bank', data['bankName'] ?? 'N/A',
           Icons.account_balance_outlined),
       _infoRow(t, 'Account No.',
@@ -3511,7 +3514,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
   Widget _buildMedicalSection(
       Map<String, dynamic> data, RoleThemeData t) {
     return _card(t, 'Medical', Icons.local_hospital_outlined,
-        const Color(0xFF00796B), [
+        SoftPalette.teal550, [
       _infoRow(t, 'Degree', data['degree'] ?? 'N/A',
           Icons.school_outlined),
     ]);
@@ -3591,7 +3594,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       t,
       'Active Device & Session History',
       Icons.devices_rounded,
-      Colors.blue.shade700,
+      SoftPalette.blue500,
       [
         if (deviceInfo != null) ...[
           Padding(
@@ -3698,7 +3701,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
         border: Border.all(color: t.bgRule, width: 0.9),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
+            color: SoftPalette.gray900.withValues(alpha: 0.04),
             blurRadius: 14,
             offset: const Offset(0, 3),
           ),
@@ -3805,12 +3808,12 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                   borderRadius: BorderRadius.circular(8),
                   onTap: () {
                     Clipboard.setData(ClipboardData(text: value));
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    AppToast.showSnackBar(context, 
                       SnackBar(
                         content: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.check_circle_rounded, color: Colors.white, size: 16),
+                            const Icon(Icons.check_circle_rounded, color: SoftPalette.gray50, size: 16),
                             const SizedBox(width: 8),
                             Text('Copied $label to clipboard', style: const TextStyle(fontSize: 12.5)),
                           ],
@@ -3904,7 +3907,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                     border: Border.all(color: t.bgRule)),
                 child: Row(children: [
                   const Icon(Icons.picture_as_pdf_rounded,
-                      color: Colors.red, size: 22),
+                      color: SoftPalette.red400, size: 22),
                   const SizedBox(width: 12),
                   Expanded(
                       child: Text('View PDF',
@@ -4136,9 +4139,9 @@ class _UserDetailScreenState extends State<UserDetailScreen>
               : type == 'shield'
                   ? t.accentLight
                   : type == 'madrassa'
-                      ? const Color(0xFF5C6BC0)
+                      ? SoftPalette.indigo500
                       : type == 'hybrid'
-                          ? const Color(0xFF00796B)
+                          ? SoftPalette.teal550
                           : t.textSecondary;
           return Row(
             children: [
@@ -4158,8 +4161,8 @@ class _UserDetailScreenState extends State<UserDetailScreen>
           final isShield = type == 'shield';
           final isMadrassa = type == 'madrassa';
           final isHybrid = type == 'hybrid';
-          const madrassaColor = Color(0xFF5C6BC0);
-          const hybridColor = Color(0xFF00796B);
+          const madrassaColor = SoftPalette.indigo500;
+          const hybridColor = SoftPalette.teal550;
           
           final Color iconColor = isCrown
               ? t.accent
@@ -4249,12 +4252,12 @@ class _UserDetailScreenState extends State<UserDetailScreen>
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
             color: has
-                ? const Color(0xFFE8F5E9)
+                ? context.adapt(SoftPalette.green100m)
                 : t.bg,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
                 color: has
-                    ? Colors.green.shade400
+                    ? SoftPalette.green350
                     : t.bgRule,
                 width: 1.5),
           ),
@@ -4264,7 +4267,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                     ? Icons.check_circle_rounded
                     : Icons.upload_file_rounded,
                 color: has
-                    ? Colors.green.shade700
+                    ? SoftPalette.green500
                     : t.textTertiary,
                 size: 22),
             const SizedBox(width: 12),
@@ -4281,7 +4284,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                       Text(file.name,
                           style: TextStyle(
                               fontSize: 11,
-                              color: Colors.green.shade700),
+                              color: SoftPalette.green500),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis),
                   ]),
@@ -4290,7 +4293,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                 style: TextStyle(
                     fontSize: 12,
                     color: has
-                        ? Colors.green.shade700
+                        ? SoftPalette.green500
                         : t.accent,
                     fontWeight: FontWeight.w600)),
           ]),
@@ -4306,11 +4309,11 @@ class _UserDetailScreenState extends State<UserDetailScreen>
     final reasonCtrl = TextEditingController();
 
     final statusOptions = [
-      {'key': 'active', 'label': 'Active Student / Guardian', 'color': Colors.green, 'icon': Icons.check_circle_rounded},
-      {'key': 'hifz_completed', 'label': 'Hifz Completed', 'color': const Color(0xFF4C4DDC), 'icon': Icons.workspace_premium_rounded},
-      {'key': 'left', 'label': 'Left Madrassa', 'color': Colors.redAccent, 'icon': Icons.exit_to_app_rounded},
-      {'key': 'dropped', 'label': 'Dropped Out', 'color': Colors.red, 'icon': Icons.person_off_rounded},
-      {'key': 'archived', 'label': 'Archived', 'color': Colors.orange, 'icon': Icons.archive_rounded},
+      {'key': 'active', 'label': 'Active Student / Guardian', 'color': SoftPalette.green400, 'icon': Icons.check_circle_rounded},
+      {'key': 'hifz_completed', 'label': 'Hifz Completed', 'color': SoftPalette.indigo550, 'icon': Icons.workspace_premium_rounded},
+      {'key': 'left', 'label': 'Left Madrassa', 'color': SoftPalette.red400, 'icon': Icons.exit_to_app_rounded},
+      {'key': 'dropped', 'label': 'Dropped Out', 'color': SoftPalette.red400, 'icon': Icons.person_off_rounded},
+      {'key': 'archived', 'label': 'Archived', 'color': SoftPalette.amber300, 'icon': Icons.archive_rounded},
     ];
 
     final confirm = await showDialog<bool>(
@@ -4419,7 +4422,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                           onPressed: () => Navigator.pop(ctx, true),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: currentOpt['color'] as Color,
-                            foregroundColor: Colors.white,
+                            foregroundColor: SoftPalette.gray50,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           ),
                           child: const Text('Update Status', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -4500,10 +4503,10 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: Colors.teal.withValues(alpha: 0.12),
+                    color: SoftPalette.teal500.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: const Icon(Icons.family_restroom_rounded, color: Colors.teal, size: 22),
+                  child: const Icon(Icons.family_restroom_rounded, color: SoftPalette.teal500, size: 22),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -4538,8 +4541,8 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
                 ),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.teal,
-                  foregroundColor: Colors.white,
+                  backgroundColor: SoftPalette.teal500,
+                  foregroundColor: SoftPalette.gray50,
                   padding: const EdgeInsets.symmetric(vertical: 14),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                   elevation: 0,
@@ -4568,16 +4571,16 @@ class _UserDetailScreenState extends State<UserDetailScreen>
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: isRevoked
-            ? Colors.red.withValues(alpha: 0.08)
+            ? SoftPalette.red400.withValues(alpha: 0.08)
             : t.bgCard,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: isRevoked ? Colors.red.withValues(alpha: 0.35) : t.bgRule,
+          color: isRevoked ? SoftPalette.red400.withValues(alpha: 0.35) : t.bgRule,
           width: 0.9,
         ),
         boxShadow: [
           BoxShadow(
-            color: (isRevoked ? Colors.red : Colors.black).withValues(alpha: 0.04),
+            color: (isRevoked ? SoftPalette.red400 : SoftPalette.gray900).withValues(alpha: 0.04),
             blurRadius: 12,
             offset: const Offset(0, 3),
           ),
@@ -4592,13 +4595,13 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                 width: 44,
                 height: 44,
                 decoration: BoxDecoration(
-                  color: isRevoked ? Colors.red.withValues(alpha: 0.15) : t.accentMuted,
+                  color: isRevoked ? SoftPalette.red400.withValues(alpha: 0.15) : t.accentMuted,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 alignment: Alignment.center,
                 child: Icon(
                   isRevoked ? Icons.no_accounts_rounded : Icons.shield_outlined,
-                  color: isRevoked ? Colors.red : t.accent,
+                  color: isRevoked ? SoftPalette.red400 : t.accent,
                   size: 24,
                 ),
               ),
@@ -4634,13 +4637,13 @@ class _UserDetailScreenState extends State<UserDetailScreen>
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: Colors.red.withValues(alpha: 0.06),
+                color: SoftPalette.red400.withValues(alpha: 0.06),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.red.withValues(alpha: 0.25)),
+                border: Border.all(color: SoftPalette.red400.withValues(alpha: 0.25)),
               ),
               child: Text(
                 'Reason: ${data['revocationReason']}',
-                style: const TextStyle(fontSize: 12, color: Colors.red, fontWeight: FontWeight.w600),
+                style: const TextStyle(fontSize: 12, color: SoftPalette.red400, fontWeight: FontWeight.w600),
               ),
             ),
           ],
@@ -4656,8 +4659,8 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: isRevoked ? const Color(0xFF334155) : Colors.amber.shade900,
-                    foregroundColor: Colors.white,
+                    backgroundColor: isRevoked ? SoftPalette.slate700 : SoftPalette.orange350,
+                    foregroundColor: SoftPalette.gray50,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     elevation: 0,
@@ -4674,8 +4677,8 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                     style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red.shade800,
-                    foregroundColor: Colors.white,
+                    backgroundColor: SoftPalette.red550,
+                    foregroundColor: SoftPalette.gray50,
                     padding: const EdgeInsets.symmetric(vertical: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     elevation: 0,
@@ -4773,7 +4776,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(
           children: [
-            const Icon(Icons.delete_forever_rounded, color: Colors.red, size: 28),
+            const Icon(Icons.delete_forever_rounded, color: SoftPalette.red400, size: 28),
             const SizedBox(width: 10),
             Text('Delete User Account', style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 18)),
           ],
@@ -4792,8 +4795,8 @@ class _UserDetailScreenState extends State<UserDetailScreen>
             icon: const Icon(Icons.delete_forever_rounded, size: 18),
             label: const Text('Delete Permanently'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.red400,
+              foregroundColor: SoftPalette.gray50,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
           ),
@@ -4937,10 +4940,10 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: Colors.red.withValues(alpha: 0.15),
+                    color: SoftPalette.red400.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.lock_person_rounded, color: Colors.red, size: 22),
+                  child: const Icon(Icons.lock_person_rounded, color: SoftPalette.red400, size: 22),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -5017,8 +5020,8 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                 icon: const Icon(Icons.lock_person_rounded, size: 16),
                 label: const Text('Revoke Access'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.red,
-                  foregroundColor: Colors.white,
+                  backgroundColor: SoftPalette.red400,
+                  foregroundColor: SoftPalette.gray50,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
               ),
@@ -5089,12 +5092,12 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                       Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: Colors.green.withValues(alpha: 0.12),
+                          color: SoftPalette.green400.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(12),
                         ),
                         child: const Icon(
                           Icons.lock_open_rounded,
-                          color: Colors.green,
+                          color: SoftPalette.green400,
                           size: 24,
                         ),
                       ),
@@ -5168,8 +5171,8 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                           icon: const Icon(Icons.lock_open_rounded, size: 18),
                           label: const Text('Restore'),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.green,
-                            foregroundColor: Colors.white,
+                            backgroundColor: SoftPalette.green400,
+                            foregroundColor: SoftPalette.gray50,
                             padding: const EdgeInsets.symmetric(vertical: 13),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             elevation: 0,
@@ -5449,7 +5452,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
             constraints: const BoxConstraints(maxWidth: 520),
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: const Color(0xFF0F172A),
+              color: SoftPalette.slate900,
               borderRadius: BorderRadius.circular(24),
               border: Border.all(color: t.accent.withValues(alpha: 0.4), width: 1.8),
               boxShadow: [
@@ -5474,7 +5477,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                         const Text(
                           'Profile Photo',
                           style: TextStyle(
-                            color: Colors.white,
+                            color: SoftPalette.gray50,
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
                             letterSpacing: -0.3,
@@ -5483,7 +5486,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                       ],
                     ),
                     IconButton(
-                      icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                      icon: const Icon(Icons.close_rounded, color: SoftPalette.gray50A70),
                       onPressed: () => Navigator.pop(ctx),
                       tooltip: 'Close',
                     ),
@@ -5497,10 +5500,10 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                   height: 320,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    border: Border.all(color: const Color(0xFFF59E0B), width: 4.0),
+                    border: Border.all(color: SoftPalette.amber300, width: 4.0),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFFF59E0B).withValues(alpha: 0.45),
+                        color: SoftPalette.amber300.withValues(alpha: 0.45),
                         blurRadius: 24,
                         spreadRadius: 3,
                       ),
@@ -5520,7 +5523,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
                 Text(
                   name,
                   style: const TextStyle(
-                    color: Colors.white,
+                    color: SoftPalette.gray50,
                     fontSize: 20,
                     fontWeight: FontWeight.w800,
                   ),

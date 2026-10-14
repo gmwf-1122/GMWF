@@ -12,6 +12,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'dart:ui';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/material.dart';
 import '../../theme/role_theme_provider.dart' show RoleThemeScope;
 import '../tokens/spacing.dart';
@@ -128,7 +129,7 @@ class AppCard extends StatelessWidget {
                 color: t.glassTint,
                 borderRadius: r,
                 border: Border.all(
-                  color: Colors.white.withValues(alpha: isDark ? 0.08 : 0.30),
+                  color: SoftPalette.gray50.withValues(alpha: isDark ? 0.08 : 0.30),
                   width: 1,
                 ),
                 boxShadow: elevation == 0

@@ -1,6 +1,7 @@
 // lib/pages/school/school_dashboard.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'views/school_overview_view.dart';
 import 'views/school_daily_attendance_view.dart';
 import 'views/school_teacher_attendance_view.dart';
@@ -350,7 +351,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
             onPressed: () => Navigator.pop(context, true),
             style: ElevatedButton.styleFrom(
               backgroundColor: SchoolTheme.statusAbsent,
-              foregroundColor: Colors.white,
+              foregroundColor: SoftPalette.gray50,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
             child: const Text('Sign Out'),
@@ -377,7 +378,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
     if (!hasSchool && !_isAdminOrPrincipal && !_isTeacher && !_isHighestAuthority) {
       final bName = LocalStorageService.getBranchName(_effectiveBranchId);
       return Scaffold(
-        backgroundColor: SchoolTheme.bgLight,
+        backgroundColor: context.adapt(SchoolTheme.bgLight),
         appBar: AppBar(
           backgroundColor: Colors.transparent,
           elevation: 0,
@@ -390,9 +391,9 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
             margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 36),
             padding: const EdgeInsets.all(32),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: context.adapt(SoftPalette.gray50),
               borderRadius: BorderRadius.circular(24),
-              border: Border.all(color: SchoolTheme.borderLight),
+              border: Border.all(color: context.adapt(SchoolTheme.borderLight)),
               boxShadow: SchoolTheme.cardShadow,
             ),
             child: Column(
@@ -402,19 +403,19 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
                   width: 80,
                   height: 80,
                   decoration: BoxDecoration(
-                    color: SchoolTheme.primaryLight,
+                    color: context.adapt(SchoolTheme.primaryLight),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.school_outlined, size: 42, color: SchoolTheme.primary),
+                  child: Icon(Icons.school_outlined, size: 42, color: context.adapt(SchoolTheme.primary)),
                 ),
                 const SizedBox(height: 24),
                 Text(
                   'School is not available in $bName yet',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.w800,
-                    color: SchoolTheme.textDark,
+                    color: context.adapt(SchoolTheme.textDark),
                     letterSpacing: -0.4,
                   ),
                 ),
@@ -422,7 +423,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
                 Text(
                   'The school facility is not registered for the $bName branch. Contact system administration to configure it in Branches Management.',
                   textAlign: TextAlign.center,
-                  style: const TextStyle(fontSize: 13, color: SchoolTheme.textMuted, height: 1.5),
+                  style: TextStyle(fontSize: 13, color: context.adapt(SchoolTheme.textMuted), height: 1.5),
                 ),
                 const SizedBox(height: 28),
                 ElevatedButton.icon(
@@ -431,7 +432,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
                   label: const Text('Return to Dashboard', style: TextStyle(fontWeight: FontWeight.bold)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: SchoolTheme.primary,
-                    foregroundColor: Colors.white,
+                    foregroundColor: SoftPalette.gray50,
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     elevation: 0,
@@ -513,7 +514,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
         tabIconSize: 24.0,
         tabIconSelectedSize: 22.0,
         tabSelectedColor: t.accent,
-        tabIconSelectedColor: Colors.white,
+        tabIconSelectedColor: SoftPalette.gray50,
         tabBarColor: t.bgCard,
         onTabItemSelected: (int value) {
           setState(() {
@@ -530,7 +531,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
         border: Border(top: BorderSide(color: t.bgRule)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.04),
+            color: SoftPalette.gray900.withValues(alpha: 0.04),
             blurRadius: 10,
             offset: const Offset(0, -2),
           ),
@@ -558,7 +559,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
                     duration: const Duration(milliseconds: 200),
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                     decoration: BoxDecoration(
-                      color: isSelected ? t.accent : (t.isDarkCanvas ? const Color(0xFF161B22) : const Color(0xFFF1F5F9)),
+                      color: isSelected ? t.accent : (t.isDarkCanvas ? SoftPalette.slate900 : SoftPalette.slate100),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
                         color: isSelected ? t.accent : t.bgRule,
@@ -570,7 +571,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
                         Icon(
                           item.icon,
                           size: 16,
-                          color: isSelected ? Colors.white : t.textSecondary,
+                          color: isSelected ? SoftPalette.gray50 : t.textSecondary,
                         ),
                         const SizedBox(width: 6),
                         Text(
@@ -578,7 +579,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
-                            color: isSelected ? Colors.white : t.textPrimary,
+                            color: isSelected ? SoftPalette.gray50 : t.textPrimary,
                           ),
                         ),
                       ],
@@ -687,7 +688,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                 decoration: BoxDecoration(
-                  color: t.isDarkCanvas ? const Color(0xFF161B22) : const Color(0xFFF1F5F9),
+                  color: t.isDarkCanvas ? SoftPalette.slate900 : SoftPalette.slate100,
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: t.bgRule),
                 ),
@@ -818,7 +819,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
                         children: [
                           Icon(
                             item.icon,
-                            color: isSelected ? Colors.white : SchoolTheme.sidebarMuted,
+                            color: isSelected ? SoftPalette.gray50 : SchoolTheme.sidebarMuted,
                             size: 20,
                           ),
                           if (!isCollapsed) ...[
@@ -827,7 +828,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
                               child: Text(
                                 item.label,
                                 style: TextStyle(
-                                  color: isSelected ? Colors.white : SchoolTheme.sidebarText,
+                                  color: isSelected ? SoftPalette.gray50 : SchoolTheme.sidebarText,
                                   fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
                                   fontSize: 13.5,
                                 ),
@@ -872,7 +873,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
                     children: [
                       const Icon(
                         Icons.logout_rounded,
-                        color: Color(0xFFF87171),
+                        color: SoftPalette.red350,
                         size: 20,
                       ),
                       if (!isCollapsed) ...[
@@ -880,7 +881,7 @@ class _SchoolDashboardState extends State<SchoolDashboard> with TickerProviderSt
                         const Text(
                           'Sign Out',
                           style: TextStyle(
-                            color: Color(0xFFF87171),
+                            color: SoftPalette.red350,
                             fontWeight: FontWeight.w600,
                             fontSize: 13.5,
                           ),
@@ -986,7 +987,7 @@ class _SchoolSyncBadge extends StatelessWidget {
             color: Colors.transparent,
             child: InkWell(
               onTap: () async {
-                ScaffoldMessenger.of(context).showSnackBar(
+                AppToast.showSnackBar(context, 
                   const SnackBar(
                     content: Text('Triggering manual School data sync…'),
                     duration: Duration(seconds: 1),

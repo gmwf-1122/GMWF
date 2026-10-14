@@ -1,8 +1,10 @@
 // lib/pages/office/shared_widgets.dart
 
 import 'dart:io';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import '../../theme/app_theme.dart';
@@ -221,7 +223,7 @@ void showAddCustomDialog({
               Navigator.pop(ctx);
               onAdded(text);
             },
-            child: const Text('Add', style: TextStyle(color: Colors.white)),
+            child: const Text('Add', style: TextStyle(color: SoftPalette.gray50)),
           ),
         ],
       );
@@ -260,18 +262,18 @@ enum StatusPillVariant { success, warning, accent, pro, danger }
 Color _statusPillColor(StatusPillVariant variant, RoleThemeData theme) {
   switch (variant) {
     case StatusPillVariant.success:
-      return theme.isDarkCanvas ? Colors.green[300]! : Colors.green[700]!;
+      return theme.isDarkCanvas ? SoftPalette.green300 : SoftPalette.green500;
     case StatusPillVariant.warning:
-      return theme.isDarkCanvas ? Colors.orange[300]! : Colors.orange[700]!;
+      return theme.isDarkCanvas ? SoftPalette.amber300 : SoftPalette.orange350;
     case StatusPillVariant.accent:
       return theme.accent;
     case StatusPillVariant.pro:
-      return theme.isDarkCanvas ? Colors.blue[300]! : Colors.blue[700]!;
+      return theme.isDarkCanvas ? SoftPalette.sky350 : SoftPalette.blue500;
     case StatusPillVariant.danger:
       // NOTE: assumes RoleThemeData exposes `danger` (already referenced as
       // `t.danger` in employees_tab.dart's leave-quota screen). If your
       // theme class does not define this getter, replace the line below with:
-      //   return theme.isDarkCanvas ? Colors.red[300]! : Colors.red[700]!;
+      //   return theme.isDarkCanvas ? SoftPalette.red400 : SoftPalette.red500;
       return theme.danger;
   }
 }
@@ -303,13 +305,13 @@ Widget buildStatusPill({
       mainAxisSize: MainAxisSize.min,
       children: [
         if (icon != null) ...[
-          Icon(icon, size: 11, color: filled ? Colors.white : color),
+          Icon(icon, size: 11, color: filled ? SoftPalette.gray50 : color),
           const SizedBox(width: 4),
         ],
         Text(
           label,
           style: TextStyle(
-            color: filled ? Colors.white : color,
+            color: filled ? SoftPalette.gray50 : color,
             fontSize: 10,
             fontWeight: FontWeight.bold,
             letterSpacing: 0.3,
@@ -381,6 +383,7 @@ Widget buildMetricCardRow({
 /// Extracted since `CircleAvatar(backgroundColor: accentMuted, child: Text(initial))`
 /// is currently duplicated in Employees, Payroll, and Employee Report.
 Widget buildInitialsAvatar({
+  required BuildContext context,
   required String name,
   required RoleThemeData theme,
   double radius = 20,
@@ -409,14 +412,14 @@ Widget buildInitialsAvatar({
     if (isFemale) {
       return CircleAvatar(
         radius: radius,
-        backgroundColor: const Color(0xFFFCE7F3),
-        child: Icon(Icons.face_3_rounded, size: radius * 1.25, color: const Color(0xFFDB2777)),
+        backgroundColor: context.adapt(SoftPalette.pink100),
+        child: Icon(Icons.face_3_rounded, size: radius * 1.25, color: SoftPalette.pink500),
       );
     } else if (isMale) {
       return CircleAvatar(
         radius: radius,
-        backgroundColor: const Color(0xFFE0F2FE),
-        child: Icon(Icons.face_6_rounded, size: radius * 1.25, color: const Color(0xFF0284C7)),
+        backgroundColor: context.adapt(SoftPalette.slate100),
+        child: Icon(Icons.face_6_rounded, size: radius * 1.25, color: SoftPalette.sky500),
       );
     }
     return CircleAvatar(
@@ -444,7 +447,7 @@ Widget buildInitialsAvatar({
       child: Container(
         width: radius * 2,
         height: radius * 2,
-        color: isFemale ? const Color(0xFFFCE7F3) : (isMale ? const Color(0xFFE0F2FE) : theme.accentMuted),
+        color: isFemale ? context.adapt(SoftPalette.pink100) : (isMale ? context.adapt(SoftPalette.slate100) : theme.accentMuted),
         child: Image(
           image: imageProvider,
           fit: BoxFit.cover,

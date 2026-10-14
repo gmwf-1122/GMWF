@@ -1,6 +1,8 @@
 // lib/widgets/camp_selector_chip.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:gmwf/services/camp_session_service.dart';
@@ -75,9 +77,9 @@ class _CampSelectorChipState extends State<CampSelectorChip> {
       return const SizedBox.shrink();
     }
 
-    final textColor = widget.textColor ?? Colors.white;
-    final bgColor = widget.bgColor ?? Colors.white.withValues(alpha: 0.15);
-    final borderColor = widget.borderColor ?? Colors.white.withValues(alpha: 0.30);
+    final textColor = widget.textColor ?? SoftPalette.gray50;
+    final bgColor = widget.bgColor ?? SoftPalette.gray50.withValues(alpha: 0.15);
+    final borderColor = widget.borderColor ?? SoftPalette.gray50.withValues(alpha: 0.30);
 
     final isBound = CampSessionService.getBoundDispensaryId() != null;
     final shiftName = switch (CampSessionService.getCurrentSession(null, effBranch, activeCampId)) {
@@ -140,7 +142,16 @@ class _CampSelectorChipState extends State<CampSelectorChip> {
               ),
             ),
             const SizedBox(width: 5),
-            Icon(Icons.check_circle_rounded, color: Colors.tealAccent.shade400, size: 12),
+            Icon(
+              Icons.check_circle_rounded,
+              // Light tick on dark chips, dark tick on light chips (was light-on-light in light mode).
+              // Translucent default chips sit on dark/brand bars, so they keep the light tick.
+              color: bgColor.a < 0.5 ||
+                      ThemeData.estimateBrightnessForColor(bgColor) == Brightness.dark
+                  ? SoftPalette.emerald300
+                  : SoftPalette.emerald550,
+              size: 12,
+            ),
           ],
         ),
       );
@@ -149,7 +160,7 @@ class _CampSelectorChipState extends State<CampSelectorChip> {
     return PopupMenuButton<String>(
       tooltip: 'Switch Active Camp',
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-      color: Colors.white,
+      color: context.adapt(SoftPalette.gray50),
       elevation: 4,
       onSelected: (selectedId) async {
         await CampSessionService.setActiveCamp(selectedId, isManual: true);
@@ -169,7 +180,7 @@ class _CampSelectorChipState extends State<CampSelectorChip> {
               Icon(
                 FontAwesomeIcons.tent,
                 size: 14,
-                color: isSelected ? const Color(0xFF00695C) : Colors.grey.shade600,
+                color: isSelected ? context.adapt(SoftPalette.teal600) : context.adapt(SoftPalette.gray500),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -178,12 +189,12 @@ class _CampSelectorChipState extends State<CampSelectorChip> {
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                    color: isSelected ? const Color(0xFF00695C) : const Color(0xFF1B2631),
+                    color: isSelected ? context.adapt(SoftPalette.teal600) : context.adapt(SoftPalette.slate800),
                   ),
                 ),
               ),
               if (isSelected)
-                const Icon(Icons.check_circle_rounded, size: 16, color: Color(0xFF00695C)),
+                Icon(Icons.check_circle_rounded, size: 16, color: context.adapt(SoftPalette.teal600)),
             ],
           ),
         );

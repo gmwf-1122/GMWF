@@ -1616,25 +1616,54 @@ class CampSessionService {
     return null;
   }
 
+  /// Returns single uppercase letter for session ('M' for morning, 'E' for evening, 'N' for night, etc.)
+  static String getSessionLetter([String? session]) {
+    final s = (session ?? '').toLowerCase().trim();
+    if (s == 'morning') return 'M';
+    if (s == 'evening') return 'E';
+    if (s == 'night') return 'N';
+    if (s == 'lunch') return 'L';
+    if (s == 'dinner') return 'D';
+    if (s.isNotEmpty) return s[0].toUpperCase();
+    return 'M';
+  }
+
+  /// Extracts session letter from serial (e.g. '141026E-SADD-001' -> 'E')
+  static String? getSessionLetterFromSerial(String serial) {
+    final s = serial.trim().toUpperCase();
+    final parts = s.split('-');
+    for (final part in parts) {
+      final match = RegExp(r'^\d{6}([A-Z])$').firstMatch(part);
+      if (match != null) {
+        return match.group(1);
+      }
+    }
+    return null;
+  }
+
   /// Safely extracts the 6-digit dateKey from any serial format
-  /// (e.g. KHI-HAJI-050926-Z001, HAJI-050926-Z001, X-050926-HAJI-Z001, 050926-Z001).
+  /// Supports both standard (141026-SADD-001) and session-tagged (141026E-SADD-001).
   static String getDateKeyFromSerial(String serial) {
     final s = serial.trim();
     if (s.isEmpty) return '';
     final parts = s.split('-');
     if (parts.isEmpty) return '';
 
-    // Search for the 6-digit date part (ddMMyy)
-    final dateReg = RegExp(r'^\d{6}$');
+    // Search for the 6-digit date part (ddMMyy or ddMMyy[A-Z])
+    final dateReg = RegExp(r'^\d{6}[A-Za-z]?$');
     for (final part in parts) {
       if (dateReg.hasMatch(part)) {
-        return part;
+        return part.replaceAll(RegExp(r'[^0-9]'), '');
       }
     }
 
     if (parts[0].toUpperCase() == 'X' && parts.length > 1) {
-      return parts[1];
+      final p1 = parts[1].replaceAll(RegExp(r'[^0-9]'), '');
+      if (p1.length >= 6) return p1.substring(0, 6);
+      return p1;
     }
+    final p0 = parts[0].replaceAll(RegExp(r'[^0-9]'), '');
+    if (p0.length >= 6) return p0.substring(0, 6);
     return parts[0];
   }
 
@@ -1694,6 +1723,12 @@ class CampSessionService {
     final ser = (serial ?? '').trim().toUpperCase();
 
     // 1. Immutable Serial / Tag Check (Highest Priority — never overridden by host PC activeCamp)
+    // Prefix Check: inventory items explicitly partitioned with HAJICAMP-- or SADDAR--
+    final isHajiPrefixed   = ser.startsWith('HAJICAMP--') || ser.startsWith('HAJI--') || ser.startsWith('STOCK:HAJICAMP--') || ser.startsWith('STOCK:HAJI--');
+    final isSaddarPrefixed = ser.startsWith('SADDAR--') || ser.startsWith('KAPAYYA--') || ser.startsWith('STOCK:SADDAR--') || ser.startsWith('STOCK:KAPAYYA--');
+    if (isHajiPrefixed) return isHaji;
+    if (isSaddarPrefixed) return isSaddar;
+
     final isExplicitSaddar = ser.contains('-SADD-') || ser.contains('-KAP-') || ser.contains('-KAPAYYA-') || ser.contains('KAPAYYA') || ser.contains('SADDAR') || tag == 'SADD' || tag == 'KAP' || tag == 'SADDAR' || tag == 'KAPAYYA';
     final isExplicitHaji   = ser.contains('-HAJI-') || ser.contains('-HAJ-') || ser.contains('-HC-') || ser.contains('HAJI') || tag == 'HAJI' || tag == 'HC' || tag == 'HAJICAMP';
 

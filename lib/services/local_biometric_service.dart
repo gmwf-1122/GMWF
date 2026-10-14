@@ -1,6 +1,8 @@
 // lib/services/local_biometric_service.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
@@ -138,8 +140,8 @@ class LocalBiometricService {
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
-          children: const [
-            Icon(Icons.security_rounded, color: Color(0xFFEF4444), size: 28),
+          children: [
+            Icon(Icons.security_rounded, color: ctx.adapt(SoftPalette.red400), size: 28),
             SizedBox(width: 10),
             Text('Proxy Attendance Blocked'),
           ],
@@ -150,7 +152,7 @@ class LocalBiometricService {
         ),
         actions: [
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444), foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.red400, foregroundColor: SoftPalette.gray50),
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Understand'),
           ),
@@ -176,41 +178,41 @@ class LocalBiometricService {
           children: [
             Container(
               padding: const EdgeInsets.all(16),
-              decoration: const BoxDecoration(
-                color: Color(0xFFECFDF5),
+              decoration: BoxDecoration(
+                color: ctx.adapt(SoftPalette.emerald50),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 56),
+              child: Icon(Icons.check_circle_rounded, color: ctx.adapt(SoftPalette.emerald350), size: 56),
             ),
             const SizedBox(height: 16),
             Text(
               'Attendance Marked Successfully! 🎉',
               textAlign: TextAlign.center,
-              style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: const Color(0xFF065F46)),
+              style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: ctx.adapt(SoftPalette.emerald600)),
             ),
             const SizedBox(height: 6),
             Text(
               'Your presence has been verified via Mobile Fingerprint.',
               textAlign: TextAlign.center,
-              style: GoogleFonts.inter(fontSize: 12, color: Colors.grey[600]),
+              style: GoogleFonts.inter(fontSize: 12, color: ctx.adapt(SoftPalette.gray500)),
             ),
             const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: const Color(0xFFF8FAFC),
+                color: ctx.adapt(SoftPalette.gray50),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFE2E8F0)),
+                border: Border.all(color: ctx.adapt(SoftPalette.slate150)),
               ),
               child: Column(
                 children: [
-                  _infoRow('Name', userName),
+                  _infoRow(ctx, 'Name', userName),
                   const Divider(height: 12),
-                  _infoRow('Check-In Time', checkInTime),
+                  _infoRow(ctx, 'Check-In Time', checkInTime),
                   const Divider(height: 12),
-                  _infoRow('Date', dateStr),
+                  _infoRow(ctx, 'Date', dateStr),
                   const Divider(height: 12),
-                  _infoRow('Verification', 'Self Mobile Fingerprint'),
+                  _infoRow(ctx, 'Verification', 'Self Mobile Fingerprint'),
                 ],
               ),
             ),
@@ -219,8 +221,8 @@ class LocalBiometricService {
               width: double.infinity,
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF10B981),
-                  foregroundColor: Colors.white,
+                  backgroundColor: SoftPalette.emerald350,
+                  foregroundColor: SoftPalette.gray50,
                   padding: const EdgeInsets.symmetric(vertical: 12),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
@@ -234,12 +236,12 @@ class LocalBiometricService {
     );
   }
 
-  static Widget _infoRow(String label, String val) {
+  static Widget _infoRow(BuildContext ctx, String label, String val) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: GoogleFonts.inter(fontSize: 12, color: Colors.grey[600])),
-        Text(val, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.black87)),
+        Text(label, style: GoogleFonts.inter(fontSize: 12, color: ctx.adapt(SoftPalette.gray500))),
+        Text(val, style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold, color: ctx.adapt(SoftPalette.gray900A87))),
       ],
     );
   }

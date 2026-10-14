@@ -11,44 +11,47 @@
 //  • For Cooked Food: saved + wasted cannot exceed used (total output)
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../models/stock_item.dart';
 
 // ─── Palette (shared across files) ──────────────────────────────────────────
-const Color kPrimary   = Color(0xFF1A2332);
-const Color kAccent    = Color(0xFFE8572A);
-const Color kSuccess   = Color(0xFF22C55E);
-const Color kWarning   = Color(0xFFF59E0B);
-const Color kInfo      = Color(0xFF3B82F6);
-const Color kPurple    = Color(0xFF8B5CF6);
-const Color kSurface   = Color(0xFFF6F7F9);
-const Color kCardBg    = Colors.white;
-const Color kTextDark  = Color(0xFF0F172A);
-const Color kTextMid   = Color(0xFF475569);
-const Color kTextLight = Color(0xFF94A3B8);
-const Color kTeal      = Color(0xFF0D9488);
+const Color kPrimary   = SoftPalette.slate800;
+const Color kAccent    = SoftPalette.red400;
+const Color kSuccess   = SoftPalette.green350;
+const Color kWarning   = SoftPalette.amber300;
+const Color kInfo      = SoftPalette.blue500;
+const Color kPurple    = SoftPalette.violet500;
+const Color kSurface   = SoftPalette.gray50;
+const Color kCardBg    = SoftPalette.gray50;
+const Color kTextDark  = SoftPalette.slate900;
+const Color kTextMid   = SoftPalette.slate600;
+const Color kTextLight = SoftPalette.slate350;
+const Color kTeal      = SoftPalette.teal500;
 
 // ─── Shared decoration helpers ───────────────────────────────────────────────
-InputDecoration kInputDeco(String label, IconData icon) => InputDecoration(
+InputDecoration kInputDeco(String label, IconData icon, BuildContext context) => InputDecoration(
       labelText: label,
-      prefixIcon: Icon(icon, color: kPrimary, size: 20),
+      prefixIcon: Icon(icon, color: context.adapt(kPrimary), size: 20),
       filled: true,
-      fillColor: kSurface,
+      fillColor: context.adapt(kSurface),
       border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide.none),
       focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: kPrimary, width: 2)),
+          borderSide: BorderSide(color: context.adapt(kPrimary), width: 2)),
       contentPadding:
           const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
     );
 
-Widget kLabel(String text) => Text(text,
-    style: const TextStyle(
+Widget kLabel(String text, BuildContext context) => Text(text,
+    style: TextStyle(
         fontSize: 11,
         fontWeight: FontWeight.w800,
-        color: kTextLight,
+        color: context.adapt(kTextLight),
         letterSpacing: 1.1));
 
 Widget kSheetHandle(Color accentColor) => Center(
@@ -78,20 +81,20 @@ void showFoodTypeChooser(
     context: context,
     backgroundColor: Colors.transparent,
     builder: (_) => Container(
-      decoration: const BoxDecoration(
-        color: kCardBg,
-        borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+      decoration: BoxDecoration(
+        color: context.adapt(kCardBg),
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
       ),
       padding: const EdgeInsets.fromLTRB(24, 12, 24, 40),
       child: Column(mainAxisSize: MainAxisSize.min, children: [
         kSheetHandle(kWarning),
         const SizedBox(height: 12),
-        const Text('What are you logging?',
+        Text('What are you logging?',
             style: TextStyle(
-                fontSize: 20, fontWeight: FontWeight.w900, color: kTextDark)),
+                fontSize: 20, fontWeight: FontWeight.w900, color: context.adapt(kTextDark))),
         const SizedBox(height: 6),
-        const Text('Choose the type of food entry',
-            style: TextStyle(fontSize: 13, color: kTextLight)),
+        Text('Choose the type of food entry',
+            style: TextStyle(fontSize: 13, color: context.adapt(kTextLight))),
         const SizedBox(height: 24),
 
         _typeOption(
@@ -197,10 +200,10 @@ Widget _typeOption({
                 children: [
               Row(children: [
                 Text(title,
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w800,
-                        color: kTextDark)),
+                        color: context.adapt(kTextDark))),
                 if (badge > 0) ...[
                   const SizedBox(width: 8),
                   Container(
@@ -211,7 +214,7 @@ Widget _typeOption({
                         borderRadius: BorderRadius.circular(20)),
                     child: Text('$badge',
                         style: const TextStyle(
-                            color: Colors.white,
+                            color: SoftPalette.gray50,
                             fontSize: 10,
                             fontWeight: FontWeight.w900)),
                   ),
@@ -219,7 +222,7 @@ Widget _typeOption({
               ]),
               const SizedBox(height: 3),
               Text(subtitle,
-                  style: const TextStyle(fontSize: 12, color: kTextMid)),
+                  style: TextStyle(fontSize: 12, color: context.adapt(kTextMid))),
             ]),
           ),
           Icon(Icons.chevron_right_rounded, color: color, size: 22),
@@ -290,9 +293,9 @@ void showSavedFoodDialog(
           padding:
               EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
           child: Container(
-            decoration: const BoxDecoration(
-              color: kCardBg,
-              borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+            decoration: BoxDecoration(
+              color: ctx.adapt(kCardBg),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
             ),
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               kSheetHandle(kTeal),
@@ -328,10 +331,10 @@ void showSavedFoodDialog(
                                   fontSize: 20,
                                   fontWeight: FontWeight.w900),
                             ),
-                            const Text(
+                            Text(
                               'Serving carry-over from previous day',
                               style: TextStyle(
-                                  fontSize: 12, color: kTextLight),
+                                  fontSize: 12, color: ctx.adapt(kTextLight)),
                             ),
                           ]),
                         ),
@@ -347,17 +350,17 @@ void showSavedFoodDialog(
                           border:
                               Border.all(color: kTeal.withValues(alpha: 0.25)),
                         ),
-                        child: const Row(children: [
-                          Icon(Icons.info_outline_rounded,
+                        child: Row(children: [
+                          const Icon(Icons.info_outline_rounded,
                               color: kTeal, size: 16),
-                          SizedBox(width: 8),
+                          const SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               'This logs how you used previously saved food. '
                               'Stock will NOT be deducted — it was already '
                               'carried over from yesterday.',
                               style: TextStyle(
-                                  fontSize: 12, color: kTextMid),
+                                  fontSize: 12, color: ctx.adapt(kTextMid)),
                             ),
                           ),
                         ]),
@@ -365,7 +368,7 @@ void showSavedFoodDialog(
                       const SizedBox(height: 20),
 
                       // ── Saved item picker ─────────────────────────────
-                      kLabel('SELECT SAVED FOOD'),
+                      kLabel('SELECT SAVED FOOD', ctx),
                       const SizedBox(height: 8),
 
                       if (savedItems.isEmpty)
@@ -409,7 +412,7 @@ void showSavedFoodDialog(
                               decoration: BoxDecoration(
                                 color: isSelected
                                     ? kTeal.withValues(alpha: 0.08)
-                                    : kSurface,
+                                    : ctx.adapt(kSurface),
                                 borderRadius:
                                     BorderRadius.circular(14),
                                 border: Border.all(
@@ -425,7 +428,7 @@ void showSavedFoodDialog(
                                   decoration: BoxDecoration(
                                     color: isSelected
                                         ? kTeal.withValues(alpha: 0.15)
-                                        : Colors.white,
+                                        : ctx.adapt(SoftPalette.gray50),
                                     borderRadius:
                                         BorderRadius.circular(10),
                                   ),
@@ -433,7 +436,7 @@ void showSavedFoodDialog(
                                     Icons.save_rounded,
                                     color: isSelected
                                         ? kTeal
-                                        : kTextLight,
+                                        : ctx.adapt(kTextLight),
                                     size: 18,
                                   ),
                                 ),
@@ -451,7 +454,7 @@ void showSavedFoodDialog(
                                           fontWeight: FontWeight.w800,
                                           color: isSelected
                                               ? kTeal
-                                              : kTextDark),
+                                              : ctx.adapt(kTextDark)),
                                     ),
                                     const SizedBox(height: 2),
                                     Text(
@@ -461,7 +464,7 @@ void showSavedFoodDialog(
                                           fontWeight: FontWeight.w600,
                                           color: item.quantity <= 0
                                               ? kAccent
-                                              : kTextLight),
+                                              : ctx.adapt(kTextLight)),
                                     ),
                                   ]),
                                 ),
@@ -473,7 +476,7 @@ void showSavedFoodDialog(
                                         shape: BoxShape.circle),
                                     child: const Icon(
                                         Icons.check_rounded,
-                                        color: Colors.white,
+                                        color: SoftPalette.gray50,
                                         size: 14),
                                   ),
                               ]),
@@ -548,18 +551,18 @@ void showSavedFoodDialog(
                                     color:
                                         kSuccess.withValues(alpha: 0.25)),
                               ),
-                              child: const Row(children: [
-                                Icon(
+                              child: Row(children: [
+                                const Icon(
                                     Icons.confirmation_number_rounded,
                                     color: kSuccess,
                                     size: 15),
-                                SizedBox(width: 8),
+                                const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
                                     '"Served" is tracked automatically from tokens.',
                                     style: TextStyle(
                                         fontSize: 11,
-                                        color: kTextMid,
+                                        color: ctx.adapt(kTextMid),
                                         fontWeight: FontWeight.w600),
                                   ),
                                 ),
@@ -596,13 +599,13 @@ void showSavedFoodDialog(
                       const SizedBox(height: 16),
 
                       // ── Notes ─────────────────────────────────────────
-                      kLabel('NOTES (OPTIONAL)'),
+                      kLabel('NOTES (OPTIONAL)', ctx),
                       const SizedBox(height: 8),
                       TextFormField(
                         controller: notesCtrl,
                         maxLines: 2,
                         decoration: kInputDeco(
-                            'Any observations…', Icons.notes_rounded),
+                            'Any observations…', Icons.notes_rounded, ctx),
                       ),
                       const SizedBox(height: 24),
 
@@ -616,7 +619,7 @@ void showSavedFoodDialog(
                                 (selectedItem == null && !isEdit)
                                     ? kTeal.withValues(alpha: 0.4)
                                     : kTeal,
-                            foregroundColor: Colors.white,
+                            foregroundColor: SoftPalette.gray50,
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(16)),
                             elevation: 0,
@@ -638,7 +641,7 @@ void showSavedFoodDialog(
                                       // ── VALIDATION: total must not exceed available ──
                                       final totalKg = usedKg + savedKg + wastedKg;
                                       if (totalKg > availableQty) {
-                                        ScaffoldMessenger.of(ctx).showSnackBar(
+                                        AppToast.showSnackBar(ctx, 
                                           SnackBar(
                                             content: Text(
                                               'Total (${totalKg.toStringAsFixed(2)} kg) exceeds '
@@ -695,8 +698,7 @@ void showSavedFoodDialog(
                                       await onDone();
                                       if (ctx.mounted) Navigator.pop(ctx);
 
-                                      ScaffoldMessenger.of(ctx)
-                                          .showSnackBar(SnackBar(
+                                      AppToast.showSnackBar(ctx, SnackBar(
                                         content: Text(isEdit
                                             ? '$displayName updated'
                                             : '$displayName (saved food) logged'),
@@ -796,9 +798,9 @@ void showCookDialog(
         padding:
             EdgeInsets.only(bottom: MediaQuery.of(ctx).viewInsets.bottom),
         child: Container(
-          decoration: const BoxDecoration(
-            color: kCardBg,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
+          decoration: BoxDecoration(
+            color: ctx.adapt(kCardBg),
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
           ),
           child: Column(mainAxisSize: MainAxisSize.min, children: [
             kSheetHandle(typeColor),
@@ -829,8 +831,8 @@ void showCookDialog(
                               style: const TextStyle(
                                   fontSize: 20, fontWeight: FontWeight.w900)),
                           Text(typeSubtitle,
-                              style: const TextStyle(
-                                  fontSize: 12, color: kTextLight)),
+                              style: TextStyle(
+                                  fontSize: 12, color: ctx.adapt(kTextLight))),
                         ]),
                       ),
                     ]),
@@ -846,22 +848,22 @@ void showCookDialog(
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(color: kPurple.withValues(alpha: 0.2)),
                         ),
-                        child: const Row(children: [
-                          Icon(Icons.info_outline_rounded,
+                        child: Row(children: [
+                          const Icon(Icons.info_outline_rounded,
                               color: kPurple, size: 16),
-                          SizedBox(width: 8),
+                          const SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               'Received externally (daig, donation, etc.). '
                               'Nothing will be deducted from your inventory.',
-                              style: TextStyle(fontSize: 12, color: kTextMid),
+                              style: TextStyle(fontSize: 12, color: ctx.adapt(kTextMid)),
                             ),
                           ),
                         ]),
                       ),
 
                     // ── Dish name ────────────────────────────────────────
-                    kLabel(isReceived ? 'DISH / FOOD NAME' : 'DISH / MENU NAME'),
+                    kLabel(isReceived ? 'DISH / FOOD NAME' : 'DISH / MENU NAME', ctx),
                     const SizedBox(height: 8),
                     TextFormField(
                       controller: dishCtrl,
@@ -870,6 +872,7 @@ void showCookDialog(
                             ? 'e.g. Biryani, Aloo Qeema, Daal'
                             : 'e.g. Daal Chawal, Karahi',
                         Icons.restaurant_menu_rounded,
+                        ctx,
                       ),
                       validator: (v) =>
                           v?.trim().isEmpty ?? true ? 'Required' : null,
@@ -878,13 +881,13 @@ void showCookDialog(
                     // ── Source (received only) ───────────────────────────
                     if (isReceived) ...[
                       const SizedBox(height: 14),
-                      kLabel('SOURCE (OPTIONAL)'),
+                      kLabel('SOURCE (OPTIONAL)', ctx),
                       const SizedBox(height: 8),
                       TextFormField(
                         controller: sourceCtrl,
                         decoration: kInputDeco(
                             'e.g. Donated by XYZ, Catered from ABC',
-                            Icons.store_rounded),
+                            Icons.store_rounded, ctx),
                       ),
                     ],
 
@@ -925,11 +928,11 @@ void showCookDialog(
                           Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                            kLabel('INGREDIENTS USED'),
+                            kLabel('INGREDIENTS USED', ctx),
                             const SizedBox(height: 2),
-                            const Text('Deducted from stock on save',
+                            Text('Deducted from stock on save',
                                 style: TextStyle(
-                                    fontSize: 11, color: kTextLight)),
+                                    fontSize: 11, color: ctx.adapt(kTextLight))),
                           ]),
                           TextButton.icon(
                             onPressed: () => setModal(() =>
@@ -1032,16 +1035,16 @@ void showCookDialog(
                             border: Border.all(
                                 color: kSuccess.withValues(alpha: 0.25)),
                           ),
-                          child: const Row(children: [
-                            Icon(Icons.confirmation_number_rounded,
+                          child: Row(children: [
+                            const Icon(Icons.confirmation_number_rounded,
                                 color: kSuccess, size: 15),
-                            SizedBox(width: 8),
+                            const SizedBox(width: 8),
                             Expanded(
                               child: Text(
                                 '"Served" is tracked automatically from tokens — no need to enter it here.',
                                 style: TextStyle(
                                     fontSize: 11,
-                                    color: kTextMid,
+                                    color: ctx.adapt(kTextMid),
                                     fontWeight: FontWeight.w600),
                               ),
                             ),
@@ -1054,11 +1057,11 @@ void showCookDialog(
                               Icon(Icons.info_outline_rounded,
                                   color: typeColor, size: 14),
                               const SizedBox(width: 6),
-                              const Expanded(
+                              Expanded(
                                 child: Text(
                                   'You can leave these blank and fill them later via Edit.',
                                   style: TextStyle(
-                                      fontSize: 11, color: kTextMid),
+                                      fontSize: 11, color: ctx.adapt(kTextMid)),
                                 ),
                               ),
                             ]),
@@ -1088,15 +1091,15 @@ void showCookDialog(
                               border: Border.all(
                                   color: kInfo.withValues(alpha: 0.2)),
                             ),
-                            child: const Row(children: [
-                              Icon(Icons.schedule_rounded,
+                            child: Row(children: [
+                              const Icon(Icons.schedule_rounded,
                                   color: kInfo, size: 16),
-                              SizedBox(width: 8),
+                              const SizedBox(width: 8),
                               Expanded(
                                 child: Text(
                                   'Saved kg carries over to tomorrow\'s inventory automatically.',
                                   style: TextStyle(
-                                      fontSize: 12, color: kTextMid),
+                                      fontSize: 12, color: ctx.adapt(kTextMid)),
                                 ),
                               ),
                             ]),
@@ -1107,13 +1110,13 @@ void showCookDialog(
                     const SizedBox(height: 16),
 
                     // ── Notes ────────────────────────────────────────────
-                    kLabel('NOTES (OPTIONAL)'),
+                    kLabel('NOTES (OPTIONAL)', ctx),
                     const SizedBox(height: 8),
                     TextFormField(
                       controller: notesCtrl,
                       maxLines: 2,
                       decoration:
-                          kInputDeco('Any observations…', Icons.notes_rounded),
+                          kInputDeco('Any observations…', Icons.notes_rounded, ctx),
                     ),
                     const SizedBox(height: 24),
 
@@ -1124,7 +1127,7 @@ void showCookDialog(
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
                           backgroundColor: typeColor,
-                          foregroundColor: Colors.white,
+                          foregroundColor: SoftPalette.gray50,
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(16)),
                           elevation: 0,
@@ -1139,7 +1142,7 @@ void showCookDialog(
                           // ── VALIDATION: for cooked food saved+wasted ≤ used ──
                           if (!isReceived && usedKg > 0) {
                             if ((savedKg + wastedKg) > usedKg) {
-                              ScaffoldMessenger.of(ctx).showSnackBar(
+                              AppToast.showSnackBar(ctx, 
                                 SnackBar(
                                   content: Text(
                                     'Saved (${savedKg.toStringAsFixed(2)} kg) + '
@@ -1207,7 +1210,7 @@ void showCookDialog(
                                 }
                               }
                               if ((ing['qty'] as double) > availableQty) {
-                                ScaffoldMessenger.of(ctx).showSnackBar(
+                                AppToast.showSnackBar(ctx, 
                                   SnackBar(
                                     content: Text(
                                         'Not enough ${ing['name']} in stock. Available: $availableQty ${stockItem.unit}'),
@@ -1299,7 +1302,7 @@ void showCookDialog(
                           await onDone();
                           if (ctx.mounted) Navigator.pop(ctx);
 
-                          ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                          AppToast.showSnackBar(ctx, SnackBar(
                             content: Text(isEdit
                                 ? '$dish updated'
                                 : isReceived
@@ -1501,7 +1504,7 @@ class _IngredientRowState extends State<_IngredientRow> {
                                   style: TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.w700,
-                                      color: isSaved ? kTeal : kTextDark),
+                                      color: isSaved ? kTeal : ctx2.adapt(kTextDark)),
                                 ),
                                 subtitle: Text(
                                   item.quantity <= 0
@@ -1531,7 +1534,7 @@ class _IngredientRowState extends State<_IngredientRow> {
                       controller: ctrl,
                       focusNode: focus,
                       decoration:
-                          kInputDeco('Search stock…', Icons.search_rounded),
+                          kInputDeco('Search stock…', Icons.search_rounded, ctx2),
                       onChanged: (v) {
                         setState(() {
                           _selectedName = v;
@@ -1558,7 +1561,7 @@ class _IngredientRowState extends State<_IngredientRow> {
                 : TextFormField(
                     controller: _nameCtrl,
                     decoration:
-                        kInputDeco('Item', Icons.inventory_2_outlined),
+                        kInputDeco('Item', Icons.inventory_2_outlined, context),
                     onChanged: (v) {
                       _selectedName = v;
                       _notify();
@@ -1573,7 +1576,7 @@ class _IngredientRowState extends State<_IngredientRow> {
               controller: _qtyCtrl,
               keyboardType:
                   const TextInputType.numberWithOptions(decimal: true),
-              decoration: kInputDeco('Qty', Icons.scale_rounded).copyWith(
+              decoration: kInputDeco('Qty', Icons.scale_rounded, context).copyWith(
                 errorStyle: const TextStyle(fontSize: 9, height: 0.8),
               ),
               validator: (v) {
@@ -1603,7 +1606,7 @@ class _IngredientRowState extends State<_IngredientRow> {
             child: DropdownButtonFormField<String>(
               initialValue: _unit,
               isDense: true,
-              decoration: kInputDeco('', Icons.straighten).copyWith(
+              decoration: kInputDeco('', Icons.straighten, context).copyWith(
                 prefixIcon: null,
                 contentPadding:
                     const EdgeInsets.symmetric(horizontal: 8, vertical: 12),

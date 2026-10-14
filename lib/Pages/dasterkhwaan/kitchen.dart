@@ -5,9 +5,12 @@
 //   • widgets/cook_dialog.dart   — food logging (cook / received / saved)
 //   • widgets/stock_dialogs.dart — inventory add / adjust
 
-import 'dart:convert';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import '../../widgets/lazy_indexed_stack.dart';
 import 'package:flutter/material.dart';
+import 'package:gmwf/utils/base64_image_cache.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -500,7 +503,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
     }
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      AppToast.showSnackBar(context, SnackBar(
         content: Text('Token #$tokenNumber served ✓'),
         backgroundColor: kSuccess,
         behavior: SnackBarBehavior.floating,
@@ -542,7 +545,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
     await _loadAllStockItems();
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      AppToast.showSnackBar(context, SnackBar(
         content: Text(isSavedFood
             ? 'Saved food entry deleted'
             : isReceived
@@ -596,7 +599,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [Color(0xFF0F172A), Color(0xFF1E293B), Color(0xFF0F172A)],
+              colors: [SoftPalette.slate900, SoftPalette.slate800, SoftPalette.slate900],
             ),
           ),
           child: Center(
@@ -606,10 +609,10 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
               Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.05),
+                  color: SoftPalette.gray50.withValues(alpha: 0.05),
                   shape: BoxShape.circle,
                   border:
-                      Border.all(color: Colors.white.withValues(alpha: 0.1)),
+                      Border.all(color: SoftPalette.gray50.withValues(alpha: 0.1)),
                 ),
                 child: const CircularProgressIndicator(
                     color: kWarning, strokeWidth: 3),
@@ -617,13 +620,13 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
               const SizedBox(height: 32),
               Text('Loading Kitchen Panel…',
                   style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.9),
+                      color: SoftPalette.gray50.withValues(alpha: 0.9),
                       fontSize: 18,
                       fontWeight: FontWeight.w700)),
               const SizedBox(height: 8),
               Text('Preparing your workspace',
                   style: TextStyle(
-                      color: Colors.white.withValues(alpha: 0.5),
+                      color: SoftPalette.gray50.withValues(alpha: 0.5),
                       fontSize: 13)),
             ]),
           ),
@@ -634,7 +637,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
     final isKitchenUser = _role?.toLowerCase() == 'kitchen' || _role?.toLowerCase() == 'dasterkhwaan kitchen';
 
     return Scaffold(
-      backgroundColor: kSurface,
+      backgroundColor: context.adapt(kSurface),
       body: isKitchenUser
           ? _TokensTab(
               branchId:   _branchId!,
@@ -678,10 +681,10 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
     ];
     return Container(
       decoration: BoxDecoration(
-        color: kCardBg,
+        color: context.adapt(kCardBg),
         boxShadow: [
           BoxShadow(
-              color: Colors.black.withValues(alpha: 0.08),
+              color: SoftPalette.gray900.withValues(alpha: 0.08),
               blurRadius: 20,
               offset: const Offset(0, -4))
         ],
@@ -712,7 +715,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
                   ),
                   child: Column(mainAxisSize: MainAxisSize.min, children: [
                     Icon(item.icon,
-                        color: selected ? item.color : kTextLight,
+                        color: selected ? item.color : context.adapt(kTextLight),
                         size: 24),
                     const SizedBox(height: 4),
                     Text(item.label,
@@ -721,7 +724,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
                             fontWeight: selected
                                 ? FontWeight.w800
                                 : FontWeight.w600,
-                            color: selected ? item.color : kTextLight)),
+                            color: selected ? item.color : context.adapt(kTextLight))),
                   ]),
                 ),
               );
@@ -834,18 +837,18 @@ class _TokensTabState extends State<_TokensTab> {
                       // ── Session Filter Chips ──────────────────────────────────────
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        color: Colors.white,
+                        color: context.adapt(SoftPalette.gray50),
                         child: Row(
                           children: [
                             _sessionFilterChip('all', 'All (${unserved.length})', null),
                             const SizedBox(width: 8),
-                            _sessionFilterChip('evening', '🌅 Evening ($evePending)', const Color(0xFFD97706)),
+                            _sessionFilterChip('evening', '🌅 Evening ($evePending)', SoftPalette.orange400),
                             const SizedBox(width: 8),
-                            _sessionFilterChip('night', '🌙 Night ($nightPending)', const Color(0xFF4F46E5)),
+                            _sessionFilterChip('night', '🌙 Night ($nightPending)', SoftPalette.indigo550),
                           ],
                         ),
                       ),
-                      const Divider(height: 1, thickness: 1, color: Color(0xFFE2E8F0)),
+                      Divider(height: 1, thickness: 1, color: context.adapt(SoftPalette.slate150)),
 
                       // ── Token List ────────────────────────────────────────────────
                       Expanded(
@@ -860,13 +863,13 @@ class _TokensTabState extends State<_TokensTab> {
                                   Text(_selectedSessionFilter == 'all'
                                       ? 'All tokens served!'
                                       : 'No pending ${_selectedSessionFilter == 'night' ? 'Night (رات)' : 'Evening (شام)'} tokens',
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                           fontSize: 17,
                                           fontWeight: FontWeight.w700,
-                                          color: kTextLight)),
+                                          color: context.adapt(kTextLight))),
                                   const SizedBox(height: 6),
-                                  const Text('Tokens will appear when issued by Office Boy',
-                                      style: TextStyle(fontSize: 13, color: kTextLight)),
+                                  Text('Tokens will appear when issued by Office Boy',
+                                      style: TextStyle(fontSize: 13, color: context.adapt(kTextLight))),
                                 ]))
                             : ListView.builder(
                                 padding: const EdgeInsets.fromLTRB(16, 14, 16, 100),
@@ -914,10 +917,10 @@ class _TokensTabState extends State<_TokensTab> {
           duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
-            color: isSelected ? color.withValues(alpha: 0.12) : const Color(0xFFF1F5F9),
+            color: isSelected ? color.withValues(alpha: 0.12) : context.adapt(SoftPalette.slate100),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: isSelected ? color : const Color(0xFFCBD5E1),
+              color: isSelected ? color : context.adapt(SoftPalette.slate200),
               width: isSelected ? 1.5 : 1,
             ),
           ),
@@ -927,7 +930,7 @@ class _TokensTabState extends State<_TokensTab> {
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
-                color: isSelected ? color : const Color(0xFF475569),
+                color: isSelected ? color : context.adapt(SoftPalette.slate600),
               ),
             ),
           ),
@@ -940,7 +943,7 @@ class _TokensTabState extends State<_TokensTab> {
     return Container(
       decoration: const BoxDecoration(
         gradient: LinearGradient(
-          colors: [Color(0xFF16A34A), kSuccess],
+          colors: [SoftPalette.green400, kSuccess],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -960,7 +963,7 @@ class _TokensTabState extends State<_TokensTab> {
                       children: [
                         if (Navigator.canPop(context)) ...[
                           IconButton(
-                            icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 20),
+                            icon: const Icon(Icons.arrow_back_rounded, color: SoftPalette.gray50, size: 20),
                             onPressed: () => Navigator.maybePop(context),
                           ),
                           const SizedBox(width: 8),
@@ -968,7 +971,7 @@ class _TokensTabState extends State<_TokensTab> {
                         Container(
                           padding: const EdgeInsets.all(4),
                           decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.15),
+                            color: SoftPalette.gray50.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(12),
                           ),
                           child: ClipRRect(
@@ -980,7 +983,7 @@ class _TokensTabState extends State<_TokensTab> {
                               fit: BoxFit.contain,
                               errorBuilder: (_, _, _) => const Icon(
                                 Icons.restaurant_rounded,
-                                color: Colors.white70,
+                                color: SoftPalette.gray50A70,
                                 size: 28,
                               ),
                             ),
@@ -997,7 +1000,7 @@ class _TokensTabState extends State<_TokensTab> {
                               const Text(
                                 'Active Tokens',
                                 style: TextStyle(
-                                  color: Colors.white,
+                                  color: SoftPalette.gray50,
                                   fontSize: 18,
                                   fontWeight: FontWeight.w900,
                                   letterSpacing: -0.5,
@@ -1007,7 +1010,7 @@ class _TokensTabState extends State<_TokensTab> {
                               Text(
                                 widget.username,
                                 style: const TextStyle(
-                                  color: Colors.white70,
+                                  color: SoftPalette.gray50A70,
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600,
                                 ),
@@ -1026,10 +1029,10 @@ class _TokensTabState extends State<_TokensTab> {
                       icon: Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.2),
+                          color: SoftPalette.gray50.withValues(alpha: 0.2),
                           borderRadius: BorderRadius.circular(10),
                         ),
-                        child: const Icon(Icons.restaurant_menu_rounded, color: Colors.white, size: 20),
+                        child: const Icon(Icons.restaurant_menu_rounded, color: SoftPalette.gray50, size: 20),
                       ),
                       onPressed: () {
                         Navigator.push(
@@ -1078,10 +1081,10 @@ class _TokensTabState extends State<_TokensTab> {
                 return Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.15),
+                    color: SoftPalette.gray50.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.2)),
+                        color: SoftPalette.gray50.withValues(alpha: 0.2)),
                   ),
                   child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -1090,20 +1093,20 @@ class _TokensTabState extends State<_TokensTab> {
                       Icons.hourglass_top_rounded,
                       'Pending (🌅$evePending · 🌙$nightPending)',
                       '$pending',
-                      const Color(0xFFFFD54F),
+                      SoftPalette.yellow200,
                     ),
                     Container(
                         width: 1,
                         height: 40,
-                        color: Colors.white.withValues(alpha: 0.2)),
+                        color: SoftPalette.gray50.withValues(alpha: 0.2)),
                     _statBadge(Icons.check_circle_rounded, 'Served',
-                        '$served', const Color(0xFF86EFAC)),
+                        '$served', SoftPalette.emerald200),
                     Container(
                         width: 1,
                         height: 40,
-                        color: Colors.white.withValues(alpha: 0.2)),
+                        color: SoftPalette.gray50.withValues(alpha: 0.2)),
                     _statBadge(Icons.confirmation_number_rounded, 'Total',
-                        '${all.length}', Colors.white),
+                        '${all.length}', SoftPalette.gray50),
                   ]),
                 );
               },
@@ -1121,12 +1124,12 @@ class _TokensTabState extends State<_TokensTab> {
         const SizedBox(height: 5),
         Text(value,
             style: const TextStyle(
-                color: Colors.white,
+                color: SoftPalette.gray50,
                 fontSize: 22,
                 fontWeight: FontWeight.w900)),
         Text(label,
             style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.7),
+                color: SoftPalette.gray50.withValues(alpha: 0.7),
                 fontSize: 11,
                 fontWeight: FontWeight.w600)),
       ]);
@@ -1147,17 +1150,17 @@ class _TokenCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isNight = session == 'night';
-    final sessionColor = isNight ? const Color(0xFF4F46E5) : const Color(0xFFD97706);
-    final sessionBg = isNight ? const Color(0xFFEEF2FF) : const Color(0xFFFFFBEB);
+    final sessionColor = isNight ? SoftPalette.indigo550 : SoftPalette.orange400;
+    final sessionBg = context.adapt(isNight ? SoftPalette.slate100 : SoftPalette.yellow50m);
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.adapt(SoftPalette.gray50),
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-              color: (isNight ? const Color(0xFF4F46E5) : kSuccess).withValues(alpha: 0.1),
+              color: (isNight ? SoftPalette.indigo550 : kSuccess).withValues(alpha: 0.1),
               blurRadius: 16,
               offset: const Offset(0, 4))
         ],
@@ -1171,11 +1174,11 @@ class _TokenCard extends StatelessWidget {
             decoration: BoxDecoration(
               gradient: isNight
                   ? const LinearGradient(
-                      colors: [Color(0xFF3730A3), Color(0xFF4F46E5)],
+                      colors: [SoftPalette.indigo700, SoftPalette.indigo550],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight)
                   : const LinearGradient(
-                      colors: [Color(0xFF16A34A), kSuccess],
+                      colors: [SoftPalette.green400, kSuccess],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight),
               borderRadius: BorderRadius.circular(16),
@@ -1183,7 +1186,7 @@ class _TokenCard extends StatelessWidget {
             child: Center(
                 child: Text('#$number',
                     style: const TextStyle(
-                        color: Colors.white,
+                        color: SoftPalette.gray50,
                         fontSize: 18,
                         fontWeight: FontWeight.w900))),
           ),
@@ -1194,11 +1197,11 @@ class _TokenCard extends StatelessWidget {
                   children: [
             Row(
               children: [
-                const Text('Token Ready',
+                Text('Token Ready',
                     style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.w800,
-                        color: kTextDark)),
+                        color: context.adapt(kTextDark))),
                 const SizedBox(width: 6),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
@@ -1231,20 +1234,20 @@ class _TokenCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Row(children: [
-              const Icon(Icons.access_time_rounded,
-                  size: 13, color: kTextLight),
+              Icon(Icons.access_time_rounded,
+                  size: 13, color: context.adapt(kTextLight)),
               const SizedBox(width: 4),
               Text(DateFormat('hh:mm a').format(time),
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 12,
-                      color: kTextLight,
+                      color: context.adapt(kTextLight),
                       fontWeight: FontWeight.w600)),
             ]),
           ])),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: isNight ? const Color(0xFF4F46E5) : kSuccess,
-              foregroundColor: Colors.white,
+              backgroundColor: isNight ? SoftPalette.indigo550 : kSuccess,
+              foregroundColor: SoftPalette.gray50,
               padding: const EdgeInsets.symmetric(
                   horizontal: 22, vertical: 14),
               shape: RoundedRectangleBorder(
@@ -1292,7 +1295,7 @@ class _CookingTab extends StatelessWidget {
         Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
-                colors: [Color(0xFFD97706), kWarning],
+                colors: [SoftPalette.orange400, kWarning],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight),
           ),
@@ -1308,7 +1311,7 @@ class _CookingTab extends StatelessWidget {
                   Row(children: [
                     if (Navigator.canPop(context)) ...[
                       IconButton(
-                        icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 20),
+                        icon: const Icon(Icons.arrow_back_rounded, color: SoftPalette.gray50, size: 20),
                         onPressed: () => Navigator.maybePop(context),
                       ),
                       const SizedBox(width: 8),
@@ -1316,7 +1319,7 @@ class _CookingTab extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.15),
+                        color: SoftPalette.gray50.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: ClipRRect(
@@ -1328,7 +1331,7 @@ class _CookingTab extends StatelessWidget {
                           fit: BoxFit.contain,
                           errorBuilder: (_, _, _) => const Icon(
                             Icons.restaurant_rounded,
-                            color: Colors.white70,
+                            color: SoftPalette.gray50A70,
                             size: 28,
                           ),
                         ),
@@ -1339,13 +1342,13 @@ class _CookingTab extends StatelessWidget {
                         children: [
                       const Text('Food Log',
                           style: TextStyle(
-                              color: Colors.white,
+                              color: SoftPalette.gray50,
                               fontSize: 24,
                               fontWeight: FontWeight.w900,
                               letterSpacing: -0.5)),
                       Text(username,
                           style: const TextStyle(
-                              color: Colors.white,
+                              color: SoftPalette.gray50,
                               fontSize: 18,
                               fontWeight: FontWeight.w700)),
                     ]),
@@ -1392,10 +1395,10 @@ class _CookingTab extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(
                           vertical: 14, horizontal: 8),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.15),
+                        color: SoftPalette.gray50.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(16),
                         border: Border.all(
-                            color: Colors.white.withValues(alpha: 0.2)),
+                            color: SoftPalette.gray50.withValues(alpha: 0.2)),
                       ),
                       child: Row(
                           mainAxisAlignment:
@@ -1451,14 +1454,14 @@ class _CookingTab extends StatelessWidget {
                 Icon(Icons.soup_kitchen_rounded,
                     size: 80, color: kWarning.withValues(alpha: 0.25)),
                 const SizedBox(height: 16),
-                const Text('No food logged yet',
+                Text('No food logged yet',
                     style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w700,
-                        color: kTextLight)),
+                        color: context.adapt(kTextLight))),
                 const SizedBox(height: 8),
-                const Text('Tap + to log cooked or received food',
-                    style: TextStyle(fontSize: 13, color: kTextLight)),
+                Text('Tap + to log cooked or received food',
+                    style: TextStyle(fontSize: 13, color: context.adapt(kTextLight))),
               ]));
             }
             return ListView.builder(
@@ -1523,7 +1526,7 @@ class _CookingTab extends StatelessWidget {
           ElevatedButton(
             style: ElevatedButton.styleFrom(
                 backgroundColor: kAccent,
-                foregroundColor: Colors.white,
+                foregroundColor: SoftPalette.gray50,
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12))),
             onPressed: () {
@@ -1540,22 +1543,22 @@ class _CookingTab extends StatelessWidget {
 
   Widget _cookStat(String label, String value, IconData icon) =>
       Column(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, color: Colors.white, size: 16),
+        Icon(icon, color: SoftPalette.gray50, size: 16),
         const SizedBox(height: 5),
         Text(value,
             style: const TextStyle(
-                color: Colors.white,
+                color: SoftPalette.gray50,
                 fontSize: 12,
                 fontWeight: FontWeight.w900)),
         Text(label,
             style: TextStyle(
-                color: Colors.white.withValues(alpha: 0.7),
+                color: SoftPalette.gray50.withValues(alpha: 0.7),
                 fontSize: 10,
                 fontWeight: FontWeight.w600)),
       ]);
 
   Widget _vDiv() =>
-      Container(width: 1, height: 36, color: Colors.white.withValues(alpha: 0.2));
+      Container(width: 1, height: 36, color: SoftPalette.gray50.withValues(alpha: 0.2));
 }
 
 // ── Cooking card ─────────────────────────────────────────────────────────────
@@ -1618,7 +1621,7 @@ class _CookingCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.adapt(SoftPalette.gray50),
         borderRadius: BorderRadius.circular(20),
         border: _quantitiesMissing
             ? Border.all(color: _typeColor.withValues(alpha: 0.5), width: 1.5)
@@ -1651,10 +1654,10 @@ class _CookingCard extends StatelessWidget {
               Row(children: [
                 Expanded(
                   child: Text(displayDish,
-                      style: const TextStyle(
+                      style: TextStyle(
                           fontSize: 15,
                           fontWeight: FontWeight.w800,
-                          color: kTextDark)),
+                          color: context.adapt(kTextDark))),
                 ),
                 Container(
                   margin: const EdgeInsets.only(left: 6),
@@ -1676,8 +1679,8 @@ class _CookingCard extends StatelessWidget {
               const SizedBox(height: 2),
               Row(children: [
                 Text(DateFormat('hh:mm a · dd MMM').format(time),
-                    style: const TextStyle(
-                        fontSize: 11, color: kTextLight)),
+                    style: TextStyle(
+                        fontSize: 11, color: context.adapt(kTextLight))),
                 if (_quantitiesMissing) ...[
                   const SizedBox(width: 8),
                   Container(
@@ -1817,13 +1820,13 @@ class _CookingCard extends StatelessWidget {
 
         // Ingredients (cooked only)
         if (!_isReceived && !_isSavedFood && ingredients.isNotEmpty) ...[
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 12, 16, 6),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
             child: Text('INGREDIENTS USED',
                 style: TextStyle(
                     fontSize: 10,
                     fontWeight: FontWeight.w800,
-                    color: kTextLight,
+                    color: context.adapt(kTextLight),
                     letterSpacing: 1.0)),
           ),
           Padding(
@@ -1836,14 +1839,14 @@ class _CookingCard extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 10, vertical: 5),
                         decoration: BoxDecoration(
-                            color: kSurface,
+                            color: context.adapt(kSurface),
                             borderRadius: BorderRadius.circular(8)),
                         child: Text(
                             '${ing['name']}: ${_fmt(ing['qty'] as num?)} ${ing['unit']}',
-                            style: const TextStyle(
+                            style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
-                                color: kTextMid)),
+                                color: context.adapt(kTextMid))),
                       ))
                   .toList(),
             ),
@@ -1858,11 +1861,11 @@ class _CookingCard extends StatelessWidget {
               width: double.infinity,
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                  color: kSurface,
+                  color: context.adapt(kSurface),
                   borderRadius: BorderRadius.circular(10)),
               child: Text(data['notes'] as String,
                   style:
-                      const TextStyle(fontSize: 12, color: Color(0xFF64748B))),
+                      TextStyle(fontSize: 12, color: context.adapt(SoftPalette.slate550))),
             ),
           ),
 
@@ -1989,7 +1992,7 @@ class _HistoryTabState extends State<_HistoryTab> {
         Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
-                colors: [Color(0xFF7C3AED), kPurple],
+                colors: [SoftPalette.violet550, kPurple],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight),
           ),
@@ -2005,7 +2008,7 @@ class _HistoryTabState extends State<_HistoryTab> {
                   Row(children: [
                     if (Navigator.canPop(context)) ...[
                       IconButton(
-                        icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 20),
+                        icon: const Icon(Icons.arrow_back_rounded, color: SoftPalette.gray50, size: 20),
                         onPressed: () => Navigator.maybePop(context),
                       ),
                       const SizedBox(width: 8),
@@ -2013,7 +2016,7 @@ class _HistoryTabState extends State<_HistoryTab> {
                     Container(
                       padding: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.15),
+                        color: SoftPalette.gray50.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: ClipRRect(
@@ -2025,7 +2028,7 @@ class _HistoryTabState extends State<_HistoryTab> {
                           fit: BoxFit.contain,
                           errorBuilder: (_, _, _) => const Icon(
                             Icons.restaurant_rounded,
-                            color: Colors.white70,
+                            color: SoftPalette.gray50A70,
                             size: 28,
                           ),
                         ),
@@ -2038,13 +2041,13 @@ class _HistoryTabState extends State<_HistoryTab> {
                         children: [
                       const Text('Daily History',
                           style: TextStyle(
-                              color: Colors.white,
+                              color: SoftPalette.gray50,
                               fontSize: 24,
                               fontWeight: FontWeight.w900,
                               letterSpacing: -0.5)),
                       Text(widget.username,
                           style: const TextStyle(
-                              color: Colors.white,
+                              color: SoftPalette.gray50,
                               fontSize: 18,
                               fontWeight: FontWeight.w700)),
                     ]),
@@ -2055,10 +2058,10 @@ class _HistoryTabState extends State<_HistoryTab> {
                 Container(
                   padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.15),
+                    color: SoftPalette.gray50.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.2)),
+                        color: SoftPalette.gray50.withValues(alpha: 0.2)),
                   ),
                   child: Row(children: [
                     _dateNavBtn(
@@ -2093,14 +2096,14 @@ class _HistoryTabState extends State<_HistoryTab> {
                                   MainAxisAlignment.center,
                               children: [
                             const Icon(Icons.calendar_today_rounded,
-                                color: Colors.white, size: 16),
+                                color: SoftPalette.gray50, size: 16),
                             const SizedBox(width: 8),
                             Text(
                                 isToday
                                     ? 'Today — $displayDate'
                                     : displayDate,
                                 style: const TextStyle(
-                                    color: Colors.white,
+                                    color: SoftPalette.gray50,
                                     fontWeight: FontWeight.w800,
                                     fontSize: 14)),
                           ]),
@@ -2215,10 +2218,10 @@ class _HistoryTabState extends State<_HistoryTab> {
                     size: 80, color: kPurple.withValues(alpha: 0.2)),
                 const SizedBox(height: 16),
                 Text('No records for $displayDate',
-                    style: const TextStyle(
+                    style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w700,
-                        color: kTextLight)),
+                        color: context.adapt(kTextLight))),
               ]));
             }
 
@@ -2252,13 +2255,13 @@ class _HistoryTabState extends State<_HistoryTab> {
                       width: double.infinity,
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                          color: const Color(0xFFFFFBEB),
+                          color: context.adapt(SoftPalette.yellow50m),
                           borderRadius: BorderRadius.circular(10)),
                       child: Text(menu,
-                          style: const TextStyle(
+                          style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.w600,
-                              color: Color(0xFF92400E),
+                              color: context.adapt(SoftPalette.orange600),
                               height: 1.5)),
                     ),
                   ),
@@ -2266,10 +2269,10 @@ class _HistoryTabState extends State<_HistoryTab> {
                 ],
                 if (sessions.isNotEmpty) ...[
                   Text('FOOD LOG (${sessions.length})',
-                      style: const TextStyle(
+                      style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w800,
-                          color: kTextLight,
+                          color: context.adapt(kTextLight),
                           letterSpacing: 1.0)),
                   const SizedBox(height: 8),
                   ...sessions.map((s) => _HistCookCard(session: s)),
@@ -2292,14 +2295,14 @@ class _HistoryTabState extends State<_HistoryTab> {
           margin: const EdgeInsets.all(2),
           decoration: BoxDecoration(
             color: onTap == null
-                ? (isWrapped ? kPurple.withValues(alpha: 0.05) : Colors.white.withValues(alpha: 0.05))
-                : (isWrapped ? kPurple.withValues(alpha: 0.15) : Colors.white.withValues(alpha: 0.15)),
+                ? (isWrapped ? kPurple.withValues(alpha: 0.05) : SoftPalette.gray50.withValues(alpha: 0.05))
+                : (isWrapped ? kPurple.withValues(alpha: 0.15) : SoftPalette.gray50.withValues(alpha: 0.15)),
             borderRadius: BorderRadius.circular(12),
           ),
           child: Icon(icon,
               color: onTap == null
-                  ? (isWrapped ? kPurple.withValues(alpha: 0.3) : Colors.white.withValues(alpha: 0.3))
-                  : (isWrapped ? kPurple : Colors.white),
+                  ? (isWrapped ? kPurple.withValues(alpha: 0.3) : SoftPalette.gray50.withValues(alpha: 0.3))
+                  : (isWrapped ? kPurple : SoftPalette.gray50),
               size: 20),
         ),
       );
@@ -2314,11 +2317,11 @@ class _HistoryTabState extends State<_HistoryTab> {
       Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: context.adapt(SoftPalette.gray50),
           borderRadius: BorderRadius.circular(18),
           boxShadow: [
             BoxShadow(
-                color: Colors.black.withValues(alpha: 0.04),
+                color: SoftPalette.gray900.withValues(alpha: 0.04),
                 blurRadius: 12,
                 offset: const Offset(0, 3))
           ],
@@ -2335,10 +2338,10 @@ class _HistoryTabState extends State<_HistoryTab> {
                 child: Icon(icon, color: iconColor, size: 18)),
             const SizedBox(width: 10),
             Text(title,
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 15,
                     fontWeight: FontWeight.w800,
-                    color: kTextDark)),
+                    color: context.adapt(kTextDark))),
           ]),
           const SizedBox(height: 14),
           child,
@@ -2362,10 +2365,10 @@ class _HistoryTabState extends State<_HistoryTab> {
                 color: color)),
         const SizedBox(height: 2),
         Text(label,
-            style: const TextStyle(
+            style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w600,
-                color: kTextLight)),
+                color: context.adapt(kTextLight))),
       ]);
 }
 
@@ -2415,7 +2418,7 @@ class _HistCookCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.adapt(SoftPalette.gray50),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: _typeColor.withValues(alpha: 0.2)),
         boxShadow: [
@@ -2433,10 +2436,10 @@ class _HistCookCard extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
               child: Text(displayDish,
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontSize: 14,
                       fontWeight: FontWeight.w800,
-                      color: kTextDark))),
+                      color: context.adapt(kTextDark)))),
           Container(
             padding: const EdgeInsets.symmetric(
                 horizontal: 8, vertical: 3),
@@ -2497,14 +2500,14 @@ class _HistCookCard extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                          color: kSurface,
+                          color: context.adapt(kSurface),
                           borderRadius: BorderRadius.circular(6)),
                       child: Text(
                           '${ing['name']}: ${_fmt(ing['qty'] as num?)} ${ing['unit']}',
-                          style: const TextStyle(
+                          style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
-                              color: kTextMid)),
+                              color: context.adapt(kTextMid))),
                     ))
                 .toList(),
           ),
@@ -2512,8 +2515,8 @@ class _HistCookCard extends StatelessWidget {
         if ((session['notes'] as String? ?? '').isNotEmpty) ...[
           const SizedBox(height: 8),
           Text(session['notes'] as String,
-              style: const TextStyle(
-                  fontSize: 12, color: Color(0xFF64748B))),
+              style: TextStyle(
+                  fontSize: 12, color: context.adapt(SoftPalette.slate550))),
         ],
       ]),
     );
@@ -2553,16 +2556,16 @@ Widget _settingsBtn(VoidCallback onTap) => GestureDetector(
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.18),
+          color: SoftPalette.gray50.withValues(alpha: 0.18),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.25), width: 0.5),
+          border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.25), width: 0.5),
         ),
         child: const Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.settings_outlined, color: Colors.white, size: 16),
+          Icon(Icons.settings_outlined, color: SoftPalette.gray50, size: 16),
           SizedBox(width: 5),
           Text('Settings',
               style: TextStyle(
-                  color: Colors.white,
+                  color: SoftPalette.gray50,
                   fontWeight: FontWeight.w800,
                   fontSize: 13)),
         ]),
@@ -2585,7 +2588,7 @@ class _UserAvatar extends StatelessWidget {
       } else {
         try {
           final cleanBase64 = photoStr.contains(',') ? photoStr.split(',').last : photoStr;
-          imageProvider = MemoryImage(base64Decode(cleanBase64));
+          imageProvider = Base64ImageCache.of(cleanBase64);
         } catch (_) {}
       }
     }
@@ -2599,10 +2602,10 @@ class _UserAvatar extends StatelessWidget {
         height: 44,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          border: Border.all(color: Colors.white.withValues(alpha: 0.4), width: 2),
+          border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.4), width: 2),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.15),
+              color: SoftPalette.gray900.withValues(alpha: 0.15),
               blurRadius: 6,
               offset: const Offset(0, 2),
             ),
@@ -2618,12 +2621,12 @@ class _UserAvatar extends StatelessWidget {
   }
 
   Widget _fallback(String initial) => Container(
-        color: Colors.white.withValues(alpha: 0.20),
+        color: SoftPalette.gray50.withValues(alpha: 0.20),
         alignment: Alignment.center,
         child: Text(
           initial,
           style: const TextStyle(
-            color: Colors.white,
+            color: SoftPalette.gray50,
             fontWeight: FontWeight.bold,
             fontSize: 18,
           ),

@@ -24,6 +24,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import '../../theme/role_theme_provider.dart' show RoleThemeScope;
 import '../tokens/spacing.dart';
 import '../tokens/radius.dart';
@@ -58,7 +59,7 @@ class AppSegmentedControl extends StatelessWidget {
       padding: const EdgeInsets.all(Gsp.sp1),
       decoration: BoxDecoration(
         color: isDark
-            ? Colors.white.withValues(alpha: 0.06)
+            ? SoftPalette.gray50.withValues(alpha: 0.06)
             : t.bgCardAlt,
         borderRadius: Gr.segment,
         border: Border.all(
@@ -88,7 +89,7 @@ class AppSegmentedControl extends StatelessWidget {
                 boxShadow: isSelected
                     ? [
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.08),
+                          color: SoftPalette.gray900.withValues(alpha: isDark ? 0.25 : 0.08),
                           blurRadius: 4,
                           offset: const Offset(0, 2),
                         ),

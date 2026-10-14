@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart';
@@ -112,9 +114,9 @@ class _StudentFeeLedgerScreenState extends State<StudentFeeLedgerScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDlgState) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Row(
+          title: Row(
             children: [
-              Icon(Icons.payment, color: Color(0xFF1E88E5)),
+              Icon(Icons.payment, color: ctx.adapt(SoftPalette.blue500)),
               SizedBox(width: 8),
               Text('Collect Fee Payment', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
             ],
@@ -202,8 +204,8 @@ class _StudentFeeLedgerScreenState extends State<StudentFeeLedgerScreen> {
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1E88E5),
-                foregroundColor: Colors.white,
+                backgroundColor: SoftPalette.blue500,
+                foregroundColor: SoftPalette.gray50,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
               onPressed: () async {
@@ -370,14 +372,14 @@ class _StudentFeeLedgerScreenState extends State<StudentFeeLedgerScreen> {
                 // Summary cards
                 Container(
                   padding: const EdgeInsets.all(16),
-                  color: isDark ? const Color(0xFF1E1E2D) : const Color(0xFFE3F2FD),
+                  color: isDark ? SoftPalette.slate900 : SoftPalette.slate100,
                   child: Row(
                     children: [
-                      _buildSummaryCard('Total Paid', 'Rs. ${_totalPaid.toStringAsFixed(0)}', Colors.green, Icons.check_circle_outline),
+                      _buildSummaryCard('Total Paid', 'Rs. ${_totalPaid.toStringAsFixed(0)}', context.adapt(SoftPalette.green400), Icons.check_circle_outline),
                       const SizedBox(width: 8),
-                      _buildSummaryCard('Total Concession', 'Rs. ${_totalDiscount.toStringAsFixed(0)}', Colors.orange, Icons.discount_outlined),
+                      _buildSummaryCard('Total Concession', 'Rs. ${_totalDiscount.toStringAsFixed(0)}', context.adapt(SoftPalette.amber300), Icons.discount_outlined),
                       const SizedBox(width: 8),
-                      _buildSummaryCard('Outstanding Due', 'Rs. ${_totalDue.toStringAsFixed(0)}', Colors.red, Icons.pending_actions),
+                      _buildSummaryCard('Outstanding Due', 'Rs. ${_totalDue.toStringAsFixed(0)}', context.adapt(SoftPalette.red400), Icons.pending_actions),
                     ],
                   ),
                 ),
@@ -392,8 +394,8 @@ class _StudentFeeLedgerScreenState extends State<StudentFeeLedgerScreen> {
                         icon: const Icon(Icons.add, size: 16),
                         label: const Text('Record Payment'),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF1E88E5),
-                          foregroundColor: Colors.white,
+                          backgroundColor: SoftPalette.blue500,
+                          foregroundColor: SoftPalette.gray50,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         ),
                         onPressed: _recordPaymentDialog,
@@ -409,9 +411,9 @@ class _StudentFeeLedgerScreenState extends State<StudentFeeLedgerScreen> {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.receipt_long_outlined, size: 64, color: Colors.grey.shade400),
+                              Icon(Icons.receipt_long_outlined, size: 64, color: context.adapt(SoftPalette.gray300)),
                               const SizedBox(height: 12),
-                              Text('No fee records found for this student', style: TextStyle(fontSize: 16, color: Colors.grey.shade600)),
+                              Text('No fee records found for this student', style: TextStyle(fontSize: 16, color: context.adapt(SoftPalette.gray500))),
                               const SizedBox(height: 8),
                               ElevatedButton(
                                 onPressed: _recordPaymentDialog,
@@ -442,10 +444,10 @@ class _StudentFeeLedgerScreenState extends State<StudentFeeLedgerScreen> {
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                               child: ListTile(
                                 leading: CircleAvatar(
-                                  backgroundColor: status == 'Paid' ? Colors.green.shade100 : Colors.amber.shade100,
+                                  backgroundColor: status == 'Paid' ? SoftPalette.green200 : SoftPalette.yellow150,
                                   child: Icon(
                                     status == 'Paid' ? Icons.check : Icons.access_time,
-                                    color: status == 'Paid' ? Colors.green.shade800 : Colors.amber.shade800,
+                                    color: status == 'Paid' ? SoftPalette.green550 : SoftPalette.orange350,
                                   ),
                                 ),
                                 title: Text('$monthName $year', style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -455,9 +457,9 @@ class _StudentFeeLedgerScreenState extends State<StudentFeeLedgerScreen> {
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   crossAxisAlignment: CrossAxisAlignment.end,
                                   children: [
-                                    Text('Rs. $amount', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.green)),
+                                    Text('Rs. $amount', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: ctx.adapt(SoftPalette.green400))),
                                     if (due > 0)
-                                      Text('Due: Rs. $due', style: const TextStyle(fontSize: 11, color: Colors.red, fontWeight: FontWeight.w600)),
+                                      Text('Due: Rs. $due', style: TextStyle(fontSize: 11, color: ctx.adapt(SoftPalette.red400), fontWeight: FontWeight.w600)),
                                   ],
                                 ),
                                 onTap: () => _printReceipt(r),

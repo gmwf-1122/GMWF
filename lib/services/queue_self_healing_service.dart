@@ -42,6 +42,9 @@ class QueueSelfHealingService {
     // 1. First, revive & heal dead letter queue
     deadLettersRevived = await _healAndReviveDeadLetters(effectiveFallbackBranch, details);
 
+    // 1b. Heal historical legacy records (attendance, patients, entries, prescriptions)
+    await LocalStorageService.healLegacyHistoricalData();
+
     // 2. Next, purge obsolete duplicate entries across queues
     final duplicatesPurged = await LocalStorageService.purgeBloatedSyncQueue();
 
@@ -217,7 +220,18 @@ class QueueSelfHealingService {
       action['attempts'] = 0;
       action.remove('lastError');
       action.remove('nextRetryAt');
+      action.remove('sdkHandedOffAt');
       modified = true;
+    }
+
+    // Clear stale sdkHandedOffAt so records are not stuck indefinitely
+    final handedOffStr = action['sdkHandedOffAt'] as String?;
+    if (handedOffStr != null) {
+      final handedAt = DateTime.tryParse(handedOffStr);
+      if (handedAt == null || DateTime.now().difference(handedAt).inMinutes >= 5) {
+        action.remove('sdkHandedOffAt');
+        modified = true;
+      }
     }
 
     if (modified) {
@@ -256,6 +270,7 @@ class QueueSelfHealingService {
         action.remove('deadLetterReason');
         action.remove('nextRetryAt');
         action.remove('lastError');
+        action.remove('sdkHandedOffAt');
         action['attempts'] = 0;
         action['revivedAt'] = DateTime.now().toUtc().toIso8601String();
 

@@ -1,6 +1,7 @@
 // lib/pages/office/employee_report_page.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:intl/intl.dart';
 import '../../theme/role_theme_provider.dart';
 import '../../theme/app_theme.dart';
@@ -80,6 +81,7 @@ class _EmployeeReportPageState extends State<EmployeeReportPage> {
       child: Row(
         children: [
           buildInitialsAvatar(
+            context: context,
             name: emp['name']?.toString() ?? '',
             theme: t,
             radius: 28,
@@ -153,9 +155,9 @@ class _EmployeeReportPageState extends State<EmployeeReportPage> {
           _row('Sunday overtime days', '${s['sundayOvertimeDays']}', t),
           const Divider(height: 20),
           _row('Base earned', 'PKR ${NumberFormat('#,###').format(earned)}', t),
-          _row('Absence deductions', '- PKR ${NumberFormat('#,###').format(deductions)}', t, color: Colors.red),
-          _row('Holiday bonus', '+ PKR ${NumberFormat('#,###').format(holidayBonus)}', t, color: Colors.green),
-          _row('Sunday OT bonus', '+ PKR ${NumberFormat('#,###').format(sunBonus)}', t, color: Colors.green),
+          _row('Absence deductions', '- PKR ${NumberFormat('#,###').format(deductions)}', t, color: SoftPalette.red400),
+          _row('Holiday bonus', '+ PKR ${NumberFormat('#,###').format(holidayBonus)}', t, color: SoftPalette.green400),
+          _row('Sunday OT bonus', '+ PKR ${NumberFormat('#,###').format(sunBonus)}', t, color: SoftPalette.green400),
           const Divider(height: 20),
           _row('Net earned so far', 'PKR ${NumberFormat('#,###').format(net)}', t, bold: true),
         ],
@@ -188,7 +190,7 @@ class _EmployeeReportPageState extends State<EmployeeReportPage> {
             children: [
               Text('LOANS & ADVANCES', style: TextStyle(color: t.accent, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1)),
               Text('Outstanding: PKR ${NumberFormat('#,###').format(outstanding)}',
-                  style: TextStyle(color: outstanding > 0 ? Colors.orange : t.textTertiary, fontSize: 12, fontWeight: FontWeight.bold)),
+                  style: TextStyle(color: outstanding > 0 ? SoftPalette.amber300 : t.textTertiary, fontSize: 12, fontWeight: FontWeight.bold)),
             ],
           ),
           const SizedBox(height: 10),
@@ -211,7 +213,7 @@ class _EmployeeReportPageState extends State<EmployeeReportPage> {
                         Text('PKR ${NumberFormat('#,###').format((loan['principal'] as num).toDouble())} \u2022 ${loan['repaymentType']}',
                             style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 12)),
                         Text(loan['status'] == 'closed' ? 'PAID OFF' : 'Balance: PKR ${NumberFormat('#,###').format(balance)}',
-                            style: TextStyle(color: loan['status'] == 'closed' ? Colors.green : Colors.orange, fontSize: 11, fontWeight: FontWeight.bold)),
+                            style: TextStyle(color: loan['status'] == 'closed' ? SoftPalette.green400 : SoftPalette.amber300, fontSize: 11, fontWeight: FontWeight.bold)),
                       ],
                     ),
                     Text(loan['reason']?.toString() ?? '', style: TextStyle(color: t.textTertiary, fontSize: 11)),

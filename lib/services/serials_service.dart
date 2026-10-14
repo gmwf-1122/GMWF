@@ -39,8 +39,8 @@ int parseSequenceFromSerial(String serial) {
     if (numVal != null && lastPart.length <= 4) return numVal;
   }
 
-  // 3. Standard token serial format: ddMMyy-TAG-SEQ (e.g. 160826-HAJI-003)
-  if (parts.length == 3 && RegExp(r'^\d{6}$').hasMatch(parts[0])) {
+  // 3. Standard token serial format: ddMMyy[A-Z]?-TAG-SEQ (e.g. 141026E-SADD-003 or 160826-HAJI-003)
+  if (parts.length == 3 && RegExp(r'^\d{6}[A-Za-z]?$').hasMatch(parts[0])) {
     final cleanSeq = parts[2].replaceAll(RegExp(r'[^\d]'), '');
     final numVal = int.tryParse(cleanSeq);
     if (numVal != null && cleanSeq.length <= 4) return numVal;
@@ -80,12 +80,13 @@ Future<Map<String, dynamic>> issueAtomicSerialTransaction({
   final shiftInfo = CampSessionService.resolveShiftAndDateKey(time);
   final dateKey = shiftInfo.dateKey;
   final session = shiftInfo.session;
+  final sessionLetter = CampSessionService.getSessionLetter(session);
 
   final counterRef = FirebaseFirestore.instance
       .collection('branches')
       .doc(normBranch)
       .collection('counters')
-      .doc('${dateKey}_$normTag');
+      .doc('${dateKey}_${sessionLetter}_$normTag');
 
   final db = FirebaseFirestore.instance;
 
@@ -121,12 +122,13 @@ Future<Map<String, dynamic>> issueAtomicSerialTransaction({
     }
     final newSeq = currentSeq + 1;
     final seqPadded = newSeq.toString().padLeft(newSeq > 999 ? 4 : 3, '0');
-    final serial = '$dateKey-$normTag-$seqPadded';
+    final serial = '$dateKey$sessionLetter-$normTag-$seqPadded';
 
     transaction.set(counterRef, {
       'lastSeq': newSeq,
       'dateKey': dateKey,
       'session': session,
+      'sessionLetter': sessionLetter,
       'dispensaryTag': normTag,
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
@@ -135,6 +137,7 @@ Future<Map<String, dynamic>> issueAtomicSerialTransaction({
     entryData['serial'] = serial;
     entryData['dateKey'] = dateKey;
     entryData['session'] = session;
+    entryData['sessionLetter'] = sessionLetter;
     entryData['queueType'] = queueType;
     entryData['branchId'] = normBranch;
 

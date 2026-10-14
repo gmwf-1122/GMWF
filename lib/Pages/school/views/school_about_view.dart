@@ -1,6 +1,7 @@
 // lib/pages/school/views/school_about_view.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import '../../../theme/role_theme_provider.dart';
 import '../../../theme/app_theme.dart';
 import '../../../design/design_system.dart';
@@ -31,14 +32,14 @@ class SchoolAboutView extends StatelessWidget {
             padding: EdgeInsets.all(isMobile ? 20 : 32),
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                colors: [Color(0xFF0D2137), Color(0xFF1B4965), Color(0xFF2C6E8A)],
+                colors: [SoftPalette.slate900, SoftPalette.sky700, SoftPalette.sky550],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(24),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.15),
+                  color: SoftPalette.gray900.withValues(alpha: 0.15),
                   blurRadius: 20,
                   offset: const Offset(0, 8),
                 ),
@@ -55,11 +56,11 @@ class SchoolAboutView extends StatelessWidget {
                       height: 52,
                       padding: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: SoftPalette.gray50,
                         borderRadius: BorderRadius.circular(14),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.1),
+                            color: SoftPalette.gray900.withValues(alpha: 0.1),
                             blurRadius: 8,
                             offset: const Offset(0, 2),
                           ),
@@ -68,7 +69,7 @@ class SchoolAboutView extends StatelessWidget {
                       child: Image.asset('assets/logo/gmwf-1.webp', fit: BoxFit.contain),
                     ),
                     const SizedBox(width: 14),
-                    const Text('•', style: TextStyle(color: Colors.white38, fontSize: 24)),
+                    const Text('•', style: TextStyle(color: SoftPalette.gray50A38, fontSize: 24)),
                     const SizedBox(width: 14),
 
                     // TWT Official Logo
@@ -77,11 +78,11 @@ class SchoolAboutView extends StatelessWidget {
                       height: 52,
                       padding: const EdgeInsets.all(4),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: SoftPalette.gray50,
                         borderRadius: BorderRadius.circular(14),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.1),
+                            color: SoftPalette.gray900.withValues(alpha: 0.1),
                             blurRadius: 8,
                             offset: const Offset(0, 2),
                           ),
@@ -90,21 +91,21 @@ class SchoolAboutView extends StatelessWidget {
                       child: Image.asset(
                         'assets/logo/twt.webp',
                         fit: BoxFit.contain,
-                        errorBuilder: (ctx, error, stackTrace) => const Icon(Icons.school_rounded, color: Color(0xFF1E3A8A)),
+                        errorBuilder: (ctx, error, stackTrace) => const Icon(Icons.school_rounded, color: SoftPalette.blue700),
                       ),
                     ),
                     const Spacer(),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.1),
+                        color: SoftPalette.gray50.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+                        border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.2)),
                       ),
                       child: const Text(
                         'GMWF Project',
                         style: TextStyle(
-                          color: Colors.white,
+                          color: SoftPalette.gray50,
                           fontWeight: FontWeight.w700,
                           fontSize: 11,
                         ),
@@ -116,7 +117,7 @@ class SchoolAboutView extends StatelessWidget {
                 const Text(
                   'Taleem-wa-Tarbiyat School System',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: SoftPalette.gray50,
                     fontSize: 26,
                     fontWeight: FontWeight.w900,
                     letterSpacing: -0.5,
@@ -126,7 +127,7 @@ class SchoolAboutView extends StatelessWidget {
                 Text(
                   'A Prestigious Educational Initiative by Gulzar Madina Welfare Foundation (GMWF)',
                   style: TextStyle(
-                    color: Colors.white.withValues(alpha: 0.85),
+                    color: SoftPalette.gray50.withValues(alpha: 0.85),
                     fontSize: 14,
                     fontWeight: FontWeight.w500,
                   ),
@@ -135,18 +136,18 @@ class SchoolAboutView extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.08),
+                    color: SoftPalette.gray50.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(12),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.location_on_rounded, color: Color(0xFF38BDF8), size: 16),
+                      const Icon(Icons.location_on_rounded, color: SoftPalette.sky350, size: 16),
                       const SizedBox(width: 8),
                       Text(
                         'Campus Branch: ${branchName ?? branchId.toUpperCase()}',
                         style: const TextStyle(
-                          color: Color(0xFFE2E8F0),
+                          color: SoftPalette.slate150,
                           fontWeight: FontWeight.w600,
                           fontSize: 12,
                         ),
@@ -180,7 +181,7 @@ class SchoolAboutView extends StatelessWidget {
                   t: t,
                   title: 'Our Vision',
                   icon: Icons.visibility_rounded,
-                  iconColor: const Color(0xFF1B4965),
+                  iconColor: context.adapt(SoftPalette.sky700),
                   content: 'To foster intellectual excellence, religious values, and moral discipline (Tarbiyat) in every student, providing an inclusive learning environment backed by charitable welfare support.',
                 ),
               ),
@@ -191,7 +192,7 @@ class SchoolAboutView extends StatelessWidget {
                     t: t,
                     title: 'Our Mission',
                     icon: Icons.track_changes_rounded,
-                    iconColor: const Color(0xFF2D9B83),
+                    iconColor: SoftPalette.teal500,
                     content: 'Delivering holistic secular and Islamic education with state-of-the-art campus digitization, continuous teacher training, merit scholarships, and well-equipped digital libraries.',
                   ),
                 ),
@@ -204,7 +205,7 @@ class SchoolAboutView extends StatelessWidget {
               t: t,
               title: 'Our Mission',
               icon: Icons.track_changes_rounded,
-              iconColor: const Color(0xFF2D9B83),
+              iconColor: SoftPalette.teal500,
               content: 'Delivering holistic secular and Islamic education with state-of-the-art campus digitization, continuous teacher training, merit scholarships, and well-equipped digital libraries.',
             ),
           ],
@@ -311,7 +312,7 @@ class _InfoCard extends StatelessWidget {
         border: Border.all(color: t.bgRule),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.02),
+            color: SoftPalette.gray900.withValues(alpha: 0.02),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),

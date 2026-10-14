@@ -1,6 +1,7 @@
 // lib/pages/office/employees_tab.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/design_system.dart';
 import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
@@ -204,19 +205,19 @@ class _EmployeesTabState extends State<EmployeesTab> {
             ? RoleThemeData(
                 roleLabel: tOriginal.roleLabel,
                 isDarkCanvas: true,
-                bg: const Color(0xFF0F172A),
-                bgCard: const Color(0xFF1E293B),
-                bgCardAlt: const Color(0xFF162032),
-                bgRule: const Color(0xFF334155),
-                accent: const Color(0xFF10B981),
-                accentLight: const Color(0xFF34D399),
-                accentMuted: const Color(0xFF064E3B).withValues(alpha: 0.3),
-                accentGradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
-                glassTint: const Color(0x1A10B981),
-                textPrimary: const Color(0xFFF8FAFC),
-                textSecondary: const Color(0xFF94A3B8),
-                textTertiary: const Color(0xFF64748B),
-                danger: const Color(0xFFEF4444),
+                bg: SoftPalette.slate900,
+                bgCard: SoftPalette.slate800,
+                bgCardAlt: SoftPalette.slate900,
+                bgRule: SoftPalette.slate700,
+                accent: SoftPalette.emerald350,
+                accentLight: SoftPalette.emerald300,
+                accentMuted: SoftPalette.emerald700.withValues(alpha: 0.3),
+                accentGradient: const LinearGradient(colors: [SoftPalette.emerald350, SoftPalette.emerald500]),
+                glassTint: SoftPalette.emerald350A10,
+                textPrimary: SoftPalette.gray50,
+                textSecondary: SoftPalette.slate350,
+                textTertiary: SoftPalette.slate550,
+                danger: SoftPalette.red400,
                 zakat: tOriginal.zakat,
                 nonZakat: tOriginal.nonZakat,
                 gmwf: tOriginal.gmwf,
@@ -231,19 +232,19 @@ class _EmployeesTabState extends State<EmployeesTab> {
             : RoleThemeData(
                 roleLabel: tOriginal.roleLabel,
                 isDarkCanvas: false,
-                bg: const Color(0xFFFBFDFF),
-                bgCard: Colors.white,
-                bgCardAlt: const Color(0xFFF6F9F8),
-                bgRule: const Color(0xFFF1F5F9),
-                accent: const Color(0xFF0F9A7A),
-                accentLight: const Color(0xFF4CB79A),
-                accentMuted: const Color(0xFFE8F6F0),
-                accentGradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
-                glassTint: const Color(0x1A10B981),
-                textPrimary: const Color(0xFF111827),
-                textSecondary: const Color(0xFF6B7280),
-                textTertiary: const Color(0xFF9CA3AF),
-                danger: const Color(0xFFEF4444),
+                bg: SoftPalette.gray50,
+                bgCard: SoftPalette.gray50,
+                bgCardAlt: SoftPalette.gray50,
+                bgRule: SoftPalette.slate100,
+                accent: SoftPalette.emerald500,
+                accentLight: SoftPalette.emerald350,
+                accentMuted: SoftPalette.emerald100m,
+                accentGradient: const LinearGradient(colors: [SoftPalette.emerald350, SoftPalette.emerald500]),
+                glassTint: SoftPalette.emerald350A10,
+                textPrimary: SoftPalette.slate900,
+                textSecondary: SoftPalette.slate550,
+                textTertiary: SoftPalette.slate350,
+                danger: SoftPalette.red400,
                 zakat: tOriginal.zakat,
                 nonZakat: tOriginal.nonZakat,
                 gmwf: tOriginal.gmwf,
@@ -426,7 +427,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
             ),
             child: Text(
               '$selectedCount Selected',
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: SoftPalette.gray50),
             ),
           ),
           const SizedBox(width: 10),
@@ -446,8 +447,8 @@ class _EmployeesTabState extends State<EmployeesTab> {
           // STRICTLY ONLY OFFBOARD & DELETE BUTTONS (NO EDIT OR OTHER ACTIONS)
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFEA580C),
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.orange400,
+              foregroundColor: SoftPalette.gray50,
               elevation: 0,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -462,8 +463,8 @@ class _EmployeesTabState extends State<EmployeesTab> {
           const SizedBox(width: 8),
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.red500,
+              foregroundColor: SoftPalette.gray50,
               elevation: 0,
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -504,13 +505,13 @@ class _EmployeesTabState extends State<EmployeesTab> {
             scrollDirection: Axis.horizontal,
             child: Row(
               children: [
-                _buildStageTabPill('All Staff', allList.length, _statusFilter == 'All', () => setState(() => _statusFilter = 'All'), const Color(0xFF3B82F6), t),
+                _buildStageTabPill('All Staff', allList.length, _statusFilter == 'All', () => setState(() => _statusFilter = 'All'), SoftPalette.blue500, t),
                 const SizedBox(width: 8),
-                _buildStageTabPill('Active', activeCount, _statusFilter == 'Active', () => setState(() => _statusFilter = 'Active'), const Color(0xFF10B981), t),
+                _buildStageTabPill('Active', activeCount, _statusFilter == 'Active', () => setState(() => _statusFilter = 'Active'), SoftPalette.emerald350, t),
                 const SizedBox(width: 8),
-                _buildStageTabPill('On Leave', leaveCount, _statusFilter == 'Temporary Leave', () => setState(() => _statusFilter = 'Temporary Leave'), const Color(0xFFF59E0B), t),
+                _buildStageTabPill('On Leave', leaveCount, _statusFilter == 'Temporary Leave', () => setState(() => _statusFilter = 'Temporary Leave'), SoftPalette.amber300, t),
                 const SizedBox(width: 8),
-                _buildStageTabPill('Left / Inactive', leftCount, _statusFilter == 'Left' || _statusFilter == 'Inactive', () => setState(() => _statusFilter = 'Left'), const Color(0xFF6B7280), t),
+                _buildStageTabPill('Left / Inactive', leftCount, _statusFilter == 'Left' || _statusFilter == 'Inactive', () => setState(() => _statusFilter = 'Left'), SoftPalette.slate550, t),
               ],
             ),
           ),
@@ -565,7 +566,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                             decoration: BoxDecoration(color: t.accent, borderRadius: BorderRadius.circular(10)),
-                            child: Text('$_activeFilterCount', style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                            child: Text('$_activeFilterCount', style: const TextStyle(color: SoftPalette.gray50, fontSize: 10, fontWeight: FontWeight.bold)),
                           ),
                         ],
                       ],
@@ -617,12 +618,12 @@ class _EmployeesTabState extends State<EmployeesTab> {
                     height: 44,
                     width: 44,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFECFDF5),
+                      color: context.adapt(SoftPalette.emerald50),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFF10B981).withOpacity(0.3)),
+                      border: Border.all(color: SoftPalette.emerald350.withOpacity(0.3)),
                     ),
                     child: IconButton(
-                      icon: const Icon(Icons.fingerprint_rounded, color: Color(0xFF059669), size: 22),
+                      icon: const Icon(Icons.fingerprint_rounded, color: SoftPalette.emerald500, size: 22),
                       onPressed: () {
                         Navigator.push(
                           context,
@@ -641,12 +642,12 @@ class _EmployeesTabState extends State<EmployeesTab> {
                     height: 44,
                     width: 44,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF5F3FF),
+                      color: context.adapt(SoftPalette.violet100m),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFF8B5CF6).withOpacity(0.3)),
+                      border: Border.all(color: SoftPalette.violet500.withOpacity(0.3)),
                     ),
                     child: IconButton(
-                      icon: const Icon(Icons.merge_type_rounded, color: Color(0xFF7C3AED), size: 20),
+                      icon: const Icon(Icons.merge_type_rounded, color: SoftPalette.violet550, size: 20),
                       onPressed: () => _openMergeStaffDialog(context, t),
                     ),
                   ),
@@ -658,12 +659,12 @@ class _EmployeesTabState extends State<EmployeesTab> {
                     height: 44,
                     width: 44,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF0FDF4),
+                      color: context.adapt(SoftPalette.emerald50m),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+                      border: Border.all(color: SoftPalette.emerald350.withValues(alpha: 0.3)),
                     ),
                     child: IconButton(
-                      icon: const Icon(Icons.cleaning_services_rounded, color: Color(0xFF059669), size: 20),
+                      icon: const Icon(Icons.cleaning_services_rounded, color: SoftPalette.emerald500, size: 20),
                       onPressed: () async {
                         final sanitized = await FinanceLocalStorage.sanitizeEmployeeProfiles();
                         if (mounted) {
@@ -680,8 +681,8 @@ class _EmployeesTabState extends State<EmployeesTab> {
                 const SizedBox(width: 8),
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF10B981),
-                    foregroundColor: Colors.white,
+                    backgroundColor: SoftPalette.emerald350,
+                    foregroundColor: SoftPalette.gray50,
                     minimumSize: const Size(0, 44),
                     padding: const EdgeInsets.symmetric(horizontal: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -840,18 +841,18 @@ class _EmployeesTabState extends State<EmployeesTab> {
                       margin: const EdgeInsets.only(bottom: 10),
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFECFDF5),
+                        color: context.adapt(SoftPalette.emerald50),
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFFA7F3D0)),
+                        border: Border.all(color: context.adapt(SoftPalette.emerald150)),
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.lock_rounded, size: 16, color: Color(0xFF059669)),
+                          const Icon(Icons.lock_rounded, size: 16, color: SoftPalette.emerald500),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               'Branch: ${_getBranchName(_branchFilter)} (Locked)',
-                              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF064E3B)),
+                              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.emerald700)),
                             ),
                           ),
                         ],
@@ -939,7 +940,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: t.accent,
-                      foregroundColor: Colors.white,
+                      foregroundColor: SoftPalette.gray50,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
@@ -1064,13 +1065,13 @@ class _EmployeesTabState extends State<EmployeesTab> {
     final isOffice = departmentName.toUpperCase().contains('OFFICE');
     final isDark = UserThemeService.isDarkMode();
     final headerBg = isOffice
-        ? (isDark ? const Color(0xFF064E3B).withValues(alpha: 0.3) : const Color(0xFFECFDF5))
+        ? (isDark ? SoftPalette.emerald700.withValues(alpha: 0.3) : SoftPalette.emerald50)
         : t.bgCardAlt;
     final headerBorder = isOffice
-        ? (isDark ? const Color(0xFF059669).withValues(alpha: 0.5) : const Color(0xFFA7F3D0))
+        ? (isDark ? SoftPalette.emerald500.withValues(alpha: 0.5) : SoftPalette.emerald150)
         : t.bgRule;
-    final iconColor = isOffice ? (isDark ? const Color(0xFF34D399) : const Color(0xFF059669)) : t.accent;
-    final titleColor = isOffice ? (isDark ? const Color(0xFF6EE7B7) : const Color(0xFF064E3B)) : t.textPrimary;
+    final iconColor = isOffice ? (isDark ? SoftPalette.emerald300 : SoftPalette.emerald500) : t.accent;
+    final titleColor = isOffice ? (isDark ? SoftPalette.emerald200 : SoftPalette.emerald700) : t.textPrimary;
 
     return Container(
       margin: const EdgeInsets.only(top: 10, bottom: 6),
@@ -1080,7 +1081,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: headerBorder, width: isOffice ? 1.5 : 1.0),
         boxShadow: isOffice ? [
-          BoxShadow(color: (isDark ? const Color(0xFF10B981) : const Color(0xFF059669)).withValues(alpha: 0.08), blurRadius: 8, offset: const Offset(0, 2)),
+          BoxShadow(color: (isDark ? SoftPalette.emerald350 : SoftPalette.emerald500).withValues(alpha: 0.08), blurRadius: 8, offset: const Offset(0, 2)),
         ] : [],
       ),
       child: Row(
@@ -1105,12 +1106,12 @@ class _EmployeesTabState extends State<EmployeesTab> {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
               decoration: BoxDecoration(
-                color: const Color(0xFF059669),
+                color: SoftPalette.emerald500,
                 borderRadius: BorderRadius.circular(6),
               ),
               child: const Text(
                 'TOP',
-                style: TextStyle(fontSize: 8, fontWeight: FontWeight.w900, color: Colors.white, letterSpacing: 0.5),
+                style: TextStyle(fontSize: 8, fontWeight: FontWeight.w900, color: SoftPalette.gray50, letterSpacing: 0.5),
               ),
             ),
           ],
@@ -1118,16 +1119,16 @@ class _EmployeesTabState extends State<EmployeesTab> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: isOffice ? (isDark ? const Color(0xFF064E3B).withValues(alpha: 0.4) : const Color(0xFF059669).withValues(alpha: 0.12)) : t.bgCard,
+              color: isOffice ? (isDark ? SoftPalette.emerald700.withValues(alpha: 0.4) : SoftPalette.emerald500.withValues(alpha: 0.12)) : t.bgCard,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: isOffice ? (isDark ? const Color(0xFF059669).withValues(alpha: 0.5) : const Color(0xFFA7F3D0)) : t.bgRule),
+              border: Border.all(color: isOffice ? (isDark ? SoftPalette.emerald500.withValues(alpha: 0.5) : SoftPalette.emerald150) : t.bgRule),
             ),
             child: Text(
               '$count EMPLOYEE${count == 1 ? '' : 'S'}',
               style: TextStyle(
                 fontSize: 10,
                 fontWeight: FontWeight.w800,
-                color: isOffice ? (isDark ? const Color(0xFF34D399) : const Color(0xFF059669)) : t.textSecondary,
+                color: isOffice ? (isDark ? SoftPalette.emerald300 : SoftPalette.emerald500) : t.textSecondary,
               ),
             ),
           ),
@@ -1188,8 +1189,8 @@ class _EmployeesTabState extends State<EmployeesTab> {
         : <Map>[];
 
     final statusColor = isActive
-        ? (status == 'Temporary Leave' ? const Color(0xFFF59E0B) : const Color(0xFF10B981))
-        : const Color(0xFFEF4444);
+        ? (status == 'Temporary Leave' ? SoftPalette.amber300 : SoftPalette.emerald350)
+        : SoftPalette.red400;
     final statusLabel = status.toUpperCase();
 
     return Container(
@@ -1205,7 +1206,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
           BoxShadow(
             color: isSelected
                 ? t.accent.withValues(alpha: 0.18)
-                : Colors.black.withValues(alpha: isDark ? 0.2 : 0.03),
+                : SoftPalette.gray900.withValues(alpha: isDark ? 0.2 : 0.03),
             blurRadius: isSelected ? 8 : 6,
             offset: const Offset(0, 2),
           ),
@@ -1254,7 +1255,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                             final isEnrolled = cred != null && cred.active && cred.biometricPin.isNotEmpty;
                             final displayPin = isEnrolled ? cred.biometricPin : (pin.isNotEmpty ? pin : '');
                             final hasPin = displayPin.isNotEmpty;
-                            final pinColor = hasPin ? const Color(0xFF10B981) : const Color(0xFFF59E0B);
+                            final pinColor = hasPin ? SoftPalette.emerald350 : SoftPalette.amber300;
 
                             return InkWell(
                               onTap: _isSelectionMode
@@ -1296,13 +1297,13 @@ class _EmployeesTabState extends State<EmployeesTab> {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3.5),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF6366F1).withValues(alpha: isDark ? 0.2 : 0.12),
+                                color: SoftPalette.indigo500.withValues(alpha: isDark ? 0.2 : 0.12),
                                 borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: const Color(0xFF6366F1).withValues(alpha: isDark ? 0.4 : 0.25)),
+                                border: Border.all(color: SoftPalette.indigo500.withValues(alpha: isDark ? 0.4 : 0.25)),
                               ),
                               child: Text(
                                 dept.toUpperCase(),
-                                style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Color(0xFF818CF8), letterSpacing: 0.3),
+                                style: const TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: SoftPalette.indigo400, letterSpacing: 0.3),
                               ),
                             ),
                         ],
@@ -1356,6 +1357,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                       const SizedBox(width: 4),
                     ],
                     buildInitialsAvatar(
+                      context: context,
                       name: name,
                       theme: t,
                       radius: 17,
@@ -1440,7 +1442,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                             PopupMenuItem(
                               value: 'pin',
                               child: Row(children: [
-                                const Icon(Icons.fingerprint_rounded, size: 16, color: Color(0xFF10B981)),
+                                const Icon(Icons.fingerprint_rounded, size: 16, color: SoftPalette.emerald350),
                                 const SizedBox(width: 8),
                                 Text('Set / Edit PIN', style: TextStyle(color: t.textPrimary, fontSize: 13)),
                               ]),
@@ -1448,7 +1450,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                             PopupMenuItem(
                               value: 'medical',
                               child: Row(children: [
-                                const Icon(Icons.medical_services_outlined, size: 16, color: Colors.teal),
+                                const Icon(Icons.medical_services_outlined, size: 16, color: SoftPalette.teal500),
                                 const SizedBox(width: 8),
                                 Text('Medical History', style: TextStyle(color: t.textPrimary, fontSize: 13)),
                               ]),
@@ -1456,7 +1458,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                             PopupMenuItem(
                               value: 'merge',
                               child: Row(children: [
-                                const Icon(Icons.merge_type_rounded, size: 16, color: Color(0xFF7C3AED)),
+                                const Icon(Icons.merge_type_rounded, size: 16, color: SoftPalette.violet550),
                                 const SizedBox(width: 8),
                                 Text('Merge Duplicates', style: TextStyle(color: t.textPrimary, fontSize: 13)),
                               ]),
@@ -1465,9 +1467,9 @@ class _EmployeesTabState extends State<EmployeesTab> {
                             PopupMenuItem(
                               value: 'offboard',
                               child: const Row(children: [
-                                Icon(Icons.person_off_outlined, size: 16, color: Colors.redAccent),
+                                Icon(Icons.person_off_outlined, size: 16, color: SoftPalette.red400),
                                 SizedBox(width: 8),
-                                Text('Offboard Employee', style: TextStyle(color: Colors.redAccent, fontSize: 13)),
+                                Text('Offboard Employee', style: TextStyle(color: SoftPalette.red400, fontSize: 13)),
                               ]),
                             ),
                           ],
@@ -1505,18 +1507,18 @@ class _EmployeesTabState extends State<EmployeesTab> {
                       ...camps.map((campName) => Container(
                             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF10B981).withValues(alpha: isDark ? 0.2 : 0.1),
+                              color: SoftPalette.emerald350.withValues(alpha: isDark ? 0.2 : 0.1),
                               borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: const Color(0xFF10B981).withValues(alpha: isDark ? 0.4 : 0.25)),
+                              border: Border.all(color: SoftPalette.emerald350.withValues(alpha: isDark ? 0.4 : 0.25)),
                             ),
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.holiday_village_outlined, size: 11, color: Color(0xFF10B981)),
+                                const Icon(Icons.holiday_village_outlined, size: 11, color: SoftPalette.emerald350),
                                 const SizedBox(width: 4),
                                 Text(
                                   campName,
-                                  style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF10B981)),
+                                  style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: SoftPalette.emerald350),
                                 ),
                               ],
                             ),
@@ -1531,18 +1533,18 @@ class _EmployeesTabState extends State<EmployeesTab> {
                         return Container(
                           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF6366F1).withValues(alpha: isDark ? 0.18 : 0.1),
+                            color: SoftPalette.indigo500.withValues(alpha: isDark ? 0.18 : 0.1),
                             borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: const Color(0xFF6366F1).withValues(alpha: isDark ? 0.4 : 0.25)),
+                            border: Border.all(color: SoftPalette.indigo500.withValues(alpha: isDark ? 0.4 : 0.25)),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.schedule_rounded, size: 11, color: Color(0xFF818CF8)),
+                              const Icon(Icons.schedule_rounded, size: 11, color: SoftPalette.indigo400),
                               const SizedBox(width: 4),
                               Text(
                                 label,
-                                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: Color(0xFF818CF8)),
+                                style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: SoftPalette.indigo400),
                               ),
                             ],
                           ),
@@ -1552,8 +1554,8 @@ class _EmployeesTabState extends State<EmployeesTab> {
                       InkWell(
                         onTap: () {
                           Clipboard.setData(ClipboardData(text: rawCnic));
-                          ScaffoldMessenger.of(context).clearSnackBars();
-                          ScaffoldMessenger.of(context).showSnackBar(
+                          AppToast.clear();
+                          AppToast.showSnackBar(context, 
                             SnackBar(content: Text('Copied CNIC: $formattedCnic'), duration: const Duration(seconds: 1), behavior: SnackBarBehavior.floating),
                           );
                         },
@@ -1579,8 +1581,8 @@ class _EmployeesTabState extends State<EmployeesTab> {
                       InkWell(
                         onTap: () {
                           Clipboard.setData(ClipboardData(text: rawPhone));
-                          ScaffoldMessenger.of(context).clearSnackBars();
-                          ScaffoldMessenger.of(context).showSnackBar(
+                          AppToast.clear();
+                          AppToast.showSnackBar(context, 
                             SnackBar(content: Text('Copied Phone: $rawPhone'), duration: const Duration(seconds: 1), behavior: SnackBarBehavior.floating),
                           );
                         },
@@ -1635,7 +1637,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
     );
     if (result == true && mounted) {
       setState(() {});
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(content: Text('${emp['name'] ?? 'Employee'} has been offboarded.')),
       );
     }
@@ -1699,10 +1701,10 @@ class _EmployeesTabState extends State<EmployeesTab> {
                           Container(
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              color: Colors.orange.withValues(alpha: 0.15),
+                              color: SoftPalette.amber300.withValues(alpha: 0.15),
                               borderRadius: BorderRadius.circular(10),
                             ),
-                            child: const Icon(Icons.person_off_rounded, color: Colors.deepOrange, size: 22),
+                            child: const Icon(Icons.person_off_rounded, color: SoftPalette.red400, size: 22),
                           ),
                           const SizedBox(width: 12),
                           Expanded(
@@ -1761,7 +1763,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                                     return Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                       decoration: BoxDecoration(
-                                        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                                        color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                                         borderRadius: BorderRadius.circular(6),
                                         border: Border.all(color: borderColor),
                                       ),
@@ -1856,16 +1858,16 @@ class _EmployeesTabState extends State<EmployeesTab> {
                             Container(
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
-                                color: Colors.red.withValues(alpha: 0.08),
+                                color: SoftPalette.red400.withValues(alpha: 0.08),
                                 borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: Colors.redAccent.withValues(alpha: 0.25)),
+                                border: Border.all(color: SoftPalette.red400.withValues(alpha: 0.25)),
                               ),
                               child: Row(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Checkbox(
                                     value: isClearanceConfirmed,
-                                    activeColor: Colors.redAccent,
+                                    activeColor: SoftPalette.red400,
                                     onChanged: (val) => setDiagState(() => isClearanceConfirmed = val ?? false),
                                   ),
                                   Expanded(
@@ -1939,12 +1941,12 @@ class _EmployeesTabState extends State<EmployeesTab> {
                                     }
                                   },
                             icon: isProcessing
-                                ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                                ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50))
                                 : const Icon(Icons.person_off_rounded, size: 16),
                             label: Text(isProcessing ? 'Offboarding...' : 'Confirm Batch Offboard (${selectedEmployees.length})'),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFEA580C),
-                              foregroundColor: Colors.white,
+                              backgroundColor: SoftPalette.orange400,
+                              foregroundColor: SoftPalette.gray50,
                               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                             ),
@@ -1981,10 +1983,10 @@ class _EmployeesTabState extends State<EmployeesTab> {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: Colors.red.withValues(alpha: 0.12),
+                      color: SoftPalette.red400.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(10),
                     ),
-                    child: const Icon(Icons.delete_forever_rounded, color: Color(0xFFDC2626), size: 24),
+                    child: const Icon(Icons.delete_forever_rounded, color: SoftPalette.red500, size: 24),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -2009,8 +2011,8 @@ class _EmployeesTabState extends State<EmployeesTab> {
                 ),
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFDC2626),
-                    foregroundColor: Colors.white,
+                    backgroundColor: SoftPalette.red500,
+                    foregroundColor: SoftPalette.gray50,
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
@@ -2042,7 +2044,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                           }
                         },
                   icon: isDeleting
-                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                      ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50))
                       : const Icon(Icons.delete_forever_rounded, size: 16),
                   label: Text(isDeleting ? 'Deleting...' : 'Delete Permanently ($count)'),
                 ),
@@ -2238,20 +2240,20 @@ class _EmployeesTabState extends State<EmployeesTab> {
                               margin: const EdgeInsets.only(bottom: 12),
                               padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
-                                color: Colors.purple.withOpacity(0.08),
+                                color: SoftPalette.purple550.withOpacity(0.08),
                                 borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.purple.withOpacity(0.3)),
+                                border: Border.all(color: SoftPalette.purple550.withOpacity(0.3)),
                               ),
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Row(
                                     children: [
-                                      const Icon(Icons.info_outline, color: Colors.purple, size: 16),
+                                      const Icon(Icons.info_outline, color: SoftPalette.purple550, size: 16),
                                       const SizedBox(width: 6),
                                       Text(
                                         'Retroactive Arrears Preview',
-                                        style: TextStyle(color: Colors.purple, fontWeight: FontWeight.bold, fontSize: 12),
+                                        style: TextStyle(color: SoftPalette.purple550, fontWeight: FontWeight.bold, fontSize: 12),
                                       ),
                                     ],
                                   ),
@@ -2263,7 +2265,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                                   const SizedBox(height: 2),
                                   Text(
                                     'Total Projected Arrears: PKR ${NumberFormat('#,###').format(amount)}',
-                                    style: const TextStyle(color: Colors.purple, fontWeight: FontWeight.bold, fontSize: 12),
+                                    style: const TextStyle(color: SoftPalette.purple550, fontWeight: FontWeight.bold, fontSize: 12),
                                   ),
                                 ],
                               ),
@@ -2278,7 +2280,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                     ElevatedButton(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: t.accent,
-                        foregroundColor: Colors.white,
+                        foregroundColor: SoftPalette.gray50,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
@@ -2498,8 +2500,8 @@ class _EmployeesTabState extends State<EmployeesTab> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text('Projected Monthly Increase', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 11)),
-                            Text('+PKR ${NumberFormat('#,###').format(netPayrollIncrease)}', style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 12)),
+                            const Text('Projected Monthly Increase', style: TextStyle(color: SoftPalette.green400, fontWeight: FontWeight.bold, fontSize: 11)),
+                            Text('+PKR ${NumberFormat('#,###').format(netPayrollIncrease)}', style: const TextStyle(color: SoftPalette.green400, fontWeight: FontWeight.bold, fontSize: 12)),
                           ],
                         ),
                       ],
@@ -2631,7 +2633,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                                 }
                               });
                             },
-                            child: const Text('Clear All', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.red)),
+                            child: const Text('Clear All', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: SoftPalette.red400)),
                           ),
                         ],
                       ),
@@ -2673,7 +2675,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(8),
                                   side: BorderSide(
-                                    color: isEligible ? t.bgRule : Colors.orange.withOpacity(0.3),
+                                    color: isEligible ? t.bgRule : SoftPalette.amber300.withOpacity(0.3),
                                   ),
                                 ),
                                 child: CheckboxListTile(
@@ -2688,15 +2690,15 @@ class _EmployeesTabState extends State<EmployeesTab> {
                                       Row(
                                         children: [
                                           Text('PKR ${NumberFormat('#,###').format(currentSalary)} ➔ ', style: TextStyle(color: t.textTertiary, fontSize: 11)),
-                                          Text('PKR ${NumberFormat('#,###').format(proposedSalary)}', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 11)),
+                                          Text('PKR ${NumberFormat('#,###').format(proposedSalary)}', style: TextStyle(color: SoftPalette.green400, fontWeight: FontWeight.bold, fontSize: 11)),
                                           const SizedBox(width: 8),
                                           if (!isEligible)
                                             Container(
                                               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-                                              decoration: BoxDecoration(color: Colors.orange.withOpacity(0.12), borderRadius: BorderRadius.circular(4)),
+                                              decoration: BoxDecoration(color: SoftPalette.amber300.withOpacity(0.12), borderRadius: BorderRadius.circular(4)),
                                               child: const Text(
                                                 '< 8 Months',
-                                                style: TextStyle(color: Colors.orange, fontSize: 8, fontWeight: FontWeight.bold),
+                                                style: TextStyle(color: SoftPalette.amber300, fontSize: 8, fontWeight: FontWeight.bold),
                                               ),
                                             ),
                                         ],
@@ -2718,7 +2720,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                   ElevatedButton(
                     style: ElevatedButton.styleFrom(
                       backgroundColor: t.accent,
-                      foregroundColor: Colors.white,
+                      foregroundColor: SoftPalette.gray50,
                       padding: const EdgeInsets.symmetric(vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
@@ -2888,7 +2890,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                   child: Text('Cancel', style: TextStyle(color: t.textSecondary)),
                 ),
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+                  style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.red400),
                   onPressed: () async {
                     if (reasonController.text.trim().isEmpty) {
                       return;
@@ -2925,7 +2927,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                       showCustomSnackBar(diagCtx, 'Failed: $e', error: true);
                     }
                   },
-                  child: const Text('Offboard', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  child: const Text('Offboard', style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold)),
                 ),
               ],
             );
@@ -3042,7 +3044,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                             setDiagState(() => loading = false);
                           }
                         },
-                  child: Text(loading ? 'Processing...' : 'Transfer', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  child: Text(loading ? 'Processing...' : 'Transfer', style: const TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold)),
                 ),
               ],
             );
@@ -3106,24 +3108,24 @@ class _EmployeesTabState extends State<EmployeesTab> {
         Border? cellBorder = Border.all(color: t.bgRule);
 
         if (status == 'present' || status == 'late') {
-          cellBg = Colors.green.withValues(alpha: 0.15);
-          textCol = t.isDarkCanvas ? Colors.green[300]! : Colors.green[700]!;
-          cellBorder = Border.all(color: Colors.green.withValues(alpha: 0.3));
+          cellBg = SoftPalette.green400.withValues(alpha: 0.15);
+          textCol = t.isDarkCanvas ? SoftPalette.green300 : SoftPalette.green500;
+          cellBorder = Border.all(color: SoftPalette.green400.withValues(alpha: 0.3));
           presentCount++;
         } else if (status == 'absent') {
-          cellBg = Colors.red.withValues(alpha: 0.15);
-          textCol = t.isDarkCanvas ? Colors.red[300]! : Colors.red[700]!;
-          cellBorder = Border.all(color: Colors.red.withValues(alpha: 0.3));
+          cellBg = SoftPalette.red400.withValues(alpha: 0.15);
+          textCol = t.isDarkCanvas ? SoftPalette.red400 : SoftPalette.red500;
+          cellBorder = Border.all(color: SoftPalette.red400.withValues(alpha: 0.3));
           absentCount++;
         } else if (status == 'leave') {
-          cellBg = Colors.orange.withValues(alpha: 0.15);
-          textCol = t.isDarkCanvas ? Colors.orange[300]! : Colors.orange[700]!;
-          cellBorder = Border.all(color: Colors.orange.withValues(alpha: 0.3));
+          cellBg = SoftPalette.amber300.withValues(alpha: 0.15);
+          textCol = t.isDarkCanvas ? SoftPalette.amber300 : SoftPalette.orange350;
+          cellBorder = Border.all(color: SoftPalette.amber300.withValues(alpha: 0.3));
           leaveCount++;
         } else if (status == 'half_day') {
-          cellBg = Colors.blue.withValues(alpha: 0.15);
-          textCol = t.isDarkCanvas ? Colors.blue[300]! : Colors.blue[700]!;
-          cellBorder = Border.all(color: Colors.blue.withValues(alpha: 0.3));
+          cellBg = SoftPalette.blue400.withValues(alpha: 0.15);
+          textCol = t.isDarkCanvas ? SoftPalette.sky350 : SoftPalette.blue500;
+          cellBorder = Border.all(color: SoftPalette.blue400.withValues(alpha: 0.3));
           presentCount++;
         } else if (status == 'off' || status == 'holiday' || isHolidayDay) {
           cellBg = t.accent.withValues(alpha: 0.08);
@@ -3168,9 +3170,9 @@ class _EmployeesTabState extends State<EmployeesTab> {
         Row(
           mainAxisAlignment: MainAxisAlignment.spaceAround,
           children: [
-            _buildStatIndicator('P', '$presentCount', Colors.green, t),
-            _buildStatIndicator('A', '$absentCount', Colors.red, t),
-            _buildStatIndicator('L', '$leaveCount', Colors.orange, t),
+            _buildStatIndicator('P', '$presentCount', SoftPalette.green400, t),
+            _buildStatIndicator('A', '$absentCount', SoftPalette.red400, t),
+            _buildStatIndicator('L', '$leaveCount', SoftPalette.amber300, t),
             _buildStatIndicator('H/O', '$holidayCount', t.accent, t),
           ],
         ),
@@ -3193,7 +3195,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
               child: Text('Cancel', style: TextStyle(color: t.textSecondary)),
             ),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.red400),
               onPressed: () async {
                 Navigator.pop(ctx);
                 Navigator.pop(context);
@@ -3209,7 +3211,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                   showCustomSnackBar(context, 'Failed to delete: $e', error: true);
                 }
               },
-              child: const Text('Delete Permanently', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              child: const Text('Delete Permanently', style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold)),
             ),
           ],
         );
@@ -3302,24 +3304,24 @@ class _EmployeesTabState extends State<EmployeesTab> {
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: Colors.red.withOpacity(0.08),
+                          color: SoftPalette.red400.withOpacity(0.08),
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.red.withOpacity(0.3)),
+                          border: Border.all(color: SoftPalette.red400.withOpacity(0.3)),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             const Row(
                               children: [
-                                Icon(Icons.warning_amber_rounded, color: Colors.red, size: 16),
+                                Icon(Icons.warning_amber_rounded, color: SoftPalette.red400, size: 16),
                                 SizedBox(width: 6),
-                                Text('Locked Periods Detected', style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 12)),
+                                Text('Locked Periods Detected', style: TextStyle(color: SoftPalette.red400, fontWeight: FontWeight.bold, fontSize: 12)),
                               ],
                             ),
                             const SizedBox(height: 6),
                             const Text(
                               'Some months in the selected window are closed and locked. Backfill is blocked.',
-                              style: TextStyle(color: Colors.red, fontSize: 11),
+                              style: TextStyle(color: SoftPalette.red400, fontSize: 11),
                             ),
                             const SizedBox(height: 8),
                             Wrap(
@@ -3330,13 +3332,13 @@ class _EmployeesTabState extends State<EmployeesTab> {
                                 return Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                   decoration: BoxDecoration(
-                                    color: isL ? Colors.red.withOpacity(0.12) : Colors.green.withOpacity(0.12),
+                                    color: isL ? SoftPalette.red400.withOpacity(0.12) : SoftPalette.green400.withOpacity(0.12),
                                     borderRadius: BorderRadius.circular(4),
                                   ),
                                   child: Text(
                                     '${m['key']} ${isL ? "🔒" : "🔓"}',
                                     style: TextStyle(
-                                      color: isL ? Colors.red : Colors.green,
+                                      color: isL ? SoftPalette.red400 : SoftPalette.green400,
                                       fontSize: 9,
                                       fontWeight: FontWeight.bold,
                                     ),
@@ -3351,9 +3353,9 @@ class _EmployeesTabState extends State<EmployeesTab> {
                       Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: Colors.green.withOpacity(0.08),
+                          color: SoftPalette.green400.withOpacity(0.08),
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.green.withOpacity(0.3)),
+                          border: Border.all(color: SoftPalette.green400.withOpacity(0.3)),
                         ),
                         child: Row(
                           children: [
@@ -3362,7 +3364,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                             Expanded(
                               child: Text(
                                 'All periods in this backfill window (${months.isEmpty ? "none" : months.last['key']} to ${months.isEmpty ? "none" : months.first['key']}) are unlocked and safe.',
-                                style: const TextStyle(color: Colors.green, fontSize: 11, fontWeight: FontWeight.w600),
+                                style: const TextStyle(color: SoftPalette.green400, fontSize: 11, fontWeight: FontWeight.w600),
                               ),
                             ),
                           ],
@@ -3413,8 +3415,8 @@ class _EmployeesTabState extends State<EmployeesTab> {
 
                     ElevatedButton(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: hasLockedMonths ? Colors.grey : t.accent,
-                        foregroundColor: Colors.white,
+                        backgroundColor: hasLockedMonths ? SoftPalette.gray350 : t.accent,
+                        foregroundColor: SoftPalette.gray50,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
@@ -3497,16 +3499,16 @@ class _EmployeesTabState extends State<EmployeesTab> {
     showDialog(
       context: context,
       builder: (diagCtx) => AlertDialog(
-        backgroundColor: Colors.white,
+        backgroundColor: context.adapt(SoftPalette.gray50),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
         title: Row(
           children: [
-            const Icon(Icons.fingerprint_rounded, color: Color(0xFF0F766E), size: 22),
+            const Icon(Icons.fingerprint_rounded, color: SoftPalette.teal550, size: 22),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
                 'Biometric PIN — $name',
-                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate900)),
               ),
             ),
           ],
@@ -3515,25 +3517,25 @@ class _EmployeesTabState extends State<EmployeesTab> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text(
+            Text(
               'Enter the unique numeric PIN for physical ZKTeco fingerprint/face scanners.',
-              style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+              style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.slate550)),
             ),
             const SizedBox(height: 14),
             TextField(
               controller: pinCtrl,
               autofocus: true,
               keyboardType: TextInputType.number,
-              style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF0F172A)),
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate900)),
               decoration: InputDecoration(
                 labelText: 'Scanner PIN (e.g. 159)',
-                labelStyle: const TextStyle(color: Color(0xFF64748B)),
+                labelStyle: TextStyle(color: context.adapt(SoftPalette.slate550)),
                 filled: true,
-                fillColor: const Color(0xFFF8FAFC),
-                prefixIcon: const Icon(Icons.pin_outlined, color: Color(0xFF0F766E)),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
-                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: Color(0xFF0F766E), width: 1.5)),
+                fillColor: context.adapt(SoftPalette.gray50),
+                prefixIcon: const Icon(Icons.pin_outlined, color: SoftPalette.teal550),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: context.adapt(SoftPalette.slate150))),
+                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: context.adapt(SoftPalette.slate150))),
+                focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: SoftPalette.teal550, width: 1.5)),
               ),
             ),
           ],
@@ -3541,12 +3543,12 @@ class _EmployeesTabState extends State<EmployeesTab> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(diagCtx),
-            child: const Text('Cancel', style: TextStyle(color: Color(0xFF64748B))),
+            child: Text('Cancel', style: TextStyle(color: context.adapt(SoftPalette.slate550))),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF0F766E),
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.teal550,
+              foregroundColor: SoftPalette.gray50,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
             onPressed: () async {
@@ -3678,10 +3680,10 @@ class _EmployeesTabState extends State<EmployeesTab> {
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFEDE9FE),
+                    color: context.adapt(SoftPalette.violet150m),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.merge_type_rounded, color: Color(0xFF7C3AED), size: 22),
+                  child: const Icon(Icons.merge_type_rounded, color: SoftPalette.violet550, size: 22),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -3712,23 +3714,23 @@ class _EmployeesTabState extends State<EmployeesTab> {
                             decoration: BoxDecoration(
                               color: theme.bgCardAlt,
                               borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: const Color(0xFF10B981).withOpacity(0.4)),
+                              border: Border.all(color: SoftPalette.emerald350.withOpacity(0.4)),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Row(
                                   children: const [
-                                    Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 14),
+                                    Icon(Icons.check_circle_rounded, color: SoftPalette.emerald350, size: 14),
                                     SizedBox(width: 4),
-                                    Text('Keep (Primary)', style: TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.bold)),
+                                    Text('Keep (Primary)', style: TextStyle(color: SoftPalette.emerald350, fontSize: 11, fontWeight: FontWeight.bold)),
                                   ],
                                 ),
                                 const SizedBox(height: 6),
                                 Text(emp['name']?.toString() ?? 'Staff', style: TextStyle(color: theme.textPrimary, fontWeight: FontWeight.bold, fontSize: 13)),
                                 Text('${emp['role'] ?? 'Staff'} • ${emp['department'] ?? 'Office'}', style: TextStyle(color: theme.textSecondary, fontSize: 11)),
                                 const SizedBox(height: 4),
-                                Text(curEmpPin.isNotEmpty ? 'PIN: $curEmpPin' : 'No PIN', style: TextStyle(color: curEmpPin.isNotEmpty ? const Color(0xFF059669) : theme.textTertiary, fontSize: 11, fontWeight: FontWeight.w600)),
+                                Text(curEmpPin.isNotEmpty ? 'PIN: $curEmpPin' : 'No PIN', style: TextStyle(color: curEmpPin.isNotEmpty ? SoftPalette.emerald500 : theme.textTertiary, fontSize: 11, fontWeight: FontWeight.w600)),
                               ],
                             ),
                           ),
@@ -3740,16 +3742,16 @@ class _EmployeesTabState extends State<EmployeesTab> {
                             decoration: BoxDecoration(
                               color: theme.bgCardAlt,
                               borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: Colors.redAccent.withOpacity(0.4)),
+                              border: Border.all(color: SoftPalette.red400.withOpacity(0.4)),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Row(
                                   children: const [
-                                    Icon(Icons.remove_circle_outline_rounded, color: Colors.redAccent, size: 14),
+                                    Icon(Icons.remove_circle_outline_rounded, color: SoftPalette.red400, size: 14),
                                     SizedBox(width: 4),
-                                    Text('Remove (Duplicate)', style: TextStyle(color: Colors.redAccent, fontSize: 11, fontWeight: FontWeight.bold)),
+                                    Text('Remove (Duplicate)', style: TextStyle(color: SoftPalette.red400, fontSize: 11, fontWeight: FontWeight.bold)),
                                   ],
                                 ),
                                 const SizedBox(height: 6),
@@ -3781,7 +3783,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                                   Text(secondary['name']?.toString() ?? 'Staff', style: TextStyle(color: theme.textPrimary, fontWeight: FontWeight.bold, fontSize: 13)),
                                   Text('${secondary['role'] ?? 'Staff'} • ${secondary['department'] ?? 'Office'}', style: TextStyle(color: theme.textSecondary, fontSize: 11)),
                                   const SizedBox(height: 4),
-                                  Text(curSecPin.isNotEmpty ? 'PIN: $curSecPin' : 'No PIN', style: TextStyle(color: curSecPin.isNotEmpty ? const Color(0xFF059669) : theme.textTertiary, fontSize: 11, fontWeight: FontWeight.w600)),
+                                  Text(curSecPin.isNotEmpty ? 'PIN: $curSecPin' : 'No PIN', style: TextStyle(color: curSecPin.isNotEmpty ? SoftPalette.emerald500 : theme.textTertiary, fontSize: 11, fontWeight: FontWeight.w600)),
                                 ],
                               ],
                             ),
@@ -3823,7 +3825,7 @@ class _EmployeesTabState extends State<EmployeesTab> {
                             decoration: InputDecoration(
                               labelText: 'Biometric PIN',
                               labelStyle: TextStyle(color: theme.textSecondary, fontSize: 12),
-                              prefixIcon: const Icon(Icons.fingerprint_rounded, size: 18, color: Color(0xFF10B981)),
+                              prefixIcon: const Icon(Icons.fingerprint_rounded, size: 18, color: SoftPalette.emerald350),
                               border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                               contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                             ),
@@ -3855,8 +3857,8 @@ class _EmployeesTabState extends State<EmployeesTab> {
               ),
               ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF7C3AED),
-                  foregroundColor: Colors.white,
+                  backgroundColor: SoftPalette.violet550,
+                  foregroundColor: SoftPalette.gray50,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                 ),
@@ -4003,7 +4005,7 @@ void showCustomBranchDialog({
                 onAdded(id, name);
               }
             },
-            child: const Text('Add Branch', style: TextStyle(color: Colors.white)),
+            child: const Text('Add Branch', style: TextStyle(color: SoftPalette.gray50)),
           ),
         ],
       );

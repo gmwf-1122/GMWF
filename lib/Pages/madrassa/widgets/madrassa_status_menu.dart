@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import '../madrassa_strings.dart';
@@ -89,17 +92,17 @@ class StatusActionMenu extends StatelessWidget {
 
     Color confirmColor;
     if (isUnarchive) {
-      confirmColor = Colors.green;
+      confirmColor = SoftPalette.green400;
     } else if (newStatus == 'hifz_completed') {
-      confirmColor = const Color(0xFF4C4DDC);
+      confirmColor = SoftPalette.indigo550;
     } else if (newStatus == 'nazra_completed') {
-      confirmColor = const Color(0xFF0D9488);
+      confirmColor = SoftPalette.teal500;
     } else if (newStatus == 'left') {
-      confirmColor = Colors.redAccent;
+      confirmColor = SoftPalette.red400;
     } else if (newStatus == 'dropped') {
-      confirmColor = Colors.red;
+      confirmColor = SoftPalette.red400;
     } else {
-      confirmColor = Colors.orange;
+      confirmColor = SoftPalette.amber300;
     }
 
     final reasonCtrl = TextEditingController();
@@ -135,7 +138,7 @@ class StatusActionMenu extends StatelessWidget {
                           ? (ctx.isUrdu ? 'دوبارہ فعال ہونے کی تاریخ (اختیاری)' : 'Reactivation Date (optional)')
                           : (ctx.isUrdu ? 'واقعہ کی تاریخ' : 'Event Date'),
                       style: context.urduStyle(
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF008080)),
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ctx.adapt(SoftPalette.teal550)),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -163,7 +166,7 @@ class StatusActionMenu extends StatelessWidget {
                               ),
                               child: Row(
                                 children: [
-                                  const Icon(Icons.calendar_today_outlined, size: 16, color: Color(0xFF008080)),
+                                  Icon(Icons.calendar_today_outlined, size: 16, color: ctx.adapt(SoftPalette.teal550)),
                                   const SizedBox(width: 10),
                                   Text(
                                     selectedDate != null
@@ -180,7 +183,7 @@ class StatusActionMenu extends StatelessWidget {
                         if (isUnarchive && selectedDate != null) ...[
                           const SizedBox(width: 8),
                           IconButton(
-                            icon: const Icon(Icons.clear, size: 18, color: Colors.grey),
+                            icon: Icon(Icons.clear, size: 18, color: ctx.adapt(SoftPalette.gray350)),
                             tooltip: 'Clear',
                             onPressed: () => setDs(() => selectedDate = null),
                           ),
@@ -227,7 +230,7 @@ class StatusActionMenu extends StatelessWidget {
                 onPressed: () => Navigator.pop(ctx, true),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: confirmColor,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
                 child: Text(context.l.confirm, style: context.urduStyle()),
@@ -301,6 +304,7 @@ class StatusActionMenu extends StatelessWidget {
           studentCache[dateFieldName] = selectedDate!.toIso8601String();
         }
         studentCache['lastUpdatedAt'] = DateTime.now().toIso8601String();
+        studentCache['syncStatus'] = 'pending';
 
         final auditList = List<Map<String, dynamic>>.from(
           (studentCache['auditLog'] as List? ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)),
@@ -439,7 +443,7 @@ class StatusActionMenu extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   'Total Duration: $durationStr',
-                  style: TextStyle(color: Colors.grey[600], fontSize: 13),
+                  style: TextStyle(color: ctx.adapt(SoftPalette.gray500), fontSize: 13),
                 ),
                 const SizedBox(height: 16),
                 const Divider(),
@@ -463,22 +467,22 @@ class StatusActionMenu extends StatelessWidget {
                         final logDate = _parseDateTime(log['date']);
                         final logReason = log['reason'] ?? '';
 
-                        Color dotColor = Colors.grey;
+                        Color dotColor = context.adapt(SoftPalette.gray350);
                         IconData icon = Icons.circle;
                         if (logStatus == 'active' || logType == 'enrollment' || logType == 'rejoin_approval') {
-                          dotColor = const Color(0xFF008080); // Teal
+                          dotColor = context.adapt(SoftPalette.teal550); // Teal
                           icon = Icons.check_circle_outline;
                         } else if (logStatus == 'left' || logType == 'rejoin_rejection') {
-                          dotColor = Colors.redAccent;
+                          dotColor = context.adapt(SoftPalette.red400);
                           icon = Icons.error_outline;
                         } else if (logStatus == 'archived') {
-                          dotColor = Colors.orange;
+                          dotColor = context.adapt(SoftPalette.amber300);
                           icon = Icons.archive_outlined;
                         } else if (logStatus == 'hifz_completed') {
-                          dotColor = const Color(0xFF4C4DDC); // Purple
+                          dotColor = context.adapt(SoftPalette.indigo550); // Purple
                           icon = Icons.stars_outlined;
                         } else if (logStatus == 'dropped') {
-                          dotColor = Colors.red;
+                          dotColor = context.adapt(SoftPalette.red400);
                           icon = Icons.remove_circle_outline;
                         }
 
@@ -493,7 +497,7 @@ class StatusActionMenu extends StatelessWidget {
                                     Expanded(
                                       child: Container(
                                         width: 2,
-                                        color: Colors.grey[300],
+                                        color: context.adapt(SoftPalette.gray150),
                                         margin: const EdgeInsets.symmetric(vertical: 4),
                                       ),
                                     ),
@@ -517,13 +521,13 @@ class StatusActionMenu extends StatelessWidget {
                                       const SizedBox(height: 2),
                                       Text(
                                         logReason,
-                                        style: const TextStyle(fontSize: 12, color: Colors.black87),
+                                        style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.gray900A87)),
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
                                         DateFormat('dd MMMM yyyy, hh:mm a').format(logDate),
                                         style: TextStyle(
-                                          color: Colors.grey[500],
+                                          color: context.adapt(SoftPalette.gray350),
                                           fontSize: 10,
                                         ),
                                       ),
@@ -574,10 +578,10 @@ class StatusActionMenu extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.red.withValues(alpha: 0.1),
+                color: ctx.adapt(SoftPalette.red400).withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.delete_forever, color: Colors.red, size: 24),
+              child: Icon(Icons.delete_forever, color: ctx.adapt(SoftPalette.red400), size: 24),
             ),
             const SizedBox(width: 12),
             Text(
@@ -599,8 +603,8 @@ class StatusActionMenu extends StatelessWidget {
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.red400,
+              foregroundColor: SoftPalette.gray50,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
             onPressed: () => Navigator.pop(ctx, true),
@@ -625,10 +629,10 @@ class StatusActionMenu extends StatelessWidget {
         studentName: studentName,
       );
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('$studentName deleted successfully'),
-            backgroundColor: Colors.red,
+            backgroundColor: SoftPalette.red400,
           ),
         );
       }
@@ -654,10 +658,10 @@ class StatusActionMenu extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: Colors.amber.withValues(alpha: 0.15),
+                      color: dialogCtx.adapt(SoftPalette.amber200).withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Icon(Icons.undo_rounded, color: Colors.amber.shade800, size: 22),
+                    child: Icon(Icons.undo_rounded, color: dialogCtx.adapt(SoftPalette.orange350), size: 22),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -676,18 +680,18 @@ class StatusActionMenu extends StatelessWidget {
                     isUrdu
                         ? 'کیا آپ $studentName کے لیے قاعدہ کی تکمیل منسوخ کرنا چاہتے ہیں؟ موجودہ تختی / سبق منتخب کریں:'
                         : 'Revert accidental Qaida completion for $studentName. Select current lesson to resume from:',
-                    style: ctx.urduStyle(style: const TextStyle(fontSize: 13, color: Colors.black87)),
+                    style: ctx.urduStyle(style: TextStyle(fontSize: 13, color: dialogCtx.adapt(SoftPalette.gray900A87))),
                   ),
                   const SizedBox(height: 16),
                   Text(
                     isUrdu ? 'سبق / تختی:' : 'Qaida Lesson (1–21):',
-                    style: ctx.urduStyle(style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+                    style: ctx.urduStyle(style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: dialogCtx.adapt(SoftPalette.gray350))),
                   ),
                   const SizedBox(height: 6),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.shade300),
+                      border: Border.all(color: dialogCtx.adapt(SoftPalette.gray150)),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: DropdownButtonHideUnderline(
@@ -723,8 +727,8 @@ class StatusActionMenu extends StatelessWidget {
                 ),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.amber.shade800,
-                    foregroundColor: Colors.white,
+                    backgroundColor: SoftPalette.orange350,
+                    foregroundColor: SoftPalette.gray50,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
                   onPressed: () => Navigator.pop(ctx, true),
@@ -753,6 +757,8 @@ class StatusActionMenu extends StatelessWidget {
         'reason': 'Reverted Qaida completion to Lesson $selectedLesson',
       });
       studentCache['auditLog'] = auditList;
+      studentCache['lastUpdatedAt'] = DateTime.now().toIso8601String();
+      studentCache['syncStatus'] = 'pending';
 
       await MadrassaLocalStorage.cacheStudent(branchId, studentId, studentCache);
 
@@ -800,14 +806,14 @@ class StatusActionMenu extends StatelessWidget {
       );
 
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text(
               context.isUrdu
                   ? '$studentName کے لیے قاعدہ تکمیل منسوخ ہو گئی (سبق $selectedLesson)'
                   : 'Qaida completion reverted for $studentName to Lesson $selectedLesson',
             ),
-            backgroundColor: Colors.amber.shade800,
+            backgroundColor: SoftPalette.orange350,
           ),
         );
       }
@@ -860,15 +866,15 @@ class StatusActionMenu extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF4C4DDC).withValues(alpha: 0.12),
+                  color: ctx.adapt(SoftPalette.indigo550).withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.edit_rounded, size: 16, color: Color(0xFF4C4DDC)),
+                child: Icon(Icons.edit_rounded, size: 16, color: ctx.adapt(SoftPalette.indigo550)),
               ),
               const SizedBox(width: 10),
               Text(
                 'Edit Student Profile',
-                style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF4C4DDC), fontSize: 13)),
+                style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.bold, color: ctx.adapt(SoftPalette.indigo550), fontSize: 13)),
               ),
             ],
           ),
@@ -882,10 +888,10 @@ class StatusActionMenu extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: Colors.green.withValues(alpha: 0.12),
+                    color: ctx.adapt(SoftPalette.green400).withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Icon(Icons.check_circle_rounded, size: 16, color: Colors.green),
+                  child: Icon(Icons.check_circle_rounded, size: 16, color: ctx.adapt(SoftPalette.green400)),
                 ),
                 const SizedBox(width: 10),
                 Text(context.l.statusActive, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
@@ -901,10 +907,10 @@ class StatusActionMenu extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(6),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF4C4DDC).withValues(alpha: 0.12),
+                      color: ctx.adapt(SoftPalette.indigo550).withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(Icons.workspace_premium_rounded, size: 16, color: Color(0xFF4C4DDC)),
+                    child: Icon(Icons.workspace_premium_rounded, size: 16, color: ctx.adapt(SoftPalette.indigo550)),
                   ),
                   const SizedBox(width: 10),
                   Text(context.l.statusHifzCompleted, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
@@ -919,10 +925,10 @@ class StatusActionMenu extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(6),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0D9488).withValues(alpha: 0.12),
+                      color: ctx.adapt(SoftPalette.teal500).withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(Icons.menu_book_rounded, size: 16, color: Color(0xFF0D9488)),
+                    child: Icon(Icons.menu_book_rounded, size: 16, color: ctx.adapt(SoftPalette.teal500)),
                   ),
                   const SizedBox(width: 10),
                   Text(context.l.statusNazraCompleted, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
@@ -937,15 +943,15 @@ class StatusActionMenu extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(6),
                       decoration: BoxDecoration(
-                        color: Colors.amber.withValues(alpha: 0.12),
+                        color: ctx.adapt(SoftPalette.amber200).withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: Icon(Icons.undo_rounded, size: 16, color: Colors.amber.shade800),
+                      child: Icon(Icons.undo_rounded, size: 16, color: ctx.adapt(SoftPalette.orange350)),
                     ),
                     const SizedBox(width: 10),
                     Text(
                       context.isUrdu ? 'قاعدہ تکمیل منسوخ کریں' : 'Revert Qaida Completion',
-                      style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.w600, color: Colors.amber.shade900, fontSize: 13)),
+                      style: context.urduStyle(style: TextStyle(fontWeight: FontWeight.w600, color: ctx.adapt(SoftPalette.orange350), fontSize: 13)),
                     ),
                   ],
                 ),
@@ -958,10 +964,10 @@ class StatusActionMenu extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: Colors.redAccent.withValues(alpha: 0.12),
+                    color: ctx.adapt(SoftPalette.red400).withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Icon(Icons.exit_to_app_rounded, size: 16, color: Colors.redAccent),
+                  child: Icon(Icons.exit_to_app_rounded, size: 16, color: ctx.adapt(SoftPalette.red400)),
                 ),
                 const SizedBox(width: 10),
                 Text(context.l.statusLeft, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
@@ -975,10 +981,10 @@ class StatusActionMenu extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: Colors.red.withValues(alpha: 0.12),
+                    color: ctx.adapt(SoftPalette.red400).withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Icon(Icons.person_off_rounded, size: 16, color: Colors.red),
+                  child: Icon(Icons.person_off_rounded, size: 16, color: ctx.adapt(SoftPalette.red400)),
                 ),
                 const SizedBox(width: 10),
                 Text(context.isUrdu ? 'خارج' : 'Dropped Out', style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
@@ -992,10 +998,10 @@ class StatusActionMenu extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: Colors.orange.withValues(alpha: 0.12),
+                    color: ctx.adapt(SoftPalette.amber300).withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Icon(Icons.archive_rounded, size: 16, color: Colors.orange),
+                  child: Icon(Icons.archive_rounded, size: 16, color: ctx.adapt(SoftPalette.amber300)),
                 ),
                 const SizedBox(width: 10),
                 Text(context.l.statusArchived, style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13))),
@@ -1011,10 +1017,10 @@ class StatusActionMenu extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  color: Colors.grey.withValues(alpha: 0.12),
+                  color: ctx.adapt(SoftPalette.gray350).withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.history_rounded, size: 16, color: Colors.grey),
+                child: Icon(Icons.history_rounded, size: 16, color: ctx.adapt(SoftPalette.gray350)),
               ),
               const SizedBox(width: 10),
               Text('Audit & Status History', style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 13))),
@@ -1030,16 +1036,16 @@ class StatusActionMenu extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: Colors.red.withValues(alpha: 0.12),
+                    color: ctx.adapt(SoftPalette.red400).withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Icon(Icons.delete_forever_rounded, size: 16, color: Colors.red),
+                  child: Icon(Icons.delete_forever_rounded, size: 16, color: ctx.adapt(SoftPalette.red400)),
                 ),
                 const SizedBox(width: 10),
                 Text(
                   context.isUrdu ? 'طالب علم ڈیلیٹ کریں' : 'Delete Student',
                   style: context.urduStyle(
-                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red, fontSize: 13),
+                    style: TextStyle(fontWeight: FontWeight.bold, color: ctx.adapt(SoftPalette.red400), fontSize: 13),
                   ),
                 ),
               ],

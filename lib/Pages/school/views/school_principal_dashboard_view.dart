@@ -1,6 +1,7 @@
 // lib/pages/school/views/school_principal_dashboard_view.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/design_system.dart';
 import 'package:intl/intl.dart';
 import '../models/school_grade.dart';
 import '../models/school_student.dart';
@@ -134,7 +135,7 @@ class _SchoolPrincipalDashboardViewState extends State<SchoolPrincipalDashboardV
                           padding: const EdgeInsets.all(24),
                           decoration: BoxDecoration(
                             gradient: const LinearGradient(
-                              colors: [Color(0xFF0D2137), Color(0xFF1B4965), Color(0xFF2C6E8A)],
+                              colors: [SoftPalette.slate900, SoftPalette.sky700, SoftPalette.sky550],
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
                             ),
@@ -152,10 +153,10 @@ class _SchoolPrincipalDashboardViewState extends State<SchoolPrincipalDashboardV
                               Container(
                                 padding: const EdgeInsets.all(12),
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.15),
+                                  color: SoftPalette.gray50.withValues(alpha: 0.15),
                                   shape: BoxShape.circle,
                                 ),
-                                child: const Icon(Icons.workspace_premium_rounded, color: Colors.amberAccent, size: 30),
+                                child: const Icon(Icons.workspace_premium_rounded, color: SoftPalette.yellow200, size: 30),
                               ),
                               const SizedBox(width: 16),
                               Expanded(
@@ -167,7 +168,7 @@ class _SchoolPrincipalDashboardViewState extends State<SchoolPrincipalDashboardV
                                       style: const TextStyle(
                                         fontSize: 20,
                                         fontWeight: FontWeight.w800,
-                                        color: Colors.white,
+                                        color: SoftPalette.gray50,
                                       ),
                                     ),
                                     const SizedBox(height: 4),
@@ -177,7 +178,7 @@ class _SchoolPrincipalDashboardViewState extends State<SchoolPrincipalDashboardV
                                           : 'Principal Oversight, Faculty Supervision, and Class Homeroom In-charges',
                                       style: TextStyle(
                                         fontSize: 13,
-                                        color: Colors.white.withValues(alpha: 0.85),
+                                        color: SoftPalette.gray50.withValues(alpha: 0.85),
                                       ),
                                     ),
                                   ],
@@ -186,16 +187,16 @@ class _SchoolPrincipalDashboardViewState extends State<SchoolPrincipalDashboardV
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.15),
+                                  color: SoftPalette.gray50.withValues(alpha: 0.15),
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
+                                  border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.2)),
                                 ),
                                 child: Column(
                                   children: [
-                                    const Text('Branch', style: TextStyle(color: Colors.white70, fontSize: 10)),
+                                    const Text('Branch', style: TextStyle(color: SoftPalette.gray50A70, fontSize: 10)),
                                     Text(
                                       widget.branchId.toUpperCase(),
-                                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                      style: const TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 13),
                                     ),
                                   ],
                                 ),
@@ -222,14 +223,14 @@ class _SchoolPrincipalDashboardViewState extends State<SchoolPrincipalDashboardV
                                   value: '${enrolledStudents.length}',
                                   subtitle: 'Active Students',
                                   icon: Icons.groups_rounded,
-                                  accentColor: SchoolTheme.primary,
+                                  accentColor: context.adapt(SchoolTheme.primary),
                                 ),
                                 SchoolMetricCard(
                                   title: 'Total Faculty',
                                   value: '${teachers.length}',
                                   subtitle: 'Teaching Staff',
                                   icon: Icons.co_present_rounded,
-                                  accentColor: SchoolTheme.secondary,
+                                  accentColor: context.adapt(SchoolTheme.secondary),
                                 ),
                                 SchoolMetricCard(
                                   title: 'Student Attendance',
@@ -342,15 +343,15 @@ class _SchoolPrincipalDashboardViewState extends State<SchoolPrincipalDashboardV
                                             children: [
                                               Text(
                                                 classKey,
-                                                style: const TextStyle(
+                                                style: TextStyle(
                                                   fontWeight: FontWeight.bold,
                                                   fontSize: 14,
-                                                  color: SchoolTheme.textDark,
+                                                  color: context.adapt(SchoolTheme.textDark),
                                                 ),
                                               ),
                                               Text(
                                                 '${studentsInClass.length} Students enrolled',
-                                                style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                                                style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.gray500)),
                                               ),
                                             ],
                                           ),
@@ -360,13 +361,13 @@ class _SchoolPrincipalDashboardViewState extends State<SchoolPrincipalDashboardV
                                           child: Column(
                                             crossAxisAlignment: CrossAxisAlignment.start,
                                             children: [
-                                              const Text('Homeroom In-charge', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                                              Text('Homeroom In-charge', style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.gray350))),
                                               Text(
                                                 teacherName,
                                                 style: TextStyle(
                                                   fontSize: 13,
                                                   fontWeight: FontWeight.w600,
-                                                  color: isAssigned ? SchoolTheme.primary : Colors.grey.shade500,
+                                                  color: isAssigned ? context.adapt(SchoolTheme.primary) : context.adapt(SoftPalette.gray350),
                                                 ),
                                               ),
                                             ],
@@ -378,10 +379,10 @@ class _SchoolPrincipalDashboardViewState extends State<SchoolPrincipalDashboardV
                                             child: Column(
                                               crossAxisAlignment: CrossAxisAlignment.start,
                                               children: [
-                                                const Text('Class Top Performer', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                                                Text('Class Top Performer', style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.gray350))),
                                                 Row(
                                                   children: [
-                                                    const Icon(Icons.star_rounded, size: 14, color: Colors.amber),
+                                                    const Icon(Icons.star_rounded, size: 14, color: SoftPalette.amber200),
                                                     const SizedBox(width: 4),
                                                     Flexible(
                                                       child: Text(
@@ -393,7 +394,7 @@ class _SchoolPrincipalDashboardViewState extends State<SchoolPrincipalDashboardV
                                                     const SizedBox(width: 6),
                                                     Text(
                                                       '(${topPct.toStringAsFixed(0)}%)',
-                                                      style: const TextStyle(fontSize: 11, color: Colors.grey),
+                                                      style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.gray350)),
                                                     ),
                                                   ],
                                                 ),
@@ -401,7 +402,7 @@ class _SchoolPrincipalDashboardViewState extends State<SchoolPrincipalDashboardV
                                             ),
                                           ),
                                         IconButton(
-                                          icon: const Icon(Icons.edit_note_rounded, color: SchoolTheme.primary),
+                                          icon: Icon(Icons.edit_note_rounded, color: context.adapt(SchoolTheme.primary)),
                                           tooltip: 'Change Homeroom Teacher',
                                           onPressed: () => _openHomeroomDialog(grade, section),
                                         ),

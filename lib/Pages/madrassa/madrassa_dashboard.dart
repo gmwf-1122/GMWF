@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -99,13 +100,13 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
       principalUsername: _displayUsername,
     );
     if (registered == true && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      AppToast.showSnackBar(context, const SnackBar(
         content: Row(children: [
-          Icon(Icons.check_circle_outline, color: Colors.white, size: 17),
+          Icon(Icons.check_circle_outline, color: SoftPalette.gray50, size: 17),
           SizedBox(width: 8),
           Text('Teacher registered successfully!'),
         ]),
-        backgroundColor: Color(0xFF0F766E),
+        backgroundColor: SoftPalette.teal550,
         behavior: SnackBarBehavior.floating,
         margin: EdgeInsets.all(16),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.all(Radius.circular(12))),
@@ -159,10 +160,10 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
       future: _bootstrapFuture,
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
+          return Scaffold(
             body: Center(
               child: CircularProgressIndicator(
-                color: Color(0xFF00796B),
+                color: context.adapt(SoftPalette.teal550),
               ),
             ),
           );
@@ -285,13 +286,13 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
               valueListenable: UserThemeService.listenable(widget.username),
               builder: (context, Box box, _) {
                 final isDark = UserThemeService.isDarkMode(widget.username);
-                final scaffoldBg = isDark ? const Color(0xFF090D16) : const Color(0xFFF6F8FB);
-                final cardBg = isDark ? const Color(0xFF131B2E) : Colors.white;
-                final textPrimary = isDark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A);
-                final textMuted = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
-                final borderColor = isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0);
-                const emeraldPrimary = Color(0xFF0F766E);
-                const emeraldLight = Color(0xFF14B8A6);
+                final scaffoldBg = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+                final cardBg = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+                final textPrimary = isDark ? SoftPalette.slate100 : SoftPalette.slate900;
+                final textMuted = isDark ? SoftPalette.slate350 : SoftPalette.slate550;
+                final borderColor = isDark ? SoftPalette.slate800 : SoftPalette.slate150;
+                const emeraldPrimary = SoftPalette.teal550;
+                const emeraldLight = SoftPalette.teal350;
 
                 return LayoutBuilder(
                   builder: (context, constraints) {
@@ -461,11 +462,11 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
       child: IgnorePointer(
         child: Opacity(
           opacity: isDark ? 0.055 : 0.075,
-          child: Image.asset(
+          child: GDecorativeImage.asset(
             'assets/images/islamic_pattern.webp',
             fit: BoxFit.cover,
             repeat: ImageRepeat.repeat,
-            color: const Color(0xFFD4AF37),
+            color: SoftPalette.yellow300,
             colorBlendMode: BlendMode.srcIn,
           ),
         ),
@@ -491,7 +492,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
           border: Border(bottom: BorderSide(color: borderColor, width: 1)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.03),
+              color: SoftPalette.gray900.withValues(alpha: isDark ? 0.3 : 0.03),
               blurRadius: 10,
               offset: const Offset(0, 2),
             ),
@@ -512,7 +513,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                       width: 34,
                       height: 34,
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                        color: isDark ? SoftPalette.slate800 : SoftPalette.slate100,
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(color: borderColor),
                       ),
@@ -527,15 +528,15 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                   height: 36,
                   padding: const EdgeInsets.all(5),
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                    color: isDark ? SoftPalette.slate800 : SoftPalette.slate100,
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                      color: const Color(0xFF0F766E).withValues(alpha: 0.3),
+                      color: context.adapt(SoftPalette.teal550).withValues(alpha: 0.3),
                       width: 1.2,
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFF0F766E).withValues(alpha: 0.15),
+                        color: SoftPalette.teal550.withValues(alpha: 0.15),
                         blurRadius: 6,
                         offset: const Offset(0, 2),
                       ),
@@ -551,7 +552,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'Gulzar Madina Madrassa',
+                        context.isUrdu ? 'جامعہ گلزار مدینہ' : 'Gulzar Madina',
                         overflow: TextOverflow.ellipsis,
                         style: context.urduStyle(
                           style: TextStyle(
@@ -568,17 +569,17 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF0F766E).withValues(alpha: 0.12),
+                              color: context.adapt(SoftPalette.teal550).withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(6),
                               border: Border.all(
-                                color: const Color(0xFF0F766E).withValues(alpha: 0.25),
+                                color: context.adapt(SoftPalette.teal550).withValues(alpha: 0.25),
                                 width: 0.8,
                               ),
                             ),
                             child: Text(
                               widget.branchId.toUpperCase(),
-                              style: const TextStyle(
-                                color: Color(0xFF0F766E),
+                              style: TextStyle(
+                                color: context.adapt(SoftPalette.teal550),
                                 fontWeight: FontWeight.bold,
                                 fontSize: 9,
                               ),
@@ -589,8 +590,8 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                             child: Text(
                               currentTitle,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Color(0xFF0F766E),
+                              style: TextStyle(
+                                color: context.adapt(SoftPalette.teal550),
                                 fontWeight: FontWeight.bold,
                                 fontSize: 10.5,
                               ),
@@ -622,6 +623,39 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                       _openProfileDialog();
                     } else if (val == 'theme') {
                       await UserThemeService.toggleDarkMode(explicitUserKey: widget.username);
+                    } else if (val == 'logout') {
+                      final navigator = Navigator.of(context);
+                      final confirm = await showDialog<bool>(
+                        context: context,
+                        builder: (dCtx) => AlertDialog(
+                          title: Text(
+                            context.isUrdu ? 'لاگ آؤٹ' : 'Sign Out',
+                            style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)),
+                          ),
+                          content: Text(
+                            context.isUrdu ? 'کیا آپ واقعی لاگ آؤٹ کرنا چاہتے ہیں؟' : 'Are you sure you want to sign out?',
+                            style: context.urduStyle(),
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () => Navigator.pop(dCtx, false),
+                              child: Text(context.l.cancel, style: context.urduStyle()),
+                            ),
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(backgroundColor: context.adapt(SoftPalette.red500)),
+                              onPressed: () => Navigator.pop(dCtx, true),
+                              child: Text(
+                                context.isUrdu ? 'لاگ آؤٹ' : 'Sign Out',
+                                style: context.urduStyle(style: const TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      );
+                      if (confirm == true && mounted) {
+                        await FirebaseAuth.instance.signOut();
+                        navigator.pushNamedAndRemoveUntil('/login', (_) => false);
+                      }
                     }
                   },
                   itemBuilder: (ctx) => [
@@ -630,7 +664,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                         value: 'register_teacher',
                         child: Row(
                           children: [
-                            const Icon(Icons.person_add_rounded, size: 18, color: Color(0xFF0F766E)),
+                            Icon(Icons.person_add_rounded, size: 18, color: ctx.adapt(SoftPalette.teal550)),
                             const SizedBox(width: 10),
                             Text(
                               context.isUrdu ? 'نیا استاد درج کریں' : 'Register Teacher',
@@ -643,7 +677,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                       value: 'profile',
                       child: Row(
                         children: [
-                          const Icon(Icons.manage_accounts_rounded, size: 18, color: Color(0xFF0F766E)),
+                          Icon(Icons.manage_accounts_rounded, size: 18, color: ctx.adapt(SoftPalette.teal550)),
                           const SizedBox(width: 10),
                           Text(
                             context.isUrdu ? 'پروفائل اور پاس ورڈ' : 'Profile & Password',
@@ -659,7 +693,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                           Icon(
                             isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
                             size: 18,
-                            color: Colors.amber[700],
+                            color: ctx.adapt(SoftPalette.amber300),
                           ),
                           const SizedBox(width: 10),
                           Text(
@@ -667,6 +701,26 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                                 ? (context.isUrdu ? 'لائٹ موڈ' : 'Light Mode')
                                 : (context.isUrdu ? 'ڈارک موڈ' : 'Dark Mode'),
                             style: context.urduStyle(style: const TextStyle(fontSize: 13)),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const PopupMenuDivider(),
+                    PopupMenuItem(
+                      value: 'logout',
+                      child: Row(
+                        children: [
+                          Icon(Icons.logout_rounded, size: 18, color: ctx.adapt(SoftPalette.red500)),
+                          const SizedBox(width: 10),
+                          Text(
+                            context.isUrdu ? 'لاگ آؤٹ' : 'Sign Out',
+                            style: context.urduStyle(
+                              style: TextStyle(
+                                fontSize: 13,
+                                color: ctx.adapt(SoftPalette.red500),
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
                           ),
                         ],
                       ),
@@ -730,15 +784,15 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF0F766E).withValues(alpha: 0.1),
+                    color: context.adapt(SoftPalette.teal550).withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: const Color(0xFF0F766E).withValues(alpha: 0.2)),
+                    border: Border.all(color: context.adapt(SoftPalette.teal550).withValues(alpha: 0.2)),
                   ),
                   child: Text(
                     currentTitle,
                     style: context.urduStyle(
-                      style: const TextStyle(
-                        color: Color(0xFF0F766E),
+                      style: TextStyle(
+                        color: context.adapt(SoftPalette.teal550),
                         fontWeight: FontWeight.bold,
                         fontSize: 12.5,
                       ),
@@ -747,7 +801,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                 ),
                 const SizedBox(width: 12),
                 IconButton(
-                  icon: const Icon(Icons.manage_accounts_rounded, size: 22, color: Color(0xFF0F766E)),
+                  icon: Icon(Icons.manage_accounts_rounded, size: 22, color: context.adapt(SoftPalette.teal550)),
                   tooltip: 'Profile & Password',
                   onPressed: _openProfileDialog,
                 ),
@@ -788,9 +842,9 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
         selectedIndex: _selectedIndex,
         onDestinationSelected: (i) => setState(() => _selectedIndex = i),
         labelType: NavigationRailLabelType.none,
-        selectedIconTheme: const IconThemeData(color: Color(0xFF0F766E), size: 24),
+        selectedIconTheme: IconThemeData(color: context.adapt(SoftPalette.teal550), size: 24),
         unselectedIconTheme: IconThemeData(color: textMuted, size: 22),
-        indicatorColor: const Color(0xFF0F766E).withValues(alpha: 0.14),
+        indicatorColor: context.adapt(SoftPalette.teal550).withValues(alpha: 0.14),
         destinations: List.generate(navTitles.length, (idx) {
           return NavigationRailDestination(
             icon: Icon(navIcons[idx]),
@@ -827,12 +881,12 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
             decoration: BoxDecoration(
               gradient: LinearGradient(
                 colors: isDark
-                    ? [const Color(0xFF0F766E).withValues(alpha: 0.25), const Color(0xFF14B8A6).withValues(alpha: 0.1)]
-                    : [const Color(0xFF0F766E).withValues(alpha: 0.12), const Color(0xFF14B8A6).withValues(alpha: 0.05)],
+                    ? [SoftPalette.teal550.withValues(alpha: 0.25), SoftPalette.teal350.withValues(alpha: 0.1)]
+                    : [SoftPalette.teal550.withValues(alpha: 0.12), SoftPalette.teal350.withValues(alpha: 0.05)],
               ),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: const Color(0xFF0F766E).withValues(alpha: 0.25),
+                color: context.adapt(SoftPalette.teal550).withValues(alpha: 0.25),
                 width: 1,
               ),
             ),
@@ -842,8 +896,8 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                 Container(
                   width: 8,
                   height: 8,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF10B981),
+                  decoration: BoxDecoration(
+                    color: context.adapt(SoftPalette.emerald350),
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -852,7 +906,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                   currentTitle,
                   style: context.urduStyle(
                     style: TextStyle(
-                      color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF0F766E),
+                      color: isDark ? SoftPalette.teal300 : SoftPalette.teal550,
                       fontWeight: FontWeight.bold,
                       fontSize: 14,
                     ),
@@ -866,14 +920,14 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+              color: isDark ? SoftPalette.slate800 : SoftPalette.slate100,
               borderRadius: BorderRadius.circular(20),
               border: Border.all(color: borderColor),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.location_on_outlined, size: 14, color: Color(0xFF0F766E)),
+                Icon(Icons.location_on_outlined, size: 14, color: context.adapt(SoftPalette.teal550)),
                 const SizedBox(width: 4),
                 Text(
                   widget.branchId.toUpperCase(),
@@ -889,7 +943,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
           const SizedBox(width: 12),
           // Profile & Password Button
           IconButton(
-            icon: const Icon(Icons.manage_accounts_rounded, size: 22, color: Color(0xFF0F766E)),
+            icon: Icon(Icons.manage_accounts_rounded, size: 22, color: context.adapt(SoftPalette.teal550)),
             tooltip: 'Profile & Password',
             onPressed: _openProfileDialog,
           ),
@@ -927,7 +981,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
         color: cardBg,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.03),
+            color: SoftPalette.gray900.withValues(alpha: isDark ? 0.3 : 0.03),
             blurRadius: 10,
             offset: const Offset(2, 0),
           ),
@@ -948,15 +1002,15 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                   height: 44,
                   padding: const EdgeInsets.all(7),
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                    color: isDark ? SoftPalette.slate800 : SoftPalette.slate100,
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
-                      color: const Color(0xFF0F766E).withValues(alpha: 0.35),
+                      color: context.adapt(SoftPalette.teal550).withValues(alpha: 0.35),
                       width: 1.2,
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFF0F766E).withValues(alpha: 0.2),
+                        color: SoftPalette.teal550.withValues(alpha: 0.2),
                         blurRadius: 8,
                         offset: const Offset(0, 2),
                       ),
@@ -973,7 +1027,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                         'Madrassa',
                         style: context.urduStyle(
                           style: TextStyle(
-                            color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF0F766E),
+                            color: isDark ? SoftPalette.teal300 : SoftPalette.teal550,
                             fontWeight: FontWeight.w900,
                             fontSize: 16,
                             letterSpacing: -0.3,
@@ -1028,7 +1082,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF0E1626) : const Color(0xFFF8FAFC),
+              color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
               border: Border(top: BorderSide(color: borderColor, width: 1)),
             ),
             child: Row(
@@ -1047,14 +1101,14 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                             height: 36,
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(
-                                colors: [Color(0xFF0F766E), Color(0xFF14B8A6)],
+                                colors: [SoftPalette.teal550, SoftPalette.teal350],
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,
                               ),
                               shape: BoxShape.circle,
                               boxShadow: [
                                 BoxShadow(
-                                  color: const Color(0xFF0F766E).withValues(alpha: 0.3),
+                                  color: SoftPalette.teal550.withValues(alpha: 0.3),
                                   blurRadius: 6,
                                   offset: const Offset(0, 2),
                                 ),
@@ -1064,7 +1118,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                               child: Text(
                                 _displayUsername.isNotEmpty ? _displayUsername[0].toUpperCase() : 'M',
                                 style: const TextStyle(
-                                  color: Colors.white,
+                                  color: SoftPalette.gray50,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 14,
                                 ),
@@ -1093,7 +1147,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                                     Icon(
                                       Icons.edit_outlined,
                                       size: 13,
-                                      color: const Color(0xFF0F766E).withValues(alpha: 0.7),
+                                      color: context.adapt(SoftPalette.teal550).withValues(alpha: 0.7),
                                     ),
                                   ],
                                 ),
@@ -1120,7 +1174,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
                 const SizedBox(width: 4),
                 // Sign Out Button
                 IconButton(
-                  icon: const Icon(Icons.logout_rounded, color: Color(0xFFEF4444), size: 18),
+                  icon: Icon(Icons.logout_rounded, color: context.adapt(SoftPalette.red400), size: 18),
                   tooltip: 'Sign Out',
                   splashRadius: 18,
                   onPressed: () async {
@@ -1149,13 +1203,13 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
         width: 36,
         height: 36,
         decoration: BoxDecoration(
-          color: const Color(0xFF0F766E).withValues(alpha: 0.12),
+          color: context.adapt(SoftPalette.teal550).withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: const Color(0xFF0F766E).withValues(alpha: 0.3), width: 1),
+          border: Border.all(color: context.adapt(SoftPalette.teal550).withValues(alpha: 0.3), width: 1),
         ),
         child: IconButton(
           padding: EdgeInsets.zero,
-          icon: const Icon(Icons.person_add_rounded, size: 18, color: Color(0xFF0F766E)),
+          icon: Icon(Icons.person_add_rounded, size: 18, color: context.adapt(SoftPalette.teal550)),
           tooltip: 'Register New Teacher',
           onPressed: _openRegisterTeacherDialog,
         ),
@@ -1167,10 +1221,10 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
       height: 40,
       child: ElevatedButton.icon(
         style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF0F766E),
-          foregroundColor: Colors.white,
+          backgroundColor: SoftPalette.teal550,
+          foregroundColor: SoftPalette.gray50,
           elevation: 2,
-          shadowColor: const Color(0xFF0F766E).withValues(alpha: 0.35),
+          shadowColor: SoftPalette.teal550.withValues(alpha: 0.35),
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
           padding: const EdgeInsets.symmetric(horizontal: 12),
         ),
@@ -1190,10 +1244,10 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
       width: 36,
       height: 36,
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+        color: isDark ? SoftPalette.slate800 : SoftPalette.slate100,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isDark ? Colors.white12 : const Color(0xFFE2E8F0),
+          color: isDark ? SoftPalette.gray50A12 : SoftPalette.slate150,
           width: 1,
         ),
       ),
@@ -1204,7 +1258,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
           child: Icon(
             isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
             key: ValueKey(isDark),
-            color: isDark ? const Color(0xFFFDE047) : const Color(0xFF0F766E),
+            color: isDark ? SoftPalette.yellow150 : SoftPalette.teal550,
             size: 18,
           ),
         ),
@@ -1222,10 +1276,10 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
       height: 36,
       padding: const EdgeInsets.symmetric(horizontal: 10),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+        color: isDark ? SoftPalette.slate800 : SoftPalette.slate100,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isDark ? Colors.white12 : const Color(0xFFE2E8F0),
+          color: isDark ? SoftPalette.gray50A12 : SoftPalette.slate150,
           width: 1,
         ),
       ),
@@ -1239,7 +1293,7 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
             context.isUrdu ? 'EN' : 'اردو',
             style: context.urduStyle(
               style: TextStyle(
-                color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF0F766E),
+                color: isDark ? SoftPalette.teal300 : SoftPalette.teal550,
                 fontWeight: FontWeight.bold,
                 fontSize: context.isUrdu ? 12 : 13,
               ),
@@ -1256,23 +1310,23 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
       width: 36,
       height: 36,
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+        color: isDark ? SoftPalette.slate800 : SoftPalette.slate100,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: isDark ? Colors.white12 : const Color(0xFFE2E8F0),
+          color: isDark ? SoftPalette.gray50A12 : SoftPalette.slate150,
           width: 1,
         ),
       ),
       child: IconButton(
         padding: EdgeInsets.zero,
-        icon: const Icon(
+        icon: Icon(
           Icons.sync_rounded,
-          color: Color(0xFF0F766E),
+          color: context.adapt(SoftPalette.teal550),
           size: 18,
         ),
         tooltip: context.isUrdu ? 'کلاؤڈ سے معلومات اپ ڈیٹ کریں' : 'Sync / Download Cloud Data',
         onPressed: () async {
-          ScaffoldMessenger.of(context).showSnackBar(
+          AppToast.showSnackBar(context, 
             SnackBar(
               content: Text(context.isUrdu ? 'ڈیٹا حاصل کیا جا رہا ہے...' : 'Syncing data from cloud...'),
               duration: const Duration(seconds: 1),
@@ -1284,10 +1338,10 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
           await MadrassaLocalStorage.downloadHolidays(widget.branchId);
           if (mounted) setState(() {});
           if (context.mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
+            AppToast.showSnackBar(context, 
               SnackBar(
                 content: Text(context.isUrdu ? 'ڈیٹا کامیابی سے اپ ڈیٹ ہو گیا' : 'Sync completed successfully!'),
-                backgroundColor: const Color(0xFF0F766E),
+                backgroundColor: SoftPalette.teal550,
                 duration: const Duration(seconds: 2),
               ),
             );
@@ -1329,19 +1383,19 @@ class _SidebarNavItemState extends State<_SidebarNavItem> {
   Widget build(BuildContext context) {
     final activeBg = widget.isDark
         ? const LinearGradient(
-            colors: [Color(0xFF0F766E), Color(0xFF115E59)],
+            colors: [SoftPalette.teal550, SoftPalette.teal600],
             begin: Alignment.centerLeft,
             end: Alignment.centerRight,
           )
         : const LinearGradient(
-            colors: [Color(0xFF0F766E), Color(0xFF0D9488)],
+            colors: [SoftPalette.teal550, SoftPalette.teal500],
             begin: Alignment.centerLeft,
             end: Alignment.centerRight,
           );
 
     final hoverBg = widget.isDark
-        ? const Color(0xFF1E293B).withValues(alpha: 0.6)
-        : const Color(0xFFF1F5F9);
+        ? SoftPalette.slate800.withValues(alpha: 0.6)
+        : SoftPalette.slate100;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
@@ -1360,7 +1414,7 @@ class _SidebarNavItemState extends State<_SidebarNavItem> {
             boxShadow: widget.isSelected
                 ? [
                     BoxShadow(
-                      color: const Color(0xFF0F766E).withValues(alpha: 0.3),
+                      color: SoftPalette.teal550.withValues(alpha: 0.3),
                       blurRadius: 8,
                       offset: const Offset(0, 2),
                     ),
@@ -1373,10 +1427,10 @@ class _SidebarNavItemState extends State<_SidebarNavItem> {
                 widget.isSelected ? widget.activeIcon : widget.icon,
                 size: 20,
                 color: widget.isSelected
-                    ? Colors.white
+                    ? SoftPalette.gray50
                     : (_isHovered
-                        ? (widget.isDark ? const Color(0xFF2DD4BF) : const Color(0xFF0F766E))
-                        : (widget.isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B))),
+                        ? (widget.isDark ? SoftPalette.teal300 : SoftPalette.teal550)
+                        : (widget.isDark ? SoftPalette.slate350 : SoftPalette.slate550)),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -1385,10 +1439,10 @@ class _SidebarNavItemState extends State<_SidebarNavItem> {
                   style: context.urduStyle(
                     style: TextStyle(
                       color: widget.isSelected
-                          ? Colors.white
+                          ? SoftPalette.gray50
                           : (_isHovered
-                              ? (widget.isDark ? Colors.white : const Color(0xFF0F172A))
-                              : (widget.isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155))),
+                              ? (widget.isDark ? SoftPalette.gray50 : SoftPalette.slate900)
+                              : (widget.isDark ? SoftPalette.slate200 : SoftPalette.slate700)),
                       fontWeight: widget.isSelected ? FontWeight.bold : FontWeight.w500,
                       fontSize: 13,
                     ),
@@ -1400,8 +1454,8 @@ class _SidebarNavItemState extends State<_SidebarNavItem> {
                 Container(
                   width: 6,
                   height: 6,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF34D399),
+                  decoration: BoxDecoration(
+                    color: context.adapt(SoftPalette.emerald300),
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -1481,11 +1535,11 @@ class _MadrassaMotionBottomBarState extends State<MadrassaMotionBottomBar> {
 
   @override
   Widget build(BuildContext context) {
-    final bg = widget.isDark ? const Color(0xFF101726) : Colors.white;
-    final borderColor = widget.isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0);
-    const emeraldPrimary = Color(0xFF0F766E);
-    const emeraldLight = Color(0xFF14B8A6);
-    final inactiveColor = widget.isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+    final bg = widget.isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+    final borderColor = widget.isDark ? SoftPalette.slate800 : SoftPalette.slate150;
+    const emeraldPrimary = SoftPalette.teal550;
+    const emeraldLight = SoftPalette.teal350;
+    final inactiveColor = widget.isDark ? SoftPalette.slate350 : SoftPalette.slate550;
 
     return Container(
       decoration: BoxDecoration(
@@ -1495,7 +1549,7 @@ class _MadrassaMotionBottomBarState extends State<MadrassaMotionBottomBar> {
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: widget.isDark ? 0.35 : 0.05),
+            color: SoftPalette.gray900.withValues(alpha: widget.isDark ? 0.35 : 0.05),
             blurRadius: 10,
             offset: const Offset(0, -2),
           ),
@@ -1557,7 +1611,7 @@ class _MadrassaMotionBottomBarState extends State<MadrassaMotionBottomBar> {
                             child: Icon(
                               isSelected ? widget.activeIcons[i] : widget.icons[i],
                               size: 18,
-                              color: isSelected ? Colors.white : inactiveColor,
+                              color: isSelected ? SoftPalette.gray50 : inactiveColor,
                             ),
                           ),
                           const SizedBox(height: 3),

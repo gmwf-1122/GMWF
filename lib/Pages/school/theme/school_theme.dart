@@ -1,82 +1,83 @@
 // lib/pages/school/theme/school_theme.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import '../../../theme/role_theme_provider.dart';
 
 class SchoolTheme {
   // ── Brand Colors (Deep Ocean Academic) ──────────────────────────────────
-  static const Color primary       = Color(0xFF1B4965); // Deep Ocean Teal
-  static const Color primaryDark   = Color(0xFF0F2D3F); // Navy Dark
-  static const Color primaryLight  = Color(0xFFDAE8F0); // Pale Ocean Wash
+  static const Color primary       = SoftPalette.sky700; // Deep Ocean Teal
+  static const Color primaryDark   = SoftPalette.slate800; // Navy Dark
+  static const Color primaryLight  = SoftPalette.slate150; // Pale Ocean Wash
 
-  static const Color accent        = Color(0xFF2D9B83); // Sage Teal
-  static const Color accentDark    = Color(0xFF1E7A66); // Deep Sage
-  static const Color accentLight   = Color(0xFFE6F5F0); // Mint Wash
+  static const Color accent        = SoftPalette.teal500; // Sage Teal
+  static const Color accentDark    = SoftPalette.teal550; // Deep Sage
+  static const Color accentLight   = SoftPalette.teal100m; // Mint Wash
 
-  static const Color secondary     = Color(0xFF3D5A80); // Muted Navy-Blue
-  static const Color secondaryLight = Color(0xFFE8EFF6); // Pale Steel
+  static const Color secondary     = SoftPalette.blue600; // Muted Navy-Blue
+  static const Color secondaryLight = SoftPalette.slate100; // Pale Steel
 
-  static const Color sidebarBg     = Color(0xFF0D2137); // Deep Navy
-  static const Color sidebarBorder = Color(0xFF1B3A54); // Navy Mid
-  static const Color sidebarText   = Color(0xFFB8CEDF); // Slate Cloud
-  static const Color sidebarMuted  = Color(0xFF7EA0B9); // Muted Ocean
+  static const Color sidebarBg     = SoftPalette.slate900; // Deep Navy
+  static const Color sidebarBorder = SoftPalette.slate750; // Navy Mid
+  static const Color sidebarText   = SoftPalette.slate200; // Slate Cloud
+  static const Color sidebarMuted  = SoftPalette.slate400; // Muted Ocean
 
   // ── Status Palette ─────────────────────────────────────────────────────
   /// Present / Active / Success -> Sage Teal
-  static const Color statusPresent = Color(0xFF2D9B83);
-  static const Color statusPresentBg = Color(0xFFE6F5F0);
+  static const Color statusPresent = SoftPalette.teal500;
+  static const Color statusPresentBg = SoftPalette.teal100m;
 
   /// Absent / Error -> Warm Coral Red
-  static const Color statusAbsent  = Color(0xFFDC4A4A);
-  static const Color statusAbsentBg  = Color(0xFFFDF2F2);
+  static const Color statusAbsent  = SoftPalette.red500;
+  static const Color statusAbsentBg  = SoftPalette.red100t;
 
   /// On Leave / Warning -> Warm Amber
-  static const Color statusLeave   = Color(0xFFD4940A);
-  static const Color statusLeaveBg   = Color(0xFFFFF9E6);
+  static const Color statusLeave   = SoftPalette.amber350;
+  static const Color statusLeaveBg   = SoftPalette.yellow50m;
 
   /// Late / Info -> Soft Violet
-  static const Color statusLate    = Color(0xFF7C6CC4);
-  static const Color statusLateBg    = Color(0xFFF3F0FB);
+  static const Color statusLate    = SoftPalette.violet500;
+  static const Color statusLateBg    = SoftPalette.violet100t;
 
   /// Graduated / Transferred -> Academic Blue
-  static const Color statusGraduated   = Color(0xFF3B7DDD);
-  static const Color statusGraduatedBg = Color(0xFFEBF3FD);
+  static const Color statusGraduated   = SoftPalette.blue500;
+  static const Color statusGraduatedBg = SoftPalette.slate100;
 
   // ── Grade Band Visual Colors ──────────────────────────────────────────
   static Color getGradeColor(String grade) {
     final g = grade.trim().toLowerCase();
-    if (g.contains('pre'))  return const Color(0xFF2D9B83); // Sage Teal
-    if (g.contains('9th') || g == '9')  return const Color(0xFF1B4965); // Deep Ocean
-    if (g.contains('10th') || g == '10') return const Color(0xFF3B7DDD); // Academic Blue
-    if (g.contains('nursery') || g.contains('kg')) return const Color(0xFFC06C84); // Dusty Rose
-    return const Color(0xFF3D5A80); // Muted Navy
+    if (g.contains('pre'))  return SoftPalette.teal500; // Sage Teal
+    if (g.contains('9th') || g == '9')  return SoftPalette.sky700; // Deep Ocean
+    if (g.contains('10th') || g == '10') return SoftPalette.blue500; // Academic Blue
+    if (g.contains('nursery') || g.contains('kg')) return SoftPalette.pink400; // Dusty Rose
+    return SoftPalette.blue600; // Muted Navy
   }
 
   // ── Letter Grade Spectrum Scale (A+ down to F) ────────────────────────
   static Color getLetterGradeColor(String letterGrade) {
     final lg = letterGrade.trim().toUpperCase();
-    if (lg == 'A+') return const Color(0xFF2D9B83); // Sage Teal
-    if (lg == 'A')  return const Color(0xFF1E7A66); // Deep Sage
-    if (lg == 'B')  return const Color(0xFF3B7DDD); // Academic Blue
-    if (lg == 'C')  return const Color(0xFFD4940A); // Warm Amber
-    if (lg == 'D')  return const Color(0xFFD97706); // Orange
-    return const Color(0xFFDC4A4A); // Warm Red (F)
+    if (lg == 'A+') return SoftPalette.teal500; // Sage Teal
+    if (lg == 'A')  return SoftPalette.teal550; // Deep Sage
+    if (lg == 'B')  return SoftPalette.blue500; // Academic Blue
+    if (lg == 'C')  return SoftPalette.amber350; // Warm Amber
+    if (lg == 'D')  return SoftPalette.orange400; // Orange
+    return SoftPalette.red500; // Warm Red (F)
   }
 
   // ── Surface & Neutral Light Tokens ─────────────────────────────────────
-  static const Color bgLight        = Color(0xFFF7F9FB); // Cool Off-white
-  static const Color cardLight      = Colors.white;
-  static const Color borderLight    = Color(0xFFD5DDE5); // Soft Slate
-  static const Color textDark       = Color(0xFF0D2137); // Deep Navy
-  static const Color textMid        = Color(0xFF3D5A80); // Muted Navy-Blue
-  static const Color textMuted      = Color(0xFF6B8EAE); // Soft Steel-Blue
+  static const Color bgLight        = SoftPalette.gray50; // Cool Off-white
+  static const Color cardLight      = SoftPalette.gray50;
+  static const Color borderLight    = SoftPalette.slate200; // Soft Slate
+  static const Color textDark       = SoftPalette.slate900; // Deep Navy
+  static const Color textMid        = SoftPalette.blue600; // Muted Navy-Blue
+  static const Color textMuted      = SoftPalette.sky400m; // Soft Steel-Blue
 
   // ── Surface & Neutral Dark Tokens ──────────────────────────────────────
-  static const Color bgDark         = Color(0xFF091520);
-  static const Color cardDark       = Color(0xFF0F2438);
-  static const Color borderDark     = Color(0xFF1D3A54);
-  static const Color textDarkTheme  = Color(0xFFF1F5F9);
-  static const Color textMidDark    = Color(0xFF8FAFC8);
+  static const Color bgDark         = SoftPalette.slate900;
+  static const Color cardDark       = SoftPalette.slate800;
+  static const Color borderDark     = SoftPalette.slate750;
+  static const Color textDarkTheme  = SoftPalette.slate100;
+  static const Color textMidDark    = SoftPalette.slate350;
 
   // ── Radii Constants ───────────────────────────────────────────────────
   static const double r8  = 8.0;
@@ -96,12 +97,12 @@ class SchoolTheme {
   // ── Card Shadows ──────────────────────────────────────────────────────
   static List<BoxShadow> cardShadow = [
     BoxShadow(
-      color: const Color(0xFF0D2137).withValues(alpha: 0.06),
+      color: SoftPalette.slate900.withValues(alpha: 0.06),
       blurRadius: 18,
       offset: const Offset(0, 4),
     ),
     BoxShadow(
-      color: const Color(0xFF1B4965).withValues(alpha: 0.03),
+      color: SoftPalette.sky700.withValues(alpha: 0.03),
       blurRadius: 6,
       offset: const Offset(0, 1),
     ),
@@ -229,7 +230,7 @@ class SchoolMetricCard extends StatelessWidget {
           border: Border.all(color: t.bgRule),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.02),
+              color: SoftPalette.gray900.withValues(alpha: 0.02),
               blurRadius: 8,
               offset: const Offset(0, 3),
             ),
@@ -324,7 +325,7 @@ class SchoolAccessDenied extends StatelessWidget {
           border: Border.all(color: t.bgRule),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.04),
+              color: SoftPalette.gray900.withValues(alpha: 0.04),
               blurRadius: 20,
               offset: const Offset(0, 8),
             ),
@@ -337,10 +338,10 @@ class SchoolAccessDenied extends StatelessWidget {
               width: 72,
               height: 72,
               decoration: BoxDecoration(
-                color: Colors.red.withValues(alpha: 0.1),
+                color: SoftPalette.red400.withValues(alpha: 0.1),
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.lock_rounded, size: 36, color: Colors.redAccent),
+              child: const Icon(Icons.lock_rounded, size: 36, color: SoftPalette.red400),
             ),
             const SizedBox(height: 20),
             Text(
@@ -370,7 +371,7 @@ class SchoolAccessDenied extends StatelessWidget {
               label: const Text('Return Back', style: TextStyle(fontWeight: FontWeight.bold)),
               style: ElevatedButton.styleFrom(
                 backgroundColor: t.accent,
-                foregroundColor: Colors.white,
+                foregroundColor: SoftPalette.gray50,
                 padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 elevation: 0,

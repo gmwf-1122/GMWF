@@ -11,7 +11,14 @@ class ServerSyncCoordinator {
   static bool _isSyncServiceUploading = false;
   static DateTime? _lockAcquiredAt;
 
-  static const Duration _watchdogTimeout = Duration(seconds: 35);
+  static const Duration _watchdogTimeout = Duration(seconds: 120);
+
+  /// Extends the active lock watchdog during ongoing batch processing to prevent premature lock theft.
+  static void touch() {
+    if (_lockAcquiredAt != null) {
+      _lockAcquiredAt = DateTime.now();
+    }
+  }
 
   /// Returns true if either sync pipeline is currently running.
   static bool get isAnySyncActive {

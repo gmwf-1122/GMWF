@@ -91,12 +91,33 @@ class PythonRunnerService extends ChangeNotifier {
       debugPrint('[PythonRunner] Auto-start is disabled in settings.');
       return false;
     }
+    // The setting defaults to on, so every PC started a python.exe (~60–120 MB RAM, polling
+    // the biometric devices) even where no device is handed to the Python daemon. Unless
+    // someone switched auto-start on explicitly, only start it when a device needs it.
+    final explicitlyEnabled = Hive.isBoxOpen('app_settings') &&
+        Hive.box('app_settings').containsKey('auto_start_python_sync');
+    if (!explicitlyEnabled && !_anyDeviceOwnedByPython()) {
+      debugPrint('[PythonRunner] Auto-start skipped: no biometric device uses the Python daemon.');
+      return false;
+    }
 
     _isExplicitlyStopped = false;
     debugPrint('[PythonRunner] Auto-starting ZKTeco background daemon...');
     _appendLine('🤖 [Auto-Start] Initiating background biometric sync daemon...', TerminalLineType.system);
 
     return await startScript('zkteco_sync_service.py', args: ['--config', 'config.json']);
+  }
+
+  /// True when a configured biometric device is assigned to the Python daemon
+  /// (box 'local_biometric_devices' = LocalStorageService.biometricDevicesBox).
+  bool _anyDeviceOwnedByPython() {
+    try {
+      if (!Hive.isBoxOpen('local_biometric_devices')) return false;
+      return Hive.box('local_biometric_devices').values
+          .any((v) => v is Map && v['pollingOwner']?.toString() == 'python');
+    } catch (_) {
+      return false;
+    }
   }
 
   // Resolved paths cache
@@ -137,65 +158,79 @@ class PythonRunnerService extends ChangeNotifier {
 
     if (Platform.isWindows) {
       final exeDir = File(Platform.resolvedExecutable).parent.path;
-      // 1. Top priority: bundled portable Python with the application / GMWF installation
-      candidatePaths.add(r'C:\Program Files\GMWF\python\python.exe');
-      candidatePaths.add(r'C:\Program Files (x86)\GMWF\python\python.exe');
-      candidatePaths.add(r'E:\Program Files\GMWF\python\python.exe');
-      candidatePaths.add(p.join(exeDir, 'python', 'python.exe'));
-      candidatePaths.add(p.join(exeDir, '..', 'python', 'python.exe'));
+      final localAppData = Platform.environment['LOCALAPPDATA'] ?? '';
+      final appData = Platform.environment['APPDATA'] ?? '';
+      final userProfile = Platform.environment['USERPROFILE'] ?? '';
+
+      // 1. Top priority: bundled portable Python with preinstalled libraries (pyzk, firebase_admin)
+      candidatePaths.add(r'E:\GMWF\gmwf\Installer\python-3.12.10-embed-amd64\python.exe');
+      candidatePaths.add(r'E:\GMWF\gmwf\Installer\python-3.12.10-embed-win32\python.exe');
       candidatePaths.add(p.join(Directory.current.path, 'Installer', 'python-3.12.10-embed-amd64', 'python.exe'));
       candidatePaths.add(p.join(Directory.current.path, 'Installer', 'python-3.12.10-embed-win32', 'python.exe'));
+
+      if (localAppData.isNotEmpty) {
+        candidatePaths.add(p.join(localAppData, 'Python', 'bin', 'python.exe'));
+        candidatePaths.add(p.join(localAppData, 'Programs', 'Python', 'Python312', 'python.exe'));
+        candidatePaths.add(p.join(localAppData, 'Programs', 'Python', 'Python313', 'python.exe'));
+        candidatePaths.add(p.join(localAppData, 'Programs', 'Python', 'Python314', 'python.exe'));
+        candidatePaths.add(p.join(localAppData, 'Programs', 'Python', 'Python311', 'python.exe'));
+        candidatePaths.add(p.join(localAppData, 'Programs', 'Python', 'Python310', 'python.exe'));
+        candidatePaths.add(p.join(localAppData, 'Programs', 'Python', 'Python39', 'python.exe'));
+        candidatePaths.add(p.join(localAppData, 'GMWF', 'python', 'python.exe'));
+      }
+
+      candidatePaths.add(p.join(exeDir, 'python', 'python.exe'));
+      candidatePaths.add(p.join(exeDir, '..', 'python', 'python.exe'));
       candidatePaths.add(p.join(Directory.current.path, 'python', 'python.exe'));
       candidatePaths.add(p.join(Directory.current.path, '..', 'python', 'python.exe'));
 
       final progFiles = Platform.environment['ProgramFiles'] ?? r'C:\Program Files';
       final progFilesX86 = Platform.environment['ProgramFiles(x86)'] ?? r'C:\Program Files (x86)';
+      candidatePaths.add(r'C:\Program Files\GMWF\python\python.exe');
+      candidatePaths.add(r'C:\Program Files (x86)\GMWF\python\python.exe');
+      candidatePaths.add(r'E:\Program Files\GMWF\python\python.exe');
       candidatePaths.add(p.join(progFiles, 'GMWF', 'python', 'python.exe'));
       candidatePaths.add(p.join(progFilesX86, 'GMWF', 'python', 'python.exe'));
 
-      final localAppData = Platform.environment['LOCALAPPDATA'] ?? '';
-      final appData = Platform.environment['APPDATA'] ?? '';
-      final userProfile = Platform.environment['USERPROFILE'] ?? '';
-
-      if (localAppData.isNotEmpty) {
-        candidatePaths.add(p.join(localAppData, 'GMWF', 'python', 'python.exe'));
-        candidatePaths.add(p.join(localAppData, 'Python', 'bin', 'python.exe'));
-        candidatePaths.add(p.join(localAppData, 'Programs', 'Python', 'Python314', 'python.exe'));
-        candidatePaths.add(p.join(localAppData, 'Programs', 'Python', 'Python313', 'python.exe'));
-        candidatePaths.add(p.join(localAppData, 'Programs', 'Python', 'Python312', 'python.exe'));
-        candidatePaths.add(p.join(localAppData, 'Programs', 'Python', 'Python311', 'python.exe'));
-        candidatePaths.add(p.join(localAppData, 'Programs', 'Python', 'Python310', 'python.exe'));
-        candidatePaths.add(p.join(localAppData, 'Programs', 'Python', 'Python39', 'python.exe'));
-      }
-
       if (appData.isNotEmpty) {
-        candidatePaths.add(p.join(appData, 'GMWF', 'python', 'python.exe'));
         candidatePaths.add(p.join(appData, 'Python', 'bin', 'python.exe'));
+        candidatePaths.add(p.join(appData, 'GMWF', 'python', 'python.exe'));
       }
 
       if (userProfile.isNotEmpty) {
         candidatePaths.add(p.join(userProfile, '.pyenv', 'pyenv-win', 'shims', 'python.exe'));
       }
 
-      candidatePaths.add(r'C:\Python314\python.exe');
-      candidatePaths.add(r'C:\Python313\python.exe');
       candidatePaths.add(r'C:\Python312\python.exe');
+      candidatePaths.add(r'C:\Python313\python.exe');
+      candidatePaths.add(r'C:\Python314\python.exe');
       candidatePaths.add(r'C:\Python311\python.exe');
       candidatePaths.add(r'C:\Python310\python.exe');
-      candidatePaths.add(r'C:\Program Files\Python314\python.exe');
-      candidatePaths.add(r'C:\Program Files\Python313\python.exe');
-      candidatePaths.add(r'C:\Program Files\Python312\python.exe');
-      candidatePaths.add(r'C:\Program Files\Python311\python.exe');
-      candidatePaths.add(r'C:\Program Files\Python310\python.exe');
     }
 
+    String? fallbackExecutable;
     for (final candidate in candidatePaths) {
       try {
         if (await File(candidate).exists()) {
-          _resolvedPythonPath = candidate;
-          return candidate;
+          fallbackExecutable ??= candidate;
+          // Verify that this python has required libraries (firebase_admin / pyzk)
+          try {
+            final test = await Process.run(
+              candidate,
+              ['-c', 'import firebase_admin'],
+            ).timeout(const Duration(seconds: 2));
+            if (test.exitCode == 0) {
+              _resolvedPythonPath = candidate;
+              return candidate;
+            }
+          } catch (_) {}
         }
       } catch (_) {}
+    }
+
+    if (fallbackExecutable != null) {
+      _resolvedPythonPath = fallbackExecutable;
+      return fallbackExecutable;
     }
 
     // Try standard commands: python, py, python3

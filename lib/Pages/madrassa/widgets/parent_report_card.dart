@@ -1,6 +1,7 @@
 // lib/pages/madrassa/widgets/parent_report_card.dart
 
 import 'dart:async';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -55,14 +56,14 @@ class ParentReportCard extends StatefulWidget {
   final VoidCallback? onBackToSummary;
   final bool isParentView;
 
-  static const Color primaryColor = Color(0xFF0F6C5A);  // Deep emerald teal
-  static const Color accentColor = Color(0xFFFFA726);
-  static const Color surfaceColor = Color(0xFFF4F7F6);
-  static const Color cardColor = Color(0xFFFFFFFF);
-  static const Color textPrimaryColor = Color(0xFF1E293B);
-  static const Color textMutedColor = Color(0xFF64748B);
-  static const Color errorColor = Color(0xFFEF4444);
-  static const Color successColor = Color(0xFF22C55E);
+  static const Color primaryColor = SoftPalette.teal600;  // Deep emerald teal
+  static const Color accentColor = SoftPalette.amber300;
+  static const Color surfaceColor = SoftPalette.gray100;
+  static const Color cardColor = SoftPalette.gray50;
+  static const Color textPrimaryColor = SoftPalette.slate800;
+  static const Color textMutedColor = SoftPalette.slate550;
+  static const Color errorColor = SoftPalette.red400;
+  static const Color successColor = SoftPalette.green350;
 
   const ParentReportCard({
     super.key,
@@ -115,10 +116,10 @@ class _ParentReportCardState extends State<ParentReportCard> {
     final now = DateTime.now();
     if (_lastSyncTime != null && now.difference(_lastSyncTime!) < _syncCooldown) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text(context.isUrdu ? 'مقامی ڈیٹا پہلے ہی تازہ ترین ہے' : 'Showing up-to-date data from local storage'),
-            backgroundColor: const Color(0xFF0F766E),
+            backgroundColor: SoftPalette.teal550,
             behavior: SnackBarBehavior.floating,
             duration: const Duration(seconds: 2),
           ),
@@ -146,16 +147,16 @@ class _ParentReportCardState extends State<ParentReportCard> {
 
     if (mounted) {
       setState(() => _isSyncing = false);
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: Row(
             children: [
-              const Icon(Icons.cloud_done_rounded, color: Colors.white, size: 20),
+              const Icon(Icons.cloud_done_rounded, color: SoftPalette.gray50, size: 20),
               const SizedBox(width: 8),
               Text(context.isUrdu ? 'کلاؤڈ سے تازہ ترین معلومات حاصل کر لی گئیں' : 'Latest records downloaded from Cloud'),
             ],
           ),
-          backgroundColor: const Color(0xFF0F766E),
+          backgroundColor: SoftPalette.teal550,
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 2),
         ),
@@ -188,12 +189,12 @@ class _ParentReportCardState extends State<ParentReportCard> {
 
   bool get isDarkMode => UserThemeService.isDarkMode(_currentUserKey);
 
-  Color get cardBg => isDarkMode ? const Color(0xFF1E293B) : Colors.white;
-  Color get surfaceBg => isDarkMode ? const Color(0xFF0F172A) : ParentReportCard.surfaceColor;
-  Color get textPrimary => isDarkMode ? const Color(0xFFF8FAFC) : ParentReportCard.textPrimaryColor;
-  Color get textMuted => isDarkMode ? const Color(0xFF94A3B8) : ParentReportCard.textMutedColor;
-  Color get borderColor => isDarkMode ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
-  Color get dividerColor => isDarkMode ? const Color(0xFF334155) : const Color(0xFFF1F5F9);
+  Color get cardBg => isDarkMode ? SoftPalette.slate800 : SoftPalette.gray50;
+  Color get surfaceBg => isDarkMode ? SoftPalette.slate900 : ParentReportCard.surfaceColor;
+  Color get textPrimary => isDarkMode ? SoftPalette.gray50 : ParentReportCard.textPrimaryColor;
+  Color get textMuted => isDarkMode ? SoftPalette.slate350 : ParentReportCard.textMutedColor;
+  Color get borderColor => isDarkMode ? SoftPalette.slate700 : SoftPalette.slate150;
+  Color get dividerColor => isDarkMode ? SoftPalette.slate700 : SoftPalette.slate100;
 
   bool _isCongratsDismissedForCurrentMonth() {
     try {
@@ -359,7 +360,7 @@ class _ParentReportCardState extends State<ParentReportCard> {
                   // Select Dates Label
                   Text(
                     context.isUrdu ? 'رخصت کی تاریخ منتخب کریں' : 'Select Date(s)',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: const Color(0xFF1E293B), fontFamily: context.isUrdu ? 'Noori' : null),
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate800), fontFamily: context.isUrdu ? 'Noori' : null),
                   ),
                   const SizedBox(height: 6),
 
@@ -378,9 +379,9 @@ class _ParentReportCardState extends State<ParentReportCard> {
                                   data: Theme.of(context).copyWith(
                                     colorScheme: ColorScheme.light(
                                       primary: ParentReportCard.primaryColor,
-                                      onPrimary: Colors.white,
-                                      surface: Colors.white,
-                                      onSurface: const Color(0xFF1E293B),
+                                      onPrimary: SoftPalette.gray50,
+                                      surface: SoftPalette.gray50,
+                                      onSurface: SoftPalette.slate800,
                                     ),
                                   ),
                                   child: child!,
@@ -398,13 +399,13 @@ class _ParentReportCardState extends State<ParentReportCard> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                       decoration: BoxDecoration(
-                        color: Colors.grey.shade50,
+                        color: context.adapt(SoftPalette.gray50),
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: ParentReportCard.primaryColor, width: 1.5),
+                        border: Border.all(color: context.adapt(ParentReportCard.primaryColor), width: 1.5),
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.calendar_month_rounded, color: ParentReportCard.primaryColor, size: 20),
+                          Icon(Icons.calendar_month_rounded, color: context.adapt(ParentReportCard.primaryColor), size: 20),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Column(
@@ -412,16 +413,16 @@ class _ParentReportCardState extends State<ParentReportCard> {
                               children: [
                                 Text(
                                   dateRangeLabel,
-                                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: ParentReportCard.primaryColor),
+                                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: context.adapt(ParentReportCard.primaryColor)),
                                 ),
                                 Text(
                                   context.isUrdu ? 'تاریخ تبدیل کرنے کے لیے ٹیپ کریں' : 'Tap to change date or select multiple dates',
-                                  style: TextStyle(fontSize: 10.5, color: Colors.grey.shade600),
+                                  style: TextStyle(fontSize: 10.5, color: context.adapt(SoftPalette.gray500)),
                                 ),
                               ],
                             ),
                           ),
-                          Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Colors.grey.shade500),
+                          Icon(Icons.arrow_forward_ios_rounded, size: 14, color: context.adapt(SoftPalette.gray350)),
                         ],
                       ),
                     ),
@@ -434,11 +435,11 @@ class _ParentReportCardState extends State<ParentReportCard> {
                       children: [
                         TextSpan(
                           text: context.t('Leave Reason'),
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: const Color(0xFF1E293B), fontFamily: context.isUrdu ? 'Noori' : null),
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate800), fontFamily: context.isUrdu ? 'Noori' : null),
                         ),
-                        const TextSpan(
+                        TextSpan(
                           text: ' * (Required)',
-                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFD32F2F)),
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.red500)),
                         ),
                       ],
                     ),
@@ -457,11 +458,11 @@ class _ParentReportCardState extends State<ParentReportCard> {
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                       enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: BorderSide(color: reasonError != null ? const Color(0xFFD32F2F) : const Color(0xFFD0D3D9)),
+                        borderSide: BorderSide(color: reasonError != null ? context.adapt(SoftPalette.red500) : context.adapt(SoftPalette.slate200)),
                       ),
                       focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(12),
-                        borderSide: const BorderSide(color: Color(0xFF4C4DDC), width: 2),
+                        borderSide: BorderSide(color: context.adapt(SoftPalette.indigo550), width: 2),
                       ),
                     ),
                     onChanged: (v) {
@@ -567,13 +568,13 @@ class _ParentReportCardState extends State<ParentReportCard> {
                       },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: ParentReportCard.primaryColor,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                 ),
                 child: isSaving
                     ? const SizedBox(
                         width: 18,
                         height: 18,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50),
                       )
                     : Text(context.t('Submit'), style: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null)),
               ),
@@ -601,7 +602,7 @@ class _ParentReportCardState extends State<ParentReportCard> {
               children: [
                 Text(
                   context.t('Please specify the reason/notes for requesting to rejoin the Madrassa.'),
-                  style: TextStyle(fontSize: 13, color: Colors.grey, fontFamily: context.isUrdu ? 'Noori' : null),
+                  style: TextStyle(fontSize: 13, color: context.adapt(SoftPalette.gray350), fontFamily: context.isUrdu ? 'Noori' : null),
                 ),
                 const SizedBox(height: 16),
                 RichText(
@@ -609,11 +610,11 @@ class _ParentReportCardState extends State<ParentReportCard> {
                     children: [
                       TextSpan(
                         text: context.t('Rejoining Reason'),
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: const Color(0xFF1E293B), fontFamily: context.isUrdu ? 'Noori' : null),
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate800), fontFamily: context.isUrdu ? 'Noori' : null),
                       ),
-                      const TextSpan(
+                      TextSpan(
                         text: ' *',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFD32F2F)),
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.red500)),
                       ),
                     ],
                   ),
@@ -631,11 +632,11 @@ class _ParentReportCardState extends State<ParentReportCard> {
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: reasonError != null ? const Color(0xFFD32F2F) : const Color(0xFFD0D3D9)),
+                      borderSide: BorderSide(color: reasonError != null ? context.adapt(SoftPalette.red500) : context.adapt(SoftPalette.slate200)),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: Color(0xFF4C4DDC), width: 2),
+                      borderSide: BorderSide(color: context.adapt(SoftPalette.indigo550), width: 2),
                     ),
                   ),
                   onChanged: (v) {
@@ -695,7 +696,7 @@ class _ParentReportCardState extends State<ParentReportCard> {
                 },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: ParentReportCard.primaryColor,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                 ),
                 child: Text(context.t('Submit Request'), style: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null)),
               ),
@@ -725,7 +726,7 @@ class _ParentReportCardState extends State<ParentReportCard> {
                   context.isUrdu
                       ? 'براہ کرم طالب علم کو دوبارہ فعال کرنے کی وجہ درج کریں۔ اس درخواست کو استاد کی منظوری درکار ہوگی۔'
                       : 'Please specify the reason for requesting to unarchive this student. This request requires teacher approval.',
-                  style: TextStyle(fontSize: 13, color: Colors.grey, fontFamily: context.isUrdu ? 'Noori' : null),
+                  style: TextStyle(fontSize: 13, color: context.adapt(SoftPalette.gray350), fontFamily: context.isUrdu ? 'Noori' : null),
                 ),
                 const SizedBox(height: 16),
                 RichText(
@@ -733,11 +734,11 @@ class _ParentReportCardState extends State<ParentReportCard> {
                     children: [
                       TextSpan(
                         text: context.isUrdu ? 'وجہ' : 'Reason',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: const Color(0xFF1E293B), fontFamily: context.isUrdu ? 'Noori' : null),
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate800), fontFamily: context.isUrdu ? 'Noori' : null),
                       ),
-                      const TextSpan(
+                      TextSpan(
                         text: ' *',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFFD32F2F)),
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.red500)),
                       ),
                     ],
                   ),
@@ -755,11 +756,11 @@ class _ParentReportCardState extends State<ParentReportCard> {
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
                     enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: BorderSide(color: reasonError != null ? const Color(0xFFD32F2F) : const Color(0xFFD0D3D9)),
+                      borderSide: BorderSide(color: reasonError != null ? context.adapt(SoftPalette.red500) : context.adapt(SoftPalette.slate200)),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: const BorderSide(color: Color(0xFF4C4DDC), width: 2),
+                      borderSide: BorderSide(color: context.adapt(SoftPalette.indigo550), width: 2),
                     ),
                   ),
                   onChanged: (v) {
@@ -818,8 +819,8 @@ class _ParentReportCardState extends State<ParentReportCard> {
                   if (ctx.mounted) Navigator.pop(ctx);
                 },
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.orange,
-                  foregroundColor: Colors.white,
+                  backgroundColor: SoftPalette.amber300,
+                  foregroundColor: SoftPalette.gray50,
                 ),
                 child: Text(context.t('Submit Request'), style: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null)),
               ),
@@ -907,7 +908,6 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                     ? null
                     : () async {
                         final navigator = Navigator.of(ctx);
-                        final scaffoldMessenger = ScaffoldMessenger.of(context);
                         final successMsg = context.t('Password changed successfully!');
                         final incorrectPwMsg = context.t('Incorrect old password');
                         final failedMsg = context.t('Failed to change password');
@@ -989,10 +989,10 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
 
                           if (ctx.mounted) {
                             navigator.pop();
-                            scaffoldMessenger.showSnackBar(
+                            AppToast.fromSnackBar(
                               SnackBar(
                                 content: Text(successMsg),
-                                backgroundColor: Colors.green,
+                                backgroundColor: SoftPalette.green400,
                               ),
                             );
                           }
@@ -1001,33 +1001,33 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                           if (e.code == 'wrong-password') {
                             oldPwError = incorrectPwMsg;
                           } else {
-                            scaffoldMessenger.showSnackBar(
+                            AppToast.fromSnackBar(
                               SnackBar(
                                 content: Text(e.message ?? failedMsg),
-                                backgroundColor: Colors.red,
+                                backgroundColor: SoftPalette.red400,
                               ),
                             );
                           }
                           setDs(() {});
                         } catch (e) {
                           setDs(() => isSaving = false);
-                          scaffoldMessenger.showSnackBar(
+                          AppToast.fromSnackBar(
                             SnackBar(
                               content: Text('Error: $e'),
-                              backgroundColor: Colors.red,
+                              backgroundColor: SoftPalette.red400,
                             ),
                           );
                         }
                       },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: ParentReportCard.primaryColor,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                 ),
                 child: isSaving
                     ? const SizedBox(
                         width: 20,
                         height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                        child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50),
                       )
                     : Text(
                         context.t('Confirm'),
@@ -1053,7 +1053,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
             title: Row(
               children: [
-                const Icon(Icons.reply_rounded, color: ParentReportCard.primaryColor),
+                Icon(Icons.reply_rounded, color: context.adapt(ParentReportCard.primaryColor)),
                 const SizedBox(width: 8),
                 Text(
                   context.isUrdu ? 'استاد کو جواب بھیجیں' : 'Reply to Teacher',
@@ -1067,7 +1067,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
               children: [
                 Text(
                   context.isUrdu ? '$dateStr کی حاضری کا جواب:' : 'Send a response for $dateStr:',
-                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontFamily: context.isUrdu ? 'Noori' : null),
+                  style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.gray500), fontFamily: context.isUrdu ? 'Noori' : null),
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -1157,10 +1157,10 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                       },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: ParentReportCard.primaryColor,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                 ),
                 child: isSaving
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50))
                     : Text(context.isUrdu ? 'بھیجیں' : 'Send Reply', style: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null)),
               ),
             ],
@@ -1174,8 +1174,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
     final hasReplied = statusData?['parentReplied'] == true;
     final replyText = statusData?['parentReplyText']?.toString() ?? statusData?['parentReplyMessage']?.toString();
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final textPrimary = isDark ? Colors.white : const Color(0xFF1E293B);
+    final cardBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.slate800;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1192,7 +1192,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 Icon(
                   hasReplied ? Icons.check_circle_rounded : Icons.pending_actions_rounded,
                   size: 16,
-                  color: hasReplied ? Colors.green : const Color(0xFFDC2626),
+                  color: hasReplied ? SoftPalette.green400 : SoftPalette.red500,
                 ),
                 const SizedBox(width: 6),
                 Text(
@@ -1202,7 +1202,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
-                    color: hasReplied ? Colors.green : const Color(0xFFDC2626),
+                    color: hasReplied ? SoftPalette.green400 : SoftPalette.red500,
                     fontFamily: context.isUrdu ? 'Noori' : null,
                   ),
                 ),
@@ -1218,7 +1218,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: ParentReportCard.primaryColor,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   elevation: 0,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -1234,7 +1234,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             decoration: BoxDecoration(
               color: cardBg,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.green.withValues(alpha: 0.4)),
+              border: Border.all(color: SoftPalette.green400.withValues(alpha: 0.4)),
             ),
             child: Text(
               '"$replyText"',
@@ -1268,7 +1268,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
             title: Row(
               children: [
-                const Icon(Icons.edit_note_rounded, color: ParentReportCard.primaryColor),
+                Icon(Icons.edit_note_rounded, color: context.adapt(ParentReportCard.primaryColor)),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text(
@@ -1285,7 +1285,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 children: [
                   Text(
                     context.t('Update your account, contact, and security details below:'),
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontFamily: context.isUrdu ? 'Noori' : null),
+                    style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.gray500), fontFamily: context.isUrdu ? 'Noori' : null),
                   ),
                   const SizedBox(height: 16),
                   TextField(
@@ -1483,10 +1483,10 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
 
                           if (ctx.mounted) {
                             Navigator.pop(ctx);
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            AppToast.showSnackBar(context, 
                               SnackBar(
                                 content: Text(context.isUrdu ? 'معلومات کامیابی سے اپ ڈیٹ ہو گئیں!' : 'Account details updated successfully!'),
-                                backgroundColor: Colors.green,
+                                backgroundColor: SoftPalette.green400,
                               ),
                             );
                           }
@@ -1496,26 +1496,26 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                             setDs(() => currentPwError = context.t('Incorrect current password'));
                           } else {
                             if (ctx.mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text(e.message ?? 'Failed to update account'), backgroundColor: Colors.red),
+                              AppToast.showSnackBar(context, 
+                                SnackBar(content: Text(e.message ?? 'Failed to update account'), backgroundColor: SoftPalette.red400),
                               );
                             }
                           }
                         } catch (e) {
                           setDs(() => isSaving = false);
                           if (ctx.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+                            AppToast.showSnackBar(context, 
+                              SnackBar(content: Text('Error: $e'), backgroundColor: SoftPalette.red400),
                             );
                           }
                         }
                       },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: ParentReportCard.primaryColor,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                 ),
                 child: isSaving
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50))
                     : Text(context.t('Save Changes'), style: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null)),
               ),
             ],
@@ -1562,18 +1562,18 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       if (mounted) setState(() {});
 
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text(context.isUrdu 
                 ? 'پی ٹی ایم میں شرکت کا دعویٰ بھیج دیا گیا ہے۔ استاد کی منظوری کا انتظار کریں۔' 
                 : 'PTM attendance claim submitted. Waiting for teacher approval.'),
-            backgroundColor: Colors.green,
+            backgroundColor: SoftPalette.green400,
           ),
         );
       }
     } catch (e) {
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(content: Text('Error: $e')),
         );
       }
@@ -1598,7 +1598,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
               children: [
                 Text(
                   context.t('Please enter your reply/comments for the teacher.'),
-                  style: TextStyle(fontSize: 12, color: Colors.grey, fontFamily: context.isUrdu ? 'Noori' : null),
+                  style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.gray350), fontFamily: context.isUrdu ? 'Noori' : null),
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -1687,10 +1687,10 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                       },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: ParentReportCard.primaryColor,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                 ),
                 child: isSaving
-                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50))
                     : Text(context.t('Submit'), style: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null)),
               ),
             ],
@@ -1712,15 +1712,15 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
               gradient: const LinearGradient(
-                colors: [Color(0xFF064E3B), Color(0xFF0F766E), Color(0xFF134E4A)],
+                colors: [SoftPalette.emerald700, SoftPalette.teal550, SoftPalette.teal700],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
               borderRadius: BorderRadius.circular(28),
-              border: Border.all(color: const Color(0xFFFBBF24), width: 2),
+              border: Border.all(color: SoftPalette.amber200, width: 2),
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFFFBBF24).withValues(alpha: 0.35),
+                  color: SoftPalette.amber200.withValues(alpha: 0.35),
                   blurRadius: 30,
                   spreadRadius: 4,
                 ),
@@ -1736,20 +1736,20 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     gradient: const LinearGradient(
-                      colors: [Color(0xFFFDE047), Color(0xFFEAB308), Color(0xFFCA8A04)],
+                      colors: [SoftPalette.yellow150, SoftPalette.amber300, SoftPalette.amber400],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.amber.withValues(alpha: 0.6),
+                        color: SoftPalette.amber200.withValues(alpha: 0.6),
                         blurRadius: 20,
                         spreadRadius: 2,
                       ),
                     ],
                   ),
                   child: const Center(
-                    child: Icon(Icons.emoji_events_rounded, size: 54, color: Color(0xFF78350F)),
+                    child: Icon(Icons.emoji_events_rounded, size: 54, color: SoftPalette.orange700),
                   ),
                 ),
                 const SizedBox(height: 16),
@@ -1778,7 +1778,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   style: TextStyle(
                     fontSize: 24,
                     fontWeight: FontWeight.bold,
-                    color: const Color(0xFFFEF08A),
+                    color: SoftPalette.yellow150,
                     fontFamily: context.isUrdu ? 'Noori' : null,
                   ),
                 ),
@@ -1788,16 +1788,16 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.12),
+                    color: SoftPalette.gray50.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: Colors.amber.withValues(alpha: 0.4)),
+                    border: Border.all(color: SoftPalette.amber200.withValues(alpha: 0.4)),
                   ),
                   child: Text(
                     studentName.isNotEmpty ? studentName : context.t('Student'),
                     style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                      color: SoftPalette.gray50,
                     ),
                   ),
                 ),
@@ -1815,7 +1815,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 13.5,
-                    color: const Color(0xFFF1F5F9),
+                    color: SoftPalette.slate100,
                     height: 1.45,
                     fontFamily: context.isUrdu ? 'Noori' : null,
                   ),
@@ -1826,44 +1826,44 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF042F2C),
+                    color: SoftPalette.teal800,
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFFFBBF24).withValues(alpha: 0.6)),
+                    border: Border.all(color: SoftPalette.amber200.withValues(alpha: 0.6)),
                   ),
                   child: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
                       Column(
                         children: [
-                          const Icon(Icons.workspace_premium_rounded, color: Color(0xFFFDE047), size: 28),
+                          const Icon(Icons.workspace_premium_rounded, color: SoftPalette.yellow150, size: 28),
                           const SizedBox(height: 4),
                           Text(
                             context.isUrdu ? 'اعزازی شیلڈ' : 'Honor Trophy',
-                            style: TextStyle(fontSize: 11, color: Colors.amber.shade200, fontWeight: FontWeight.bold),
+                            style: TextStyle(fontSize: 11, color: SoftPalette.yellow150, fontWeight: FontWeight.bold),
                           ),
                         ],
                       ),
-                      Container(height: 36, width: 1, color: Colors.amber.withValues(alpha: 0.3)),
+                      Container(height: 36, width: 1, color: SoftPalette.amber200.withValues(alpha: 0.3)),
                       Column(
                         children: [
-                          const Icon(Icons.payments_rounded, color: Color(0xFF4ADE80), size: 28),
+                          const Icon(Icons.payments_rounded, color: SoftPalette.green300, size: 28),
                           const SizedBox(height: 4),
                           Text(
                             context.isUrdu ? 'نقد انعام (PKR)' : 'Cash Award (PKR)',
-                            style: TextStyle(fontSize: 11, color: Colors.green.shade200, fontWeight: FontWeight.bold),
+                            style: TextStyle(fontSize: 11, color: SoftPalette.green300, fontWeight: FontWeight.bold),
                           ),
                         ],
                       ),
-                      Container(height: 36, width: 1, color: Colors.amber.withValues(alpha: 0.3)),
+                      Container(height: 36, width: 1, color: SoftPalette.amber200.withValues(alpha: 0.3)),
                       Column(
                         children: [
-                          const Icon(Icons.card_membership_rounded, color: Color(0xFF67E8F9), size: 28),
+                          const Icon(Icons.card_membership_rounded, color: SoftPalette.cyan200, size: 28),
                           const SizedBox(height: 4),
                           Text(
                             isNazraStudent
                                 ? (context.isUrdu ? 'ناظرہ سرٹیفکیٹ' : 'Nazra Certificate')
                                 : (context.isUrdu ? 'حفظ سرٹیفکیٹ' : 'Hifz Certificate'),
-                            style: TextStyle(fontSize: 11, color: Colors.cyan.shade200, fontWeight: FontWeight.bold),
+                            style: TextStyle(fontSize: 11, color: SoftPalette.cyan200, fontWeight: FontWeight.bold),
                           ),
                         ],
                       ),
@@ -1875,17 +1875,17 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 // Close / Celebrate Button
                 ElevatedButton.icon(
                   onPressed: () => Navigator.pop(ctx),
-                  icon: const Icon(Icons.celebration_rounded, color: Color(0xFF0F172A), size: 18),
+                  icon: const Icon(Icons.celebration_rounded, color: SoftPalette.slate900, size: 18),
                   label: Text(
                     context.isUrdu ? 'شاندار! الحمد للہ' : 'Alhamdulillah! Celebrate',
                     style: const TextStyle(
-                      color: Color(0xFF0F172A),
+                      color: SoftPalette.slate900,
                       fontWeight: FontWeight.bold,
                       fontSize: 14,
                     ),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFFBBF24),
+                    backgroundColor: SoftPalette.amber200,
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                     elevation: 4,
@@ -1932,7 +1932,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         _quickActionButton(
           label: context.t('Request Leave'),
           icon: Icons.email_rounded,
-          color: Colors.orange,
+          color: SoftPalette.amber300,
           onTap: () {
             final now = DateTime.now();
             final today = DateTime(now.year, now.month, now.day);
@@ -1946,7 +1946,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         _quickActionStatus(
           label: context.t('Leave Pending Approval'),
           icon: Icons.hourglass_empty_rounded,
-          color: Colors.orange.shade700,
+          color: SoftPalette.orange350,
         ),
       );
     }
@@ -1956,7 +1956,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         _quickActionButton(
           label: context.isUrdu ? 'استاد کو جواب دیں' : 'Reply to Teacher',
           icon: Icons.reply_rounded,
-          color: const Color(0xFF4C4DDC),
+          color: SoftPalette.indigo550,
           onTap: () => _showSendReplyDialog(context, selectedDateStr),
         ),
       );
@@ -1965,7 +1965,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         _quickActionStatus(
           label: context.isUrdu ? 'جواب بھیج دیا گیا' : 'Reply Sent',
           icon: Icons.check_circle_rounded,
-          color: Colors.green,
+          color: SoftPalette.green400,
         ),
       );
     }
@@ -1976,7 +1976,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           _quickActionButton(
             label: context.t('Claim PTM Join'),
             icon: Icons.people_rounded,
-            color: Colors.teal,
+            color: SoftPalette.teal500,
             onTap: () => _claimPtmJoin(context),
           ),
         );
@@ -1985,7 +1985,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           _quickActionStatus(
             label: context.t('PTM Claim Pending'),
             icon: Icons.hourglass_empty_rounded,
-            color: Colors.teal.shade700,
+            color: SoftPalette.teal550,
           ),
         );
       } else if (ptmJoined) {
@@ -1993,7 +1993,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           _quickActionStatus(
             label: context.t('PTM Joined'),
             icon: Icons.check_circle_rounded,
-            color: Colors.green,
+            color: SoftPalette.green400,
           ),
         );
       } else if (ptmMissed) {
@@ -2001,7 +2001,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           _quickActionStatus(
             label: context.t('PTM Missed'),
             icon: Icons.cancel_rounded,
-            color: Colors.red,
+            color: SoftPalette.red400,
           ),
         );
       }
@@ -2017,7 +2017,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: borderColor),
         boxShadow: [
-          BoxShadow(color: isDarkMode ? Colors.black26 : Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4))
+          BoxShadow(color: isDarkMode ? SoftPalette.gray900A26 : SoftPalette.gray900.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4))
         ],
       ),
       child: Column(
@@ -2257,19 +2257,19 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFF0F5132), Color(0xFF0D6EFD)], // Emerald to Royal Blue
+          colors: [SoftPalette.emerald700, SoftPalette.blue500], // Emerald to Royal Blue
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF0F5132).withValues(alpha: 0.3),
+            color: SoftPalette.emerald700.withValues(alpha: 0.3),
             blurRadius: 20,
             offset: const Offset(0, 8),
           ),
         ],
-        border: Border.all(color: Colors.white.withValues(alpha: 0.2), width: 1.5),
+        border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.2), width: 1.5),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2279,12 +2279,12 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
+                  color: SoftPalette.gray50.withValues(alpha: 0.2),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(
                   Icons.stars_rounded,
-                  color: Colors.amber,
+                  color: SoftPalette.amber200,
                   size: 32,
                 ),
               ),
@@ -2296,7 +2296,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                     Text(
                       'Alhamdulillah! 🎉',
                       style: TextStyle(
-                        color: Colors.amber,
+                        color: SoftPalette.amber200,
                         fontSize: 22,
                         fontWeight: FontWeight.bold,
                         letterSpacing: 0.5,
@@ -2308,7 +2308,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                           ? (context.isUrdu ? 'ناظرہ قرآن کریم کامیابی سے مکمل' : 'Nazra Completed Successfully')
                           : context.t('Hifz Completed Successfully'),
                       style: TextStyle(
-                        color: Colors.white70,
+                        color: SoftPalette.gray50A70,
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
                         fontFamily: context.isUrdu ? 'Noori' : null,
@@ -2319,7 +2319,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
               ),
               if (onDismiss != null)
                 IconButton(
-                  icon: const Icon(Icons.close_rounded, color: Colors.white70, size: 22),
+                  icon: const Icon(Icons.close_rounded, color: SoftPalette.gray50A70, size: 22),
                   tooltip: context.isUrdu ? 'پیغام بند کریں' : 'Close message for this month',
                   onPressed: onDismiss,
                 ),
@@ -2335,7 +2335,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                     ? 'Dear Parents, we offer our warmest congratulations to you and your family! By the grace of Almighty Allah, $studentName has completed the full Nazra reading of the Holy Quran Majeed (8,640 lines).'
                     : 'Dear Parents, we offer our warmest congratulations to you and your family! By the grace of Almighty Allah, $studentName has completed the memorization of the Holy Quran Majeed (8,640 lines).'),
             style: TextStyle(
-              color: Colors.white,
+              color: SoftPalette.gray50,
               fontSize: 14,
               height: 1.5,
               fontWeight: FontWeight.w500,
@@ -2346,7 +2346,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.1),
+              color: SoftPalette.gray50.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(16),
             ),
             child: Column(
@@ -2357,7 +2357,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                     Text(
                       context.t('Time Taken:'),
                       style: TextStyle(
-                        color: Colors.white70,
+                        color: SoftPalette.gray50A70,
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
                         fontFamily: context.isUrdu ? 'Noori' : null,
@@ -2366,7 +2366,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                     Text(
                       durationStr,
                       style: TextStyle(
-                        color: Colors.white,
+                        color: SoftPalette.gray50,
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
                         fontFamily: context.isUrdu ? 'Noori' : null,
@@ -2383,7 +2383,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                           ? (context.isUrdu ? 'ناظرہ کا آغاز:' : 'Started Nazra:')
                           : context.t('Started Hifz:'),
                       style: TextStyle(
-                        color: Colors.white70,
+                        color: SoftPalette.gray50A70,
                         fontSize: 12,
                         fontFamily: context.isUrdu ? 'Noori' : null,
                       ),
@@ -2391,7 +2391,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                     Text(
                       joinDateStr,
                       style: TextStyle(
-                        color: Colors.white,
+                        color: SoftPalette.gray50,
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
                         fontFamily: context.isUrdu ? 'Noori' : null,
@@ -2408,7 +2408,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                           ? (context.isUrdu ? 'ناظرہ کی تکمیل:' : 'Completed Nazra:')
                           : context.t('Completed Hifz:'),
                       style: TextStyle(
-                        color: Colors.white70,
+                        color: SoftPalette.gray50A70,
                         fontSize: 12,
                         fontFamily: context.isUrdu ? 'Noori' : null,
                       ),
@@ -2416,7 +2416,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                     Text(
                       compDateStr,
                       style: TextStyle(
-                        color: Colors.white,
+                        color: SoftPalette.gray50,
                         fontSize: 12,
                         fontWeight: FontWeight.w500,
                         fontFamily: context.isUrdu ? 'Noori' : null,
@@ -2431,17 +2431,17 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           Center(
             child: ElevatedButton.icon(
               onPressed: () => _showHifzTargetCongratulationsDialog(context, studentName),
-              icon: const Icon(Icons.emoji_events_rounded, color: Color(0xFF78350F), size: 18),
+              icon: const Icon(Icons.emoji_events_rounded, color: SoftPalette.orange700, size: 18),
               label: Text(
                 context.isUrdu ? '🏆 اعزازی ٹرافی اور جشن دیکھیں' : '🏆 View Grand Honor Trophy & Celebration',
                 style: const TextStyle(
-                  color: Color(0xFF78350F),
+                  color: SoftPalette.orange700,
                   fontWeight: FontWeight.bold,
                   fontSize: 13,
                 ),
               ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFFDE047),
+                backgroundColor: SoftPalette.yellow150,
                 padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
@@ -2476,7 +2476,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
               const SizedBox(width: 6),
               Text(
                 label,
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey[600]),
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.gray500)),
               ),
             ],
           ),
@@ -2492,7 +2492,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           const SizedBox(height: 2),
           Text(
             sub,
-            style: const TextStyle(fontSize: 10, color: Colors.black87, fontWeight: FontWeight.w500),
+            style: TextStyle(fontSize: 10, color: context.adapt(SoftPalette.gray900A87), fontWeight: FontWeight.w500),
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
           ),
@@ -2506,7 +2506,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       padding: const EdgeInsets.symmetric(vertical: 8.0),
       child: Row(
         children: [
-          Icon(icon, size: 18, color: isDarkMode ? const Color(0xFF2DD4BF) : ParentReportCard.primaryColor),
+          Icon(icon, size: 18, color: isDarkMode ? SoftPalette.teal300 : ParentReportCard.primaryColor),
           const SizedBox(width: 12),
           Text(
             '$label: ',
@@ -2538,19 +2538,19 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         label = 'Left';
         break;
       case 'archived':
-        color = Colors.orange;
+        color = SoftPalette.amber300;
         label = 'Archived';
         break;
       case 'hifz_completed':
-        color = isDarkMode ? const Color(0xFF2DD4BF) : ParentReportCard.primaryColor;
+        color = isDarkMode ? SoftPalette.teal300 : ParentReportCard.primaryColor;
         label = 'Hifz Completed';
         break;
       case 'nazra_completed':
-        color = isDarkMode ? const Color(0xFF2DD4BF) : const Color(0xFF0D9488);
+        color = isDarkMode ? SoftPalette.teal300 : SoftPalette.teal500;
         label = 'Nazra Completed';
         break;
       default:
-        color = Colors.grey;
+        color = context.adapt(SoftPalette.gray350);
         label = status.toUpperCase();
     }
 
@@ -2586,20 +2586,20 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         return Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: isDarkMode ? const Color(0xFF38230D) : Colors.amber.shade50,
+            color: isDarkMode ? SoftPalette.amber800 : SoftPalette.yellow50,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: isDarkMode ? const Color(0xFFD97706).withValues(alpha: 0.4) : Colors.amber.shade200),
+            border: Border.all(color: isDarkMode ? SoftPalette.orange400.withValues(alpha: 0.4) : SoftPalette.yellow150),
           ),
           child: Column(
             children: [
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.hourglass_empty_rounded, color: Colors.amber.shade900, size: 18),
+                  Icon(Icons.hourglass_empty_rounded, color: context.adapt(SoftPalette.orange350), size: 18),
                   const SizedBox(width: 8),
                   Text(
                     context.t('Unarchive Request Pending'),
-                    style: TextStyle(fontWeight: FontWeight.bold, color: isDarkMode ? const Color(0xFFFBBF24) : Colors.amber.shade900, fontFamily: context.isUrdu ? 'Noori' : null),
+                    style: TextStyle(fontWeight: FontWeight.bold, color: isDarkMode ? SoftPalette.amber200 : SoftPalette.orange350, fontFamily: context.isUrdu ? 'Noori' : null),
                   ),
                 ],
               ),
@@ -2610,7 +2610,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                       ? 'وجہ: "$rejoinReason"'
                       : 'Reason: "$rejoinReason"',
                   textAlign: TextAlign.center,
-                  style: TextStyle(fontSize: 12, color: isDarkMode ? const Color(0xFFFDE68A) : Colors.amber.shade800, fontFamily: context.isUrdu ? 'Noori' : null),
+                  style: TextStyle(fontSize: 12, color: isDarkMode ? SoftPalette.yellow150 : SoftPalette.orange350, fontFamily: context.isUrdu ? 'Noori' : null),
                 ),
               ],
               if (rejoinDate != null) ...[
@@ -2619,7 +2619,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   context.isUrdu
                       ? 'درخواست کی تاریخ: ${DateFormat('yyyy-MM-dd HH:mm').format(rejoinDate)}'
                       : 'Requested on: ${DateFormat('yyyy-MM-dd HH:mm').format(rejoinDate)}',
-                  style: TextStyle(fontSize: 10, color: isDarkMode ? const Color(0xFFFCD34D) : Colors.amber.shade700, fontFamily: context.isUrdu ? 'Noori' : null),
+                  style: TextStyle(fontSize: 10, color: isDarkMode ? SoftPalette.yellow200 : SoftPalette.amber300, fontFamily: context.isUrdu ? 'Noori' : null),
                 ),
               ],
             ],
@@ -2630,10 +2630,10 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         width: double.infinity,
         child: ElevatedButton.icon(
           onPressed: () => _showUnarchiveDialog(context),
-          icon: const Icon(Icons.unarchive_rounded, color: Colors.white),
-          label: Text(context.t('Request Unarchive'), style: TextStyle(color: Colors.white, fontFamily: context.isUrdu ? 'Noori' : null)),
+          icon: const Icon(Icons.unarchive_rounded, color: SoftPalette.gray50),
+          label: Text(context.t('Request Unarchive'), style: TextStyle(color: SoftPalette.gray50, fontFamily: context.isUrdu ? 'Noori' : null)),
           style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.orange,
+            backgroundColor: SoftPalette.amber300,
             padding: const EdgeInsets.symmetric(vertical: 16),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           ),
@@ -2650,20 +2650,20 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: isDarkMode ? const Color(0xFF38230D) : Colors.amber.shade50,
+          color: isDarkMode ? SoftPalette.amber800 : SoftPalette.yellow50,
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: isDarkMode ? const Color(0xFFD97706).withValues(alpha: 0.4) : Colors.amber.shade200),
+          border: Border.all(color: isDarkMode ? SoftPalette.orange400.withValues(alpha: 0.4) : SoftPalette.yellow150),
         ),
         child: Column(
           children: [
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.hourglass_empty_rounded, color: isDarkMode ? const Color(0xFFFBBF24) : Colors.amber.shade900, size: 18),
+                Icon(Icons.hourglass_empty_rounded, color: isDarkMode ? SoftPalette.amber200 : SoftPalette.orange350, size: 18),
                 const SizedBox(width: 8),
                 Text(
                   context.t('Rejoin Request Pending'),
-                  style: TextStyle(fontWeight: FontWeight.bold, color: isDarkMode ? const Color(0xFFFBBF24) : Colors.amber.shade900, fontFamily: context.isUrdu ? 'Noori' : null),
+                  style: TextStyle(fontWeight: FontWeight.bold, color: isDarkMode ? SoftPalette.amber200 : SoftPalette.orange350, fontFamily: context.isUrdu ? 'Noori' : null),
                 ),
               ],
             ),
@@ -2673,7 +2673,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   ? 'وجہ: "${rejoinReason ?? 'وجہ درج نہیں ہے'}"'
                   : 'Reason: "${rejoinReason ?? 'No reason specified'}"',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 12, color: isDarkMode ? const Color(0xFFFDE68A) : Colors.amber.shade800, fontFamily: context.isUrdu ? 'Noori' : null),
+              style: TextStyle(fontSize: 12, color: isDarkMode ? SoftPalette.yellow150 : SoftPalette.orange350, fontFamily: context.isUrdu ? 'Noori' : null),
             ),
             if (rejoinDate != null) ...[
               const SizedBox(height: 4),
@@ -2681,7 +2681,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 context.isUrdu
                     ? 'درخواست کی تاریخ: ${DateFormat('yyyy-MM-dd HH:mm').format(rejoinDate)}'
                     : 'Requested on: ${DateFormat('yyyy-MM-dd HH:mm').format(rejoinDate)}',
-                style: TextStyle(fontSize: 10, color: isDarkMode ? const Color(0xFFFCD34D) : Colors.amber.shade700, fontFamily: context.isUrdu ? 'Noori' : null),
+                style: TextStyle(fontSize: 10, color: isDarkMode ? SoftPalette.yellow200 : SoftPalette.amber300, fontFamily: context.isUrdu ? 'Noori' : null),
               ),
             ],
           ],
@@ -2692,8 +2692,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         width: double.infinity,
         child: ElevatedButton.icon(
           onPressed: () => _showRejoinDialog(context),
-          icon: const Icon(Icons.keyboard_return_rounded, color: Colors.white),
-          label: Text(context.t('Request Rejoining'), style: TextStyle(color: Colors.white, fontFamily: context.isUrdu ? 'Noori' : null)),
+          icon: const Icon(Icons.keyboard_return_rounded, color: SoftPalette.gray50),
+          label: Text(context.t('Request Rejoining'), style: TextStyle(color: SoftPalette.gray50, fontFamily: context.isUrdu ? 'Noori' : null)),
           style: ElevatedButton.styleFrom(
             backgroundColor: ParentReportCard.primaryColor,
             padding: const EdgeInsets.symmetric(vertical: 16),
@@ -2737,7 +2737,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             final logDate = _parseDateTime(log['date']);
             final logReason = log['reason'] ?? '';
 
-            Color dotColor = Colors.grey;
+            Color dotColor = context.adapt(SoftPalette.gray350);
             IconData icon = Icons.circle;
             if (logStatus == 'active' || logType == 'enrollment' || logType == 'rejoin_approval') {
               dotColor = ParentReportCard.successColor;
@@ -2746,13 +2746,13 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
               dotColor = ParentReportCard.errorColor;
               icon = Icons.error_outline;
             } else if (logStatus == 'archived') {
-              dotColor = Colors.orange;
+              dotColor = SoftPalette.amber300;
               icon = Icons.archive_outlined;
             } else if (logStatus == 'hifz_completed') {
-              dotColor = isDarkMode ? const Color(0xFF2DD4BF) : ParentReportCard.primaryColor;
+              dotColor = isDarkMode ? SoftPalette.teal300 : ParentReportCard.primaryColor;
               icon = Icons.stars_outlined;
             } else if (logStatus == 'nazra_completed') {
-              dotColor = isDarkMode ? const Color(0xFF2DD4BF) : const Color(0xFF0D9488);
+              dotColor = isDarkMode ? SoftPalette.teal300 : SoftPalette.teal500;
               icon = Icons.menu_book_rounded;
             }
 
@@ -2835,7 +2835,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: isDarkMode ? const Color(0xFF1E293B) : ParentReportCard.primaryColor.withValues(alpha: 0.05),
+        color: isDarkMode ? SoftPalette.slate800 : ParentReportCard.primaryColor.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: borderColor),
       ),
@@ -2843,7 +2843,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           IconButton(
-            icon: Icon(Icons.chevron_left_rounded, color: isDarkMode ? const Color(0xFF2DD4BF) : ParentReportCard.primaryColor),
+            icon: Icon(Icons.chevron_left_rounded, color: isDarkMode ? SoftPalette.teal300 : ParentReportCard.primaryColor),
             onPressed: () {
               setState(() {
                 if (_selectedMonth == 1) {
@@ -2858,21 +2858,21 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           ),
           Row(
             children: [
-              Icon(Icons.calendar_month, color: isDarkMode ? const Color(0xFF2DD4BF) : ParentReportCard.primaryColor),
+              Icon(Icons.calendar_month, color: isDarkMode ? SoftPalette.teal300 : ParentReportCard.primaryColor),
               const SizedBox(width: 12),
               Text(
                 _formatMonthYear(date),
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 16,
-                  color: isDarkMode ? const Color(0xFF2DD4BF) : ParentReportCard.primaryColor,
+                  color: isDarkMode ? SoftPalette.teal300 : ParentReportCard.primaryColor,
                   fontFamily: context.isUrdu ? 'Noori' : null,
                 ),
               ),
             ],
           ),
           IconButton(
-            icon: Icon(Icons.chevron_right_rounded, color: isDarkMode ? const Color(0xFF2DD4BF) : ParentReportCard.primaryColor),
+            icon: Icon(Icons.chevron_right_rounded, color: isDarkMode ? SoftPalette.teal300 : ParentReportCard.primaryColor),
             onPressed: () {
               setState(() {
                 if (_selectedMonth == 12) {
@@ -3013,14 +3013,14 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             : 'Scheduled Parent Teacher Meeting.';
       } else {
         if (ptmAttended) {
-          bannerColor = const Color(0xFF1B4332);
+          bannerColor = context.adapt(SoftPalette.emerald750);
           bannerIcon = Icons.people_rounded;
           bannerTitle = context.isUrdu ? 'پی ٹی ایم: شامل ہوئے' : 'PTM: Joined';
           bannerSubtitle = context.isUrdu 
               ? 'آپ کامیابی کے ساتھ میٹنگ میں شامل ہوئے تھے۔' 
               : 'You successfully attended this meeting.';
         } else {
-          bannerColor = const Color(0xFFDC2626);
+          bannerColor = context.adapt(SoftPalette.red500);
           bannerIcon = Icons.people_outline_rounded;
           bannerTitle = context.isUrdu ? 'پی ٹی ایم: شامل نہیں ہوئے' : 'PTM: Missed';
           bannerSubtitle = context.isUrdu 
@@ -3087,7 +3087,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           if (ptmBanner != null) ptmBanner,
           _buildStatusInfoRow(
             icon: Icons.info_outline_rounded,
-            color: Colors.blueGrey,
+            color: context.adapt(SoftPalette.slate500),
             title: context.isUrdu ? '$dateStrFormatted کا کوئی ریکارڈ نہیں' : "No data for $dateStrFormatted",
             subtitle: context.t("Student was not enrolled in the Madrassa yet."),
           ),
@@ -3099,7 +3099,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           if (ptmBanner != null) ptmBanner,
           _buildStatusInfoRow(
             icon: Icons.hourglass_empty_rounded,
-            color: Colors.blue,
+            color: SoftPalette.blue400,
             title: context.isUrdu ? '$dateStrFormatted کا کوئی ریکارڈ نہیں' : "No data for $dateStrFormatted",
             subtitle: context.t("This is a future date."),
           ),
@@ -3111,7 +3111,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           if (ptmBanner != null) ptmBanner,
           _buildStatusInfoRow(
             icon: Icons.weekend_rounded,
-            color: Colors.grey,
+            color: context.adapt(SoftPalette.gray350),
             title: context.isUrdu ? 'اتوار ($dateStrFormatted)' : "Sunday ($dateStrFormatted)",
             subtitle: context.t("Madrassa is closed on Sundays."),
           ),
@@ -3139,7 +3139,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             if (ptmBanner != null) ptmBanner,
             _buildStatusInfoRow(
               icon: islamicEvent != null ? Icons.nightlight_round : Icons.flag_rounded,
-              color: islamicEvent != null ? const Color(0xFFD4AF37) : Colors.green,
+              color: islamicEvent != null ? SoftPalette.yellow300 : SoftPalette.green400,
               title: context.isUrdu ? 'تعطیل: $holidayName' : "Holiday: $holidayName",
               subtitle: holidayDesc,
             ),
@@ -3152,7 +3152,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
               if (ptmBanner != null) ptmBanner,
               _buildStatusInfoRow(
                 icon: Icons.warning_amber_rounded,
-                color: Colors.orange,
+                color: SoftPalette.amber300,
                 title: context.isUrdu ? '$dateStrFormatted کا کوئی ریکارڈ نہیں' : "No data for $dateStrFormatted",
                 subtitle: context.t("No records found for this active day."),
               ),
@@ -3236,9 +3236,9 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   width: double.infinity,
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: ParentReportCard.primaryColor.withValues(alpha: 0.05),
+                    color: context.adapt(ParentReportCard.primaryColor).withValues(alpha: 0.05),
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: ParentReportCard.primaryColor.withValues(alpha: 0.12)),
+                    border: Border.all(color: context.adapt(ParentReportCard.primaryColor).withValues(alpha: 0.12)),
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -3246,10 +3246,10 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                       Container(
                         padding: const EdgeInsets.all(10),
                         decoration: BoxDecoration(
-                          color: ParentReportCard.primaryColor.withValues(alpha: 0.1),
+                          color: context.adapt(ParentReportCard.primaryColor).withValues(alpha: 0.1),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.menu_book_rounded, color: ParentReportCard.primaryColor, size: 22),
+                        child: Icon(Icons.menu_book_rounded, color: context.adapt(ParentReportCard.primaryColor), size: 22),
                       ),
                       const SizedBox(width: 14),
                       Expanded(
@@ -3258,7 +3258,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                           children: [
                             Text(
                               context.t("Lesson Progress"),
-                              style: TextStyle(fontSize: 12, color: ParentReportCard.textMutedColor, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
+                              style: TextStyle(fontSize: 12, color: context.adapt(ParentReportCard.textMutedColor), fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
                             ),
                             const SizedBox(height: 8),
                             // Sabak
@@ -3268,14 +3268,14 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                                   isNazraStudent
                                       ? (context.isUrdu ? 'سبق (ناظرہ): ' : 'Sabak (Nazra): ')
                                       : '${context.t('Sabak')}: ',
-                                  style: TextStyle(fontSize: 13, color: ParentReportCard.textMutedColor, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
+                                  style: TextStyle(fontSize: 13, color: context.adapt(ParentReportCard.textMutedColor), fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
                                 ),
                                 Expanded(
                                   child: Text(
                                     linesRead > 0
                                         ? (context.isUrdu ? "$linesRead لائنیں" : "$linesRead lines")
                                         : context.t("No lines recorded"),
-                                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: ParentReportCard.primaryColor, fontFamily: context.isUrdu ? 'Noori' : null),
+                                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: context.adapt(ParentReportCard.primaryColor), fontFamily: context.isUrdu ? 'Noori' : null),
                                   ),
                                 ),
                               ],
@@ -3287,12 +3287,12 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                                 children: [
                                   Text(
                                     '${context.t('Sabki')}: ',
-                                    style: TextStyle(fontSize: 13, color: ParentReportCard.textMutedColor, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
+                                    style: TextStyle(fontSize: 13, color: context.adapt(ParentReportCard.textMutedColor), fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
                                   ),
                                   Expanded(
                                     child: Text(
                                       sabkiText,
-                                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: const Color(0xFFED6C02), fontFamily: context.isUrdu ? 'Noori' : null),
+                                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.orange400), fontFamily: context.isUrdu ? 'Noori' : null),
                                     ),
                                   ),
                                 ],
@@ -3303,12 +3303,12 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                                 children: [
                                   Text(
                                     '${context.t('Manzil')}: ',
-                                    style: TextStyle(fontSize: 13, color: ParentReportCard.textMutedColor, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
+                                    style: TextStyle(fontSize: 13, color: context.adapt(ParentReportCard.textMutedColor), fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
                                   ),
                                   Expanded(
                                     child: Text(
                                       manzilText,
-                                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: const Color(0xFF4C4DDC), fontFamily: context.isUrdu ? 'Noori' : null),
+                                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.indigo550), fontFamily: context.isUrdu ? 'Noori' : null),
                                     ),
                                   ),
                                 ],
@@ -3320,12 +3320,12 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                                 children: [
                                   Text(
                                     context.isUrdu ? 'رُكوع: ' : 'Ruku (رُكوع): ',
-                                    style: TextStyle(fontSize: 13, color: ParentReportCard.textMutedColor, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
+                                    style: TextStyle(fontSize: 13, color: context.adapt(ParentReportCard.textMutedColor), fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
                                   ),
                                   Expanded(
                                     child: Text(
                                       rukuText,
-                                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: const Color(0xFFED6C02), fontFamily: context.isUrdu ? 'Noori' : null),
+                                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.orange400), fontFamily: context.isUrdu ? 'Noori' : null),
                                     ),
                                   ),
                                 ],
@@ -3336,12 +3336,12 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                                 children: [
                                   Text(
                                     context.isUrdu ? 'قاعدہ سبق: ' : 'Qaida Sabak: ',
-                                    style: TextStyle(fontSize: 13, color: ParentReportCard.textMutedColor, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
+                                    style: TextStyle(fontSize: 13, color: context.adapt(ParentReportCard.textMutedColor), fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
                                   ),
                                   Expanded(
                                     child: Text(
                                       qaidaText,
-                                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: isQaidaDone ? Colors.green : const Color(0xFF4C4DDC), fontFamily: context.isUrdu ? 'Noori' : null),
+                                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: isQaidaDone ? context.adapt(SoftPalette.green400) : context.adapt(SoftPalette.indigo550), fontFamily: context.isUrdu ? 'Noori' : null),
                                     ),
                                   ),
                                 ],
@@ -3352,10 +3352,10 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                             const SizedBox(height: 6),
                             Text(
                               context.isUrdu ? "مجموعی: لائن $currentLines" : "Cumulative: Line $currentLines",
-                              style: TextStyle(fontSize: 11, color: ParentReportCard.textMutedColor, fontFamily: context.isUrdu ? 'Noori' : null),
+                              style: TextStyle(fontSize: 11, color: context.adapt(ParentReportCard.textMutedColor), fontFamily: context.isUrdu ? 'Noori' : null),
                             ),
                             const SizedBox(height: 12),
-                            Divider(color: ParentReportCard.primaryColor.withValues(alpha: 0.15)),
+                            Divider(color: context.adapt(ParentReportCard.primaryColor).withValues(alpha: 0.15)),
                             const SizedBox(height: 8),
                             _buildParentReplyStatusRow(context, dateStr, statusData),
                           ],
@@ -3369,38 +3369,38 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   width: double.infinity,
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.orange.shade50,
+                    color: context.adapt(SoftPalette.amber100m),
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.orange.shade200),
+                    border: Border.all(color: context.adapt(SoftPalette.amber200)),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
                         children: [
-                          const Icon(Icons.event_busy_rounded, color: Colors.orange, size: 22),
+                          Icon(Icons.event_busy_rounded, color: context.adapt(SoftPalette.amber300), size: 22),
                           const SizedBox(width: 10),
                           Text(
                             context.isUrdu ? 'طالب علم رخصت پر تھا' : 'Student was on Leave',
-                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.orange.shade900, fontFamily: context.isUrdu ? 'Noori' : null),
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.orange400), fontFamily: context.isUrdu ? 'Noori' : null),
                           ),
                         ],
                       ),
                       const SizedBox(height: 10),
                       if (leaveReason.isNotEmpty) ...[
-                        Text(context.t("Leave Reason:"), style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.grey.shade700, fontFamily: context.isUrdu ? 'Noori' : null)),
+                        Text(context.t("Leave Reason:"), style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.gray550), fontFamily: context.isUrdu ? 'Noori' : null)),
                         const SizedBox(height: 4),
                         Container(
                           width: double.infinity,
                           padding: const EdgeInsets.all(10),
                           decoration: BoxDecoration(
-                            color: Colors.white,
+                            color: context.adapt(SoftPalette.gray50),
                             borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: Colors.orange.shade100),
+                            border: Border.all(color: context.adapt(SoftPalette.amber150)),
                           ),
                           child: Text(
                             leaveReason,
-                            style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: Colors.grey.shade800, fontFamily: context.isUrdu ? 'Noori' : null),
+                            style: TextStyle(fontSize: 12, fontStyle: FontStyle.italic, color: context.adapt(SoftPalette.gray700), fontFamily: context.isUrdu ? 'Noori' : null),
                           ),
                         ),
                         const SizedBox(height: 10),
@@ -3410,11 +3410,11 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                         children: [
                           Row(
                             children: [
-                              Text(context.t("Approval Status: "), style: TextStyle(fontSize: 12, color: Colors.grey.shade700, fontFamily: context.isUrdu ? 'Noori' : null)),
+                              Text(context.t("Approval Status: "), style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.gray550), fontFamily: context.isUrdu ? 'Noori' : null)),
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                 decoration: BoxDecoration(
-                                  color: (leaveStatus == 'approved' ? Colors.green : (leaveStatus == 'denied' ? Colors.red : Colors.amber)).withValues(alpha: 0.15),
+                                  color: (leaveStatus == 'approved' ? SoftPalette.green400 : (leaveStatus == 'denied' ? SoftPalette.red400 : SoftPalette.amber200)).withValues(alpha: 0.15),
                                   borderRadius: BorderRadius.circular(8),
                                 ),
                                 child: Text(
@@ -3422,7 +3422,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                                   style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.bold,
-                                    color: leaveStatus == 'approved' ? Colors.green : (leaveStatus == 'denied' ? Colors.red : Colors.amber.shade900),
+                                    color: leaveStatus == 'approved' ? SoftPalette.green400 : (leaveStatus == 'denied' ? SoftPalette.red400 : SoftPalette.orange350),
                                     fontFamily: context.isUrdu ? 'Noori' : null,
                                   ),
                                 ),
@@ -3433,18 +3433,18 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
-                                color: Colors.orange.withValues(alpha: 0.15),
+                                color: SoftPalette.amber300.withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
                                 context.isUrdu ? 'والدین کی درخواست' : 'Parent Requested',
-                                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.orange.shade900, fontFamily: context.isUrdu ? 'Noori' : null),
+                                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: SoftPalette.orange400, fontFamily: context.isUrdu ? 'Noori' : null),
                               ),
                             ),
                         ],
                       ),
                       const SizedBox(height: 12),
-                      Divider(color: Colors.orange.shade200),
+                      Divider(color: context.adapt(SoftPalette.amber200)),
                       const SizedBox(height: 8),
                       _buildParentReplyStatusRow(context, dateStr, statusData),
                     ],
@@ -3456,30 +3456,30 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   width: double.infinity,
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: isDarkMode ? const Color(0xFF2D1216) : const Color(0xFFFFEBEE),
+                    color: isDarkMode ? SoftPalette.red900 : SoftPalette.pink100m,
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: const Color(0xFFDC2626).withValues(alpha: isDarkMode ? 0.4 : 0.3)),
+                    border: Border.all(color: SoftPalette.red500.withValues(alpha: isDarkMode ? 0.4 : 0.3)),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
                         children: [
-                          const Icon(Icons.cancel_rounded, color: Color(0xFFDC2626), size: 22),
+                          Icon(Icons.cancel_rounded, color: context.adapt(SoftPalette.red500), size: 22),
                           const SizedBox(width: 10),
                           Text(
                             context.isUrdu ? 'طالب علم غیر حاضر تھا (Absent)' : 'Student Marked ABSENT',
-                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: const Color(0xFFDC2626), fontFamily: context.isUrdu ? 'Noori' : null),
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.red500), fontFamily: context.isUrdu ? 'Noori' : null),
                           ),
                         ],
                       ),
                       const SizedBox(height: 6),
                       Text(
                         context.isUrdu ? 'طالب علم اس تاریخ کو مدرسہ میں غیر حاضر تھا۔' : 'Child did not attend Madrassa on this date.',
-                        style: TextStyle(fontSize: 12, color: isDarkMode ? const Color(0xFFFCA5A5) : Colors.red.shade900, fontFamily: context.isUrdu ? 'Noori' : null),
+                        style: TextStyle(fontSize: 12, color: isDarkMode ? SoftPalette.red300 : SoftPalette.red550, fontFamily: context.isUrdu ? 'Noori' : null),
                       ),
                       const SizedBox(height: 12),
-                      Divider(color: const Color(0xFFDC2626).withValues(alpha: 0.3)),
+                      Divider(color: context.adapt(SoftPalette.red500).withValues(alpha: 0.3)),
                       const SizedBox(height: 8),
                       _buildParentReplyStatusRow(context, dateStr, statusData),
                     ],
@@ -3497,7 +3497,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       decoration: BoxDecoration(
         color: cardBg,
         borderRadius: BorderRadius.circular(24),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: isDarkMode ? 0.2 : 0.04), blurRadius: 16, offset: const Offset(0, 4))],
+        boxShadow: [BoxShadow(color: SoftPalette.gray900.withValues(alpha: isDarkMode ? 0.2 : 0.04), blurRadius: 16, offset: const Offset(0, 4))],
         border: Border.all(color: borderColor),
       ),
       child: Column(
@@ -3505,7 +3505,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         children: [
           Row(
             children: [
-              const Icon(Icons.info_outline_rounded, color: ParentReportCard.primaryColor, size: 20),
+              Icon(Icons.info_outline_rounded, color: context.adapt(ParentReportCard.primaryColor), size: 20),
               const SizedBox(width: 8),
               Text(
                 context.t("Daily Details"),
@@ -3524,7 +3524,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   const SizedBox(height: 2),
                   Text(
                     '🌙 ${IslamicCalendarHelper.fromGregorian(_selectedDate).format(isUrdu: context.isUrdu)}',
-                    style: const TextStyle(fontSize: 10.5, color: Color(0xFFD4AF37), fontWeight: FontWeight.bold),
+                    style: TextStyle(fontSize: 10.5, color: context.adapt(SoftPalette.yellow300), fontWeight: FontWeight.bold),
                   ),
                 ],
               ),
@@ -3554,7 +3554,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             children: [
               Text(title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: color, fontFamily: context.isUrdu ? 'Noori' : null)),
               const SizedBox(height: 2),
-              Text(subtitle, style: TextStyle(fontSize: 12, color: Colors.grey, fontFamily: context.isUrdu ? 'Noori' : null)),
+              Text(subtitle, style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.gray350), fontFamily: context.isUrdu ? 'Noori' : null)),
             ],
           ),
         ),
@@ -3602,7 +3602,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             ? 'مدرسہ آج "$holidayName" کے باعث بند رہے گا۔'
             : 'Madrassa is closed today due to "$holidayName".',
         icon: Icons.beach_access_rounded,
-        color: const Color(0xFF0D9488),
+        color: SoftPalette.teal500,
         isUrgent: true,
       ));
     }
@@ -3616,7 +3616,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             ? 'مدرسہ کل "$holidayName" کے باعث بند رہے گا۔'
             : 'Madrassa will remain closed tomorrow due to "$holidayName".',
         icon: Icons.event_busy_rounded,
-        color: const Color(0xFFD97706),
+        color: SoftPalette.orange400,
         isUrgent: true,
       ));
     }
@@ -3634,7 +3634,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             ? 'مدرسہ $dateFormatted کو "$holidayName" کے باعث بند رہے گا۔'
             : 'Madrassa will be closed on $dateFormatted due to "$holidayName".',
         icon: Icons.campaign_rounded,
-        color: const Color(0xFF0284C7),
+        color: SoftPalette.sky500,
       ));
     }
 
@@ -3646,7 +3646,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             ? 'آج پی ٹی ایم ہے۔ اپنے بچے کی حفظ و تعلیم کی پیشرفت کے لیے مدرسہ ضرور تشریف لائیں۔'
             : 'Today is PTM day. Please visit the Madrassa to discuss your child\'s Quranic progress.',
         icon: Icons.groups_rounded,
-        color: const Color(0xFFEA580C),
+        color: SoftPalette.orange400,
         isUrgent: true,
       ));
     }
@@ -3659,7 +3659,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             ? 'بچے کی روزانہ کی پڑھائی اور حاضری پر استاد کو جوابی تاثرات بھیجیں۔'
             : 'Please send your reply/feedback to the teacher\'s daily report message.',
         icon: Icons.mark_chat_unread_rounded,
-        color: const Color(0xFF7C3AED),
+        color: SoftPalette.violet550,
         actionLabel: context.isUrdu ? 'جواب دیں' : 'Reply Now',
         onAction: dateStr != null ? () => _showSendReplyDialog(context, dateStr) : null,
       ));
@@ -3673,7 +3673,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             ? '${studentData['name'] ?? 'طالب علم'} کی رخصت کی درخواست منظور نہیں ہو سکی۔ وہ غائب شمار ہوں گے۔'
             : 'Your leave request for ${studentData['name'] ?? 'the student'} was not approved. Marked absent.',
         icon: Icons.error_outline_rounded,
-        color: const Color(0xFFDC2626),
+        color: SoftPalette.red500,
       ));
     }
 
@@ -3746,7 +3746,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                       body,
                       style: TextStyle(
                         fontSize: 12.5,
-                        color: isDarkMode ? Colors.white.withValues(alpha: 0.9) : const Color(0xFF334155),
+                        color: isDarkMode ? SoftPalette.gray50.withValues(alpha: 0.9) : SoftPalette.slate700,
                         height: 1.35,
                         fontFamily: context.isUrdu ? 'Noori' : null,
                       ),
@@ -3769,7 +3769,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 ),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: color,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   elevation: 0,
@@ -3795,7 +3795,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             Align(
               alignment: Alignment.topRight,
               child: IconButton(
-                icon: const Icon(Icons.close, color: Colors.white, size: 30),
+                icon: const Icon(Icons.close, color: SoftPalette.gray50, size: 30),
                 onPressed: () => Navigator.pop(ctx),
               ),
             ),
@@ -3812,11 +3812,11 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 return Container(
                   width: 250,
                   height: 250,
-                  color: const Color(0xFF2E7D69),
+                  color: SoftPalette.teal550,
                   alignment: Alignment.center,
                   child: Text(
                     name.isNotEmpty ? name[0] : '?',
-                    style: const TextStyle(color: Colors.white, fontSize: 80, fontWeight: FontWeight.bold),
+                    style: const TextStyle(color: SoftPalette.gray50, fontSize: 80, fontWeight: FontWeight.bold),
                   ),
                 );
               }(),
@@ -3824,7 +3824,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             const SizedBox(height: 12),
             Text(
               name,
-              style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+              style: const TextStyle(color: SoftPalette.gray50, fontSize: 18, fontWeight: FontWeight.bold),
             ),
           ],
         ),
@@ -3851,7 +3851,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
               title: Row(
                 children: [
-                  const Icon(Icons.picture_as_pdf_rounded, color: Color(0xFF2E7D69)),
+                  Icon(Icons.picture_as_pdf_rounded, color: context.adapt(SoftPalette.teal550)),
                   const SizedBox(width: 10),
                   Text(
                     context.isUrdu ? 'رپورٹ ڈاؤن لوڈ کریں' : 'Download Monthly Report',
@@ -3864,7 +3864,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 children: [
                   Text(
                     context.isUrdu ? 'براہ کرم جس مہینے کی رپورٹ چاہتے ہیں وہ منتخب کریں:' : 'Select the month for your download:',
-                    style: const TextStyle(fontSize: 13, color: Colors.grey),
+                    style: TextStyle(fontSize: 13, color: context.adapt(SoftPalette.gray350)),
                   ),
                   const SizedBox(height: 16),
                   Row(
@@ -3902,14 +3902,14 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 ),
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF2E7D69),
-                    foregroundColor: Colors.white,
+                    backgroundColor: SoftPalette.teal550,
+                    foregroundColor: SoftPalette.gray50,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                   onPressed: () {
                     Navigator.pop(ctx);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(context.t('Preparing your PDF report...')), backgroundColor: const Color(0xFF2E7D69)),
+                    AppToast.showSnackBar(context, 
+                      SnackBar(content: Text(context.t('Preparing your PDF report...')), backgroundColor: SoftPalette.teal550),
                     );
                     MadrassaReportHelper.exportIndividualPdf(
                       config: displayConfig,
@@ -4086,7 +4086,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
               const SizedBox(height: 16),
               Row(
                 children: [
-                  Icon(Icons.settings_rounded, color: isDarkMode ? const Color(0xFF2DD4BF) : const Color(0xFF008080)),
+                  Icon(Icons.settings_rounded, color: isDarkMode ? SoftPalette.teal300 : SoftPalette.teal550),
                   const SizedBox(width: 12),
                   Text(
                     context.isUrdu ? 'اکاؤنٹس اور خصوصیات' : 'Accounts & Settings',
@@ -4121,12 +4121,12 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                       final selected = i == widget.selectedIndex;
                       return ChoiceChip(
                         selected: selected,
-                        selectedColor: isDarkMode ? const Color(0xFF0F6C5A) : const Color(0xFF008080),
-                        backgroundColor: isDarkMode ? const Color(0xFF1E293B) : null,
-                        side: BorderSide(color: isDarkMode ? borderColor : Colors.grey.shade300),
+                        selectedColor: isDarkMode ? SoftPalette.teal600 : SoftPalette.teal550,
+                        backgroundColor: isDarkMode ? SoftPalette.slate800 : null,
+                        side: BorderSide(color: isDarkMode ? borderColor : SoftPalette.gray150),
                         label: Text(
                           d['name'] ?? 'Student ${i + 1}',
-                          style: TextStyle(color: selected ? Colors.white : textPrimary),
+                          style: TextStyle(color: selected ? SoftPalette.gray50 : textPrimary),
                         ),
                         onSelected: (_) {
                           Navigator.pop(ctx);
@@ -4139,7 +4139,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 Divider(height: 24, color: dividerColor),
               ],
               ListTile(
-                leading: Icon(Icons.edit_note_rounded, color: isDarkMode ? const Color(0xFF2DD4BF) : const Color(0xFF008080)),
+                leading: Icon(Icons.edit_note_rounded, color: isDarkMode ? SoftPalette.teal300 : SoftPalette.teal550),
                 title: Text(context.t('Edit Account Details'), style: TextStyle(color: textPrimary)),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -4147,7 +4147,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 },
               ),
               ListTile(
-                leading: Icon(Icons.lock_reset_rounded, color: isDarkMode ? const Color(0xFF2DD4BF) : const Color(0xFF008080)),
+                leading: Icon(Icons.lock_reset_rounded, color: isDarkMode ? SoftPalette.teal300 : SoftPalette.teal550),
                 title: Text(context.t('Change Password'), style: TextStyle(color: textPrimary)),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -4155,7 +4155,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 },
               ),
               ListTile(
-                leading: Icon(Icons.language_rounded, color: isDarkMode ? const Color(0xFF2DD4BF) : const Color(0xFF008080)),
+                leading: Icon(Icons.language_rounded, color: isDarkMode ? SoftPalette.teal300 : SoftPalette.teal550),
                 title: Text(context.isUrdu ? 'English میں تبدیل کریں' : 'اردو میں تبدیل کریں', style: TextStyle(color: textPrimary)),
                 onTap: () {
                   Navigator.pop(ctx);
@@ -4168,8 +4168,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
               if (widget.onLogout != null) ...[
                 Divider(color: dividerColor),
                 ListTile(
-                  leading: const Icon(Icons.logout_rounded, color: Colors.red),
-                  title: Text(context.t('Logout'), style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                  leading: const Icon(Icons.logout_rounded, color: SoftPalette.red400),
+                  title: Text(context.t('Logout'), style: const TextStyle(color: SoftPalette.red400, fontWeight: FontWeight.bold)),
                   onTap: () {
                     Navigator.pop(ctx);
                     widget.onLogout!();
@@ -4216,27 +4216,27 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         gradient: LinearGradient(
           colors: isDarkMode
               ? [
-                  const Color(0xFF0F2E24),
-                  const Color(0xFF134E3C),
-                  const Color(0xFF0D9488),
+                  SoftPalette.emerald800,
+                  SoftPalette.emerald700,
+                  SoftPalette.teal500,
                 ]
               : [
-                  const Color(0xFF0F766E),
-                  const Color(0xFF15803D),
-                  const Color(0xFF1E5B48),
+                  SoftPalette.teal550,
+                  SoftPalette.green550,
+                  SoftPalette.emerald600,
                 ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         border: Border.all(
           color: isDarkMode
-              ? const Color(0xFF2DD4BF).withValues(alpha: 0.25)
-              : Colors.white.withValues(alpha: 0.2),
+              ? SoftPalette.teal300.withValues(alpha: 0.25)
+              : SoftPalette.gray50.withValues(alpha: 0.2),
           width: 1.2,
         ),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF0F766E).withValues(alpha: isDarkMode ? 0.35 : 0.22),
+            color: SoftPalette.teal550.withValues(alpha: isDarkMode ? 0.35 : 0.22),
             blurRadius: 20,
             offset: const Offset(0, 8),
           ),
@@ -4251,9 +4251,9 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
               height: 58,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                border: Border.all(color: const Color(0xFFD4AF37), width: 2.2),
+                border: Border.all(color: SoftPalette.yellow300, width: 2.2),
                 boxShadow: const [
-                  BoxShadow(color: Colors.black26, blurRadius: 8, offset: Offset(0, 3)),
+                  BoxShadow(color: SoftPalette.gray900A26, blurRadius: 8, offset: Offset(0, 3)),
                 ],
               ),
               child: ClipOval(
@@ -4267,11 +4267,11 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                       width: 58,
                       height: 58,
                       errorBuilder: (_, __, ___) => Container(
-                        color: const Color(0xFFDDF4EA),
+                        color: SoftPalette.emerald100,
                         alignment: Alignment.center,
                         child: Text(
                           name.isNotEmpty ? name[0] : '?',
-                          style: const TextStyle(color: Color(0xFF1E5B48), fontSize: 22, fontWeight: FontWeight.bold),
+                          style: const TextStyle(color: SoftPalette.emerald600, fontSize: 22, fontWeight: FontWeight.bold),
                         ),
                       ),
                     );
@@ -4280,11 +4280,11 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                       fit: StackFit.expand,
                       children: [
                         Container(
-                          color: const Color(0xFFDDF4EA),
+                          color: SoftPalette.emerald100,
                           alignment: Alignment.center,
                           child: Text(
                             name.isNotEmpty ? name[0] : '?',
-                            style: const TextStyle(color: Color(0xFF1E5B48), fontSize: 22, fontWeight: FontWeight.bold),
+                            style: const TextStyle(color: SoftPalette.emerald600, fontSize: 22, fontWeight: FontWeight.bold),
                           ),
                         ),
                         Image.network(
@@ -4298,11 +4298,11 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                     );
                   }
                   return Container(
-                    color: const Color(0xFFDDF4EA),
+                    color: SoftPalette.emerald100,
                     alignment: Alignment.center,
                     child: Text(
                       name.isNotEmpty ? name[0] : '?',
-                      style: const TextStyle(color: Color(0xFF1E5B48), fontSize: 22, fontWeight: FontWeight.bold),
+                      style: const TextStyle(color: SoftPalette.emerald600, fontSize: 22, fontWeight: FontWeight.bold),
                     ),
                   );
                 }(),
@@ -4321,7 +4321,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   child: Text(
                     name,
                     style: TextStyle(
-                      color: Colors.white,
+                      color: SoftPalette.gray50,
                       fontSize: isDesktop ? 18 : 15,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 0.2,
@@ -4339,15 +4339,15 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                       decoration: BoxDecoration(
-                        color: isNazraStudent ? const Color(0xFF0D9488).withValues(alpha: 0.35) : Colors.white.withValues(alpha: 0.2),
+                        color: isNazraStudent ? SoftPalette.teal500.withValues(alpha: 0.35) : SoftPalette.gray50.withValues(alpha: 0.2),
                         borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: isNazraStudent ? const Color(0xFF2DD4BF).withValues(alpha: 0.5) : Colors.white.withValues(alpha: 0.3)),
+                        border: Border.all(color: isNazraStudent ? SoftPalette.teal300.withValues(alpha: 0.5) : SoftPalette.gray50.withValues(alpha: 0.3)),
                       ),
                       child: Text(
                         isNazraStudent ? (context.isUrdu ? '📖 ناظرہ' : '📖 Nazra') : (context.isUrdu ? '🕋 حفظ' : '🕋 Hifz'),
                         style: const TextStyle(
                           fontSize: 11,
-                          color: Colors.white,
+                          color: SoftPalette.gray50,
                           fontWeight: FontWeight.bold,
                         ),
                       ),
@@ -4356,15 +4356,15 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.2),
+                          color: SoftPalette.gray50.withValues(alpha: 0.2),
                           borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+                          border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.3)),
                         ),
                         child: Text(
                           '#$rollNo',
                           style: const TextStyle(
                             fontSize: 11,
-                            color: Colors.white,
+                            color: SoftPalette.gray50,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
@@ -4374,7 +4374,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                         context.isUrdu ? 'سرپرست: $guardianDisplay' : 'Guardian: $guardianDisplay',
                         style: TextStyle(
                           fontSize: 12,
-                          color: Colors.white.withValues(alpha: 0.9),
+                          color: SoftPalette.gray50.withValues(alpha: 0.9),
                           fontWeight: FontWeight.w500,
                           fontFamily: context.isUrdu ? 'Noori' : null,
                         ),
@@ -4389,8 +4389,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           if (isAccountView) ...[
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white,
-                foregroundColor: const Color(0xFF0F766E),
+                backgroundColor: SoftPalette.gray50,
+                foregroundColor: SoftPalette.teal550,
                 elevation: 2,
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -4405,10 +4405,10 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           ] else ...[
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.white.withValues(alpha: 0.18),
-                foregroundColor: Colors.white,
+                backgroundColor: SoftPalette.gray50.withValues(alpha: 0.18),
+                foregroundColor: SoftPalette.gray50,
                 shadowColor: Colors.transparent,
-                side: BorderSide(color: Colors.white.withValues(alpha: 0.45)),
+                side: BorderSide(color: SoftPalette.gray50.withValues(alpha: 0.45)),
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
@@ -4421,10 +4421,10 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   holidays ?? [],
                 );
               },
-              icon: const Icon(Icons.file_download_rounded, size: 17, color: Colors.white),
+              icon: const Icon(Icons.file_download_rounded, size: 17, color: SoftPalette.gray50),
               label: Text(
                 context.isUrdu ? 'رپورٹ' : 'Report',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white, fontFamily: context.isUrdu ? 'Noori' : null),
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: SoftPalette.gray50, fontFamily: context.isUrdu ? 'Noori' : null),
               ),
             ),
           ],
@@ -4437,11 +4437,11 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.85),
+        color: SoftPalette.gray50.withValues(alpha: 0.85),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF2E7D69).withValues(alpha: 0.2)),
+        border: Border.all(color: SoftPalette.teal550.withValues(alpha: 0.2)),
         boxShadow: const [
-          BoxShadow(color: Color(0x0F17232A), blurRadius: 4, offset: Offset(0, 2)),
+          BoxShadow(color: SoftPalette.slate800A6, blurRadius: 4, offset: Offset(0, 2)),
         ],
       ),
       child: Row(
@@ -4451,7 +4451,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           const SizedBox(width: 6),
           Text(
             label,
-            style: const TextStyle(color: Color(0xFF17362E), fontSize: 11, fontWeight: FontWeight.bold),
+            style: const TextStyle(color: SoftPalette.teal750m, fontSize: 11, fontWeight: FontWeight.bold),
           ),
         ],
       ),
@@ -4462,10 +4462,10 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: Colors.white.withValues(alpha: 0.15),
+        color: SoftPalette.gray50.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(8),
       ),
-      child: Text(label, style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+      child: Text(label, style: const TextStyle(color: SoftPalette.gray50, fontSize: 11, fontWeight: FontWeight.bold)),
     );
   }
 
@@ -4478,13 +4478,13 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFFD4A017), Color(0xFFE6B422)],
+          colors: [SoftPalette.amber350, SoftPalette.amber300],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(20),
         boxShadow: [
-          BoxShadow(color: const Color(0xFFD4A017).withValues(alpha: 0.3), blurRadius: 16, offset: const Offset(0, 6)),
+          BoxShadow(color: SoftPalette.amber350.withValues(alpha: 0.3), blurRadius: 16, offset: const Offset(0, 6)),
         ],
       ),
       child: Row(
@@ -4492,10 +4492,10 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.25),
+              color: SoftPalette.gray50.withValues(alpha: 0.25),
               shape: BoxShape.circle,
             ),
-            child: const Icon(Icons.auto_awesome, color: Colors.white, size: 24),
+            child: const Icon(Icons.auto_awesome, color: SoftPalette.gray50, size: 24),
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -4504,7 +4504,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
               children: [
                 Text(
                   'MashaAllah! 🌟',
-                  style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
+                  style: TextStyle(color: SoftPalette.gray50, fontSize: 16, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -4515,7 +4515,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                       : (isNazraStudent
                           ? '$studentName is nearing Nazra completion — only $remaining lines remaining!'
                           : '$studentName is nearing Hifz completion — only $remaining lines remaining!'),
-                  style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 13, fontWeight: FontWeight.w500, fontFamily: context.isUrdu ? 'Noori' : null),
+                  style: TextStyle(color: SoftPalette.gray50.withValues(alpha: 0.9), fontSize: 13, fontWeight: FontWeight.w500, fontFamily: context.isUrdu ? 'Noori' : null),
                 ),
               ],
             ),
@@ -4539,7 +4539,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
     bool isHoliday = false,
     bool isPast = false,
   }) {
-    final neutralColor = isDarkMode ? const Color(0xFF64748B) : Colors.grey.shade400;
+    final neutralColor = isDarkMode ? SoftPalette.slate550 : SoftPalette.gray300;
 
     String attValue;
     Color attColor;
@@ -4548,19 +4548,19 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       attColor = neutralColor;
     } else if (isHoliday) {
       attValue = context.isUrdu ? 'تعطیل' : 'Holiday';
-      attColor = const Color(0xFF0D9488); // Teal
+      attColor = SoftPalette.teal500; // Teal
     } else if (currentStatus == 'present') {
       attValue = context.t('Present');
       attColor = ParentReportCard.successColor;
     } else if (currentStatus == 'leave' || currentStatus == 'leave_requested') {
       attValue = context.t('Leave');
-      attColor = Colors.orange;
+      attColor = SoftPalette.amber300;
     } else if (currentStatus == 'absent') {
       attValue = context.t('Absent');
       attColor = ParentReportCard.errorColor;
     } else if (isToday || !isPast) {
       attValue = context.isUrdu ? 'زیر انتظار' : 'Pending';
-      attColor = isDarkMode ? const Color(0xFFFBBF24) : Colors.amber.shade700;
+      attColor = isDarkMode ? SoftPalette.amber200 : SoftPalette.amber300;
     } else {
       attValue = context.t('Absent');
       attColor = ParentReportCard.errorColor;
@@ -4581,13 +4581,13 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       uniformColor = neutralColor;
     } else if (currentStatus == 'leave' || currentStatus == 'leave_requested') {
       uniformValue = context.t('Leave');
-      uniformColor = Colors.orange;
+      uniformColor = SoftPalette.amber300;
     } else if (currentStatus == 'present') {
       uniformValue = uniformOk ? context.t('Clean') : context.t('Unclean');
-      uniformColor = uniformOk ? Colors.blue : ParentReportCard.errorColor;
+      uniformColor = uniformOk ? SoftPalette.blue400 : ParentReportCard.errorColor;
     } else if (isToday || !isPast) {
       uniformValue = context.isUrdu ? 'زیر انتظار' : 'Pending';
-      uniformColor = isDarkMode ? const Color(0xFFFBBF24) : Colors.amber.shade700;
+      uniformColor = isDarkMode ? SoftPalette.amber200 : SoftPalette.amber300;
     } else {
       uniformValue = context.t('Absent');
       uniformColor = ParentReportCard.errorColor;
@@ -4613,7 +4613,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             icon: Icons.mail_rounded,
             label: context.t('Reply'),
             value: replied ? context.t('Sent') : context.t('Pending'),
-            color: replied ? Colors.green : ParentReportCard.errorColor,
+            color: replied ? SoftPalette.green400 : ParentReportCard.errorColor,
             onTap: () => _changeTab(1),
           );
 
@@ -4627,10 +4627,10 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       ptmColor = ParentReportCard.primaryColor;
     } else if (ptmClaimed) {
       ptmValue = context.t('Claim Pending');
-      ptmColor = Colors.teal.shade700;
+      ptmColor = SoftPalette.teal550;
     } else if (isPtmToday) {
       ptmValue = context.t('Today');
-      ptmColor = Colors.orange;
+      ptmColor = SoftPalette.amber300;
     } else if (hasPtmStatus) {
       ptmValue = context.t('Missed');
       ptmColor = ParentReportCard.errorColor;
@@ -4690,7 +4690,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           color: cardBg,
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: color.withValues(alpha: isDarkMode ? 0.35 : 0.25), width: 1.2),
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: isDarkMode ? 0.2 : 0.03), blurRadius: 8, offset: const Offset(0, 2))],
+          boxShadow: [BoxShadow(color: SoftPalette.gray900.withValues(alpha: isDarkMode ? 0.2 : 0.03), blurRadius: 8, offset: const Offset(0, 2))],
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -4718,10 +4718,10 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
 
   Widget _buildTeacherMessageCard({required bool needsReply, required String branchId, required String studentId, required String dateStr}) {
     if (!needsReply) return const SizedBox();
-    final cardBgColor = isDarkMode ? const Color(0xFF1E1B4B) : const Color(0xFF7C3AED).withValues(alpha: 0.08);
-    final borderColor = isDarkMode ? const Color(0xFF4C1D95) : const Color(0xFF7C3AED).withValues(alpha: 0.15);
-    final titleColor = isDarkMode ? const Color(0xFFA78BFA) : const Color(0xFF7C3AED);
-    final subtitleColor = isDarkMode ? const Color(0xFFC4B5FD) : const Color(0xFF7C3AED).withValues(alpha: 0.8);
+    final cardBgColor = isDarkMode ? SoftPalette.indigo800 : SoftPalette.violet550.withValues(alpha: 0.08);
+    final borderColor = isDarkMode ? SoftPalette.violet700 : SoftPalette.violet550.withValues(alpha: 0.15);
+    final titleColor = isDarkMode ? SoftPalette.violet350 : SoftPalette.violet550;
+    final subtitleColor = isDarkMode ? SoftPalette.violet300 : SoftPalette.violet550.withValues(alpha: 0.8);
 
     return Container(
       width: double.infinity,
@@ -4753,15 +4753,15 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               decoration: BoxDecoration(
-                color: const Color(0xFF7C3AED),
+                color: SoftPalette.violet550,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(context.isUrdu ? 'ابھی جواب دیں' : 'Reply Now', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                  Text(context.isUrdu ? 'ابھی جواب دیں' : 'Reply Now', style: const TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 13)),
                   const SizedBox(width: 6),
-                  const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 16),
+                  const Icon(Icons.arrow_forward_rounded, color: SoftPalette.gray50, size: 16),
                 ],
               ),
             ),
@@ -4792,11 +4792,11 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       feeIcon = Icons.thumb_up_alt_rounded;
     } else if (totalSavings > 0) {
       feeMessage = context.isUrdu ? 'آپ نے ${totalSavings.toStringAsFixed(0)} روپے بچائے — حاضری و جواب سے مزید بچت ممکن ہے' : 'You saved Rs. ${totalSavings.toStringAsFixed(0)} — more attendance & replies = more savings';
-      feeMessageColor = Colors.orange.shade700;
+      feeMessageColor = SoftPalette.orange350;
       feeIcon = Icons.trending_up_rounded;
     } else {
       feeMessage = context.isUrdu ? 'حاضری، یونیفارم اور جواب سے فیس میں چھوٹ حاصل کریں' : 'Attendance, uniform & replies earn fee discounts';
-      feeMessageColor = Colors.grey;
+      feeMessageColor = context.adapt(SoftPalette.gray350);
       feeIcon = Icons.info_outline;
     }
 
@@ -4880,7 +4880,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: borderColor),
         boxShadow: [
-          BoxShadow(color: isDarkMode ? Colors.black26 : const Color(0x1417232A), blurRadius: 16, offset: const Offset(0, 4)),
+          BoxShadow(color: isDarkMode ? SoftPalette.gray900A26 : SoftPalette.slate800A8, blurRadius: 16, offset: const Offset(0, 4)),
         ],
       ),
       padding: const EdgeInsets.all(20),
@@ -4895,19 +4895,19 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 style: TextStyle(
                   fontSize: 14,
                   fontWeight: FontWeight.bold,
-                  color: isDarkMode ? const Color(0xFF2DD4BF) : const Color(0xFF1E5B48),
+                  color: isDarkMode ? SoftPalette.teal300 : SoftPalette.emerald600,
                   fontFamily: context.isUrdu ? 'Noori' : null,
                 ),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: isDarkMode ? const Color(0xFF0F3E32) : const Color(0xFFDDF4EA),
+                  color: isDarkMode ? SoftPalette.emerald750 : SoftPalette.emerald100,
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
                   monthYearStr,
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isDarkMode ? const Color(0xFF4ADE80) : const Color(0xFF1E5B48)),
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isDarkMode ? SoftPalette.green300 : SoftPalette.emerald600),
                 ),
               ),
             ],
@@ -4924,21 +4924,21 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: textMuted),
           ),
           const SizedBox(height: 6),
-          _formFeeRow(context.t('Attendance Reward'), '- Rs. ${attSavings.toStringAsFixed(0)}', color: Colors.green),
-          _formFeeRow(context.t('Uniform Cleanliness Reward'), '- Rs. ${uniSavings.toStringAsFixed(0)}', color: Colors.blue),
-          _formFeeRow(context.t('Teacher Reply Response Reward'), '- Rs. ${msgSavings.toStringAsFixed(0)}', color: Colors.purple),
-          _formFeeRow(context.t('PTM Meeting Reward'), '- Rs. ${ptmSavings.toStringAsFixed(0)}', color: Colors.orange),
+          _formFeeRow(context.t('Attendance Reward'), '- Rs. ${attSavings.toStringAsFixed(0)}', color: SoftPalette.green400),
+          _formFeeRow(context.t('Uniform Cleanliness Reward'), '- Rs. ${uniSavings.toStringAsFixed(0)}', color: SoftPalette.blue400),
+          _formFeeRow(context.t('Teacher Reply Response Reward'), '- Rs. ${msgSavings.toStringAsFixed(0)}', color: SoftPalette.purple550),
+          _formFeeRow(context.t('PTM Meeting Reward'), '- Rs. ${ptmSavings.toStringAsFixed(0)}', color: SoftPalette.amber300),
           Divider(height: 20, thickness: 1, color: dividerColor),
-          _formFeeRow(context.t('Total Discounts & Savings'), '- Rs. ${totalSavings.toStringAsFixed(0)}', isBold: true, color: Colors.green),
+          _formFeeRow(context.t('Total Discounts & Savings'), '- Rs. ${totalSavings.toStringAsFixed(0)}', isBold: true, color: SoftPalette.green400),
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               color: isPaid || due <= 0
-                  ? (isDarkMode ? const Color(0xFF0F3E32) : const Color(0xFFDDF4EA))
-                  : (isDarkMode ? const Color(0xFF3B1219) : const Color(0xFFFFF1F1)),
+                  ? (isDarkMode ? SoftPalette.emerald750 : SoftPalette.emerald100)
+                  : (isDarkMode ? SoftPalette.red800 : SoftPalette.red100m),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: isPaid || due <= 0 ? const Color(0xFF22A861) : const Color(0xFFE84B4B)),
+              border: Border.all(color: isPaid || due <= 0 ? SoftPalette.green400 : SoftPalette.red400),
             ),
             child: Column(
               children: [
@@ -4951,8 +4951,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
                         color: isPaid || due <= 0
-                            ? (isDarkMode ? const Color(0xFF4ADE80) : const Color(0xFF1E5B48))
-                            : (isDarkMode ? const Color(0xFFF87171) : const Color(0xFFE84B4B)),
+                            ? (isDarkMode ? SoftPalette.green300 : SoftPalette.emerald600)
+                            : (isDarkMode ? SoftPalette.red350 : SoftPalette.red400),
                         fontFamily: context.isUrdu ? 'Noori' : null,
                       ),
                     ),
@@ -4962,8 +4962,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
                         color: isPaid || due <= 0
-                            ? (isDarkMode ? const Color(0xFF4ADE80) : const Color(0xFF1E5B48))
-                            : (isDarkMode ? const Color(0xFFF87171) : const Color(0xFFE84B4B)),
+                            ? (isDarkMode ? SoftPalette.green300 : SoftPalette.emerald600)
+                            : (isDarkMode ? SoftPalette.red350 : SoftPalette.red400),
                       ),
                     ),
                   ],
@@ -4977,7 +4977,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                       style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
-                        color: isDarkMode ? Colors.white70 : Colors.black87,
+                        color: isDarkMode ? SoftPalette.gray50A70 : SoftPalette.gray900A87,
                         fontFamily: context.isUrdu ? 'Noori' : null,
                       ),
                     ),
@@ -4985,8 +4985,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
                         color: isPaid || due <= 0
-                            ? (isDarkMode ? const Color(0xFF065F46) : const Color(0xFFD1FAE5))
-                            : (isDarkMode ? const Color(0xFF7F1D1D) : const Color(0xFFFEE2E2)),
+                            ? (isDarkMode ? SoftPalette.emerald600 : SoftPalette.emerald100)
+                            : (isDarkMode ? SoftPalette.red700 : SoftPalette.red150m),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
@@ -4999,8 +4999,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
                           color: isPaid || due <= 0
-                              ? (isDarkMode ? const Color(0xFF34D399) : const Color(0xFF047857))
-                              : (isDarkMode ? const Color(0xFFF87171) : const Color(0xFFB91C1C)),
+                              ? (isDarkMode ? SoftPalette.emerald300 : SoftPalette.emerald550)
+                              : (isDarkMode ? SoftPalette.red350 : SoftPalette.red550),
                           fontFamily: context.isUrdu ? 'Noori' : null,
                         ),
                       ),
@@ -5026,7 +5026,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             style: TextStyle(
               fontSize: 12,
               fontWeight: (isHeader || isBold) ? FontWeight.bold : FontWeight.w500,
-              color: isInfo ? (isDarkMode ? const Color(0xFF94A3B8) : Colors.blueGrey) : (color ?? (isDarkMode ? textPrimary : Colors.black87)),
+              color: isInfo ? (isDarkMode ? SoftPalette.slate350 : SoftPalette.slate500) : (color ?? (isDarkMode ? textPrimary : SoftPalette.gray900A87)),
               fontFamily: context.isUrdu ? 'Noori' : null,
             ),
           ),
@@ -5035,7 +5035,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             style: TextStyle(
               fontSize: 12,
               fontWeight: (isHeader || isBold) ? FontWeight.bold : FontWeight.w600,
-              color: color ?? (isInfo ? (isDarkMode ? const Color(0xFF94A3B8) : Colors.blueGrey) : (isDarkMode ? textPrimary : Colors.black87)),
+              color: color ?? (isInfo ? (isDarkMode ? SoftPalette.slate350 : SoftPalette.slate500) : (isDarkMode ? textPrimary : SoftPalette.gray900A87)),
             ),
           ),
         ],
@@ -5071,7 +5071,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         border: Border.all(color: isDarkMode ? borderColor : ParentReportCard.accentColor.withValues(alpha: 0.2)),
         boxShadow: [
           BoxShadow(
-            color: isDarkMode ? Colors.black26 : Colors.black.withValues(alpha: 0.04),
+            color: isDarkMode ? SoftPalette.gray900A26 : SoftPalette.gray900.withValues(alpha: 0.04),
             blurRadius: 16,
             offset: const Offset(0, 6),
           ),
@@ -5118,15 +5118,15 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             width: double.infinity,
             height: 180,
             decoration: BoxDecoration(
-              color: isDarkMode ? const Color(0xFF0F333A) : ParentReportCard.accentColor.withValues(alpha: 0.12),
+              color: isDarkMode ? SoftPalette.slate750 : ParentReportCard.accentColor.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                color: isDarkMode ? const Color(0xFF2DD4BF).withValues(alpha: 0.3) : ParentReportCard.accentColor.withValues(alpha: 0.3),
+                color: isDarkMode ? SoftPalette.teal300.withValues(alpha: 0.3) : ParentReportCard.accentColor.withValues(alpha: 0.3),
                 width: 1.5,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: (isDarkMode ? const Color(0xFF2DD4BF) : ParentReportCard.accentColor).withValues(alpha: 0.12),
+                  color: (isDarkMode ? SoftPalette.teal300 : ParentReportCard.accentColor).withValues(alpha: 0.12),
                   blurRadius: 14,
                   offset: const Offset(0, 4),
                 ),
@@ -5143,7 +5143,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   return Center(
                     child: Icon(
                       Icons.menu_book_rounded,
-                      color: isDarkMode ? const Color(0xFF2DD4BF) : ParentReportCard.accentColor,
+                      color: isDarkMode ? SoftPalette.teal300 : ParentReportCard.accentColor,
                       size: 64,
                     ),
                   );
@@ -5165,7 +5165,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                     child: CircularProgressIndicator(
                       value: juzPercentage / 100,
                       strokeWidth: 8,
-                      backgroundColor: isDarkMode ? const Color(0xFF334155) : Colors.grey.shade100,
+                      backgroundColor: isDarkMode ? SoftPalette.slate700 : SoftPalette.gray100,
                       color: ParentReportCard.accentColor,
                     ),
                   ),
@@ -5177,7 +5177,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                         style: TextStyle(
                           fontWeight: FontWeight.w800,
                           fontSize: 16,
-                          color: isDarkMode ? const Color(0xFF2DD4BF) : ParentReportCard.primaryColor,
+                          color: isDarkMode ? SoftPalette.teal300 : ParentReportCard.primaryColor,
                         ),
                       ),
                       Text(
@@ -5208,7 +5208,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                       style: TextStyle(
                         fontWeight: FontWeight.w800,
                         fontSize: 14.5,
-                        color: isDarkMode ? const Color(0xFF2DD4BF) : ParentReportCard.primaryColor,
+                        color: isDarkMode ? SoftPalette.teal300 : ParentReportCard.primaryColor,
                         fontFamily: context.isUrdu ? 'Noori' : null,
                       ),
                     ),
@@ -5271,7 +5271,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   sub: (selectedDateLog['attendance'] == 'leave' || selectedDateLog['attendance'] == 'leave_requested')
                       ? (context.isUrdu ? 'رخصت پر مطلع' : 'On Leave')
                       : (overallPace > 0 ? '${overallPace.toStringAsFixed(1)} lines/day avg' : (context.isUrdu ? 'روزانہ کارکردگی' : 'Daily Progress')),
-                  color: isDarkMode ? const Color(0xFF2DD4BF) : ParentReportCard.primaryColor,
+                  color: isDarkMode ? SoftPalette.teal300 : ParentReportCard.primaryColor,
                 ),
               ),
               const SizedBox(width: 8),
@@ -5303,7 +5303,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: isDarkMode ? const Color(0xFF0F172A) : color.withValues(alpha: 0.06),
+        color: isDarkMode ? SoftPalette.slate900 : color.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: isDarkMode ? borderColor : color.withValues(alpha: 0.15)),
         boxShadow: [
@@ -5318,10 +5318,10 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(label, style: TextStyle(fontSize: 10, color: ParentReportCard.textMutedColor, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null)),
+                Text(label, style: TextStyle(fontSize: 10, color: context.adapt(ParentReportCard.textMutedColor), fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null)),
                 const SizedBox(height: 2),
                 Text(value, style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: color, fontFamily: context.isUrdu ? 'Noori' : null)),
-                Text(sub, style: TextStyle(fontSize: 10, color: ParentReportCard.textMutedColor, fontFamily: context.isUrdu ? 'Noori' : null)),
+                Text(sub, style: TextStyle(fontSize: 10, color: context.adapt(ParentReportCard.textMutedColor), fontFamily: context.isUrdu ? 'Noori' : null)),
               ],
             ),
           ),
@@ -5403,7 +5403,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             children: [
               Text(
                 context.isUrdu ? 'مکمل فیس کی تفصیلات دیکھیں ←' : 'View Detailed Fee Statement →',
-                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: ParentReportCard.primaryColor, fontFamily: context.isUrdu ? 'Noori' : null),
+                style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(ParentReportCard.primaryColor), fontFamily: context.isUrdu ? 'Noori' : null),
               ),
             ],
           ),
@@ -5458,7 +5458,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
               context.isUrdu
                   ? (isNazraStudent ? 'اس مہینے کی پیش رفت: +$monthGain لائنیں ناظرہ پڑھیں' : 'اس مہینے کی پیش رفت: +$monthGain لائنیں حفظ کیں')
                   : (isNazraStudent ? 'Progress this month: +$monthGain lines read' : 'Progress this month: +$monthGain lines memorized'),
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: ParentReportCard.primaryColor, fontFamily: context.isUrdu ? 'Noori' : null),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: context.adapt(ParentReportCard.primaryColor), fontFamily: context.isUrdu ? 'Noori' : null),
             ),
           ),
         ],
@@ -5473,7 +5473,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             label: context.t('Weekly Pace'),
             value: context.isUrdu ? '${paceWeekly.toStringAsFixed(1)} لائنیں' : '${paceWeekly.toStringAsFixed(1)} lines',
             sub: context.isUrdu ? '${overallPace.toStringAsFixed(1)} لائنیں/دن' : '${overallPace.toStringAsFixed(1)} lines/day',
-            color: ParentReportCard.primaryColor,
+            color: context.adapt(ParentReportCard.primaryColor),
           ),
         ),
         const SizedBox(width: 12),
@@ -5539,13 +5539,13 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                       margin: const EdgeInsets.only(bottom: 8),
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.amber.shade50,
+                        color: context.adapt(SoftPalette.yellow50),
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.amber.shade200),
+                        border: Border.all(color: context.adapt(SoftPalette.yellow150)),
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.event_repeat_rounded, color: Colors.amber),
+                          Icon(Icons.event_repeat_rounded, color: context.adapt(SoftPalette.amber200)),
                           const SizedBox(width: 16),
                           Expanded(
                             child: Column(
@@ -5553,11 +5553,11 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                               children: [
                                 Text(
                                   context.isUrdu ? 'پی ٹی ایم دوبارہ شیڈول: ${log['oldValue']} → ${log['newValue']}' : 'PTM Rescheduled: ${log['oldValue']} → ${log['newValue']}',
-                                  style: TextStyle(fontWeight: FontWeight.bold, color: Colors.amber.shade900, fontFamily: context.isUrdu ? 'Noori' : null),
+                                  style: TextStyle(fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.orange350), fontFamily: context.isUrdu ? 'Noori' : null),
                                 ),
                                 Text(
                                   context.t('Parent Teacher Meeting date has been updated.'),
-                                  style: TextStyle(fontSize: 12, color: Colors.amber.shade700, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
+                                  style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.amber300), fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
                                 ),
                               ],
                             ),
@@ -5598,7 +5598,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         border: Border.all(color: borderColor),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDarkMode ? 0.2 : 0.04),
+            color: SoftPalette.gray900.withValues(alpha: isDarkMode ? 0.2 : 0.04),
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
@@ -5613,8 +5613,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
               _SectionTitle(label: context.t('Attendance Calendar'), icon: Icons.calendar_month),
               TextButton.icon(
                 onPressed: () => _changeTab(1),
-                icon: Icon(Icons.arrow_forward_rounded, size: 16, color: isDarkMode ? const Color(0xFF2DD4BF) : null),
-                label: Text(context.isUrdu ? 'تفصیل' : 'Details', style: TextStyle(color: isDarkMode ? const Color(0xFF2DD4BF) : null, fontFamily: context.isUrdu ? 'Noori' : null)),
+                icon: Icon(Icons.arrow_forward_rounded, size: 16, color: isDarkMode ? SoftPalette.teal300 : null),
+                label: Text(context.isUrdu ? 'تفصیل' : 'Details', style: TextStyle(color: isDarkMode ? SoftPalette.teal300 : null, fontFamily: context.isUrdu ? 'Noori' : null)),
               ),
             ],
           ),
@@ -5694,7 +5694,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                         border: Border.all(color: borderColor),
                         boxShadow: [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: isDarkMode ? 0.2 : 0.04),
+                            color: SoftPalette.gray900.withValues(alpha: isDarkMode ? 0.2 : 0.04),
                             blurRadius: 16,
                             offset: const Offset(0, 4),
                           ),
@@ -5705,7 +5705,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                         children: [
                           Row(
                             children: [
-                              const Icon(Icons.dashboard_outlined, color: ParentReportCard.primaryColor, size: 18),
+                              Icon(Icons.dashboard_outlined, color: context.adapt(ParentReportCard.primaryColor), size: 18),
                               const SizedBox(width: 8),
                               Text(
                                 context.t("Daily Status Overview"),
@@ -5885,15 +5885,15 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: isOnTrackForGift
-              ? [const Color(0xFF14532D), const Color(0xFF15803D)]
-              : [const Color(0xFF7C2D12), const Color(0xFF9A3412)],
+              ? [SoftPalette.green700, SoftPalette.green550]
+              : [SoftPalette.orange700, SoftPalette.red600],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: (isOnTrackForGift ? const Color(0xFF15803D) : const Color(0xFF9A3412)).withValues(alpha: 0.25),
+            color: (isOnTrackForGift ? SoftPalette.green550 : SoftPalette.red600).withValues(alpha: 0.25),
             blurRadius: 16,
             offset: const Offset(0, 6),
           ),
@@ -5907,7 +5907,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.2),
+                  color: SoftPalette.gray50.withValues(alpha: 0.2),
                   shape: BoxShape.circle,
                 ),
                 child: const Text('🎁', style: TextStyle(fontSize: 22)),
@@ -5924,7 +5924,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                       style: TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,
-                        color: Colors.white,
+                        color: SoftPalette.gray50,
                         fontFamily: context.isUrdu ? 'Noori' : null,
                       ),
                     ),
@@ -5937,7 +5937,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                           : (context.isUrdu 
                               ? 'شمولیت کے 2 سال کے اندر حفظ مکمل کرنے والے طلبا کے لیے خاص انعام!' 
                               : 'Special prize & honor gift for completing Hifz within 2 years of joining!'),
-                      style: TextStyle(fontSize: 11, color: Colors.white70, fontFamily: context.isUrdu ? 'Noori' : null),
+                      style: TextStyle(fontSize: 11, color: SoftPalette.gray50A70, fontFamily: context.isUrdu ? 'Noori' : null),
                     ),
                   ],
                 ),
@@ -5945,7 +5945,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             ],
           ),
           const SizedBox(height: 20),
-          const Divider(color: Colors.white24),
+          const Divider(color: SoftPalette.gray50A24),
           const SizedBox(height: 16),
           // Metrics Row
           Row(
@@ -5954,19 +5954,19 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 child: Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.12),
+                    color: SoftPalette.gray50.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Column(
                     children: [
                       Text(
                         context.isUrdu ? 'باقی دن' : 'Days Remaining',
-                        style: TextStyle(fontSize: 10, color: Colors.white70, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
+                        style: TextStyle(fontSize: 10, color: SoftPalette.gray50A70, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         daysLeftForGiftGoal > 0 ? '$daysLeftForGiftGoal ${context.isUrdu ? "دن" : "days"}' : (context.isUrdu ? 'مکمل' : 'Passed'),
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: SoftPalette.gray50),
                       ),
                     ],
                   ),
@@ -5977,19 +5977,19 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 child: Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.12),
+                    color: SoftPalette.gray50.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Column(
                     children: [
                       Text(
                         context.isUrdu ? 'مطلوبہ روزانہ رفتار' : 'Required Daily Pace',
-                        style: TextStyle(fontSize: 10, color: Colors.white70, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
+                        style: TextStyle(fontSize: 10, color: SoftPalette.gray50A70, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         isCompletedHifz ? '0' : '${requiredDailyForGift.toStringAsFixed(1)} ${context.isUrdu ? "لائنیں" : "lines/day"}',
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.amberAccent),
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: SoftPalette.yellow200),
                       ),
                     ],
                   ),
@@ -6000,19 +6000,19 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 child: Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.12),
+                    color: SoftPalette.gray50.withValues(alpha: 0.12),
                     borderRadius: BorderRadius.circular(16),
                   ),
                   child: Column(
                     children: [
                       Text(
                         context.isUrdu ? 'مطلوبہ ہفتہ وار' : 'Required Weekly',
-                        style: TextStyle(fontSize: 10, color: Colors.white70, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
+                        style: TextStyle(fontSize: 10, color: SoftPalette.gray50A70, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         isCompletedHifz ? '0' : '${requiredWeeklyForGift.toStringAsFixed(0)} ${context.isUrdu ? "لائنیں" : "lines/wk"}',
-                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
+                        style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: SoftPalette.gray50),
                       ),
                     ],
                   ),
@@ -6028,12 +6028,12 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             child: Container(
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: SoftPalette.gray50,
                 borderRadius: BorderRadius.circular(16),
                 boxShadow: isCompletedHifz
                     ? [
                         BoxShadow(
-                          color: const Color(0xFFFBBF24).withValues(alpha: 0.5),
+                          color: SoftPalette.amber200.withValues(alpha: 0.5),
                           blurRadius: 10,
                           spreadRadius: 1,
                         ),
@@ -6044,7 +6044,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 children: [
                   Icon(
                     isOnTrackForGift ? Icons.emoji_events_rounded : Icons.track_changes_rounded,
-                    color: isOnTrackForGift ? const Color(0xFFD4A017) : const Color(0xFFD97706),
+                    color: isOnTrackForGift ? SoftPalette.amber350 : SoftPalette.orange400,
                     size: 24,
                   ),
                   const SizedBox(width: 12),
@@ -6067,7 +6067,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.bold,
-                            color: isOnTrackForGift ? const Color(0xFF14532D) : const Color(0xFF7C2D12),
+                            color: isOnTrackForGift ? SoftPalette.green700 : SoftPalette.orange700,
                             fontFamily: context.isUrdu ? 'Noori' : null,
                           ),
                         ),
@@ -6090,7 +6090,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                                           : 'Need ${requiredDailyForGift.toStringAsFixed(1)} lines/day (${requiredWeeklyForGift.toStringAsFixed(0)} lines/week) over the next $daysLeftForGiftGoal days to win the gift!'))),
                           style: TextStyle(
                             fontSize: 11,
-                            color: Colors.grey.shade800,
+                            color: SoftPalette.gray700,
                             fontFamily: context.isUrdu ? 'Noori' : null,
                           ),
                         ),
@@ -6098,7 +6098,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                     ),
                   ),
                   const SizedBox(width: 8),
-                  const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: Color(0xFFD97706)),
+                  const Icon(Icons.arrow_forward_ios_rounded, size: 14, color: SoftPalette.orange400),
                 ],
               ),
             ),
@@ -6142,7 +6142,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         color: ParentReportCard.primaryColor,
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.08), blurRadius: 16, offset: const Offset(0, 6))
+          BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.08), blurRadius: 16, offset: const Offset(0, 6))
         ],
       ),
       child: Column(
@@ -6151,7 +6151,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             isNazraStudent
                 ? (context.isUrdu ? 'قرآن مجید ناظرہ کی مجموعی پیشرفت' : 'Overall Quran Majeed Nazra Progress')
                 : context.t('Overall Quran Majeed Memorization Progress'),
-            style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500, fontFamily: context.isUrdu ? 'Noori' : null),
+            style: TextStyle(color: SoftPalette.gray50A70, fontSize: 13, fontWeight: FontWeight.w500, fontFamily: context.isUrdu ? 'Noori' : null),
           ),
           const SizedBox(height: 20),
           Stack(
@@ -6164,24 +6164,24 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   value: (currentTotalLines / total).clamp(0.0, 1.0),
                   strokeWidth: 10,
                   color: ParentReportCard.accentColor,
-                  backgroundColor: Colors.white12,
+                  backgroundColor: SoftPalette.gray50A12,
                 ),
               ),
               Text(
                 '$pct%',
-                style: const TextStyle(color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold),
+                style: const TextStyle(color: SoftPalette.gray50, fontSize: 22, fontWeight: FontWeight.bold),
               ),
             ],
           ),
           const SizedBox(height: 20),
           Text(
             context.isUrdu ? 'کل $total میں سے لائن $currentTotalLines مکمل' : 'Line $currentTotalLines of $total completed',
-            style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
+            style: TextStyle(color: SoftPalette.gray50, fontSize: 16, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
           ),
           const SizedBox(height: 4),
           Text(
             context.isUrdu ? '$remainingLines لائنیں باقی ہیں' : '$remainingLines lines remaining',
-            style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 13, fontFamily: context.isUrdu ? 'Noori' : null),
+            style: TextStyle(color: SoftPalette.gray50.withOpacity(0.7), fontSize: 13, fontFamily: context.isUrdu ? 'Noori' : null),
           ),
         ],
       ),
@@ -6204,7 +6204,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
               context.isUrdu
                   ? (isNazraStudent ? 'اس مہینے کی پیش رفت: +$monthGain لائنیں ناظرہ پڑھیں' : 'اس مہینے کی پیش رفت: +$monthGain لائنیں حفظ کیں')
                   : (isNazraStudent ? 'Progress this month: +$monthGain lines read' : 'Progress this month: +$monthGain lines memorized'),
-              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: ParentReportCard.primaryColor, fontFamily: context.isUrdu ? 'Noori' : null),
+              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: context.adapt(ParentReportCard.primaryColor), fontFamily: context.isUrdu ? 'Noori' : null),
             ),
           ),
         ],
@@ -6293,7 +6293,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: borderColor),
         boxShadow: [
-          BoxShadow(color: isDarkMode ? Colors.black26 : const Color(0x1417232A), blurRadius: 20, offset: const Offset(0, 8)),
+          BoxShadow(color: isDarkMode ? SoftPalette.gray900A26 : SoftPalette.slate800A8, blurRadius: 20, offset: const Offset(0, 8)),
         ],
       ),
       child: Column(
@@ -6301,14 +6301,14 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         children: [
           Row(
             children: [
-              Icon(Icons.list_alt_rounded, color: isDarkMode ? const Color(0xFF2DD4BF) : const Color(0xFF1E5B48)),
+              Icon(Icons.list_alt_rounded, color: isDarkMode ? SoftPalette.teal300 : SoftPalette.emerald600),
               const SizedBox(width: 10),
               Text(
                 context.isUrdu ? 'روزانہ کی حاضری اور بچت کی تفصیل' : 'Daily Attendance & Savings Ledger',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
-                  color: isDarkMode ? const Color(0xFF2DD4BF) : const Color(0xFF1E5B48),
+                  color: isDarkMode ? SoftPalette.teal300 : SoftPalette.emerald600,
                   fontFamily: context.isUrdu ? 'Noori' : null,
                 ),
               ),
@@ -6443,15 +6443,15 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       final isFuture = dateOnly.isAfter(todayOnly);
 
       String attText = '';
-      Color attColor = Colors.grey;
+      Color attColor = context.adapt(SoftPalette.gray350);
       IconData attIcon = Icons.help_outline_rounded;
       
       String uniText = '';
-      Color uniColor = Colors.grey;
+      Color uniColor = context.adapt(SoftPalette.gray350);
       IconData uniIcon = Icons.help_outline_rounded;
 
       String replyText = '';
-      Color replyColor = Colors.grey;
+      Color replyColor = context.adapt(SoftPalette.gray350);
       IconData replyIcon = Icons.help_outline_rounded;
 
       double dailyEarned = 0.0;
@@ -6463,31 +6463,31 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
 
       if (isFuture) {
         attText = context.isUrdu ? 'مستقبل' : 'Future';
-        attColor = Colors.blueGrey;
+        attColor = context.adapt(SoftPalette.slate500);
         attIcon = Icons.schedule_rounded;
 
         uniText = '—';
-        uniColor = Colors.grey;
+        uniColor = context.adapt(SoftPalette.gray350);
         uniIcon = Icons.remove;
 
         replyText = '—';
-        replyColor = Colors.grey;
+        replyColor = context.adapt(SoftPalette.gray350);
         replyIcon = Icons.remove;
       } else {
         final att = sLog?['attendance']?.toString();
         if (att == 'present') {
           attText = context.isUrdu ? 'حاضر' : 'Present';
-          attColor = const Color(0xFF22A861);
+          attColor = SoftPalette.green400;
           attIcon = Icons.check_circle_rounded;
           dailyEarned += dailyAttReward;
         } else if (att == 'leave') {
           attText = context.isUrdu ? 'رخصت' : 'Leave';
-          attColor = Colors.amber.shade700;
+          attColor = SoftPalette.amber300;
           attIcon = Icons.offline_pin_rounded;
           dailyEarned += dailyAttReward;
         } else {
           attText = context.isUrdu ? 'غیر حاضر' : 'Absent';
-          attColor = const Color(0xFFE84B4B);
+          attColor = SoftPalette.red400;
           attIcon = Icons.cancel_rounded;
         }
 
@@ -6495,34 +6495,34 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         if (att == 'present') {
           if (isClean) {
             uniText = context.isUrdu ? 'صاف' : 'Clean';
-            uniColor = const Color(0xFF3A8DFF);
+            uniColor = SoftPalette.blue400;
             uniIcon = Icons.dry_cleaning_rounded;
             dailyEarned += dailyUniReward;
           } else {
             uniText = context.isUrdu ? 'غیر صاف' : 'Dirty';
-            uniColor = const Color(0xFFE84B4B);
+            uniColor = SoftPalette.red400;
             uniIcon = Icons.warning_amber_rounded;
           }
         } else if (att == 'leave') {
           uniText = context.isUrdu ? 'رخصت' : 'Leave';
-          uniColor = Colors.amber.shade700;
+          uniColor = SoftPalette.amber300;
           uniIcon = Icons.offline_pin_rounded;
           dailyEarned += dailyUniReward;
         } else {
           uniText = context.isUrdu ? 'غیر حاضر' : 'Absent';
-          uniColor = const Color(0xFFE84B4B);
+          uniColor = SoftPalette.red400;
           uniIcon = Icons.cancel_rounded;
         }
 
         final replied = sLog?['parentReplied'] == true;
         if (replied) {
           replyText = context.isUrdu ? 'جواب دیا' : 'Replied';
-          replyColor = const Color(0xFF8A3FFC);
+          replyColor = SoftPalette.violet500;
           replyIcon = Icons.chat_bubble_rounded;
           dailyEarned += dailyMsgReward;
         } else {
           replyText = context.isUrdu ? 'کوئی جواب نہیں' : 'No Reply';
-          replyColor = const Color(0xFFE84B4B);
+          replyColor = SoftPalette.red400;
           replyIcon = Icons.speaker_notes_off_rounded;
         }
       }
@@ -6532,7 +6532,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           margin: const EdgeInsets.only(bottom: 8),
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            color: isDarkMode ? const Color(0xFF0F172A) : const Color(0xFFFCFCFA),
+            color: isDarkMode ? SoftPalette.slate900 : SoftPalette.gray50,
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: borderColor),
           ),
@@ -6545,7 +6545,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   children: [
                     Text(
                       DateFormat(context.isUrdu ? 'dd MMM' : 'dd MMMM').format(date),
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: isDarkMode ? const Color(0xFF2DD4BF) : const Color(0xFF1E5B48)),
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: isDarkMode ? SoftPalette.teal300 : SoftPalette.emerald600),
                     ),
                     Text(
                       DateFormat('EEEE').format(date),
@@ -6608,7 +6608,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                     style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 13,
-                      color: dailyEarned > 0 ? const Color(0xFF22A861) : Colors.red.shade400,
+                      color: dailyEarned > 0 ? SoftPalette.green400 : SoftPalette.red400,
                     ),
                   ),
                 ),
@@ -6651,7 +6651,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isFinal ? color.withOpacity(isDarkMode ? 0.15 : 0.08) : (isDarkMode ? const Color(0xFF0F172A) : Colors.transparent),
+        color: isFinal ? color.withOpacity(isDarkMode ? 0.15 : 0.08) : (isDarkMode ? SoftPalette.slate900 : Colors.transparent),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: isFinal ? color.withOpacity(isDarkMode ? 0.35 : 0.2) : borderColor),
       ),
@@ -6700,7 +6700,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: borderColor),
         boxShadow: [
-          BoxShadow(color: isDarkMode ? Colors.black26 : Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4))
+          BoxShadow(color: isDarkMode ? SoftPalette.gray900A26 : SoftPalette.gray900.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4))
         ],
       ),
       child: Column(
@@ -6708,7 +6708,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         children: [
           Row(
             children: [
-              Icon(Icons.badge_outlined, color: isDarkMode ? const Color(0xFF2DD4BF) : const Color(0xFF14532D)),
+              Icon(Icons.badge_outlined, color: isDarkMode ? SoftPalette.teal300 : SoftPalette.green700),
               const SizedBox(width: 12),
               Text(
                 context.t('Personal Information'),
@@ -6772,7 +6772,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: borderColor),
         boxShadow: [
-          BoxShadow(color: isDarkMode ? Colors.black26 : Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4))
+          BoxShadow(color: isDarkMode ? SoftPalette.gray900A26 : SoftPalette.gray900.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4))
         ],
       ),
       child: Column(
@@ -6783,7 +6783,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             children: [
               Row(
                 children: [
-                  Icon(Icons.family_restroom, color: isDarkMode ? const Color(0xFF2DD4BF) : const Color(0xFF14532D)),
+                  Icon(Icons.family_restroom, color: isDarkMode ? SoftPalette.teal300 : SoftPalette.green700),
                   const SizedBox(width: 12),
                   Text(
                     context.t('Guardian Details'),
@@ -6797,18 +6797,18 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: (isDarkMode ? const Color(0xFF2DD4BF) : const Color(0xFF14532D)).withValues(alpha: isDarkMode ? 0.15 : 0.08),
+                    color: (isDarkMode ? SoftPalette.teal300 : SoftPalette.green700).withValues(alpha: isDarkMode ? 0.15 : 0.08),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: (isDarkMode ? const Color(0xFF2DD4BF) : const Color(0xFF14532D)).withValues(alpha: isDarkMode ? 0.35 : 0.2)),
+                    border: Border.all(color: (isDarkMode ? SoftPalette.teal300 : SoftPalette.green700).withValues(alpha: isDarkMode ? 0.35 : 0.2)),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.edit_rounded, size: 14, color: isDarkMode ? const Color(0xFF2DD4BF) : const Color(0xFF14532D)),
+                      Icon(Icons.edit_rounded, size: 14, color: isDarkMode ? SoftPalette.teal300 : SoftPalette.green700),
                       const SizedBox(width: 4),
                       Text(
                         context.isUrdu ? 'ترمیم کریں' : 'Edit',
-                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDarkMode ? const Color(0xFF2DD4BF) : const Color(0xFF14532D), fontFamily: context.isUrdu ? 'Noori' : null),
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDarkMode ? SoftPalette.teal300 : SoftPalette.green700, fontFamily: context.isUrdu ? 'Noori' : null),
                       ),
                     ],
                   ),
@@ -6837,7 +6837,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: borderColor),
         boxShadow: [
-          BoxShadow(color: isDarkMode ? Colors.black26 : Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4))
+          BoxShadow(color: isDarkMode ? SoftPalette.gray900A26 : SoftPalette.gray900.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4))
         ],
       ),
       child: Column(
@@ -6845,7 +6845,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         children: [
           Row(
             children: [
-              Icon(Icons.folder_shared_outlined, color: isDarkMode ? const Color(0xFF2DD4BF) : const Color(0xFF14532D)),
+              Icon(Icons.folder_shared_outlined, color: isDarkMode ? SoftPalette.teal300 : SoftPalette.green700),
               const SizedBox(width: 12),
               Expanded(
                 child: Text(
@@ -6863,12 +6863,12 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: isDarkMode ? const Color(0xFF334155) : Colors.grey.shade100,
+                  color: isDarkMode ? SoftPalette.slate700 : SoftPalette.gray100,
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
                   'Read Only',
-                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: isDarkMode ? const Color(0xFF94A3B8) : Colors.grey),
+                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: isDarkMode ? SoftPalette.slate350 : SoftPalette.gray350),
                 ),
               ),
             ],
@@ -6899,7 +6899,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: borderColor),
         boxShadow: [
-          BoxShadow(color: isDarkMode ? Colors.black26 : Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4))
+          BoxShadow(color: isDarkMode ? SoftPalette.gray900A26 : SoftPalette.gray900.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4))
         ],
       ),
       child: Column(
@@ -6907,7 +6907,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         children: [
           Row(
             children: [
-              Icon(Icons.language, color: isDarkMode ? const Color(0xFF2DD4BF) : const Color(0xFF14532D)),
+              Icon(Icons.language, color: isDarkMode ? SoftPalette.teal300 : SoftPalette.green700),
               const SizedBox(width: 12),
               Text(
                 context.t('Change Language'),
@@ -6963,7 +6963,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: borderColor),
         boxShadow: [
-          BoxShadow(color: isDarkMode ? Colors.black26 : Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4))
+          BoxShadow(color: isDarkMode ? SoftPalette.gray900A26 : SoftPalette.gray900.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4))
         ],
       ),
       child: Column(
@@ -6971,7 +6971,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         children: [
           Row(
             children: [
-              Icon(Icons.lock_reset_rounded, color: isDarkMode ? const Color(0xFF2DD4BF) : const Color(0xFF14532D)),
+              Icon(Icons.lock_reset_rounded, color: isDarkMode ? SoftPalette.teal300 : SoftPalette.green700),
               const SizedBox(width: 12),
               Text(
                 context.t('Change Password'),
@@ -7009,8 +7009,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 ),
               ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: isDarkMode ? const Color(0xFF0F6C5A) : const Color(0xFF14532D),
-                foregroundColor: Colors.white,
+                backgroundColor: isDarkMode ? SoftPalette.teal600 : SoftPalette.green700,
+                foregroundColor: SoftPalette.gray50,
                 padding: const EdgeInsets.symmetric(vertical: 14),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               ),
@@ -7030,7 +7030,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: borderColor),
         boxShadow: [
-          BoxShadow(color: isDarkMode ? Colors.black26 : Colors.black.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4))
+          BoxShadow(color: isDarkMode ? SoftPalette.gray900A26 : SoftPalette.gray900.withValues(alpha: 0.02), blurRadius: 10, offset: const Offset(0, 4))
         ],
       ),
       child: _buildTimeline(auditList),
@@ -7320,13 +7320,13 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
             margin: const EdgeInsets.only(bottom: 12),
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
-              color: isDarkMode ? const Color(0xFF451A03).withValues(alpha: 0.6) : Colors.amber.shade50,
+              color: isDarkMode ? SoftPalette.orange800.withValues(alpha: 0.6) : SoftPalette.yellow50,
               borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: isDarkMode ? const Color(0xFFB45309) : Colors.amber.shade400, width: 1.2),
+              border: Border.all(color: isDarkMode ? SoftPalette.orange500 : SoftPalette.yellow200, width: 1.2),
             ),
             child: Row(
               children: [
-                Icon(Icons.warning_amber_rounded, color: isDarkMode ? const Color(0xFFFBBF24) : Colors.amber.shade900, size: 22),
+                Icon(Icons.warning_amber_rounded, color: isDarkMode ? SoftPalette.amber200 : SoftPalette.orange350, size: 22),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Column(
@@ -7337,7 +7337,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                         style: TextStyle(
                           fontWeight: FontWeight.bold,
                           fontSize: 12,
-                          color: isDarkMode ? const Color(0xFFFBBF24) : Colors.amber.shade900,
+                          color: isDarkMode ? SoftPalette.amber200 : SoftPalette.orange350,
                           fontFamily: context.isUrdu ? 'Noori' : null,
                         ),
                       ),
@@ -7349,7 +7349,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                         style: TextStyle(
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
-                          color: isDarkMode ? Colors.amber.shade200 : Colors.amber.shade900,
+                          color: isDarkMode ? SoftPalette.yellow150 : SoftPalette.orange350,
                         ),
                       ),
                     ],
@@ -7364,17 +7364,17 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           padding: const EdgeInsets.all(22),
           decoration: BoxDecoration(
             color: isCurrentMonthPaid
-                ? (isDarkMode ? const Color(0xFF0F3E2E) : ParentReportCard.successColor.withValues(alpha: 0.08))
+                ? (isDarkMode ? SoftPalette.emerald750 : ParentReportCard.successColor.withValues(alpha: 0.08))
                 : (due > 0
-                    ? (isDarkMode ? const Color(0xFF3B1219) : ParentReportCard.errorColor.withValues(alpha: 0.08))
-                    : (isDarkMode ? const Color(0xFF0F3E2E) : ParentReportCard.successColor.withValues(alpha: 0.08))),
+                    ? (isDarkMode ? SoftPalette.red800 : ParentReportCard.errorColor.withValues(alpha: 0.08))
+                    : (isDarkMode ? SoftPalette.emerald750 : ParentReportCard.successColor.withValues(alpha: 0.08))),
             borderRadius: BorderRadius.circular(24),
             border: Border.all(
               color: isCurrentMonthPaid
-                  ? (isDarkMode ? const Color(0xFF4ADE80).withValues(alpha: 0.4) : ParentReportCard.successColor.withValues(alpha: 0.3))
+                  ? (isDarkMode ? SoftPalette.green300.withValues(alpha: 0.4) : ParentReportCard.successColor.withValues(alpha: 0.3))
                   : (due > 0
-                      ? (isDarkMode ? const Color(0xFFF87171).withValues(alpha: 0.3) : ParentReportCard.errorColor.withValues(alpha: 0.2))
-                      : (isDarkMode ? const Color(0xFF4ADE80).withValues(alpha: 0.3) : ParentReportCard.successColor.withValues(alpha: 0.2))),
+                      ? (isDarkMode ? SoftPalette.red350.withValues(alpha: 0.3) : ParentReportCard.errorColor.withValues(alpha: 0.2))
+                      : (isDarkMode ? SoftPalette.green300.withValues(alpha: 0.3) : ParentReportCard.successColor.withValues(alpha: 0.2))),
               width: 1.5,
             ),
           ),
@@ -7386,8 +7386,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   context.t('Amount Due'),
                   style: TextStyle(
                     color: isCurrentMonthPaid
-                        ? (isDarkMode ? const Color(0xFF4ADE80) : ParentReportCard.successColor)
-                        : (due > 0 ? (isDarkMode ? const Color(0xFFF87171) : ParentReportCard.errorColor) : (isDarkMode ? const Color(0xFF4ADE80) : ParentReportCard.successColor)),
+                        ? (isDarkMode ? SoftPalette.green300 : ParentReportCard.successColor)
+                        : (due > 0 ? (isDarkMode ? SoftPalette.red350 : ParentReportCard.errorColor) : (isDarkMode ? SoftPalette.green300 : ParentReportCard.successColor)),
                     fontWeight: FontWeight.bold,
                     fontSize: 13,
                     fontFamily: context.isUrdu ? 'Noori' : null,
@@ -7403,10 +7403,10 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                     decoration: BoxDecoration(
                       color: isCurrentMonthPaid
-                          ? (isDarkMode ? const Color(0xFF065F46) : const Color(0xFFD1FAE5))
+                          ? (isDarkMode ? SoftPalette.emerald600 : SoftPalette.emerald100)
                           : (due <= 0
-                              ? (isDarkMode ? const Color(0xFF065F46) : const Color(0xFFD1FAE5))
-                              : (isDarkMode ? const Color(0xFF7F1D1D) : const Color(0xFFFEE2E2))),
+                              ? (isDarkMode ? SoftPalette.emerald600 : SoftPalette.emerald100)
+                              : (isDarkMode ? SoftPalette.red700 : SoftPalette.red150m)),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: Row(
@@ -7416,8 +7416,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                           isCurrentMonthPaid || due <= 0 ? Icons.check_circle_rounded : Icons.pending_actions_rounded,
                           size: 13,
                           color: isCurrentMonthPaid || due <= 0
-                              ? (isDarkMode ? const Color(0xFF34D399) : const Color(0xFF047857))
-                              : (isDarkMode ? const Color(0xFFF87171) : const Color(0xFFB91C1C)),
+                              ? (isDarkMode ? SoftPalette.emerald300 : SoftPalette.emerald550)
+                              : (isDarkMode ? SoftPalette.red350 : SoftPalette.red550),
                         ),
                         const SizedBox(width: 4),
                         Text(
@@ -7428,8 +7428,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
                             color: isCurrentMonthPaid || due <= 0
-                                ? (isDarkMode ? const Color(0xFF34D399) : const Color(0xFF047857))
-                                : (isDarkMode ? const Color(0xFFF87171) : const Color(0xFFB91C1C)),
+                                ? (isDarkMode ? SoftPalette.emerald300 : SoftPalette.emerald550)
+                                : (isDarkMode ? SoftPalette.red350 : SoftPalette.red550),
                             fontFamily: context.isUrdu ? 'Noori' : null,
                           ),
                         ),
@@ -7445,8 +7445,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                       fontSize: 28,
                       fontWeight: FontWeight.bold,
                       color: isCurrentMonthPaid || due <= 0
-                          ? (isDarkMode ? const Color(0xFF4ADE80) : ParentReportCard.successColor)
-                          : (isDarkMode ? const Color(0xFFF87171) : ParentReportCard.errorColor),
+                          ? (isDarkMode ? SoftPalette.green300 : ParentReportCard.successColor)
+                          : (isDarkMode ? SoftPalette.red350 : ParentReportCard.errorColor),
                       fontFamily: context.isUrdu ? 'Noori' : null,
                     ),
                   ),
@@ -7462,7 +7462,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: isDarkMode ? const Color(0xFF0F172A) : color.withOpacity(0.06),
+          color: isDarkMode ? SoftPalette.slate900 : color.withOpacity(0.06),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(color: isDarkMode ? borderColor : color.withOpacity(0.12)),
         ),
@@ -7479,15 +7479,15 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
 
     Widget buildSavingsGrid() => Column(children: [
       Row(children: [
-        Expanded(child: buildSavingsTile('Attendance', attSavings, Colors.green, Icons.calendar_today)),
+        Expanded(child: buildSavingsTile('Attendance', attSavings, SoftPalette.green400, Icons.calendar_today)),
         const SizedBox(width: 12),
-        Expanded(child: buildSavingsTile('Uniform', uniSavings, Colors.blue, Icons.checkroom)),
+        Expanded(child: buildSavingsTile('Uniform', uniSavings, SoftPalette.blue400, Icons.checkroom)),
       ]),
       const SizedBox(height: 12),
       Row(children: [
-        Expanded(child: buildSavingsTile('Teacher Response', msgSavings, Colors.purple, Icons.chat_bubble_outline)),
+        Expanded(child: buildSavingsTile('Teacher Response', msgSavings, SoftPalette.purple550, Icons.chat_bubble_outline)),
         const SizedBox(width: 12),
-        Expanded(child: buildSavingsTile('PTM Meeting', ptmSavings, Colors.orange, Icons.people_outline)),
+        Expanded(child: buildSavingsTile('PTM Meeting', ptmSavings, SoftPalette.amber300, Icons.people_outline)),
       ]),
     ]);
 
@@ -7497,7 +7497,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         color: cardBg,
         borderRadius: BorderRadius.circular(24),
         border: Border.all(color: borderColor),
-        boxShadow: [BoxShadow(color: isDarkMode ? Colors.black26 : Colors.black.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4))],
+        boxShadow: [BoxShadow(color: isDarkMode ? SoftPalette.gray900A26 : SoftPalette.gray900.withOpacity(0.02), blurRadius: 10, offset: const Offset(0, 4))],
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text(context.t('Fee Calculation Flow'), style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: textPrimary, fontFamily: context.isUrdu ? 'Noori' : null)),
@@ -7508,24 +7508,24 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: isDarkMode ? const Color(0xFF38230D) : Colors.amber.shade50,
+              color: isDarkMode ? SoftPalette.amber800 : SoftPalette.yellow50,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: isDarkMode ? const Color(0xFFD97706).withOpacity(0.3) : Colors.amber.shade200),
+              border: Border.all(color: isDarkMode ? SoftPalette.orange400.withOpacity(0.3) : SoftPalette.yellow150),
             ),
             child: Row(children: [
-              Icon(Icons.info_outline, size: 16, color: isDarkMode ? const Color(0xFFFBBF24) : Colors.amber.shade900), const SizedBox(width: 8),
-              Expanded(child: Text(context.isUrdu ? 'بنیادی فیس (عام طور پر روپے ${displayConfig.baseFee.toStringAsFixed(0)}) تناسب کی بنیاد پر ہے کیونکہ طالب علم کی شمولیت کی تاریخ $joinDateStr ہے۔' : 'Base fee (Rs. ${displayConfig.baseFee.toStringAsFixed(0)} standard) is pro-rated because the student joined on $joinDateStr.', style: TextStyle(fontSize: 11, color: isDarkMode ? const Color(0xFFFDE68A) : Colors.amber.shade900, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null))),
+              Icon(Icons.info_outline, size: 16, color: isDarkMode ? SoftPalette.amber200 : SoftPalette.orange350), const SizedBox(width: 8),
+              Expanded(child: Text(context.isUrdu ? 'بنیادی فیس (عام طور پر روپے ${displayConfig.baseFee.toStringAsFixed(0)}) تناسب کی بنیاد پر ہے کیونکہ طالب علم کی شمولیت کی تاریخ $joinDateStr ہے۔' : 'Base fee (Rs. ${displayConfig.baseFee.toStringAsFixed(0)} standard) is pro-rated because the student joined on $joinDateStr.', style: TextStyle(fontSize: 11, color: isDarkMode ? SoftPalette.yellow150 : SoftPalette.orange350, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null))),
             ]),
           ),
         ],
-        Center(child: Padding(padding: const EdgeInsets.symmetric(vertical: 8.0), child: Icon(Icons.remove_circle_outline, color: isDarkMode ? const Color(0xFFF87171) : ParentReportCard.errorColor, size: 20))),
-        _buildFlowStep(title: context.t('Total Savings / Deductions'), subtitle: context.t('Combined rewards for attendance, behavior & PTM'), amount: context.isUrdu ? 'روپے ${totalSavings.toStringAsFixed(0)}-' : '-Rs. ${totalSavings.toStringAsFixed(0)}', color: Colors.green, icon: Icons.savings_outlined),
+        Center(child: Padding(padding: const EdgeInsets.symmetric(vertical: 8.0), child: Icon(Icons.remove_circle_outline, color: isDarkMode ? SoftPalette.red350 : ParentReportCard.errorColor, size: 20))),
+        _buildFlowStep(title: context.t('Total Savings / Deductions'), subtitle: context.t('Combined rewards for attendance, behavior & PTM'), amount: context.isUrdu ? 'روپے ${totalSavings.toStringAsFixed(0)}-' : '-Rs. ${totalSavings.toStringAsFixed(0)}', color: SoftPalette.green400, icon: Icons.savings_outlined),
         Center(child: Padding(padding: const EdgeInsets.symmetric(vertical: 8.0), child: Icon(Icons.drag_handle, color: textMuted, size: 20))),
         _buildFlowStep(
           title: context.t('Final Net Amount Due'),
           subtitle: context.isUrdu ? 'مہینہ برائے ${_formatMonth(DateTime(_selectedYear, _selectedMonth))} جمع کرائی گئی' : 'Submitted for the month of ${DateFormat('MMMM').format(DateTime(_selectedYear, _selectedMonth))}',
           amount: context.isUrdu ? 'روپے ${due.toStringAsFixed(0)}' : 'Rs. ${due.toStringAsFixed(0)}',
-          color: due > 0 ? (isDarkMode ? const Color(0xFFF87171) : ParentReportCard.errorColor) : (isDarkMode ? const Color(0xFF4ADE80) : ParentReportCard.successColor),
+          color: due > 0 ? (isDarkMode ? SoftPalette.red350 : ParentReportCard.errorColor) : (isDarkMode ? SoftPalette.green300 : ParentReportCard.successColor),
           icon: Icons.receipt,
           isFinal: true,
         ),
@@ -7538,11 +7538,11 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
         Text(context.t('Monthly Statement'), style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: textPrimary, fontFamily: context.isUrdu ? 'Noori' : null)),
         ExportButton(
           onExcel: () {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.t('Preparing your Excel report...')), backgroundColor: ParentReportCard.primaryColor));
+            AppToast.showSnackBar(context, SnackBar(content: Text(context.t('Preparing your Excel report...')), backgroundColor: ParentReportCard.primaryColor));
             MadrassaReportHelper.exportIndividualExcel(config: displayConfig, studentId: widget.studentId, studentData: studentData, logs: monthLogs, holidays: holidays);
           },
           onPdf: () {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.t('Preparing your PDF report...')), backgroundColor: ParentReportCard.primaryColor));
+            AppToast.showSnackBar(context, SnackBar(content: Text(context.t('Preparing your PDF report...')), backgroundColor: ParentReportCard.primaryColor));
             MadrassaReportHelper.exportIndividualPdf(config: displayConfig, studentId: widget.studentId, studentData: studentData, logs: monthLogs, holidays: holidays);
           },
           isSmall: true,
@@ -7562,8 +7562,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
               style: TextStyle(fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
             ),
             style: ElevatedButton.styleFrom(
-              backgroundColor: isDarkMode ? const Color(0xFF0F6C5A) : ParentReportCard.primaryColor,
-              foregroundColor: Colors.white,
+              backgroundColor: isDarkMode ? SoftPalette.teal600 : ParentReportCard.primaryColor,
+              foregroundColor: SoftPalette.gray50,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
             ),
@@ -7708,11 +7708,11 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 const SizedBox(width: 12),
                 ExportButton(
                   onExcel: () {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.t('Preparing your Excel report...')), backgroundColor: ParentReportCard.primaryColor));
+                    AppToast.showSnackBar(context, SnackBar(content: Text(context.t('Preparing your Excel report...')), backgroundColor: ParentReportCard.primaryColor));
                     MadrassaReportHelper.exportIndividualExcel(config: displayConfig, studentId: widget.studentId, studentData: studentData, logs: monthLogs, holidays: holidays);
                   },
                   onPdf: () {
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.t('Preparing your PDF report...')), backgroundColor: ParentReportCard.primaryColor));
+                    AppToast.showSnackBar(context, SnackBar(content: Text(context.t('Preparing your PDF report...')), backgroundColor: ParentReportCard.primaryColor));
                     MadrassaReportHelper.exportIndividualPdf(config: displayConfig, studentId: widget.studentId, studentData: studentData, logs: monthLogs, holidays: holidays);
                   },
                   isSmall: true,
@@ -7731,11 +7731,11 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   const SizedBox(width: 8),
                   _buildTabFilterChip('absent', context.isUrdu ? 'غیر حاضر ($absentCount1)' : 'Absent ($absentCount1)', _attendanceFilter == 'absent', (val) => setState(() => _attendanceFilter = val), activeColor: ParentReportCard.errorColor),
                   const SizedBox(width: 8),
-                  _buildTabFilterChip('leave', context.isUrdu ? 'رخصت ($leaveCount1)' : 'Leave ($leaveCount1)', _attendanceFilter == 'leave', (val) => setState(() => _attendanceFilter = val), activeColor: Colors.orange),
+                  _buildTabFilterChip('leave', context.isUrdu ? 'رخصت ($leaveCount1)' : 'Leave ($leaveCount1)', _attendanceFilter == 'leave', (val) => setState(() => _attendanceFilter = val), activeColor: SoftPalette.amber300),
                   const SizedBox(width: 8),
-                  _buildTabFilterChip('ptm', context.isUrdu ? 'پی ٹی ایم' : 'PTM', _attendanceFilter == 'ptm', (val) => setState(() => _attendanceFilter = val), activeColor: const Color(0xFF0F6C5A)),
+                  _buildTabFilterChip('ptm', context.isUrdu ? 'پی ٹی ایم' : 'PTM', _attendanceFilter == 'ptm', (val) => setState(() => _attendanceFilter = val), activeColor: SoftPalette.teal600),
                   const SizedBox(width: 8),
-                  _buildTabFilterChip('holidays', context.isUrdu ? 'تعطیلات ($holidayCount1)' : 'Holidays ($holidayCount1)', _attendanceFilter == 'holidays', (val) => setState(() => _attendanceFilter = val), activeColor: const Color(0xFF0D9488)),
+                  _buildTabFilterChip('holidays', context.isUrdu ? 'تعطیلات ($holidayCount1)' : 'Holidays ($holidayCount1)', _attendanceFilter == 'holidays', (val) => setState(() => _attendanceFilter = val), activeColor: SoftPalette.teal500),
                 ],
               ),
             ),
@@ -7797,15 +7797,15 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                       badgeText = context.isUrdu ? 'حاضر' : 'Present';
                       badgeIcon = Icons.check_circle_rounded;
                     } else if (statusType == 'leave') {
-                      badgeColor = Colors.orange;
+                      badgeColor = SoftPalette.amber300;
                       badgeText = context.isUrdu ? 'رخصت' : 'Leave';
                       badgeIcon = Icons.event_busy_rounded;
                     } else if (statusType == 'holiday') {
-                      badgeColor = const Color(0xFF0D9488);
+                      badgeColor = SoftPalette.teal500;
                       badgeText = holidayName ?? (context.isUrdu ? 'تعطیل' : 'Holiday');
                       badgeIcon = Icons.beach_access_rounded;
                     } else if (isPtm) {
-                      badgeColor = const Color(0xFF0F6C5A);
+                      badgeColor = SoftPalette.teal600;
                       badgeText = context.isUrdu ? 'پی ٹی ایم میٹنگ' : 'PTM Meeting';
                       badgeIcon = Icons.people_rounded;
                     } else {
@@ -7827,8 +7827,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                         decoration: BoxDecoration(
                           color: cardBg,
                           borderRadius: BorderRadius.circular(16),
-                          border: Border.all(color: isSelected ? ParentReportCard.primaryColor : badgeColor.withValues(alpha: isDarkMode ? 0.35 : 0.25), width: isSelected ? 2 : 1),
-                          boxShadow: [BoxShadow(color: isDarkMode ? Colors.black26 : Colors.black.withValues(alpha: 0.02), blurRadius: 6, offset: const Offset(0, 2))],
+                          border: Border.all(color: isSelected ? context.adapt(ParentReportCard.primaryColor) : badgeColor.withValues(alpha: isDarkMode ? 0.35 : 0.25), width: isSelected ? 2 : 1),
+                          boxShadow: [BoxShadow(color: isDarkMode ? SoftPalette.gray900A26 : SoftPalette.gray900.withValues(alpha: 0.02), blurRadius: 6, offset: const Offset(0, 2))],
                         ),
                         child: Row(
                           children: [
@@ -7848,7 +7848,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                                   ),
                                   Text(
                                     '🌙 ${IslamicCalendarHelper.fromGregorian(date).format(isUrdu: context.isUrdu)}',
-                                    style: const TextStyle(fontSize: 11, color: Color(0xFFD4AF37), fontWeight: FontWeight.bold),
+                                    style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.yellow300), fontWeight: FontWeight.bold),
                                   ),
                                 ],
                               ),
@@ -7891,14 +7891,14 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   _buildTabFilterChip('sabak', isNazraStudent ? (context.isUrdu ? 'سبق (ناظرہ)' : 'Sabak (Nazra)') : (context.isUrdu ? 'سبق ریکارڈز' : 'Sabak Progress'), _quranProgressFilter == 'sabak', (val) => setState(() => _quranProgressFilter = val), activeColor: ParentReportCard.primaryColor),
                   if (!isNazraStudent) ...[
                     const SizedBox(width: 8),
-                    _buildTabFilterChip('sabki', context.isUrdu ? 'سبقی دہرائی' : 'Sabki Revision', _quranProgressFilter == 'sabki', (val) => setState(() => _quranProgressFilter = val), activeColor: const Color(0xFFED6C02)),
+                    _buildTabFilterChip('sabki', context.isUrdu ? 'سبقی دہرائی' : 'Sabki Revision', _quranProgressFilter == 'sabki', (val) => setState(() => _quranProgressFilter = val), activeColor: SoftPalette.orange400),
                     const SizedBox(width: 8),
-                    _buildTabFilterChip('manzil', context.isUrdu ? 'منزل دہرائی' : 'Manzil Revision', _quranProgressFilter == 'manzil', (val) => setState(() => _quranProgressFilter = val), activeColor: const Color(0xFF4C4DDC)),
+                    _buildTabFilterChip('manzil', context.isUrdu ? 'منزل دہرائی' : 'Manzil Revision', _quranProgressFilter == 'manzil', (val) => setState(() => _quranProgressFilter = val), activeColor: SoftPalette.indigo550),
                   ] else ...[
                     const SizedBox(width: 8),
-                    _buildTabFilterChip('ruku', context.isUrdu ? 'رُكوع' : 'Ruku', _quranProgressFilter == 'ruku', (val) => setState(() => _quranProgressFilter = val), activeColor: const Color(0xFFED6C02)),
+                    _buildTabFilterChip('ruku', context.isUrdu ? 'رُكوع' : 'Ruku', _quranProgressFilter == 'ruku', (val) => setState(() => _quranProgressFilter = val), activeColor: SoftPalette.orange400),
                     const SizedBox(width: 8),
-                    _buildTabFilterChip('qaida', context.isUrdu ? 'قاعدہ سبق' : 'Qaida Sabak', _quranProgressFilter == 'qaida', (val) => setState(() => _quranProgressFilter = val), activeColor: const Color(0xFF4C4DDC)),
+                    _buildTabFilterChip('qaida', context.isUrdu ? 'قاعدہ سبق' : 'Qaida Sabak', _quranProgressFilter == 'qaida', (val) => setState(() => _quranProgressFilter = val), activeColor: SoftPalette.indigo550),
                   ],
                 ],
               ),
@@ -8217,7 +8217,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 statusColor = ParentReportCard.errorColor;
                 statusLabel = context.isUrdu ? 'مسترد' : 'Denied';
               } else {
-                statusColor = Colors.orange;
+                statusColor = SoftPalette.amber300;
                 statusLabel = context.isUrdu ? 'زیر التوا' : 'Pending';
               }
 
@@ -8228,7 +8228,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(color: statusColor.withValues(alpha: isDarkMode ? 0.4 : 0.3)),
                   boxShadow: [
-                    BoxShadow(color: isDarkMode ? Colors.black26 : Colors.black.withValues(alpha: 0.02), blurRadius: 8, offset: const Offset(0, 2)),
+                    BoxShadow(color: isDarkMode ? SoftPalette.gray900A26 : SoftPalette.gray900.withValues(alpha: 0.02), blurRadius: 8, offset: const Offset(0, 2)),
                   ],
                 ),
                 child: Column(
@@ -8306,13 +8306,13 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                             children: [
                               TextButton.icon(
                                 onPressed: () => _approveLeaveRequest(branchId, req['dateStr'], req['studentId']),
-                                icon: const Icon(Icons.check, size: 14, color: Colors.green),
-                                label: Text(context.isUrdu ? 'منظور کریں' : 'Approve', style: const TextStyle(color: Colors.green, fontSize: 12)),
+                                icon: const Icon(Icons.check, size: 14, color: SoftPalette.green400),
+                                label: Text(context.isUrdu ? 'منظور کریں' : 'Approve', style: const TextStyle(color: SoftPalette.green400, fontSize: 12)),
                               ),
                               TextButton.icon(
                                 onPressed: () => _denyLeaveRequest(branchId, req['dateStr'], req['studentId']),
-                                icon: const Icon(Icons.close, size: 14, color: Colors.red),
-                                label: Text(context.isUrdu ? 'مسترد کریں' : 'Deny', style: const TextStyle(color: Colors.red, fontSize: 12)),
+                                icon: const Icon(Icons.close, size: 14, color: SoftPalette.red400),
+                                label: Text(context.isUrdu ? 'مسترد کریں' : 'Deny', style: const TextStyle(color: SoftPalette.red400, fontSize: 12)),
                               ),
                             ],
                           ),
@@ -8331,13 +8331,13 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
     final selected = _requestStatusFilter == filterVal;
     return ChoiceChip(
       selected: selected,
-      selectedColor: isDarkMode ? const Color(0xFF0F6C5A) : ParentReportCard.primaryColor,
-      backgroundColor: isDarkMode ? const Color(0xFF1E293B) : null,
-      side: BorderSide(color: isDarkMode ? borderColor : Colors.grey.shade300),
+      selectedColor: isDarkMode ? SoftPalette.teal600 : ParentReportCard.primaryColor,
+      backgroundColor: isDarkMode ? SoftPalette.slate800 : null,
+      side: BorderSide(color: isDarkMode ? borderColor : SoftPalette.gray150),
       label: Text(
         label,
         style: TextStyle(
-          color: selected ? Colors.white : textPrimary,
+          color: selected ? SoftPalette.gray50 : textPrimary,
           fontWeight: FontWeight.bold,
           fontSize: 12,
         ),
@@ -8347,16 +8347,16 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
   }
 
   Widget _buildTabFilterChip(String filterVal, String label, bool isSelected, ValueChanged<String> onSelected, {Color? activeColor}) {
-    final effectiveColor = activeColor ?? (isDarkMode ? const Color(0xFF0F6C5A) : ParentReportCard.primaryColor);
+    final effectiveColor = activeColor ?? (isDarkMode ? SoftPalette.teal600 : ParentReportCard.primaryColor);
     return ChoiceChip(
       selected: isSelected,
       selectedColor: effectiveColor,
-      backgroundColor: isDarkMode ? const Color(0xFF1E293B) : Colors.white,
-      side: BorderSide(color: isSelected ? effectiveColor : (isDarkMode ? borderColor : Colors.grey.shade300)),
+      backgroundColor: isDarkMode ? SoftPalette.slate800 : SoftPalette.gray50,
+      side: BorderSide(color: isSelected ? effectiveColor : (isDarkMode ? borderColor : SoftPalette.gray150)),
       label: Text(
         label,
         style: TextStyle(
-          color: isSelected ? Colors.white : (isDarkMode ? const Color(0xFFE2E8F0) : textPrimary),
+          color: isSelected ? SoftPalette.gray50 : (isDarkMode ? SoftPalette.slate150 : textPrimary),
           fontWeight: FontWeight.bold,
           fontSize: 12,
           fontFamily: context.isUrdu ? 'Noori' : null,
@@ -8394,8 +8394,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                 if (logSnap.connectionState == ConnectionState.waiting ||
                     (configSnap.connectionState == ConnectionState.waiting && !configSnap.hasData && !configSnap.hasError) ||
                     holidaySnap.connectionState == ConnectionState.waiting) {
-                  return const ColoredBox(
-                    color: ParentReportCard.surfaceColor,
+                  return ColoredBox(
+                    color: context.adapt(ParentReportCard.surfaceColor),
                     child: Center(child: CircularProgressIndicator(color: ParentReportCard.primaryColor)),
                   );
                 }
@@ -8529,18 +8529,18 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   valueListenable: UserThemeService.listenable(userThemeKey),
                   builder: (context, Box box, _) {
                     final isDark = UserThemeService.isDarkMode(userThemeKey);
-                    final scaffoldBg = isDark ? const Color(0xFF0F172A) : ParentReportCard.surfaceColor;
-                    final appBarBg = isDark ? const Color(0xFF1E293B) : ParentReportCard.primaryColor;
+                    final scaffoldBg = isDark ? SoftPalette.slate900 : ParentReportCard.surfaceColor;
+                    final appBarBg = isDark ? SoftPalette.slate800 : ParentReportCard.primaryColor;
 
                     return Scaffold(
                       backgroundColor: scaffoldBg,
                       appBar: AppBar(
                         backgroundColor: appBarBg,
                         elevation: 0,
-                        iconTheme: const IconThemeData(color: Colors.white),
+                        iconTheme: const IconThemeData(color: SoftPalette.gray50),
                         leading: widget.onBackToSummary != null
                             ? IconButton(
-                                icon: const Icon(Icons.arrow_back, color: Colors.white),
+                                icon: const Icon(Icons.arrow_back, color: SoftPalette.gray50),
                                 tooltip: context.t('Back to Family Summary'),
                                 onPressed: widget.onBackToSummary,
                               )
@@ -8561,7 +8561,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                                       style: TextStyle(
                                         fontSize: 15,
                                         fontWeight: FontWeight.bold,
-                                        color: Colors.white,
+                                        color: SoftPalette.gray50,
                                         fontFamily: context.isUrdu ? 'Noori' : null,
                                       ),
                                     ),
@@ -8579,7 +8579,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                                     }(),
                                     style: const TextStyle(
                                       fontSize: 11,
-                                      color: Colors.white70,
+                                      color: SoftPalette.gray50A70,
                                       fontWeight: FontWeight.w500,
                                     ),
                                     overflow: TextOverflow.ellipsis,
@@ -8589,17 +8589,17 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                             : DropdownButtonHideUnderline(
                                 child: DropdownButton<int>(
                                   value: widget.selectedIndex,
-                                  dropdownColor: isDark ? const Color(0xFF1E293B) : ParentReportCard.primaryColor,
-                                  icon: const Icon(Icons.arrow_drop_down, color: Colors.white),
+                                  dropdownColor: isDark ? SoftPalette.slate800 : ParentReportCard.primaryColor,
+                                  icon: const Icon(Icons.arrow_drop_down, color: SoftPalette.gray50),
                                   isExpanded: true,
-                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                                  style: const TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 15),
                                   selectedItemBuilder: (BuildContext context) {
                                     return widget.allDocs.map<Widget>((doc) {
                                       final d = doc is Map ? Map<String, dynamic>.from(doc) : (doc is DocumentSnapshot ? (doc.data() as Map<String, dynamic>?) ?? {} : <String, dynamic>{});
                                       final name = d['name'] ?? 'Student';
                                       return Text(
                                         name,
-                                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white, fontFamily: context.isUrdu ? 'Noori' : null),
+                                        style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: SoftPalette.gray50, fontFamily: context.isUrdu ? 'Noori' : null),
                                         overflow: TextOverflow.ellipsis,
                                       );
                                     }).toList();
@@ -8610,7 +8610,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                                     final name = dData['name'] ?? 'Student';
                                     return DropdownMenuItem<int>(
                                       value: index,
-                                      child: Text(name, style: const TextStyle(color: Colors.white)),
+                                      child: Text(name, style: const TextStyle(color: SoftPalette.gray50)),
                                     );
                                   }),
                                   onChanged: (val) {
@@ -8627,9 +8627,9 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                                 ? const SizedBox(
                                     width: 18,
                                     height: 18,
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                    child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50),
                                   )
-                                : const Icon(Icons.sync_rounded, color: Colors.white, size: 20),
+                                : const Icon(Icons.sync_rounded, color: SoftPalette.gray50, size: 20),
                             tooltip: context.isUrdu ? 'تازہ کاری کریں (کلاؤڈ سے حاصل کریں)' : 'Sync / Refresh (Download latest from Cloud)',
                             onPressed: _isSyncing ? null : () => _syncLatestData(context),
                           ),
@@ -8637,7 +8637,7 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                           IconButton(
                             icon: Icon(
                               isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-                              color: isDark ? const Color(0xFFFDE047) : Colors.white,
+                              color: isDark ? SoftPalette.yellow150 : SoftPalette.gray50,
                               size: 20,
                             ),
                             tooltip: isDark ? (context.isUrdu ? 'لائٹ موڈ' : 'Light Mode') : (context.isUrdu ? 'ڈارک موڈ' : 'Dark Mode'),
@@ -8662,8 +8662,8 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, fontFamily: context.isUrdu ? 'Noori' : null),
                             ),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: _selectedTab == 4 ? ParentReportCard.accentColor : Colors.white.withValues(alpha: 0.2),
-                              foregroundColor: Colors.white,
+                              backgroundColor: _selectedTab == 4 ? ParentReportCard.accentColor : SoftPalette.gray50.withValues(alpha: 0.2),
+                              foregroundColor: SoftPalette.gray50,
                               elevation: 0,
                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -8679,11 +8679,11 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                           Positioned.fill(
                             child: Opacity(
                               opacity: isDark ? 0.085 : 0.11,
-                              child: Image.asset(
+                              child: GDecorativeImage.asset(
                                 'assets/images/islamic_pattern.webp',
                                 fit: BoxFit.cover,
                                 repeat: ImageRepeat.repeat,
-                                color: const Color(0xFFD4AF37),
+                                color: SoftPalette.yellow300,
                                 colorBlendMode: BlendMode.srcIn,
                               ),
                             ),
@@ -8770,14 +8770,14 @@ class _SectionTitle extends StatelessWidget {
     final isDark = UserThemeService.isDarkMode();
     return Row(
       children: [
-        Icon(icon, size: 20, color: isDark ? const Color(0xFF2DD4BF) : ParentReportCard.primaryColor),
+        Icon(icon, size: 20, color: isDark ? SoftPalette.teal300 : ParentReportCard.primaryColor),
         const SizedBox(width: 8),
         Text(
           label,
           style: TextStyle(
             fontWeight: FontWeight.bold,
             fontSize: 16,
-            color: isDark ? const Color(0xFFF8FAFC) : ParentReportCard.textPrimaryColor,
+            color: isDark ? SoftPalette.gray50 : ParentReportCard.textPrimaryColor,
             fontFamily: context.isUrdu ? 'Noori' : null,
           ),
         ),
@@ -8799,12 +8799,12 @@ class _QuranAnimationIcon extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F333A) : ParentReportCard.accentColor.withValues(alpha: 0.12),
+        color: isDark ? SoftPalette.slate750 : ParentReportCard.accentColor.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(size >= 60 ? 24 : 14),
-        border: Border.all(color: (isDark ? const Color(0xFF2DD4BF) : ParentReportCard.accentColor).withValues(alpha: 0.35), width: 1.5),
+        border: Border.all(color: (isDark ? SoftPalette.teal300 : ParentReportCard.accentColor).withValues(alpha: 0.35), width: 1.5),
         boxShadow: [
           BoxShadow(
-            color: (isDark ? const Color(0xFF2DD4BF) : ParentReportCard.accentColor).withValues(alpha: 0.18),
+            color: (isDark ? SoftPalette.teal300 : ParentReportCard.accentColor).withValues(alpha: 0.18),
             blurRadius: 16,
             spreadRadius: 2,
             offset: const Offset(0, 4),
@@ -8822,7 +8822,7 @@ class _QuranAnimationIcon extends StatelessWidget {
             return Center(
               child: Icon(
                 Icons.menu_book_rounded,
-                color: isDark ? const Color(0xFF2DD4BF) : ParentReportCard.accentColor,
+                color: isDark ? SoftPalette.teal300 : ParentReportCard.accentColor,
                 size: size * 0.5,
               ),
             );
@@ -8852,15 +8852,15 @@ class _ActionButton extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          color: isSelected ? color : (isActive ? color.withValues(alpha: isDark ? 0.15 : 0.1) : (isDark ? const Color(0xFF1E293B) : Colors.grey.shade100)),
+          color: isSelected ? color : (isActive ? color.withValues(alpha: isDark ? 0.15 : 0.1) : (isDark ? SoftPalette.slate800 : SoftPalette.gray100)),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: isSelected ? color : (isActive ? color.withValues(alpha: isDark ? 0.3 : 0.2) : (isDark ? const Color(0xFF334155) : Colors.grey.shade200))),
+          border: Border.all(color: isSelected ? color : (isActive ? color.withValues(alpha: isDark ? 0.3 : 0.2) : (isDark ? SoftPalette.slate700 : SoftPalette.gray100))),
         ),
         child: Row(
           children: [
-            Icon(icon, color: isSelected ? Colors.white : (isActive ? color : Colors.grey)),
+            Icon(icon, color: isSelected ? SoftPalette.gray50 : (isActive ? color : context.adapt(SoftPalette.gray350))),
             const SizedBox(width: 16),
-            Text(label, style: TextStyle(fontWeight: FontWeight.bold, color: isSelected ? Colors.white : (isActive ? color : Colors.grey))),
+            Text(label, style: TextStyle(fontWeight: FontWeight.bold, color: isSelected ? SoftPalette.gray50 : (isActive ? color : context.adapt(SoftPalette.gray350)))),
           ],
         ),
       ),
@@ -8875,13 +8875,13 @@ class _CalendarLegend extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = UserThemeService.isDarkMode();
     final items = [
-      (isDark ? const Color(0xFF0F3E2E) : const Color(0xFFE8F5E9), 'Present', null, false, false),
-      (isDark ? const Color(0xFF3B1219) : const Color(0xFFFFEBEE), 'Absent', null, false, false),
-      (isDark ? const Color(0xFF1E293B) : const Color(0xFFECEFF1), 'Sunday', null, false, false),
-      (isDark ? const Color(0xFF0F333A) : const Color(0xFFE0F2F1), 'Holiday', Icons.flag_rounded, false, false),
-      (isDark ? const Color(0xFF3B2E10) : const Color(0xFFFEF3C7), 'Islamic Holiday', Icons.nightlight_round, false, false),
-      (isDark ? const Color(0xFF10B981) : const Color(0xFF1B4332), 'PTM Joined', null, true, true),
-      (const Color(0xFFDC2626), 'PTM Missed', null, true, false),
+      (isDark ? SoftPalette.emerald750 : SoftPalette.green100m, 'Present', null, false, false),
+      (isDark ? SoftPalette.red800 : SoftPalette.pink100m, 'Absent', null, false, false),
+      (isDark ? SoftPalette.slate800 : SoftPalette.gray100, 'Sunday', null, false, false),
+      (isDark ? SoftPalette.slate750 : SoftPalette.teal100m, 'Holiday', Icons.flag_rounded, false, false),
+      (isDark ? SoftPalette.amber750m : SoftPalette.yellow100, 'Islamic Holiday', Icons.nightlight_round, false, false),
+      (isDark ? SoftPalette.emerald350 : SoftPalette.emerald750, 'PTM Joined', null, true, true),
+      (SoftPalette.red500, 'PTM Missed', null, true, false),
     ];
     return Wrap(
       spacing: 12,
@@ -8899,7 +8899,7 @@ class _CalendarLegend extends StatelessWidget {
             ),
             child: Text(
               ptmJoined ? (context.isUrdu ? 'شامل' : 'JOINED') : (context.isUrdu ? 'شامل نہیں' : 'MISSED'),
-              style: const TextStyle(fontSize: 6.5, fontWeight: FontWeight.bold, color: Colors.white),
+              style: const TextStyle(fontSize: 6.5, fontWeight: FontWeight.bold, color: SoftPalette.gray50),
             ),
           );
         } else {
@@ -8908,7 +8908,7 @@ class _CalendarLegend extends StatelessWidget {
             height: 10,
             decoration: BoxDecoration(color: t.$1, borderRadius: BorderRadius.circular(3)),
             alignment: Alignment.center,
-            child: t.$3 != null ? Icon(t.$3, size: 6, color: isDark ? const Color(0xFF2DD4BF) : const Color(0xFF00796B)) : null,
+            child: t.$3 != null ? Icon(t.$3, size: 6, color: isDark ? SoftPalette.teal300 : SoftPalette.teal550) : null,
           );
         }
         return Row(
@@ -8916,7 +8916,7 @@ class _CalendarLegend extends StatelessWidget {
           children: [
             indicator,
             const SizedBox(width: 4),
-            Text(context.t(t.$2), style: TextStyle(fontSize: 10, color: isDark ? const Color(0xFF94A3B8) : Colors.grey, fontWeight: FontWeight.bold)),
+            Text(context.t(t.$2), style: TextStyle(fontSize: 10, color: isDark ? SoftPalette.slate350 : SoftPalette.gray350, fontWeight: FontWeight.bold)),
           ],
         );
       }).toList(),
@@ -8966,10 +8966,10 @@ class _AttendanceCalendar extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
-        boxShadow: [BoxShadow(color: isDark ? Colors.black26 : Colors.black.withValues(alpha: 0.04), blurRadius: 12)],
+        border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
+        boxShadow: [BoxShadow(color: isDark ? SoftPalette.gray900A26 : SoftPalette.gray900.withValues(alpha: 0.04), blurRadius: 12)],
       ),
       child: Column(
         children: [
@@ -8977,9 +8977,9 @@ class _AttendanceCalendar extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
             margin: const EdgeInsets.only(bottom: 14),
             decoration: BoxDecoration(
-              color: const Color(0xFFD4AF37).withValues(alpha: isDark ? 0.16 : 0.10),
+              color: SoftPalette.yellow300.withValues(alpha: isDark ? 0.16 : 0.10),
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFFD4AF37).withValues(alpha: 0.35)),
+              border: Border.all(color: SoftPalette.yellow300.withValues(alpha: 0.35)),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
@@ -8991,7 +8991,7 @@ class _AttendanceCalendar extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
-                    color: isDark ? const Color(0xFFFDE047) : const Color(0xFF92400E),
+                    color: isDark ? SoftPalette.yellow150 : SoftPalette.orange600,
                     fontFamily: context.isUrdu ? 'Noori' : null,
                   ),
                 ),
@@ -9000,7 +9000,7 @@ class _AttendanceCalendar extends StatelessWidget {
           ),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: dayHeaders.map((d) => Text(d, style: TextStyle(fontSize: 11, color: isDark ? const Color(0xFF94A3B8) : Colors.grey, fontWeight: FontWeight.bold))).toList(),
+            children: dayHeaders.map((d) => Text(d, style: TextStyle(fontSize: 11, color: isDark ? SoftPalette.slate350 : SoftPalette.gray350, fontWeight: FontWeight.bold))).toList(),
           ),
           const SizedBox(height: 16),
           GridView.builder(
@@ -9061,8 +9061,8 @@ class _AttendanceCalendar extends StatelessWidget {
                 }
               } catch (_) {}
 
-              Color bg = isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F4F9);
-              Color textCol = isDark ? const Color(0xFF94A3B8) : Colors.grey.shade400;
+              Color bg = isDark ? SoftPalette.slate900 : SoftPalette.slate100;
+              Color textCol = isDark ? SoftPalette.slate350 : SoftPalette.gray300;
               bool ptmAttended = statusData?['ptm'] == true;
               final isSunday = date.weekday == DateTime.sunday;
               bool isAbsent = false;
@@ -9076,52 +9076,52 @@ class _AttendanceCalendar extends StatelessWidget {
 
               if (isHoliday) {
                 bg = isIslamicHoliday && holidayDoc == null
-                    ? (isDark ? const Color(0xFF3B2E10) : const Color(0xFFFEF3C7))
-                    : (isDark ? const Color(0xFF0F333A) : const Color(0xFFE0F2F1));
+                    ? (isDark ? SoftPalette.amber750m : SoftPalette.yellow100)
+                    : (isDark ? SoftPalette.slate750 : SoftPalette.teal100m);
                 textCol = isIslamicHoliday && holidayDoc == null
-                    ? (isDark ? const Color(0xFFFBBF24) : const Color(0xFFB45309))
-                    : (isDark ? const Color(0xFF2DD4BF) : const Color(0xFF00796B));
+                    ? (isDark ? SoftPalette.amber200 : SoftPalette.orange500)
+                    : (isDark ? SoftPalette.teal300 : SoftPalette.teal550);
               } else if (isBeforeJoin) {
-                bg = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC);
-                textCol = isDark ? const Color(0xFF475569) : Colors.grey.shade400;
+                bg = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+                textCol = isDark ? SoftPalette.slate600 : SoftPalette.gray300;
                 isAbsent = false;
               } else if (att == 'present') {
-                bg = isDark ? const Color(0xFF0F3E2E) : const Color(0xFFE8F5E9);
-                textCol = isDark ? const Color(0xFF4ADE80) : const Color(0xFF2E7D32);
+                bg = isDark ? SoftPalette.emerald750 : SoftPalette.green100m;
+                textCol = isDark ? SoftPalette.green300 : SoftPalette.green550;
               } else if (isLeave) {
-                bg = isDark ? const Color(0xFF38230D) : const Color(0xFFFFF3E0);
-                textCol = isDark ? const Color(0xFFFBBF24) : const Color(0xFFEF6C00);
+                bg = isDark ? SoftPalette.amber800 : SoftPalette.amber100m;
+                textCol = isDark ? SoftPalette.amber200 : SoftPalette.orange400;
                 isAbsent = false;
               } else if (att == 'absent') {
-                bg = isDark ? const Color(0xFF3B1219) : const Color(0xFFFFEBEE);
-                textCol = isDark ? const Color(0xFFF87171) : const Color(0xFFDC2626);
+                bg = isDark ? SoftPalette.red800 : SoftPalette.pink100m;
+                textCol = isDark ? SoftPalette.red350 : SoftPalette.red500;
                 isAbsent = true;
               } else if (isPast && !isSunday) {
-                bg = isDark ? const Color(0xFF3B1219) : const Color(0xFFFFEBEE);
-                textCol = isDark ? const Color(0xFFF87171) : const Color(0xFFDC2626);
+                bg = isDark ? SoftPalette.red800 : SoftPalette.pink100m;
+                textCol = isDark ? SoftPalette.red350 : SoftPalette.red500;
                 isAbsent = true;
               } else if (isSunday) {
-                bg = isDark ? const Color(0xFF1E293B) : const Color(0xFFECEFF1);
-                textCol = isDark ? const Color(0xFF64748B) : Colors.grey.shade500;
+                bg = isDark ? SoftPalette.slate800 : SoftPalette.gray100;
+                textCol = isDark ? SoftPalette.slate550 : SoftPalette.gray350;
               }
 
               BoxDecoration decoration = BoxDecoration(
                 color: bg,
                 borderRadius: BorderRadius.circular(12),
                 border: isSelectedDate
-                    ? Border.all(color: isDark ? const Color(0xFF2DD4BF) : ParentReportCard.primaryColor, width: 2.5)
+                    ? Border.all(color: isDark ? SoftPalette.teal300 : ParentReportCard.primaryColor, width: 2.5)
                     : (isLeave
-                        ? Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.5), width: 1.2)
+                        ? Border.all(color: SoftPalette.amber300.withValues(alpha: 0.5), width: 1.2)
                         : (isAbsent
-                            ? Border.all(color: const Color(0xFFDC2626).withValues(alpha: 0.5), width: 1.2)
-                            : (isToday ? Border.all(color: ParentReportCard.accentColor.withValues(alpha: 0.5), width: 1.5) : (isDark ? Border.all(color: const Color(0xFF334155), width: 0.8) : null)))),
+                            ? Border.all(color: SoftPalette.red500.withValues(alpha: 0.5), width: 1.2)
+                            : (isToday ? Border.all(color: ParentReportCard.accentColor.withValues(alpha: 0.5), width: 1.5) : (isDark ? Border.all(color: SoftPalette.slate700, width: 0.8) : null)))),
               );
               
               if (isHoliday) {
                 final isIslamicSpecial = holidayDoc == null && isIslamicHoliday;
                 final holidayColor = isIslamicSpecial
-                    ? (isDark ? const Color(0xFFFBBF24) : const Color(0xFFB45309))
-                    : (isDark ? const Color(0xFF2DD4BF) : const Color(0xFF00796B));
+                    ? (isDark ? SoftPalette.amber200 : SoftPalette.orange500)
+                    : (isDark ? SoftPalette.teal300 : SoftPalette.teal550);
                 final holidayLabel = isIslamicSpecial
                     ? (context.isUrdu ? islamicEvent.titleUr : islamicEvent.titleEn)
                     : (context.isUrdu ? 'تعطیل' : 'Holiday');
@@ -9133,7 +9133,7 @@ class _AttendanceCalendar extends StatelessWidget {
                       color: bg,
                       borderRadius: BorderRadius.circular(12),
                       border: isSelectedDate
-                          ? Border.all(color: isDark ? const Color(0xFF2DD4BF) : ParentReportCard.primaryColor, width: 2.5)
+                          ? Border.all(color: isDark ? SoftPalette.teal300 : ParentReportCard.primaryColor, width: 2.5)
                           : Border.all(color: holidayColor.withValues(alpha: 0.35), width: 1.0),
                     ),
                     child: Stack(
@@ -9186,12 +9186,12 @@ class _AttendanceCalendar extends StatelessWidget {
                             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
                             margin: const EdgeInsets.only(bottom: 2),
                             decoration: BoxDecoration(
-                              color: ptmAttended ? (isDark ? const Color(0xFF10B981) : const Color(0xFF1B4332)) : const Color(0xFFDC2626),
+                              color: ptmAttended ? (isDark ? SoftPalette.emerald350 : SoftPalette.emerald750) : SoftPalette.red500,
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
                               ptmAttended ? (context.isUrdu ? 'شامل' : 'JOINED') : (context.isUrdu ? 'شامل نہیں' : 'MISSED'),
-                              style: const TextStyle(fontSize: 7.5, fontWeight: FontWeight.bold, color: Colors.white),
+                              style: const TextStyle(fontSize: 7.5, fontWeight: FontWeight.bold, color: SoftPalette.gray50),
                             ),
                           ),
                         ),
@@ -9206,7 +9206,7 @@ class _AttendanceCalendar extends StatelessWidget {
                   onTap: () => onDateSelected(date),
                   child: _PulsingPtmCell(
                     day: day,
-                    textCol: isToday ? (isDark ? const Color(0xFF2DD4BF) : ParentReportCard.primaryColor) : (isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
+                    textCol: isToday ? (isDark ? SoftPalette.teal300 : ParentReportCard.primaryColor) : (isDark ? SoftPalette.slate350 : SoftPalette.gray500),
                     isSelected: isSelectedDate,
                   ),
                 );
@@ -9233,7 +9233,7 @@ class _AttendanceCalendar extends StatelessWidget {
                                 style: TextStyle(
                                   fontSize: 6.5,
                                   fontWeight: FontWeight.w900,
-                                  color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFEF6C00),
+                                  color: isDark ? SoftPalette.amber200 : SoftPalette.orange400,
                                   fontFamily: context.isUrdu ? 'Noori' : null,
                                 ),
                               ),
@@ -9244,7 +9244,7 @@ class _AttendanceCalendar extends StatelessWidget {
                                 style: TextStyle(
                                   fontSize: 6.5,
                                   fontWeight: FontWeight.w900,
-                                  color: const Color(0xFFDC2626),
+                                  color: context.adapt(SoftPalette.red500),
                                   fontFamily: context.isUrdu ? 'Noori' : null,
                                 ),
                               ),
@@ -9278,7 +9278,13 @@ class _PulsingPtmCellState extends State<_PulsingPtmCell> with SingleTickerProvi
   @override
   void initState() {
     super.initState();
-    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1500))..repeat(reverse: true);
+    _controller = AnimationController(vsync: this, duration: const Duration(milliseconds: 1500));
+    // Eye comfort: a steady highlight instead of a flashing one.
+    if (GDecor.reduceMotion) {
+      _controller.value = 0.5;
+    } else {
+      _controller.repeat(reverse: true);
+    }
   }
   @override
   void dispose() { _controller.dispose(); super.dispose(); }
@@ -9324,7 +9330,7 @@ class _PulsingPtmCellState extends State<_PulsingPtmCell> with SingleTickerProvi
                   ),
                   child: Text(
                     context.isUrdu ? 'پی ٹی ایم' : 'PTM',
-                    style: const TextStyle(fontSize: 7.5, fontWeight: FontWeight.bold, color: Colors.white),
+                    style: const TextStyle(fontSize: 7.5, fontWeight: FontWeight.bold, color: SoftPalette.gray50),
                   ),
                 ),
               ),

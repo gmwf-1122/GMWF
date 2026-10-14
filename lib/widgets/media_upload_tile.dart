@@ -1,5 +1,7 @@
 // lib/widgets/media_upload_tile.dart
 import 'dart:io';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:image_picker/image_picker.dart';
@@ -89,7 +91,7 @@ class _MediaUploadTileState extends State<MediaUploadTile> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
-            Icon(widget.icon, color: const Color(0xFF00695C)),
+            Icon(widget.icon, color: context.adapt(SoftPalette.teal600)),
             const SizedBox(width: 10),
             Expanded(child: Text(widget.label, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold))),
           ],
@@ -110,7 +112,7 @@ class _MediaUploadTileState extends State<MediaUploadTile> {
 
   Widget _buildPreviewImage() {
     if (_currentValue == null || _currentValue!.isEmpty) {
-      return Icon(widget.icon, size: 28, color: const Color(0xFF00695C));
+      return Icon(widget.icon, size: 28, color: context.adapt(SoftPalette.teal600));
     }
 
     final val = _currentValue!;
@@ -124,7 +126,7 @@ class _MediaUploadTileState extends State<MediaUploadTile> {
           width: 50,
           height: 50,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => const Icon(Icons.broken_image_rounded, color: Colors.grey),
+          errorBuilder: (_, __, ___) => Icon(Icons.broken_image_rounded, color: context.adapt(SoftPalette.gray350)),
         ),
       );
     }
@@ -139,7 +141,7 @@ class _MediaUploadTileState extends State<MediaUploadTile> {
           width: 50,
           height: 50,
           fit: BoxFit.cover,
-          errorBuilder: (_, __, ___) => const Icon(Icons.insert_drive_file_rounded, color: Colors.blue),
+          errorBuilder: (_, __, ___) => Icon(Icons.insert_drive_file_rounded, color: context.adapt(SoftPalette.blue400)),
         ),
       );
     }
@@ -155,13 +157,13 @@ class _MediaUploadTileState extends State<MediaUploadTile> {
             width: 50,
             height: 50,
             fit: BoxFit.cover,
-            errorBuilder: (_, __, ___) => const Icon(Icons.insert_drive_file_rounded, color: Colors.blue),
+            errorBuilder: (_, __, ___) => Icon(Icons.insert_drive_file_rounded, color: context.adapt(SoftPalette.blue400)),
           ),
         );
       }
     } catch (_) {}
 
-    return Icon(widget.icon, size: 28, color: const Color(0xFF00695C));
+    return Icon(widget.icon, size: 28, color: context.adapt(SoftPalette.teal600));
   }
 
   @override
@@ -172,12 +174,12 @@ class _MediaUploadTileState extends State<MediaUploadTile> {
       margin: const EdgeInsets.only(bottom: 10),
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.adapt(SoftPalette.gray50),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: hasValue ? Colors.teal.shade300 : Colors.grey.shade200),
+        border: Border.all(color: hasValue ? context.adapt(SoftPalette.teal350) : context.adapt(SoftPalette.gray100)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.02),
+            color: SoftPalette.gray900.withValues(alpha: 0.02),
             blurRadius: 6,
             offset: const Offset(0, 2),
           ),
@@ -189,15 +191,15 @@ class _MediaUploadTileState extends State<MediaUploadTile> {
             width: 42,
             height: 42,
             decoration: BoxDecoration(
-              color: const Color(0xFF00695C).withValues(alpha: 0.08),
+              color: context.adapt(SoftPalette.teal600).withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Center(
               child: _isProcessing
-                  ? const SizedBox(
+                  ? SizedBox(
                       width: 18,
                       height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00695C)),
+                      child: CircularProgressIndicator(strokeWidth: 2, color: context.adapt(SoftPalette.teal600)),
                     )
                   : _buildPreviewImage(),
             ),
@@ -212,10 +214,10 @@ class _MediaUploadTileState extends State<MediaUploadTile> {
                   widget.label,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 12,
-                    color: Color(0xFF1E293B),
+                    color: context.adapt(SoftPalette.slate800),
                     height: 1.15,
                   ),
                 ),
@@ -226,7 +228,7 @@ class _MediaUploadTileState extends State<MediaUploadTile> {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 10,
-                    color: hasValue ? Colors.teal.shade700 : Colors.grey.shade500,
+                    color: hasValue ? context.adapt(SoftPalette.teal550) : context.adapt(SoftPalette.gray350),
                     fontWeight: hasValue ? FontWeight.w600 : FontWeight.normal,
                   ),
                 ),
@@ -239,20 +241,20 @@ class _MediaUploadTileState extends State<MediaUploadTile> {
               IconButton(
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-                icon: const Icon(Icons.visibility_rounded, color: Color(0xFF00695C), size: 18),
+                icon: Icon(Icons.visibility_rounded, color: context.adapt(SoftPalette.teal600), size: 18),
                 onPressed: _showDocumentPreview,
                 tooltip: 'Preview Document',
               )
             else
-              const Padding(
+              Padding(
                 padding: EdgeInsets.symmetric(horizontal: 4),
-                child: Text('Not Uploaded', style: TextStyle(fontSize: 10, color: Colors.grey)),
+                child: Text('Not Uploaded', style: TextStyle(fontSize: 10, color: context.adapt(SoftPalette.gray350))),
               )
           else if (hasValue)
             IconButton(
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-              icon: const Icon(Icons.close_rounded, color: Colors.redAccent, size: 18),
+              icon: Icon(Icons.close_rounded, color: context.adapt(SoftPalette.red400), size: 18),
               onPressed: _clearValue,
               tooltip: 'Remove',
             )
@@ -260,7 +262,7 @@ class _MediaUploadTileState extends State<MediaUploadTile> {
             IconButton(
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-              icon: const Icon(Icons.camera_alt_outlined, color: Color(0xFF00695C), size: 18),
+              icon: Icon(Icons.camera_alt_outlined, color: context.adapt(SoftPalette.teal600), size: 18),
               onPressed: _pickFromCamera,
               tooltip: 'Take Photo',
             ),
@@ -268,7 +270,7 @@ class _MediaUploadTileState extends State<MediaUploadTile> {
             IconButton(
               padding: EdgeInsets.zero,
               constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
-              icon: const Icon(Icons.folder_open_rounded, color: Color(0xFF00695C), size: 18),
+              icon: Icon(Icons.folder_open_rounded, color: context.adapt(SoftPalette.teal600), size: 18),
               onPressed: _pickFromGallery,
               tooltip: 'Choose File',
             ),

@@ -1,6 +1,7 @@
 // lib/pages/office/expenses_tab.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/design_system.dart';
 import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
@@ -81,18 +82,18 @@ class _ExpensesTabState extends State<ExpensesTab> {
   Color _getCategoryColor(String category, RoleThemeData t) {
     switch (category.toLowerCase()) {
       case 'masjid':
-        return Colors.teal;
+        return SoftPalette.teal500;
       case 'dasterkhwaan':
       case 'dasterkhawaan':
-        return Colors.orange;
+        return SoftPalette.amber300;
       case 'school':
-        return Colors.blue;
+        return SoftPalette.blue400;
       case 'office':
-        return Colors.indigo;
+        return SoftPalette.indigo600;
       case 'dispensary':
-        return Colors.red;
+        return SoftPalette.red400;
       case 'home':
-        return Colors.purple;
+        return SoftPalette.purple550;
       default:
         return t.accent;
     }
@@ -108,19 +109,19 @@ class _ExpensesTabState extends State<ExpensesTab> {
     final t = RoleThemeData(
       roleLabel: tOriginal.roleLabel,
       isDarkCanvas: false,
-      bg: const Color(0xFFF8FAFC),
-      bgCard: Colors.white,
-      bgCardAlt: const Color(0xFFF1F5F9),
-      bgRule: const Color(0xFFE2E8F0),
-      accent: const Color(0xFF10B981),
-      accentLight: const Color(0xFF34D399),
-      accentMuted: const Color(0xFFD1FAE5),
-      accentGradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
-      glassTint: const Color(0x1A10B981),
-      textPrimary: const Color(0xFF111827),
-      textSecondary: const Color(0xFF6B7280),
-      textTertiary: const Color(0xFF9CA3AF),
-      danger: const Color(0xFFEF4444),
+      bg: SoftPalette.gray50,
+      bgCard: SoftPalette.gray50,
+      bgCardAlt: SoftPalette.slate100,
+      bgRule: SoftPalette.slate150,
+      accent: SoftPalette.emerald350,
+      accentLight: SoftPalette.emerald300,
+      accentMuted: SoftPalette.emerald100,
+      accentGradient: const LinearGradient(colors: [SoftPalette.emerald350, SoftPalette.emerald500]),
+      glassTint: SoftPalette.emerald350A10,
+      textPrimary: SoftPalette.slate900,
+      textSecondary: SoftPalette.slate550,
+      textTertiary: SoftPalette.slate350,
+      danger: SoftPalette.red400,
       zakat: tOriginal.zakat,
       nonZakat: tOriginal.nonZakat,
       gmwf: tOriginal.gmwf,
@@ -262,7 +263,7 @@ class _ExpensesTabState extends State<ExpensesTab> {
                       child: ElevatedButton(
                         style: ElevatedButton.styleFrom(
                           backgroundColor: t.accent,
-                          foregroundColor: Colors.white,
+                          foregroundColor: SoftPalette.gray50,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         ),
                         onPressed: () async {
@@ -271,21 +272,21 @@ class _ExpensesTabState extends State<ExpensesTab> {
                           final dateStr = dateCtrl.text.trim();
 
                           if (amt == null || amt <= 0) {
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            AppToast.showSnackBar(context, 
                               const SnackBar(content: Text('Please enter a valid amount')),
                             );
                             return;
                           }
 
                           if (desc.isEmpty) {
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            AppToast.showSnackBar(context, 
                               const SnackBar(content: Text('Please enter a description')),
                             );
                             return;
                           }
 
                           if (isOtherSelected && customCatCtrl.text.trim().isEmpty) {
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            AppToast.showSnackBar(context, 
                               const SnackBar(content: Text('Please specify the custom category')),
                             );
                             return;
@@ -319,7 +320,7 @@ class _ExpensesTabState extends State<ExpensesTab> {
 
                             if (context.mounted) {
                               Navigator.pop(dialogCtx);
-                              ScaffoldMessenger.of(context).showSnackBar(
+                              AppToast.showSnackBar(context, 
                                 const SnackBar(content: Text('Daily Expense logged successfully')),
                               );
                             }
@@ -376,11 +377,11 @@ class _ExpensesTabState extends State<ExpensesTab> {
               child: Text('Cancel', style: TextStyle(color: t.textSecondary)),
             ),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: t.danger, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: t.danger, foregroundColor: SoftPalette.gray50),
               onPressed: () async {
                 final reason = reasonCtrl.text.trim();
                 if (reason.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  AppToast.showSnackBar(context, 
                     const SnackBar(content: Text('Please enter a void reason')),
                   );
                   return;
@@ -401,7 +402,7 @@ class _ExpensesTabState extends State<ExpensesTab> {
 
                   if (context.mounted) {
                     Navigator.pop(ctx);
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    AppToast.showSnackBar(context, 
                       const SnackBar(content: Text('Expense has been voided')),
                     );
                   }
@@ -423,19 +424,19 @@ class _ExpensesTabState extends State<ExpensesTab> {
     final t = RoleThemeData(
       roleLabel: tOriginal.roleLabel,
       isDarkCanvas: false,
-      bg: const Color(0xFFF8FAFC),
-      bgCard: Colors.white,
-      bgCardAlt: const Color(0xFFF1F5F9),
-      bgRule: const Color(0xFFE2E8F0),
-      accent: const Color(0xFF10B981),
-      accentLight: const Color(0xFF34D399),
-      accentMuted: const Color(0xFFD1FAE5),
-      accentGradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
-      glassTint: const Color(0x1A10B981),
-      textPrimary: const Color(0xFF111827),
-      textSecondary: const Color(0xFF6B7280),
-      textTertiary: const Color(0xFF9CA3AF),
-      danger: const Color(0xFFEF4444),
+      bg: SoftPalette.gray50,
+      bgCard: SoftPalette.gray50,
+      bgCardAlt: SoftPalette.slate100,
+      bgRule: SoftPalette.slate150,
+      accent: SoftPalette.emerald350,
+      accentLight: SoftPalette.emerald300,
+      accentMuted: SoftPalette.emerald100,
+      accentGradient: const LinearGradient(colors: [SoftPalette.emerald350, SoftPalette.emerald500]),
+      glassTint: SoftPalette.emerald350A10,
+      textPrimary: SoftPalette.slate900,
+      textSecondary: SoftPalette.slate550,
+      textTertiary: SoftPalette.slate350,
+      danger: SoftPalette.red400,
       zakat: tOriginal.zakat,
       nonZakat: tOriginal.nonZakat,
       gmwf: tOriginal.gmwf,
@@ -453,7 +454,7 @@ class _ExpensesTabState extends State<ExpensesTab> {
     final isLocked = Hive.box(LocalStorageService.financeSettingsBox).get('month_lock_$monthKey') == true;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: context.adapt(SoftPalette.gray50),
       body: Column(
         children: [
           if (isLocked)
@@ -462,18 +463,18 @@ class _ExpensesTabState extends State<ExpensesTab> {
               margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               decoration: BoxDecoration(
-                color: Colors.amber.withOpacity(0.08),
+                color: context.adapt(SoftPalette.amber200).withOpacity(0.08),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.amber.withOpacity(0.35)),
+                border: Border.all(color: context.adapt(SoftPalette.amber200).withOpacity(0.35)),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.lock_outline, color: Colors.amber, size: 18),
+                  const Icon(Icons.lock_outline, color: SoftPalette.amber200, size: 18),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       'The period $monthKey is locked and closed. Logging or voiding expenses is disabled.',
-                      style: TextStyle(color: Colors.amber[800], fontSize: 11, fontWeight: FontWeight.bold),
+                      style: TextStyle(color: SoftPalette.orange350, fontSize: 11, fontWeight: FontWeight.bold),
                     ),
                   ),
                 ],
@@ -482,16 +483,16 @@ class _ExpensesTabState extends State<ExpensesTab> {
           // ── Date Navigator + Toggle bar ──────────────────────────────────────────
           Container(
             padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
-            decoration: const BoxDecoration(
-              color: Colors.white,
-              border: Border(bottom: BorderSide(color: Color(0xFFE2E8F0), width: 0.5)),
+            decoration: BoxDecoration(
+              color: context.adapt(SoftPalette.gray50),
+              border: Border(bottom: BorderSide(color: context.adapt(SoftPalette.slate150), width: 0.5)),
             ),
             child: Row(
               children: [
                 // Previous Day
                 IconButton(
                   icon: const Icon(Icons.arrow_back_ios, size: 16),
-                  color: const Color(0xFF6B7280),
+                  color: context.adapt(SoftPalette.slate550),
                   onPressed: () => _changeDate(-1),
                 ),
                 
@@ -515,8 +516,8 @@ class _ExpensesTabState extends State<ExpensesTab> {
                       alignment: Alignment.center,
                       child: Text(
                         DateFormat('EEEE, d MMMM yyyy').format(_selectedDate),
-                        style: const TextStyle(
-                          color: Color(0xFF111827),
+                        style: TextStyle(
+                          color: context.adapt(SoftPalette.slate900),
                           fontWeight: FontWeight.bold,
                           fontSize: 14,
                         ),
@@ -528,7 +529,7 @@ class _ExpensesTabState extends State<ExpensesTab> {
                 // Next Day
                 IconButton(
                   icon: const Icon(Icons.arrow_forward_ios, size: 16),
-                  color: const Color(0xFF6B7280),
+                  color: context.adapt(SoftPalette.slate550),
                   onPressed: () => _changeDate(1),
                 ),
 
@@ -543,9 +544,9 @@ class _ExpensesTabState extends State<ExpensesTab> {
                     return Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFD1FAE5),
+                        color: context.adapt(SoftPalette.emerald100),
                         borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: const Color(0xFF10B981).withOpacity(0.35)),
+                        border: Border.all(color: SoftPalette.emerald350.withOpacity(0.35)),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
@@ -553,10 +554,10 @@ class _ExpensesTabState extends State<ExpensesTab> {
                           Container(
                             width: 6,
                             height: 6,
-                            decoration: const BoxDecoration(color: Color(0xFF10B981), shape: BoxShape.circle),
+                            decoration: const BoxDecoration(color: SoftPalette.emerald350, shape: BoxShape.circle),
                           ),
                           const SizedBox(width: 4),
-                          const Text('Today', style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 9, letterSpacing: 0.5)),
+                          const Text('Today', style: TextStyle(color: SoftPalette.emerald350, fontWeight: FontWeight.bold, fontSize: 9, letterSpacing: 0.5)),
                         ],
                       ),
                     );
@@ -569,16 +570,16 @@ class _ExpensesTabState extends State<ExpensesTab> {
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFD1FAE5),
+                        color: context.adapt(SoftPalette.emerald100),
                         borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: const Color(0xFF10B981).withOpacity(0.5)),
+                        border: Border.all(color: SoftPalette.emerald350.withOpacity(0.5)),
                       ),
                       child: const Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.today_outlined, size: 10, color: Color(0xFF10B981)),
+                          Icon(Icons.today_outlined, size: 10, color: SoftPalette.emerald350),
                           SizedBox(width: 4),
-                          Text('GO TO TODAY', style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 9, letterSpacing: 0.5)),
+                          Text('GO TO TODAY', style: TextStyle(color: SoftPalette.emerald350, fontWeight: FontWeight.bold, fontSize: 9, letterSpacing: 0.5)),
                         ],
                       ),
                     ),
@@ -588,8 +589,8 @@ class _ExpensesTabState extends State<ExpensesTab> {
                 const SizedBox(width: 4),
                 ElevatedButton.icon(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: isLocked ? Colors.grey : const Color(0xFF10B981),
-                    foregroundColor: Colors.white,
+                    backgroundColor: isLocked ? SoftPalette.gray350 : SoftPalette.emerald350,
+                    foregroundColor: SoftPalette.gray50,
                     minimumSize: const Size(0, 36),
                     padding: const EdgeInsets.symmetric(horizontal: 10),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -606,13 +607,13 @@ class _ExpensesTabState extends State<ExpensesTab> {
                   Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Text(
+                      Text(
                         'All Branches',
-                        style: TextStyle(color: Color(0xFF6B7280), fontSize: 11, fontWeight: FontWeight.w600),
+                        style: TextStyle(color: context.adapt(SoftPalette.slate550), fontSize: 11, fontWeight: FontWeight.w600),
                       ),
                       const SizedBox(width: 4),
                       Switch(
-                        activeColor: const Color(0xFF10B981),
+                        activeColor: SoftPalette.emerald350,
                         value: _viewAllBranches,
                         onChanged: (val) {
                           setState(() => _viewAllBranches = val);
@@ -624,7 +625,7 @@ class _ExpensesTabState extends State<ExpensesTab> {
               ],
             ),
           ),
-          const Divider(height: 1, thickness: 1, color: Color(0xFFE2E8F0)),
+          Divider(height: 1, thickness: 1, color: context.adapt(SoftPalette.slate150)),
 
           // ── Reactive Expenses List & Breakdowns ──────────────────────────────────
           Expanded(
@@ -652,11 +653,11 @@ class _ExpensesTabState extends State<ExpensesTab> {
                         width: double.infinity,
                         padding: const EdgeInsets.all(20),
                         decoration: BoxDecoration(
-                          gradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
+                          gradient: const LinearGradient(colors: [SoftPalette.emerald350, SoftPalette.emerald500]),
                           borderRadius: BorderRadius.circular(16),
                           boxShadow: [
                             BoxShadow(
-                              color: const Color(0xFF10B981).withOpacity(0.25),
+                              color: SoftPalette.emerald350.withOpacity(0.25),
                               blurRadius: 10,
                               offset: const Offset(0, 4),
                             ),
@@ -667,12 +668,12 @@ class _ExpensesTabState extends State<ExpensesTab> {
                           children: [
                             Text(
                               _viewAllBranches ? 'Total Cross-Branch Spent Today' : 'Total Spent Today',
-                              style: TextStyle(color: Colors.white.withOpacity(0.85), fontSize: 13, fontWeight: FontWeight.w500),
+                              style: TextStyle(color: SoftPalette.gray50.withOpacity(0.85), fontSize: 13, fontWeight: FontWeight.w500),
                             ),
                             const SizedBox(height: 6),
                             Text(
                               'PKR ${NumberFormat('#,##0.00').format(totalDailySpend)}',
-                              style: const TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.bold),
+                              style: const TextStyle(color: SoftPalette.gray50, fontSize: 26, fontWeight: FontWeight.bold),
                             ),
                           ],
                         ),
@@ -681,9 +682,9 @@ class _ExpensesTabState extends State<ExpensesTab> {
 
                       // Category Breakdown Chips / Bar list
                       if (breakdown.isNotEmpty) ...[
-                        const Text(
+                        Text(
                           'Category Breakdown',
-                          style: TextStyle(color: Color(0xFF111827), fontSize: 13, fontWeight: FontWeight.bold),
+                          style: TextStyle(color: context.adapt(SoftPalette.slate900), fontSize: 13, fontWeight: FontWeight.bold),
                         ),
                         const SizedBox(height: 8),
                         SizedBox(
@@ -700,9 +701,9 @@ class _ExpensesTabState extends State<ExpensesTab> {
                                 margin: const EdgeInsets.only(right: 10),
                                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                 decoration: BoxDecoration(
-                                  color: Colors.white,
+                                  color: context.adapt(SoftPalette.gray50),
                                   borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                                  border: Border.all(color: context.adapt(SoftPalette.slate150)),
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
@@ -715,11 +716,11 @@ class _ExpensesTabState extends State<ExpensesTab> {
                                     const SizedBox(width: 6),
                                     Text(
                                       '$cat: ',
-                                      style: const TextStyle(color: Color(0xFF6B7280), fontSize: 12, fontWeight: FontWeight.bold),
+                                      style: TextStyle(color: context.adapt(SoftPalette.slate550), fontSize: 12, fontWeight: FontWeight.bold),
                                     ),
                                     Text(
                                       'PKR ${NumberFormat('#,##0').format(val)}',
-                                      style: const TextStyle(color: Color(0xFF111827), fontSize: 12, fontWeight: FontWeight.bold),
+                                      style: TextStyle(color: context.adapt(SoftPalette.slate900), fontSize: 12, fontWeight: FontWeight.bold),
                                     ),
                                   ],
                                 ),
@@ -731,29 +732,29 @@ class _ExpensesTabState extends State<ExpensesTab> {
                       ],
 
                       // Activity Log Header
-                      const Text(
+                      Text(
                         'Daily Spend Log',
-                        style: TextStyle(color: Color(0xFF111827), fontSize: 13, fontWeight: FontWeight.bold),
+                        style: TextStyle(color: context.adapt(SoftPalette.slate900), fontSize: 13, fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 8),
 
                       if (dayExpenses.isEmpty)
-                        const Center(
+                        Center(
                           child: Padding(
                             padding: EdgeInsets.symmetric(vertical: 40),
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.wallet_outlined, size: 52, color: Color(0xFF9CA3AF)),
+                                Icon(Icons.wallet_outlined, size: 52, color: context.adapt(SoftPalette.slate350)),
                                 SizedBox(height: 12),
                                 Text(
                                   'No expenses logged for this day',
-                                  style: TextStyle(color: Color(0xFF6B7280), fontSize: 13, fontWeight: FontWeight.w600),
+                                  style: TextStyle(color: context.adapt(SoftPalette.slate550), fontSize: 13, fontWeight: FontWeight.w600),
                                 ),
                                 SizedBox(height: 4),
                                 Text(
                                   'Tap the "+" button to log a spend',
-                                  style: TextStyle(color: Color(0xFF9CA3AF), fontSize: 11),
+                                  style: TextStyle(color: context.adapt(SoftPalette.slate350), fontSize: 11),
                                 ),
                               ],
                             ),
@@ -791,12 +792,12 @@ class _ExpensesTabState extends State<ExpensesTab> {
                             final catIcon = _getCategoryIcon(cat);
 
                             return Card(
-                              color: Colors.white,
+                              color: context.adapt(SoftPalette.gray50),
                               elevation: 0,
                               margin: const EdgeInsets.only(bottom: 8),
                               shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(10),
-                                side: BorderSide(color: isVoided ? const Color(0xFFE2E8F0).withOpacity(0.5) : const Color(0xFFE2E8F0), width: 0.75),
+                                side: BorderSide(color: isVoided ? context.adapt(SoftPalette.slate150).withOpacity(0.5) : context.adapt(SoftPalette.slate150), width: 0.75),
                               ),
                               child: ListTile(
                                 leading: Container(
@@ -810,7 +811,7 @@ class _ExpensesTabState extends State<ExpensesTab> {
                                 title: Text(
                                   desc,
                                   style: TextStyle(
-                                    color: isVoided ? const Color(0xFF9CA3AF) : const Color(0xFF111827),
+                                    color: isVoided ? context.adapt(SoftPalette.slate350) : context.adapt(SoftPalette.slate900),
                                     fontSize: 13,
                                     fontWeight: FontWeight.bold,
                                     decoration: isVoided ? TextDecoration.lineThrough : null,
@@ -838,11 +839,11 @@ class _ExpensesTabState extends State<ExpensesTab> {
                                         // Logger Name
                                         Text(
                                           'By $perfBy',
-                                          style: const TextStyle(color: Color(0xFF6B7280), fontSize: 11),
+                                          style: TextStyle(color: context.adapt(SoftPalette.slate550), fontSize: 11),
                                         ),
                                         if (timeStr.isNotEmpty) ...[
                                           const SizedBox(width: 4),
-                                          Text('• $timeStr', style: const TextStyle(color: Color(0xFF9CA3AF), fontSize: 10)),
+                                          Text('• $timeStr', style: TextStyle(color: context.adapt(SoftPalette.slate350), fontSize: 10)),
                                         ],
                                         // Branch Identifier if viewed globally
                                         if (_viewAllBranches && branchTag.isNotEmpty) ...[
@@ -850,12 +851,12 @@ class _ExpensesTabState extends State<ExpensesTab> {
                                           Container(
                                             padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                                             decoration: BoxDecoration(
-                                              color: const Color(0xFFE2E8F0),
+                                              color: context.adapt(SoftPalette.slate150),
                                               borderRadius: BorderRadius.circular(4),
                                             ),
                                             child: Text(
                                               branchTag.toUpperCase(),
-                                              style: const TextStyle(color: Color(0xFF6B7280), fontSize: 9, fontWeight: FontWeight.bold),
+                                              style: TextStyle(color: context.adapt(SoftPalette.slate550), fontSize: 9, fontWeight: FontWeight.bold),
                                             ),
                                           ),
                                         ],
@@ -865,12 +866,12 @@ class _ExpensesTabState extends State<ExpensesTab> {
                                       const SizedBox(height: 6),
                                       Row(
                                         children: [
-                                          const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 12),
+                                          const Icon(Icons.warning_amber_rounded, color: SoftPalette.red400, size: 12),
                                           const SizedBox(width: 4),
                                           Expanded(
                                             child: Text(
                                               'Voided: "${exp['voidReason'] ?? 'no reason'}" by ${exp['voidedBy'] ?? 'Unknown'}',
-                                              style: const TextStyle(color: Colors.red, fontSize: 10, fontWeight: FontWeight.bold),
+                                              style: const TextStyle(color: SoftPalette.red400, fontSize: 10, fontWeight: FontWeight.bold),
                                             ),
                                           ),
                                         ],
@@ -888,13 +889,13 @@ class _ExpensesTabState extends State<ExpensesTab> {
                                         child: Icon(
                                           syncStatus == 'synced' ? Icons.cloud_done : Icons.cloud_upload,
                                           size: 14,
-                                          color: syncStatus == 'synced' ? Colors.green.shade400 : Colors.orange.shade400,
+                                          color: syncStatus == 'synced' ? SoftPalette.green350 : SoftPalette.amber300,
                                         ),
                                       ),
                                     Text(
                                       'PKR ${NumberFormat('#,##0').format(amt)}',
                                       style: TextStyle(
-                                        color: isVoided ? const Color(0xFF9CA3AF) : const Color(0xFF111827),
+                                        color: isVoided ? context.adapt(SoftPalette.slate350) : context.adapt(SoftPalette.slate900),
                                         fontWeight: FontWeight.bold,
                                         fontSize: 14,
                                         decoration: isVoided ? TextDecoration.lineThrough : null,
@@ -904,7 +905,7 @@ class _ExpensesTabState extends State<ExpensesTab> {
                                         ['admin', 'ceo', 'chairman', 'global admin', 'hq manager', 'branch manager', 'supervisor']
                                             .contains(widget.userRole.toLowerCase()))
                                       IconButton(
-                                        icon: Icon(Icons.delete_sweep_outlined, color: isLocked ? Colors.grey : Colors.red, size: 18),
+                                        icon: Icon(Icons.delete_sweep_outlined, color: isLocked ? context.adapt(SoftPalette.gray350) : SoftPalette.red400, size: 18),
                                         onPressed: isLocked ? null : () => _openVoidConfirmDialog(context, exp, t),
                                         tooltip: isLocked ? 'Period is locked' : 'Void this record',
                                       ),

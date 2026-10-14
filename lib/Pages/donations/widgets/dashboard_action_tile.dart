@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import '../../../constants/colors.dart';
 import '../../../theme/role_theme_provider.dart';
 import '../donations_shared.dart';
@@ -56,7 +57,7 @@ class _DashboardActionTileState extends State<DashboardActionTile> {
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: _isHovered ? 0.04 : 0.02),
+                  color: SoftPalette.gray900.withValues(alpha: _isHovered ? 0.04 : 0.02),
                   blurRadius: _isHovered ? 12 : 10,
                   offset: _isHovered ? const Offset(0, 6) : const Offset(0, 4),
                 ),

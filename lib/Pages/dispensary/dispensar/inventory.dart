@@ -1,6 +1,7 @@
 // lib/pages/dispensary/dispensar/inventory.dart
 
 import 'package:gmwf/utils/debounced_box_listenable.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -69,25 +70,25 @@ class _InventoryPageState extends State<InventoryPage>
   @override
   bool get wantKeepAlive => true;
   // ── Palette ───────────────────────────────────────────────────────────────
-  static const _teal = Color(0xFF00695C);
-  static const _tealDark = Color(0xFF004D40);
-  static const _bg = Color(0xFFF1F8F6);
-  static const _white = Colors.white;
-  static const _green50 = Color(0xFFE8F5E9);
-  static const _green100 = Color(0xFFC8E6C9);
-  static const _green600 = Color(0xFF2E7D32);
-  static const _red = Color(0xFFD32F2F); // More vibrant, premium red
-  static const _orange = Color(0xFFE65100);
-  static const _amber = Color(0xFFF57F17);
-  static const _blue = Color(0xFF1976D2);
-  static const _purple = Color(0xFF6A1B9A);
-  static const _indigo = Color(0xFF283593);
-  static const _brown = Color(0xFF4E342E);
-  static const _textDark = Color(0xFF1B2631);
-  static const _textMid = Color(0xFF4A5568);
-  static const _textLight = Color(0xFF718096);
-  static const _border = Color(0xFFB2DFDB);
-  static const _shadow = Color(0x1800695C);
+  static const _teal = SoftPalette.teal600;
+  static const _tealDark = SoftPalette.teal700;
+  static const _bg = SoftPalette.teal100t;
+  static const _white = SoftPalette.gray50;
+  static const _green50 = SoftPalette.green100m;
+  static const _green100 = SoftPalette.green200;
+  static const _green600 = SoftPalette.green550;
+  static const _red = SoftPalette.red500; // More vibrant, premium red
+  static const _orange = SoftPalette.orange400;
+  static const _amber = SoftPalette.orange350;
+  static const _blue = SoftPalette.blue500;
+  static const _purple = SoftPalette.purple600;
+  static const _indigo = SoftPalette.indigo700;
+  static const _brown = SoftPalette.red700m;
+  static const _textDark = SoftPalette.slate800;
+  static const _textMid = SoftPalette.slate600;
+  static const _textLight = SoftPalette.slate500;
+  static const _border = SoftPalette.teal200;
+  static const _shadow = SoftPalette.teal600A9;
 
   bool get _isDark {
     try {
@@ -160,20 +161,20 @@ class _InventoryPageState extends State<InventoryPage>
   static const _editRequestTypes = {'edit_medicine', 'delete_medicine'};
 
   static Color _typeColor(String t) => switch (t) {
-        'Tablet' => const Color(0xFF1565C0),
-        'Capsule' => const Color(0xFF6A1B9A),
-        'Syrup' => const Color(0xFFF57F17),
-        'Injection' => const Color(0xFFC62828),
-        'Infusion' => const Color(0xFF00695C),
-        'Drip' => const Color(0xFF00695C),
-        'Drip Set' => const Color(0xFF00838F),
-        'Syringe' => const Color(0xFFAD1457),
-        'Cannula' => const Color(0xFFD81B60),
-        'Needle' => const Color(0xFF8E24AA),
-        'Nebulization' => const Color(0xFF283593),
-        'Dressing Item' => const Color(0xFF455A64),
-        'Consumables' => const Color(0xFF00796B),
-        _ => const Color(0xFF37474F),
+        'Tablet' => SoftPalette.blue550,
+        'Capsule' => SoftPalette.purple600,
+        'Syrup' => SoftPalette.orange350,
+        'Injection' => SoftPalette.red550,
+        'Infusion' => SoftPalette.teal600,
+        'Drip' => SoftPalette.teal600,
+        'Drip Set' => SoftPalette.cyan500,
+        'Syringe' => SoftPalette.pink550,
+        'Cannula' => SoftPalette.red500,
+        'Needle' => SoftPalette.purple550,
+        'Nebulization' => SoftPalette.indigo700,
+        'Dressing Item' => SoftPalette.slate600,
+        'Consumables' => SoftPalette.teal550,
+        _ => SoftPalette.slate700,
       };
 
   late final TabController _tabCtrl;
@@ -248,7 +249,7 @@ class _InventoryPageState extends State<InventoryPage>
           _showRemoveAllMeds = !_showRemoveAllMeds;
         });
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          AppToast.showSnackBar(context, 
             SnackBar(
               content: Text(
                 _showRemoveAllMeds
@@ -257,7 +258,7 @@ class _InventoryPageState extends State<InventoryPage>
                 style: const TextStyle(fontWeight: FontWeight.bold),
               ),
               duration: const Duration(seconds: 2),
-              backgroundColor: _showRemoveAllMeds ? Colors.red.shade800 : Colors.blueGrey.shade800,
+              backgroundColor: _showRemoveAllMeds ? SoftPalette.red550 : SoftPalette.slate700,
             ),
           );
         }
@@ -421,7 +422,7 @@ class _InventoryPageState extends State<InventoryPage>
     if (_lastCloudPullTime != null &&
         DateTime.now().difference(_lastCloudPullTime!) < const Duration(seconds: 30)) {
       if (showToast && mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           const SnackBar(
             content: Text('Please wait 30 seconds between cloud syncs.'),
             duration: Duration(seconds: 2),
@@ -436,7 +437,7 @@ class _InventoryPageState extends State<InventoryPage>
     final activeCamp = CampSessionService.getActiveCamp(effBranch);
 
     if (showToast && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         const SnackBar(
           content: Text('Refreshing inventory from cloud...'),
           duration: Duration(seconds: 2),
@@ -453,10 +454,10 @@ class _InventoryPageState extends State<InventoryPage>
       if (mounted) {
         _loadDataFromHive();
         if (showToast) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          AppToast.showSnackBar(context, 
             const SnackBar(
               content: Text('Inventory cloud sync complete.'),
-              backgroundColor: Color(0xFF00695C),
+              backgroundColor: SoftPalette.teal600,
               duration: Duration(seconds: 2),
             ),
           );
@@ -759,7 +760,7 @@ class _InventoryPageState extends State<InventoryPage>
       );
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('PDF export failed: $e'),
             backgroundColor: _red,
@@ -1070,10 +1071,10 @@ class _InventoryPageState extends State<InventoryPage>
         Container(
           height: 42,
           decoration: BoxDecoration(
-            color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+            color: _isDark ? SoftPalette.slate800 : SoftPalette.gray50,
             border: Border(
               bottom: BorderSide(
-                color: _isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                color: _isDark ? SoftPalette.slate700 : SoftPalette.slate150,
                 width: 1,
               ),
             ),
@@ -1097,11 +1098,11 @@ class _InventoryPageState extends State<InventoryPage>
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                   decoration: BoxDecoration(
                     color: isActive
-                        ? (_isDark ? const Color(0xFF0F766E) : _teal)
-                        : (_isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9)),
+                        ? (_isDark ? SoftPalette.teal550 : _teal)
+                        : (_isDark ? SoftPalette.slate700 : SoftPalette.slate100),
                     borderRadius: BorderRadius.circular(20),
                     border: Border.all(
-                      color: isActive ? (_isDark ? const Color(0xFF14B8A6) : _teal) : Colors.transparent,
+                      color: isActive ? (_isDark ? SoftPalette.teal350 : _teal) : Colors.transparent,
                     ),
                   ),
                   child: Row(
@@ -1110,7 +1111,7 @@ class _InventoryPageState extends State<InventoryPage>
                       Icon(
                         item['icon'] as IconData,
                         size: 13,
-                        color: isActive ? Colors.white : (_isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                        color: isActive ? SoftPalette.gray50 : (_isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                       ),
                       const SizedBox(width: 5),
                       Text(
@@ -1118,7 +1119,7 @@ class _InventoryPageState extends State<InventoryPage>
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: isActive ? FontWeight.bold : FontWeight.w600,
-                          color: isActive ? Colors.white : (_isDark ? const Color(0xFFE2E8F0) : const Color(0xFF334155)),
+                          color: isActive ? SoftPalette.gray50 : (_isDark ? SoftPalette.slate150 : SoftPalette.slate700),
                         ),
                       ),
                     ],
@@ -1150,7 +1151,7 @@ class _InventoryPageState extends State<InventoryPage>
           ];
 
     return Container(
-      color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+      color: _isDark ? SoftPalette.slate800 : SoftPalette.gray50,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1169,7 +1170,7 @@ class _InventoryPageState extends State<InventoryPage>
                         color: _teal,
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: const Icon(FontAwesomeIcons.pills, color: Colors.white, size: 16),
+                      child: const Icon(FontAwesomeIcons.pills, color: SoftPalette.gray50, size: 16),
                     );
                   },
                 ),
@@ -1181,7 +1182,7 @@ class _InventoryPageState extends State<InventoryPage>
                       Text(
                         'Gulzar Madina',
                         style: TextStyle(
-                          color: _isDark ? Colors.white : _tealDark,
+                          color: _isDark ? SoftPalette.gray50 : _tealDark,
                           fontSize: 14,
                           fontWeight: FontWeight.bold,
                           letterSpacing: 0.5,
@@ -1190,7 +1191,7 @@ class _InventoryPageState extends State<InventoryPage>
                       Text(
                         '${_getBranchName()} Inventory',
                         style: TextStyle(
-                          color: _isDark ? const Color(0xFF94A3B8) : _textLight,
+                          color: _isDark ? SoftPalette.slate350 : _textLight,
                           fontSize: 10,
                           fontWeight: FontWeight.w600,
                           letterSpacing: 0.5,
@@ -1202,7 +1203,7 @@ class _InventoryPageState extends State<InventoryPage>
               ],
             ),
           ),
-          Divider(height: 1, color: _isDark ? const Color(0xFF334155) : null),
+          Divider(height: 1, color: _isDark ? SoftPalette.slate700 : null),
           const SizedBox(height: 12),
           Expanded(
             child: ListView.builder(
@@ -1215,7 +1216,7 @@ class _InventoryPageState extends State<InventoryPage>
                   margin: const EdgeInsets.only(bottom: 6),
                   decoration: BoxDecoration(
                     color: isActive
-                        ? (_isDark ? const Color(0xFF0F766E) : _teal)
+                        ? (_isDark ? SoftPalette.teal550 : _teal)
                         : Colors.transparent,
                     borderRadius: BorderRadius.circular(8),
                   ),
@@ -1236,8 +1237,8 @@ class _InventoryPageState extends State<InventoryPage>
                           Icon(
                             item['icon'] as IconData,
                             color: isActive
-                                ? Colors.white
-                                : (_isDark ? const Color(0xFF94A3B8) : _textMid),
+                                ? SoftPalette.gray50
+                                : (_isDark ? SoftPalette.slate350 : _textMid),
                             size: 16,
                           ),
                           const SizedBox(width: 12),
@@ -1245,8 +1246,8 @@ class _InventoryPageState extends State<InventoryPage>
                             item['label'] as String,
                             style: TextStyle(
                               color: isActive
-                                  ? Colors.white
-                                  : (_isDark ? const Color(0xFFCBD5E1) : _textDark),
+                                  ? SoftPalette.gray50
+                                  : (_isDark ? SoftPalette.slate200 : _textDark),
                               fontSize: 13,
                               fontWeight: isActive ? FontWeight.bold : FontWeight.w500,
                             ),
@@ -1259,7 +1260,7 @@ class _InventoryPageState extends State<InventoryPage>
               },
             ),
           ),
-          Divider(height: 1, color: _isDark ? const Color(0xFF334155) : null),
+          Divider(height: 1, color: _isDark ? SoftPalette.slate700 : null),
           Container(
             padding: const EdgeInsets.all(16),
             child: Row(
@@ -1267,10 +1268,10 @@ class _InventoryPageState extends State<InventoryPage>
                 Container(
                   padding: const EdgeInsets.all(8),
                   decoration: BoxDecoration(
-                    color: _isDark ? const Color(0xFF0F766E).withValues(alpha: 0.2) : _teal.withValues(alpha: 0.1),
+                    color: _isDark ? SoftPalette.teal550.withValues(alpha: 0.2) : _teal.withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                   ),
-                  child: Icon(Icons.store_rounded, color: _isDark ? const Color(0xFF38BDF8) : _teal, size: 18),
+                  child: Icon(Icons.store_rounded, color: _isDark ? SoftPalette.sky350 : _teal, size: 18),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
@@ -1280,7 +1281,7 @@ class _InventoryPageState extends State<InventoryPage>
                       Text(
                         _getBranchName(),
                         style: TextStyle(
-                          color: _isDark ? Colors.white : _textDark,
+                          color: _isDark ? SoftPalette.gray50 : _textDark,
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
                         ),
@@ -1293,7 +1294,7 @@ class _InventoryPageState extends State<InventoryPage>
                           return Text(
                             'v$version',
                             style: TextStyle(
-                              color: _isDark ? const Color(0xFF64748B) : _textLight,
+                              color: _isDark ? SoftPalette.slate550 : _textLight,
                               fontSize: 10,
                               fontWeight: FontWeight.w500,
                             ),
@@ -1319,17 +1320,17 @@ class _InventoryPageState extends State<InventoryPage>
 
     if (_isSupervisorUser || _isDoctorUser) {
       return Scaffold(
-        backgroundColor: _isDark ? const Color(0xFF0F172A) : _bg,
+        backgroundColor: _isDark ? SoftPalette.slate900 : _bg,
         appBar: (!widget.isEmbedded && !isWrapped) ? _buildAppBar(isMobile: isMobile) : null,
         body: _stockTab(),
       );
     }
 
     return Scaffold(
-      backgroundColor: _isDark ? const Color(0xFF0F172A) : _bg,
+      backgroundColor: _isDark ? SoftPalette.slate900 : _bg,
       appBar: (!widget.isEmbedded && !isWrapped) ? _buildAppBar(isMobile: isMobile) : null,
       drawer: (isMobile && !widget.isDispenser) ? Drawer(
-        backgroundColor: _isDark ? const Color(0xFF1E293B) : Colors.white,
+        backgroundColor: _isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         child: _buildSidebarContent(context),
       ) : null,
       floatingActionButton: (_isSupervisorOrReadOnly || widget.isAdmin || !isMobile)
@@ -1345,10 +1346,10 @@ class _InventoryPageState extends State<InventoryPage>
                             isDispenser: widget.isDispenser,
                             isDoctor: widget.isDoctor,
                           ))),
-              icon: const Icon(Icons.add_rounded, color: Colors.white),
+              icon: const Icon(Icons.add_rounded, color: SoftPalette.gray50),
               label: const Text('Update Stock',
                   style: TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.bold)),
+                      color: SoftPalette.gray50, fontWeight: FontWeight.bold)),
             ),
       body: BlurredUnderDialogBackground(
         child: Row(
@@ -1357,8 +1358,8 @@ class _InventoryPageState extends State<InventoryPage>
             Container(
               width: 220,
               decoration: BoxDecoration(
-                color: _isDark ? const Color(0xFF1E293B) : Colors.white,
-                border: Border(right: BorderSide(color: _isDark ? const Color(0xFF334155) : Colors.grey.shade200, width: 1)),
+                color: _isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+                border: Border(right: BorderSide(color: _isDark ? SoftPalette.slate700 : SoftPalette.gray100, width: 1)),
               ),
               child: _buildSidebarContent(context),
             ),
@@ -1428,8 +1429,8 @@ class _InventoryPageState extends State<InventoryPage>
   }) {
     return ElevatedButton.icon(
       onPressed: onTap,
-      icon: Icon(icon, size: 12, color: Colors.white),
-      label: Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+      icon: Icon(icon, size: 12, color: SoftPalette.gray50),
+      label: Text(label, style: const TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 12)),
       style: ElevatedButton.styleFrom(
         backgroundColor: color,
         elevation: 1,
@@ -1442,10 +1443,10 @@ class _InventoryPageState extends State<InventoryPage>
 
   Future<void> _showDeleteInventoryDialog(Map<String, dynamic> batchData) async {
     if (!_canDeleteInventoryItem) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         const SnackBar(
           content: Text('Only the Chairman and HQ Manager can delete medicines from inventory.'),
-          backgroundColor: Colors.red,
+          backgroundColor: SoftPalette.red400,
         ),
       );
       return;
@@ -1473,7 +1474,7 @@ class _InventoryPageState extends State<InventoryPage>
           FilledButton.icon(
             onPressed: () => Navigator.pop(context, true),
             icon: const Icon(Icons.delete_forever_rounded),
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(backgroundColor: SoftPalette.red400),
             label: const Text('Delete Permanently'),
           ),
         ],
@@ -1532,11 +1533,11 @@ class _InventoryPageState extends State<InventoryPage>
       // Refresh UI instantly
       if (mounted) {
         _loadDataFromHive();
-        ScaffoldMessenger.of(context).clearSnackBars();
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.clear();
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('✅ "${batchData['name']}" deleted successfully ($deletedHiveCount items removed).'),
-            backgroundColor: Colors.green,
+            backgroundColor: SoftPalette.green400,
             duration: const Duration(seconds: 3),
           ),
         );
@@ -1610,11 +1611,11 @@ class _InventoryPageState extends State<InventoryPage>
     } catch (e, st) {
       debugPrint('[InventoryDelete] ❌ ERROR: $e\n$st');
       if (mounted) {
-        ScaffoldMessenger.of(context).clearSnackBars();
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.clear();
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('Delete notice: $e'),
-            backgroundColor: Colors.orange,
+            backgroundColor: SoftPalette.amber300,
             duration: const Duration(seconds: 4),
           ),
         );
@@ -1624,10 +1625,10 @@ class _InventoryPageState extends State<InventoryPage>
 
   Future<void> _confirmDeleteSelectedMedicines() async {
     if (!_canDeleteInventoryItem) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         const SnackBar(
           content: Text('Only the Chairman and HQ Manager can delete medicines from inventory.'),
-          backgroundColor: Colors.red,
+          backgroundColor: SoftPalette.red400,
         ),
       );
       return;
@@ -1647,7 +1648,7 @@ class _InventoryPageState extends State<InventoryPage>
         return AlertDialog(
           title: Row(
             children: [
-              const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
+              const Icon(Icons.warning_amber_rounded, color: SoftPalette.red400, size: 28),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
@@ -1676,9 +1677,9 @@ class _InventoryPageState extends State<InventoryPage>
                 Container(
                   constraints: const BoxConstraints(maxHeight: 180),
                   decoration: BoxDecoration(
-                    color: _isDark ? const Color(0xFF1E293B) : Colors.grey.shade100,
+                    color: _isDark ? SoftPalette.slate800 : SoftPalette.gray100,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.grey.shade300),
+                    border: Border.all(color: ctx.adapt(SoftPalette.gray150)),
                   ),
                   child: ListView.separated(
                     shrinkWrap: true,
@@ -1691,7 +1692,7 @@ class _InventoryPageState extends State<InventoryPage>
                         padding: const EdgeInsets.symmetric(vertical: 4),
                         child: Row(
                           children: [
-                            const Icon(Icons.medication_rounded, size: 14, color: Colors.red),
+                            const Icon(Icons.medication_rounded, size: 14, color: SoftPalette.red400),
                             const SizedBox(width: 6),
                             Expanded(
                               child: Text(
@@ -1715,7 +1716,7 @@ class _InventoryPageState extends State<InventoryPage>
               child: const Text('Cancel'),
             ),
             ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade700, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.red500, foregroundColor: SoftPalette.gray50),
               onPressed: () => Navigator.pop(ctx, true),
               icon: const Icon(Icons.delete_forever_rounded, size: 18),
               label: Text(
@@ -1857,11 +1858,11 @@ class _InventoryPageState extends State<InventoryPage>
           _selectedBatchKeys.clear();
         });
         _loadDataFromHive();
-        ScaffoldMessenger.of(context).clearSnackBars();
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.clear();
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('✅ Successfully deleted ${selectedBatches.length} medicine(s) ($deletedHiveCount local records cleaned).'),
-            backgroundColor: Colors.green,
+            backgroundColor: SoftPalette.green400,
             duration: const Duration(seconds: 4),
           ),
         );
@@ -1869,11 +1870,11 @@ class _InventoryPageState extends State<InventoryPage>
     } catch (e, st) {
       debugPrint('[InventoryDelete] ❌ ERROR: $e\n$st');
       if (mounted) {
-        ScaffoldMessenger.of(context).clearSnackBars();
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.clear();
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('Delete notice: $e'),
-            backgroundColor: Colors.orange,
+            backgroundColor: SoftPalette.amber300,
             duration: const Duration(seconds: 4),
           ),
         );
@@ -1882,28 +1883,28 @@ class _InventoryPageState extends State<InventoryPage>
   }
 
   PreferredSizeWidget _buildAppBar({bool isMobile = false}) => AppBar(
-        backgroundColor: _isDark ? const Color(0xFF0F172A) : _teal,
+        backgroundColor: _isDark ? SoftPalette.slate900 : _teal,
         elevation: 1,
         toolbarHeight: 55,
         automaticallyImplyLeading: false,
         leading: (!widget.isEmbedded && Navigator.canPop(context))
-            ? const AppBackButton(color: Colors.white)
+            ? const AppBackButton(color: SoftPalette.gray50)
             : (isMobile && !widget.isDispenser && !_isDoctorUser && !_isSupervisorUser
                 ? Builder(
                     builder: (context) => IconButton(
-                      icon: const Icon(Icons.menu_rounded, color: Colors.white, size: 22),
+                      icon: const Icon(Icons.menu_rounded, color: SoftPalette.gray50, size: 22),
                       onPressed: () => Scaffold.of(context).openDrawer(),
                     ),
                   )
                 : null),
-        iconTheme: const IconThemeData(color: Colors.white),
+        iconTheme: const IconThemeData(color: SoftPalette.gray50),
         title: Row(children: [
           const Icon(FontAwesomeIcons.pills,
-              color: Colors.white70, size: 14),
+              color: SoftPalette.gray50A70, size: 14),
           const SizedBox(width: 8),
           const Text('Inventory',
               style: TextStyle(
-                  color: Colors.white,
+                  color: SoftPalette.gray50,
                   fontSize: 16,
                   fontWeight: FontWeight.bold)),
         ]),
@@ -1932,16 +1933,16 @@ class _InventoryPageState extends State<InventoryPage>
                     icon: Stack(
                       alignment: Alignment.center,
                       children: [
-                        const Icon(Icons.sync_problem_rounded, color: Colors.orangeAccent),
+                        const Icon(Icons.sync_problem_rounded, color: SoftPalette.amber300),
                         Positioned(
                           right: 0,
                           top: 0,
                           child: CircleAvatar(
                             radius: 6,
-                            backgroundColor: Colors.red,
+                            backgroundColor: SoftPalette.red400,
                             child: Text(
                               '$failuresCount',
-                              style: const TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold),
+                              style: const TextStyle(color: SoftPalette.gray50, fontSize: 8, fontWeight: FontWeight.bold),
                             ),
                           ),
                         ),
@@ -1998,7 +1999,7 @@ class _InventoryPageState extends State<InventoryPage>
                   actions: [
                     TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
                     FilledButton(
-                      style: FilledButton.styleFrom(backgroundColor: Colors.red.shade700),
+                      style: FilledButton.styleFrom(backgroundColor: SoftPalette.red500),
                       onPressed: () => Navigator.pop(ctx, true),
                       child: const Text('Clear all'),
                     ),
@@ -2015,7 +2016,7 @@ class _InventoryPageState extends State<InventoryPage>
             return AlertDialog(
               title: const Row(
                 children: [
-                  Icon(Icons.sync_problem_rounded, color: Colors.orange),
+                  Icon(Icons.sync_problem_rounded, color: SoftPalette.amber300),
                   SizedBox(width: 8),
                   Text('Sync Retry Queue'),
                 ],
@@ -2042,7 +2043,7 @@ class _InventoryPageState extends State<InventoryPage>
                               title: Text('$name ($type)'),
                               subtitle: Text('Error: $error\nRetries: $attempts'),
                               isThreeLine: true,
-                              leading: const Icon(Icons.error_outline_rounded, color: Colors.red),
+                              leading: const Icon(Icons.error_outline_rounded, color: SoftPalette.red400),
                               trailing: IconButton(
                                 tooltip: 'Clear this item (stop retrying)',
                                 icon: const Icon(Icons.delete_outline_rounded),
@@ -2060,13 +2061,13 @@ class _InventoryPageState extends State<InventoryPage>
                 if (failed.isNotEmpty) ...[
                   TextButton.icon(
                     onPressed: clearAll,
-                    icon: const Icon(Icons.delete_sweep_rounded, color: Colors.red),
-                    label: const Text('Clear all', style: TextStyle(color: Colors.red)),
+                    icon: const Icon(Icons.delete_sweep_rounded, color: SoftPalette.red400),
+                    label: const Text('Clear all', style: TextStyle(color: SoftPalette.red400)),
                   ),
                   TextButton.icon(
                     onPressed: () {
                       SyncService().triggerUpload(force: true);
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      AppToast.showSnackBar(context, 
                         const SnackBar(content: Text('Retrying upload now…'), duration: Duration(seconds: 2)),
                       );
                     },
@@ -2095,12 +2096,12 @@ class _InventoryPageState extends State<InventoryPage>
           margin: const EdgeInsets.all(24),
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
-            color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+            color: _isDark ? SoftPalette.slate800 : SoftPalette.gray50,
             borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: _isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+            border: Border.all(color: _isDark ? SoftPalette.slate700 : SoftPalette.gray150),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.05),
+                color: SoftPalette.gray900.withValues(alpha: 0.05),
                 blurRadius: 10,
                 offset: const Offset(0, 4),
               ),
@@ -2117,7 +2118,7 @@ class _InventoryPageState extends State<InventoryPage>
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
-                  color: _isDark ? Colors.white : _textDark,
+                  color: _isDark ? SoftPalette.gray50 : _textDark,
                 ),
               ),
               const SizedBox(height: 6),
@@ -2126,7 +2127,7 @@ class _InventoryPageState extends State<InventoryPage>
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 13,
-                  color: _isDark ? const Color(0xFF94A3B8) : _textLight,
+                  color: _isDark ? SoftPalette.slate350 : _textLight,
                 ),
               ),
               const SizedBox(height: 20),
@@ -2139,7 +2140,7 @@ class _InventoryPageState extends State<InventoryPage>
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: _teal,
-                        foregroundColor: Colors.white,
+                        foregroundColor: SoftPalette.gray50,
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
@@ -2160,13 +2161,13 @@ class _InventoryPageState extends State<InventoryPage>
                     ),
                   OutlinedButton.icon(
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: _isDark ? const Color(0xFF5EEAD4) : _teal,
+                      foregroundColor: _isDark ? SoftPalette.teal200 : _teal,
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                      side: BorderSide(color: _isDark ? const Color(0xFF5EEAD4) : _teal),
+                      side: BorderSide(color: _isDark ? SoftPalette.teal200 : _teal),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
                     onPressed: () async {
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      AppToast.showSnackBar(context, 
                         const SnackBar(content: Text('🔄 Restoring and syncing branch inventory from cloud & server...'), duration: Duration(seconds: 3)),
                       );
                       if (widget.branchId.toLowerCase().contains('karachi')) {
@@ -2176,8 +2177,8 @@ class _InventoryPageState extends State<InventoryPage>
                       }
                       if (mounted) {
                         _loadDataFromHive();
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('✅ Inventory sync complete.'), backgroundColor: Color(0xFF00695C), duration: Duration(seconds: 2)),
+                        AppToast.showSnackBar(context, 
+                          const SnackBar(content: Text('✅ Inventory sync complete.'), backgroundColor: SoftPalette.teal600, duration: Duration(seconds: 2)),
                         );
                       }
                     },
@@ -2217,15 +2218,15 @@ class _InventoryPageState extends State<InventoryPage>
       margin: const EdgeInsets.fromLTRB(12, 0, 12, 8),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
-        color: _isDark ? const Color(0xFF1E293B) : const Color(0xFFFEF2F2),
+        color: _isDark ? SoftPalette.slate800 : SoftPalette.red100t,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
-          color: _isDark ? const Color(0xFF991B1B) : const Color(0xFFFECACA),
+          color: _isDark ? SoftPalette.red600 : SoftPalette.red200,
           width: 1.2,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.red.withValues(alpha: 0.06),
+            color: SoftPalette.red400.withValues(alpha: 0.06),
             blurRadius: 6,
             offset: const Offset(0, 2),
           ),
@@ -2248,7 +2249,7 @@ class _InventoryPageState extends State<InventoryPage>
                     child: Checkbox(
                       value: allSelected,
                       tristate: count > 0 && !allSelected,
-                      activeColor: Colors.red.shade700,
+                      activeColor: SoftPalette.red500,
                       onChanged: (_) => _toggleSelectAll(),
                     ),
                   ),
@@ -2258,7 +2259,7 @@ class _InventoryPageState extends State<InventoryPage>
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.bold,
-                      color: _isDark ? Colors.white : Colors.red.shade900,
+                      color: _isDark ? SoftPalette.gray50 : SoftPalette.red550,
                     ),
                   ),
                 ],
@@ -2271,8 +2272,8 @@ class _InventoryPageState extends State<InventoryPage>
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
             decoration: BoxDecoration(
               color: count > 0
-                  ? Colors.red.withValues(alpha: 0.15)
-                  : (_isDark ? Colors.white10 : Colors.grey.withValues(alpha: 0.15)),
+                  ? SoftPalette.red400.withValues(alpha: 0.15)
+                  : (_isDark ? SoftPalette.gray50A10 : SoftPalette.gray350.withValues(alpha: 0.15)),
               borderRadius: BorderRadius.circular(12),
             ),
             child: Text(
@@ -2281,8 +2282,8 @@ class _InventoryPageState extends State<InventoryPage>
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
                 color: count > 0
-                    ? (_isDark ? const Color(0xFFFF6B6B) : Colors.red.shade800)
-                    : (_isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700),
+                    ? (_isDark ? SoftPalette.red350 : SoftPalette.red550)
+                    : (_isDark ? SoftPalette.slate350 : SoftPalette.gray550),
               ),
             ),
           ),
@@ -2290,16 +2291,16 @@ class _InventoryPageState extends State<InventoryPage>
           // Delete selected button
           ElevatedButton.icon(
             onPressed: count > 0 ? _confirmDeleteSelectedMedicines : null,
-            icon: const Icon(Icons.delete_forever_rounded, size: 16, color: Colors.white),
+            icon: const Icon(Icons.delete_forever_rounded, size: 16, color: SoftPalette.gray50),
             label: Text(
               'Delete Selected ($count)',
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
             ),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red.shade700,
-              foregroundColor: Colors.white,
-              disabledBackgroundColor: _isDark ? Colors.grey.shade800 : Colors.grey.shade300,
-              disabledForegroundColor: _isDark ? Colors.white38 : Colors.grey.shade600,
+              backgroundColor: SoftPalette.red500,
+              foregroundColor: SoftPalette.gray50,
+              disabledBackgroundColor: _isDark ? SoftPalette.gray700 : SoftPalette.gray150,
+              disabledForegroundColor: _isDark ? SoftPalette.gray50A38 : SoftPalette.gray500,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               minimumSize: const Size(0, 36),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -2317,8 +2318,8 @@ class _InventoryPageState extends State<InventoryPage>
             icon: const Icon(Icons.close_rounded, size: 16),
             label: const Text('Exit Selection', style: TextStyle(fontSize: 12)),
             style: OutlinedButton.styleFrom(
-              foregroundColor: _isDark ? Colors.white70 : Colors.grey.shade800,
-              side: BorderSide(color: _isDark ? Colors.white24 : Colors.grey.shade400),
+              foregroundColor: _isDark ? SoftPalette.gray50A70 : SoftPalette.gray700,
+              side: BorderSide(color: _isDark ? SoftPalette.gray50A24 : SoftPalette.gray300),
               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
               minimumSize: const Size(0, 36),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -2353,7 +2354,7 @@ class _InventoryPageState extends State<InventoryPage>
           style: TextStyle(
             fontSize: 11.5,
             fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-            color: isSelected ? Colors.white : (_isDark ? Colors.grey.shade300 : const Color(0xFF374151)),
+            color: isSelected ? SoftPalette.gray50 : (_isDark ? SoftPalette.gray150 : SoftPalette.slate700),
           ),
         ),
       ),
@@ -2369,7 +2370,7 @@ class _InventoryPageState extends State<InventoryPage>
 
     if (isCompact) {
       return Container(
-        color: _isDark ? const Color(0xFF0F172A) : _bg,
+        color: _isDark ? SoftPalette.slate900 : _bg,
         padding: const EdgeInsets.fromLTRB(10, 6, 10, 4),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -2382,19 +2383,19 @@ class _InventoryPageState extends State<InventoryPage>
                   child: Container(
                     height: 38,
                     decoration: BoxDecoration(
-                      color: _isDark ? const Color(0xFF334155) : _white,
+                      color: _isDark ? SoftPalette.slate700 : _white,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: _isDark ? const Color(0xFF475569) : Colors.grey.shade200, width: 1),
+                      border: Border.all(color: _isDark ? SoftPalette.slate600 : SoftPalette.gray100, width: 1),
                     ),
                     child: TextField(
                       controller: _searchCtrl,
-                      cursorColor: _isDark ? const Color(0xFF38BDF8) : _teal,
+                      cursorColor: _isDark ? SoftPalette.sky350 : _teal,
                       onChanged: (_) => _onSearchChanged(),
-                      style: TextStyle(fontSize: 13, color: _isDark ? Colors.white : _textDark),
+                      style: TextStyle(fontSize: 13, color: _isDark ? SoftPalette.gray50 : _textDark),
                       decoration: InputDecoration(
-                        prefixIcon: Icon(Icons.search_rounded, color: _isDark ? const Color(0xFF94A3B8) : _textLight, size: 18),
+                        prefixIcon: Icon(Icons.search_rounded, color: _isDark ? SoftPalette.slate350 : _textLight, size: 18),
                         hintText: 'Search formula, name or barcode...',
-                        hintStyle: TextStyle(color: _isDark ? const Color(0xFF64748B) : _textLight, fontSize: 11.5),
+                        hintStyle: TextStyle(color: _isDark ? SoftPalette.slate550 : _textLight, fontSize: 11.5),
                         border: InputBorder.none,
                         contentPadding: const EdgeInsets.symmetric(vertical: 10),
                       ),
@@ -2406,15 +2407,15 @@ class _InventoryPageState extends State<InventoryPage>
                   height: 38,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   decoration: BoxDecoration(
-                    color: _isDark ? const Color(0xFF334155) : _white,
+                    color: _isDark ? SoftPalette.slate700 : _white,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: _isDark ? const Color(0xFF475569) : Colors.grey.shade200, width: 1),
+                    border: Border.all(color: _isDark ? SoftPalette.slate600 : SoftPalette.gray100, width: 1),
                   ),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<String>(
                       value: _filterType,
-                      dropdownColor: _isDark ? const Color(0xFF1E293B) : Colors.white,
-                      icon: Icon(Icons.arrow_drop_down, color: _isDark ? const Color(0xFF94A3B8) : _textLight),
+                      dropdownColor: _isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+                      icon: Icon(Icons.arrow_drop_down, color: _isDark ? SoftPalette.slate350 : _textLight),
                       onChanged: (val) {
                         if (val != null) {
                           setState(() {
@@ -2427,7 +2428,7 @@ class _InventoryPageState extends State<InventoryPage>
                       items: _types
                           .map((t) => DropdownMenuItem(
                                 value: t,
-                                child: Text(t, style: TextStyle(fontSize: 12, color: _isDark ? Colors.white : _textDark)),
+                                child: Text(t, style: TextStyle(fontSize: 12, color: _isDark ? SoftPalette.gray50 : _textDark)),
                               ))
                           .toList(),
                     ),
@@ -2443,17 +2444,17 @@ class _InventoryPageState extends State<InventoryPage>
                 height: 34,
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+                  color: _isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: _isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+                  border: Border.all(color: _isDark ? SoftPalette.slate700 : SoftPalette.gray150),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.location_on_outlined, size: 14, color: _isDark ? const Color(0xFF38BDF8) : _teal),
+                    Icon(Icons.location_on_outlined, size: 14, color: _isDark ? SoftPalette.sky350 : _teal),
                     const SizedBox(width: 4),
                     Text(
                       'Desk:',
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _isDark ? Colors.white70 : Colors.black87),
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
                     ),
                     const SizedBox(width: 6),
                     Expanded(
@@ -2507,11 +2508,11 @@ class _InventoryPageState extends State<InventoryPage>
                           );
                         }
                       },
-                      icon: const Icon(Icons.add_circle_outline_rounded, color: Colors.white, size: 14),
-                      label: const Text('Register Med', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11.5)),
+                      icon: const Icon(Icons.add_circle_outline_rounded, color: SoftPalette.gray50, size: 14),
+                      label: const Text('Register Med', style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 11.5)),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.teal.shade800,
-                        foregroundColor: Colors.white,
+                        backgroundColor: SoftPalette.teal600,
+                        foregroundColor: SoftPalette.gray50,
                         padding: const EdgeInsets.symmetric(horizontal: 10),
                         minimumSize: const Size(0, 32),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
@@ -2545,10 +2546,10 @@ class _InventoryPageState extends State<InventoryPage>
                           _loadDataFromHive();
                         }
                       },
-                      icon: const Icon(FontAwesomeIcons.fileExcel, size: 12, color: Colors.white),
+                      icon: const Icon(FontAwesomeIcons.fileExcel, size: 12, color: SoftPalette.gray50),
                       label: const Text(
                         'Proforma Sheet',
-                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11.5),
+                        style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 11.5),
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -2569,27 +2570,27 @@ class _InventoryPageState extends State<InventoryPage>
                               SizedBox(
                                 width: 14,
                                 height: 14,
-                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50),
                               ),
                               SizedBox(width: 6),
-                              Text('Exporting...', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                              Text('Exporting...', style: TextStyle(color: SoftPalette.gray50, fontSize: 11, fontWeight: FontWeight.bold)),
                             ],
                           ),
                         )
                       : ElevatedButton.icon(
                           style: ElevatedButton.styleFrom(
                             backgroundColor: _tealDark,
-                            foregroundColor: Colors.white,
+                            foregroundColor: SoftPalette.gray50,
                             padding: const EdgeInsets.symmetric(horizontal: 10),
                             minimumSize: const Size(0, 32),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(7)),
                             elevation: 1,
                           ),
                           onPressed: _exportPdf,
-                          icon: const Icon(Icons.picture_as_pdf_rounded, size: 14, color: Colors.white),
+                          icon: const Icon(Icons.picture_as_pdf_rounded, size: 14, color: SoftPalette.gray50),
                           label: const Text(
                             'Proforma PDF',
-                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11.5),
+                            style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 11.5),
                           ),
                         ),
                   const SizedBox(width: 6),
@@ -2599,15 +2600,15 @@ class _InventoryPageState extends State<InventoryPage>
                     height: 32,
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     decoration: BoxDecoration(
-                      color: _isDark ? const Color(0xFF334155) : _white,
+                      color: _isDark ? SoftPalette.slate700 : _white,
                       borderRadius: BorderRadius.circular(7),
-                      border: Border.all(color: _isDark ? const Color(0xFF475569) : Colors.grey.shade200, width: 1),
+                      border: Border.all(color: _isDark ? SoftPalette.slate600 : SoftPalette.gray100, width: 1),
                     ),
                     child: DropdownButtonHideUnderline(
                       child: DropdownButton<String>(
                         value: _filterBatch,
-                        dropdownColor: _isDark ? const Color(0xFF1E293B) : Colors.white,
-                        icon: Icon(Icons.arrow_drop_down, color: _isDark ? const Color(0xFF94A3B8) : _textLight, size: 18),
+                        dropdownColor: _isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+                        icon: Icon(Icons.arrow_drop_down, color: _isDark ? SoftPalette.slate350 : _textLight, size: 18),
                         onChanged: (val) {
                           if (val != null) {
                             setState(() {
@@ -2620,7 +2621,7 @@ class _InventoryPageState extends State<InventoryPage>
                         items: _batchKeys
                             .map((b) => DropdownMenuItem(
                                   value: b,
-                                  child: Text(b, style: TextStyle(fontSize: 11.5, color: _isDark ? Colors.white : _textDark)),
+                                  child: Text(b, style: TextStyle(fontSize: 11.5, color: _isDark ? SoftPalette.gray50 : _textDark)),
                                 ))
                             .toList(),
                       ),
@@ -2633,10 +2634,10 @@ class _InventoryPageState extends State<InventoryPage>
                     const SizedBox(width: 6),
                     ElevatedButton.icon(
                       onPressed: _confirmRemoveAllMedsFromCurrentCamp,
-                      icon: const Icon(Icons.delete_sweep_rounded, color: Colors.white, size: 14),
-                      label: const Text('Clear Camp', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
+                      icon: const Icon(Icons.delete_sweep_rounded, color: SoftPalette.gray50, size: 14),
+                      label: const Text('Clear Camp', style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 11)),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.red.shade800,
+                        backgroundColor: SoftPalette.red550,
                         padding: const EdgeInsets.symmetric(horizontal: 8),
                         minimumSize: const Size(0, 32),
                       ),
@@ -2655,15 +2656,15 @@ class _InventoryPageState extends State<InventoryPage>
                       },
                       icon: Icon(
                         _isSelectMode ? Icons.close_rounded : Icons.checklist_rounded,
-                        color: Colors.white,
+                        color: SoftPalette.gray50,
                         size: 14,
                       ),
                       label: Text(
                         _isSelectMode ? 'Cancel' : 'Select & Delete',
-                        style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11),
+                        style: const TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 11),
                       ),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: _isSelectMode ? Colors.blueGrey.shade800 : Colors.red.shade700,
+                        backgroundColor: _isSelectMode ? SoftPalette.slate700 : SoftPalette.red500,
                         padding: const EdgeInsets.symmetric(horizontal: 8),
                         minimumSize: const Size(0, 32),
                       ),
@@ -2673,10 +2674,10 @@ class _InventoryPageState extends State<InventoryPage>
                     const SizedBox(width: 6),
                     ElevatedButton.icon(
                       onPressed: _syncInventoryFromCloud,
-                      icon: const Icon(Icons.cloud_download_rounded, color: Colors.white, size: 14),
-                      label: const Text('Sync', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 11)),
+                      icon: const Icon(Icons.cloud_download_rounded, color: SoftPalette.gray50, size: 14),
+                      label: const Text('Sync', style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 11)),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.blueGrey.shade700,
+                        backgroundColor: SoftPalette.slate600,
                         padding: const EdgeInsets.symmetric(horizontal: 8),
                         minimumSize: const Size(0, 32),
                       ),
@@ -2696,19 +2697,19 @@ class _InventoryPageState extends State<InventoryPage>
         child: Container(
           height: 38,
           decoration: BoxDecoration(
-            color: _isDark ? const Color(0xFF334155) : _white,
+            color: _isDark ? SoftPalette.slate700 : _white,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: _isDark ? const Color(0xFF475569) : Colors.grey.shade200, width: 1),
+            border: Border.all(color: _isDark ? SoftPalette.slate600 : SoftPalette.gray100, width: 1),
           ),
           child: TextField(
             controller: _searchCtrl,
-            cursorColor: _isDark ? const Color(0xFF38BDF8) : _teal,
+            cursorColor: _isDark ? SoftPalette.sky350 : _teal,
             onChanged: (_) => _onSearchChanged(),
-            style: TextStyle(fontSize: 13, color: _isDark ? Colors.white : _textDark),
+            style: TextStyle(fontSize: 13, color: _isDark ? SoftPalette.gray50 : _textDark),
             decoration: InputDecoration(
-              prefixIcon: Icon(Icons.search_rounded, color: _isDark ? const Color(0xFF94A3B8) : _textLight, size: 18),
+              prefixIcon: Icon(Icons.search_rounded, color: _isDark ? SoftPalette.slate350 : _textLight, size: 18),
               hintText: 'Search name, formula or barcode (Tap row to edit)...',
-              hintStyle: TextStyle(color: _isDark ? const Color(0xFF64748B) : _textLight, fontSize: 11.5),
+              hintStyle: TextStyle(color: _isDark ? SoftPalette.slate550 : _textLight, fontSize: 11.5),
               border: InputBorder.none,
               contentPadding: const EdgeInsets.symmetric(vertical: 10),
             ),
@@ -2720,15 +2721,15 @@ class _InventoryPageState extends State<InventoryPage>
         height: 38,
         padding: const EdgeInsets.symmetric(horizontal: 8),
         decoration: BoxDecoration(
-          color: _isDark ? const Color(0xFF334155) : _white,
+          color: _isDark ? SoftPalette.slate700 : _white,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: _isDark ? const Color(0xFF475569) : Colors.grey.shade200, width: 1),
+          border: Border.all(color: _isDark ? SoftPalette.slate600 : SoftPalette.gray100, width: 1),
         ),
         child: DropdownButtonHideUnderline(
           child: DropdownButton<String>(
             value: _filterType,
-            dropdownColor: _isDark ? const Color(0xFF1E293B) : Colors.white,
-            icon: Icon(Icons.arrow_drop_down, color: _isDark ? const Color(0xFF94A3B8) : _textLight),
+            dropdownColor: _isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+            icon: Icon(Icons.arrow_drop_down, color: _isDark ? SoftPalette.slate350 : _textLight),
             onChanged: (val) {
               if (val != null) {
                 setState(() {
@@ -2741,7 +2742,7 @@ class _InventoryPageState extends State<InventoryPage>
             items: _types
                 .map((t) => DropdownMenuItem(
                       value: t,
-                      child: Text(t, style: TextStyle(fontSize: 12.5, color: _isDark ? Colors.white : _textDark)),
+                      child: Text(t, style: TextStyle(fontSize: 12.5, color: _isDark ? SoftPalette.gray50 : _textDark)),
                     ))
                 .toList(),
           ),
@@ -2752,15 +2753,15 @@ class _InventoryPageState extends State<InventoryPage>
         height: 38,
         padding: const EdgeInsets.symmetric(horizontal: 8),
         decoration: BoxDecoration(
-          color: _isDark ? const Color(0xFF334155) : _white,
+          color: _isDark ? SoftPalette.slate700 : _white,
           borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: _isDark ? const Color(0xFF475569) : Colors.grey.shade200, width: 1),
+          border: Border.all(color: _isDark ? SoftPalette.slate600 : SoftPalette.gray100, width: 1),
         ),
         child: DropdownButtonHideUnderline(
           child: DropdownButton<String>(
             value: _filterBatch,
-            dropdownColor: _isDark ? const Color(0xFF1E293B) : Colors.white,
-            icon: Icon(Icons.arrow_drop_down, color: _isDark ? const Color(0xFF94A3B8) : _textLight),
+            dropdownColor: _isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+            icon: Icon(Icons.arrow_drop_down, color: _isDark ? SoftPalette.slate350 : _textLight),
             onChanged: (val) {
               if (val != null) {
                 setState(() {
@@ -2773,7 +2774,7 @@ class _InventoryPageState extends State<InventoryPage>
             items: _batchKeys
                 .map((b) => DropdownMenuItem(
                       value: b,
-                      child: Text(b, style: TextStyle(fontSize: 12.5, color: _isDark ? Colors.white : _textDark)),
+                      child: Text(b, style: TextStyle(fontSize: 12.5, color: _isDark ? SoftPalette.gray50 : _textDark)),
                     ))
                 .toList(),
           ),
@@ -2786,9 +2787,9 @@ class _InventoryPageState extends State<InventoryPage>
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
           decoration: BoxDecoration(
-            color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+            color: _isDark ? SoftPalette.slate800 : SoftPalette.gray50,
             borderRadius: BorderRadius.circular(8),
-            border: Border.all(color: _isDark ? const Color(0xFF475569) : Colors.grey.shade300),
+            border: Border.all(color: _isDark ? SoftPalette.slate600 : SoftPalette.gray150),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
@@ -2833,10 +2834,10 @@ class _InventoryPageState extends State<InventoryPage>
               _loadDataFromHive();
             }
           },
-          icon: const Icon(FontAwesomeIcons.fileExcel, size: 14, color: Colors.white),
+          icon: const Icon(FontAwesomeIcons.fileExcel, size: 14, color: SoftPalette.gray50),
           label: const Text(
             'Proforma Sheet',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+            style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 12),
           ),
         ),
       );
@@ -2877,11 +2878,11 @@ class _InventoryPageState extends State<InventoryPage>
                     children: [
                       Icon(
                         Icons.picture_as_pdf_rounded,
-                        color: Colors.white,
+                        color: SoftPalette.gray50,
                         size: 16,
                       ),
                       SizedBox(width: 6),
-                      Text('PDF', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                      Text('PDF', style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 12)),
                     ],
                   ),
                 ),
@@ -2900,14 +2901,14 @@ class _InventoryPageState extends State<InventoryPage>
               setState(() {});
             }
           },
-          icon: const Icon(Icons.add_circle_outline_rounded, color: Colors.white, size: 16),
+          icon: const Icon(Icons.add_circle_outline_rounded, color: SoftPalette.gray50, size: 16),
           label: const Text(
             'Register Medicine',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+            style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 12),
           ),
           style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.teal.shade800,
-            foregroundColor: Colors.white,
+            backgroundColor: SoftPalette.teal600,
+            foregroundColor: SoftPalette.gray50,
             padding: const EdgeInsets.symmetric(horizontal: 14),
             minimumSize: const Size(0, 38),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -2925,16 +2926,16 @@ class _InventoryPageState extends State<InventoryPage>
       widgets.add(
         ElevatedButton.icon(
           onPressed: _confirmRemoveAllMedsFromCurrentCamp,
-          icon: const Icon(Icons.delete_sweep_rounded, color: Colors.white, size: 16),
+          icon: const Icon(Icons.delete_sweep_rounded, color: SoftPalette.gray50, size: 16),
           label: Text(
             isSpecificCampSelected
                 ? 'Remove All Meds From $campLabel'
                 : 'Remove Camp Meds (Select Camp)',
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+            style: const TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 12),
           ),
           style: ElevatedButton.styleFrom(
-            backgroundColor: isSpecificCampSelected ? Colors.red.shade800 : Colors.grey.shade700,
-            foregroundColor: Colors.white,
+            backgroundColor: isSpecificCampSelected ? SoftPalette.red550 : SoftPalette.gray550,
+            foregroundColor: SoftPalette.gray50,
             padding: const EdgeInsets.symmetric(horizontal: 14),
             minimumSize: const Size(0, 38),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -2949,14 +2950,14 @@ class _InventoryPageState extends State<InventoryPage>
       widgets.add(
         ElevatedButton.icon(
           onPressed: _syncInventoryFromCloud,
-          icon: const Icon(Icons.cloud_download_rounded, color: Colors.white, size: 16),
+          icon: const Icon(Icons.cloud_download_rounded, color: SoftPalette.gray50, size: 16),
           label: const Text(
             'Sync / Restore Cloud',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+            style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 12),
           ),
           style: ElevatedButton.styleFrom(
-            backgroundColor: Colors.blueGrey.shade700,
-            foregroundColor: Colors.white,
+            backgroundColor: SoftPalette.slate600,
+            foregroundColor: SoftPalette.gray50,
             padding: const EdgeInsets.symmetric(horizontal: 12),
             minimumSize: const Size(0, 38),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -2978,16 +2979,16 @@ class _InventoryPageState extends State<InventoryPage>
           },
           icon: Icon(
             _isSelectMode ? Icons.close_rounded : Icons.checklist_rounded,
-            color: Colors.white,
+            color: SoftPalette.gray50,
             size: 16,
           ),
           label: Text(
             _isSelectMode ? 'Cancel Selection' : 'Select & Delete',
-            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+            style: const TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 12),
           ),
           style: ElevatedButton.styleFrom(
-            backgroundColor: _isSelectMode ? Colors.blueGrey.shade800 : Colors.red.shade700,
-            foregroundColor: Colors.white,
+            backgroundColor: _isSelectMode ? SoftPalette.slate700 : SoftPalette.red500,
+            foregroundColor: SoftPalette.gray50,
             padding: const EdgeInsets.symmetric(horizontal: 14),
             minimumSize: const Size(0, 38),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -2997,7 +2998,7 @@ class _InventoryPageState extends State<InventoryPage>
     }
 
     return Container(
-      color: _isDark ? const Color(0xFF0F172A) : _bg,
+      color: _isDark ? SoftPalette.slate900 : _bg,
       padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
       // Wrap instead of a sideways-scrolling row so every control stays visible on any width.
       child: Wrap(
@@ -3031,13 +3032,13 @@ class _InventoryPageState extends State<InventoryPage>
           padding: EdgeInsets.symmetric(horizontal: isCompact ? 8 : 10),
           decoration: BoxDecoration(
             color: _mergeByFormula
-                ? (_isDark ? const Color(0xFF0F766E) : _teal)
-                : (_isDark ? const Color(0xFF334155) : Colors.white),
+                ? (_isDark ? SoftPalette.teal550 : _teal)
+                : (_isDark ? SoftPalette.slate700 : SoftPalette.gray50),
             borderRadius: BorderRadius.circular(isCompact ? 7 : 8),
             border: Border.all(
               color: _mergeByFormula
-                  ? (_isDark ? const Color(0xFF14B8A6) : _tealDark)
-                  : (_isDark ? const Color(0xFF475569) : Colors.grey.shade300),
+                  ? (_isDark ? SoftPalette.teal350 : _tealDark)
+                  : (_isDark ? SoftPalette.slate600 : SoftPalette.gray150),
               width: _mergeByFormula ? 1.5 : 1.0,
             ),
             boxShadow: _mergeByFormula
@@ -3056,7 +3057,7 @@ class _InventoryPageState extends State<InventoryPage>
               Icon(
                 _mergeByFormula ? Icons.check_box_rounded : Icons.check_box_outline_blank_rounded,
                 size: isCompact ? 16 : 18,
-                color: _mergeByFormula ? Colors.white : (_isDark ? const Color(0xFF94A3B8) : _teal),
+                color: _mergeByFormula ? SoftPalette.gray50 : (_isDark ? SoftPalette.slate350 : _teal),
               ),
               const SizedBox(width: 5),
               Text(
@@ -3064,7 +3065,7 @@ class _InventoryPageState extends State<InventoryPage>
                 style: TextStyle(
                   fontSize: isCompact ? 11.5 : 12,
                   fontWeight: FontWeight.bold,
-                  color: _mergeByFormula ? Colors.white : (_isDark ? Colors.white : _textDark),
+                  color: _mergeByFormula ? SoftPalette.gray50 : (_isDark ? SoftPalette.gray50 : _textDark),
                 ),
               ),
             ],
@@ -3075,7 +3076,7 @@ class _InventoryPageState extends State<InventoryPage>
   }
 
   Future<void> _syncInventoryFromCloud() async {
-    ScaffoldMessenger.of(context).showSnackBar(
+    AppToast.showSnackBar(context, 
       const SnackBar(
         content: Text('🔄 Downloading & restoring inventory from Firestore...'),
         duration: Duration(seconds: 2),
@@ -3084,10 +3085,10 @@ class _InventoryPageState extends State<InventoryPage>
     await LocalStorageService.downloadInventory(widget.branchId, forceFull: true, campId: _selectedCampFilter);
     if (mounted) {
       _loadDataFromHive();
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: Text('✅ Inventory restored successfully! Showing ${_displayItems.length} records.'),
-          backgroundColor: Colors.green,
+          backgroundColor: SoftPalette.green400,
         ),
       );
     }
@@ -3103,7 +3104,7 @@ class _InventoryPageState extends State<InventoryPage>
         builder: (ctx) => AlertDialog(
           title: const Row(
             children: [
-              Icon(Icons.info_outline, color: Colors.amber, size: 28),
+              Icon(Icons.info_outline, color: SoftPalette.amber200, size: 28),
               SizedBox(width: 10),
               Text('Select a Specific Camp'),
             ],
@@ -3132,7 +3133,7 @@ class _InventoryPageState extends State<InventoryPage>
       builder: (ctx) => AlertDialog(
         title: Row(
           children: [
-            const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 28),
+            const Icon(Icons.warning_amber_rounded, color: SoftPalette.red400, size: 28),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -3158,7 +3159,7 @@ class _InventoryPageState extends State<InventoryPage>
             child: const Text('Cancel'),
           ),
           ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade700, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.red500, foregroundColor: SoftPalette.gray50),
             onPressed: () => Navigator.pop(ctx, true),
             icon: const Icon(Icons.delete_forever_rounded, size: 18),
             label: Text('Yes, Delete $campLabel Meds', style: const TextStyle(fontWeight: FontWeight.bold)),
@@ -3234,18 +3235,18 @@ class _InventoryPageState extends State<InventoryPage>
 
       if (mounted) {
         _loadDataFromHive();
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('✅ Removed $count medicine record(s) from $campLabel (Local & Cloud).'),
-            backgroundColor: Colors.green,
+            backgroundColor: SoftPalette.green400,
             duration: const Duration(seconds: 4),
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to clear camp meds: $e'), backgroundColor: Colors.red),
+        AppToast.showSnackBar(context, 
+          SnackBar(content: Text('Failed to clear camp meds: $e'), backgroundColor: SoftPalette.red400),
         );
       }
     }
@@ -3264,18 +3265,18 @@ class _InventoryPageState extends State<InventoryPage>
           ),
         ),
       ),
-      icon: const Icon(Icons.add_rounded, color: Colors.white, size: 18),
+      icon: const Icon(Icons.add_rounded, color: SoftPalette.gray50, size: 18),
       label: const Text(
         'Update Stock',
         style: TextStyle(
-          color: Colors.white,
+          color: SoftPalette.gray50,
           fontWeight: FontWeight.bold,
           fontSize: 13,
         ),
       ),
       style: ElevatedButton.styleFrom(
         backgroundColor: _teal,
-        foregroundColor: Colors.white,
+        foregroundColor: SoftPalette.gray50,
         padding: const EdgeInsets.symmetric(horizontal: 16),
         minimumSize: const Size(0, 48),
         shape: RoundedRectangleBorder(
@@ -3289,7 +3290,7 @@ class _InventoryPageState extends State<InventoryPage>
   Widget _searchField() {
     return Container(
       decoration: BoxDecoration(
-        color: _white,
+        color: context.adapt(_white),
         borderRadius: BorderRadius.circular(14),
         boxShadow: [
           BoxShadow(
@@ -3302,11 +3303,11 @@ class _InventoryPageState extends State<InventoryPage>
       child: TextField(
         controller: _searchCtrl,
         cursorColor: _teal,
-        style: const TextStyle(color: _textDark, fontSize: 14),
+        style: TextStyle(color: context.adapt(_textDark), fontSize: 14),
         decoration: InputDecoration(
           prefixIcon: const Icon(Icons.search_rounded, color: _teal, size: 20),
           hintText: 'Search formula or name (Tap row to edit)...',
-          hintStyle: const TextStyle(color: _textLight, fontSize: 13),
+          hintStyle: TextStyle(color: context.adapt(_textLight), fontSize: 13),
           filled: true,
           fillColor: Colors.transparent,
           border: OutlineInputBorder(
@@ -3315,7 +3316,7 @@ class _InventoryPageState extends State<InventoryPage>
           ),
           enabledBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
-            borderSide: BorderSide(color: Colors.grey.shade200, width: 1),
+            borderSide: BorderSide(color: context.adapt(SoftPalette.gray100), width: 1),
           ),
           focusedBorder: OutlineInputBorder(
             borderRadius: BorderRadius.circular(14),
@@ -3361,12 +3362,12 @@ class _InventoryPageState extends State<InventoryPage>
       margin: const EdgeInsets.fromLTRB(12, 4, 12, 6),
       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
       decoration: BoxDecoration(
-        color: _isDark ? const Color(0xFF1E293B) : _white,
+        color: _isDark ? SoftPalette.slate800 : _white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: _isDark ? const Color(0xFF334155) : Colors.grey.shade200, width: 1),
+        border: Border.all(color: _isDark ? SoftPalette.slate700 : SoftPalette.gray100, width: 1),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.02),
+            color: SoftPalette.gray900.withValues(alpha: 0.02),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -3413,7 +3414,7 @@ class _InventoryPageState extends State<InventoryPage>
                 Text(
                   label,
                   style: TextStyle(
-                    color: _isDark ? const Color(0xFF94A3B8) : _textLight,
+                    color: _isDark ? SoftPalette.slate350 : _textLight,
                     fontSize: 11,
                     fontWeight: FontWeight.w500,
                   ),
@@ -3430,7 +3431,7 @@ class _InventoryPageState extends State<InventoryPage>
     return Container(
       height: 24,
       width: 1,
-      color: _isDark ? const Color(0xFF475569) : Colors.grey.shade200,
+      color: _isDark ? SoftPalette.slate600 : SoftPalette.gray100,
       margin: const EdgeInsets.symmetric(horizontal: 16),
     );
   }
@@ -3441,9 +3442,9 @@ class _InventoryPageState extends State<InventoryPage>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 2),
       decoration: BoxDecoration(
-        color: _white,
+        color: context.adapt(_white),
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: Colors.grey.shade200, width: 1),
+        border: Border.all(color: context.adapt(SoftPalette.gray100), width: 1),
         boxShadow: [
           BoxShadow(
             color: _shadow.withValues(alpha: 0.03),
@@ -3463,15 +3464,15 @@ class _InventoryPageState extends State<InventoryPage>
               value: value,
               isExpanded: true,
               underline: const SizedBox(),
-              dropdownColor: _white,
-              style: const TextStyle(color: _textDark, fontSize: 13.5, fontWeight: FontWeight.w500),
-              icon: const Icon(Icons.keyboard_arrow_down_rounded, color: _textMid, size: 20),
+              dropdownColor: context.adapt(_white),
+              style: TextStyle(color: context.adapt(_textDark), fontSize: 13.5, fontWeight: FontWeight.w500),
+              icon: Icon(Icons.keyboard_arrow_down_rounded, color: context.adapt(_textMid), size: 20),
               items: items
                   .map((t) => DropdownMenuItem<String>(
                       value: t,
                       child: Text(display != null ? display(t) : t,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(color: _textDark, fontSize: 13.5))))
+                          style: TextStyle(color: context.adapt(_textDark), fontSize: 13.5))))
                   .toList(),
               onChanged: onChange,
             ),
@@ -3492,7 +3493,7 @@ class _InventoryPageState extends State<InventoryPage>
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: const [
-            Icon(Icons.notification_important_rounded, color: Color(0xFFD97706)),
+            Icon(Icons.notification_important_rounded, color: SoftPalette.orange400),
             SizedBox(width: 8),
             Text('Request Restock', style: TextStyle(fontWeight: FontWeight.bold)),
           ],
@@ -3506,9 +3507,9 @@ class _InventoryPageState extends State<InventoryPage>
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: _isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                color: _isDark ? SoftPalette.slate900 : SoftPalette.slate100,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: _isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                border: Border.all(color: _isDark ? SoftPalette.slate700 : SoftPalette.slate150),
               ),
               child: Row(
                 children: [
@@ -3521,14 +3522,14 @@ class _InventoryPageState extends State<InventoryPage>
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      color: qty < 10 ? Colors.red.withValues(alpha: 0.15) : Colors.amber.withValues(alpha: 0.15),
+                      color: qty < 10 ? SoftPalette.red400.withValues(alpha: 0.15) : SoftPalette.amber200.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(6),
                     ),
                     child: Text(
                       'Qty: $qty',
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
-                        color: qty < 10 ? Colors.red : Colors.amber.shade900,
+                        color: qty < 10 ? SoftPalette.red400 : SoftPalette.orange350,
                       ),
                     ),
                   ),
@@ -3554,8 +3555,8 @@ class _InventoryPageState extends State<InventoryPage>
           ),
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFD97706),
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.orange400,
+              foregroundColor: SoftPalette.gray50,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
             icon: const Icon(Icons.send_rounded, size: 16),
@@ -3603,34 +3604,27 @@ class _InventoryPageState extends State<InventoryPage>
     // 2. Realtime broadcast
     RealtimeManager().sendMessage(payload);
 
-    // 3. Persistent cloud & offline sync storage
-    try {
-      FirebaseFirestore.instance
-          .collection('branches')
-          .doc(widget.branchId)
-          .collection('restock_requests')
-          .doc(reqId)
-          .set(reqData, SetOptions(merge: true));
-    } catch (_) {
-      LocalStorageService.enqueueSync({
-        'type': 'save_restock_request',
-        'branchId': widget.branchId,
-        'id': reqId,
-        'data': reqData,
-      });
-    }
+    // 3. Persistent cloud & offline sync storage. Always through the upload queue: the
+    // un-awaited direct write never reached its catch on Windows (an unanswered write
+    // neither completes nor fails), so the request only sat in the SDK's hidden queue.
+    unawaited(LocalStorageService.enqueueSync({
+      'type': 'save_restock_request',
+      'branchId': widget.branchId,
+      'id': reqId,
+      'data': reqData,
+    }));
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: Row(
             children: [
-              const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+              const Icon(Icons.check_circle_rounded, color: SoftPalette.gray50, size: 20),
               const SizedBox(width: 8),
               Expanded(child: Text('Restock alert sent & persisted for $name!')),
             ],
           ),
-          backgroundColor: const Color(0xFF00695C),
+          backgroundColor: SoftPalette.teal600,
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 3),
         ),
@@ -3660,12 +3654,12 @@ class _InventoryPageState extends State<InventoryPage>
           width: w,
           padding: const EdgeInsets.symmetric(vertical: 12),
           alignment: Alignment.center,
-          color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+          color: _isDark ? SoftPalette.slate800 : SoftPalette.gray50,
           child: Text(
             data.length >= totalCount
                 ? 'Showing all $totalCount medicines'
                 : 'Loading more...',
-            style: TextStyle(color: _isDark ? const Color(0xFF94A3B8) : _textLight, fontSize: 12, fontWeight: FontWeight.w500),
+            style: TextStyle(color: _isDark ? SoftPalette.slate350 : _textLight, fontSize: 12, fontWeight: FontWeight.w500),
           ),
         );
       }
@@ -3680,14 +3674,14 @@ class _InventoryPageState extends State<InventoryPage>
       final expText = _formatDate(b['expiryDate'] as String?);
       final isWarning = lowStock || expSoon;
       final rowColor = isSelected
-          ? (_isDark ? Colors.red.withValues(alpha: 0.22) : const Color(0xFFFFEBEE))
+          ? (_isDark ? SoftPalette.red400.withValues(alpha: 0.22) : SoftPalette.pink100m)
           : (_isDark
               ? (isWarning
-                  ? const Color(0xFF2D1214)
-                  : (i % 2 == 0 ? const Color(0xFF1E293B) : const Color(0xFF0F172A)))
+                  ? SoftPalette.red900
+                  : (i % 2 == 0 ? SoftPalette.slate800 : SoftPalette.slate900))
               : (isWarning
-                  ? const Color(0xFFFFF5F5)
-                  : (i % 2 == 0 ? _white : const Color(0xFFFAFAFA))));
+                  ? SoftPalette.red50t
+                  : (i % 2 == 0 ? _white : SoftPalette.gray50)));
 
       final rowContent = Container(
         decoration: BoxDecoration(
@@ -3695,10 +3689,10 @@ class _InventoryPageState extends State<InventoryPage>
           border: Border(
             bottom: BorderSide(
                 color: isSelected
-                    ? Colors.red.shade400
+                    ? SoftPalette.red400
                     : (isWarning
-                        ? (_isDark ? const Color(0xFF991B1B) : _red.withValues(alpha: 0.15))
-                        : (_isDark ? const Color(0xFF334155) : Colors.grey.shade100)),
+                        ? (_isDark ? SoftPalette.red600 : _red.withValues(alpha: 0.15))
+                        : (_isDark ? SoftPalette.slate700 : SoftPalette.gray100)),
                 width: isSelected ? 1.5 : 1.0),
           ),
         ),
@@ -3716,11 +3710,11 @@ class _InventoryPageState extends State<InventoryPage>
                     child: Container(
                       padding: const EdgeInsets.all(6),
                       decoration: BoxDecoration(
-                        color: Colors.red.withValues(alpha: 0.1),
+                        color: SoftPalette.red400.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: Colors.red.withValues(alpha: 0.25)),
+                        border: Border.all(color: SoftPalette.red400.withValues(alpha: 0.25)),
                       ),
-                      child: const Icon(Icons.delete_forever_rounded, size: 15, color: Colors.red),
+                      child: const Icon(Icons.delete_forever_rounded, size: 15, color: SoftPalette.red400),
                     ),
                   ),
                 ),
@@ -3737,19 +3731,19 @@ class _InventoryPageState extends State<InventoryPage>
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFD97706).withValues(alpha: 0.15),
+                        color: SoftPalette.orange400.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFFD97706).withValues(alpha: 0.4)),
+                        border: Border.all(color: SoftPalette.orange400.withValues(alpha: 0.4)),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: const [
-                          Icon(Icons.notification_important_rounded, size: 14, color: Color(0xFFD97706)),
+                          Icon(Icons.notification_important_rounded, size: 14, color: SoftPalette.orange400),
                           SizedBox(width: 4),
                           Text(
                             'Restock',
                             style: TextStyle(
-                              color: Color(0xFFD97706),
+                              color: SoftPalette.orange400,
                               fontSize: 11,
                               fontWeight: FontWeight.bold,
                             ),
@@ -3770,26 +3764,26 @@ class _InventoryPageState extends State<InventoryPage>
                             height: 22,
                             child: Checkbox(
                               value: isSelected,
-                              activeColor: Colors.red.shade700,
+                              activeColor: SoftPalette.red500,
                               onChanged: (_) => _toggleSelectItem(batchKey),
                             ),
                           ),
                         )
                       : Text('${i + 1}',
-                          style: TextStyle(color: _isDark ? const Color(0xFF94A3B8) : _textMid, fontSize: 12.5, fontWeight: FontWeight.bold))),
+                          style: TextStyle(color: _isDark ? SoftPalette.slate350 : _textMid, fontSize: 12.5, fontWeight: FontWeight.bold))),
               _dCell(
                   cols[1].w,
                   RichText(
                     overflow: TextOverflow.ellipsis,
                     text: TextSpan(
-                      style: TextStyle(fontSize: 13, color: _isDark ? Colors.white : _textDark),
+                      style: TextStyle(fontSize: 13, color: _isDark ? SoftPalette.gray50 : _textDark),
                       children: [
                         TextSpan(
                           text: b['name'] ?? '',
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             color: _isDark
-                                ? (isWarning ? const Color(0xFFFF6B6B) : Colors.white)
+                                ? (isWarning ? SoftPalette.red350 : SoftPalette.gray50)
                                 : (isWarning ? _red.withValues(alpha: 0.9) : _textDark),
                           ),
                         ),
@@ -3799,7 +3793,7 @@ class _InventoryPageState extends State<InventoryPage>
                             text: '(${b['formula']})',
                             style: TextStyle(
                               color: _isDark
-                                  ? (isWarning ? const Color(0xFFFCA5A5) : const Color(0xFF94A3B8))
+                                  ? (isWarning ? SoftPalette.red300 : SoftPalette.slate350)
                                   : (isWarning ? _red.withValues(alpha: 0.7) : _textLight),
                               fontWeight: FontWeight.normal,
                               fontSize: 12,
@@ -3814,7 +3808,7 @@ class _InventoryPageState extends State<InventoryPage>
               _dCell(
                   cols[4].w,
                   Text(b['dose'] ?? '—',
-                      style: TextStyle(color: _isDark ? const Color(0xFFF8FAFC) : _textDark, fontSize: 12.5))),
+                      style: TextStyle(color: _isDark ? SoftPalette.gray50 : _textDark, fontSize: 12.5))),
               _dCell(
                   cols[5].w,
                   Row(
@@ -3823,7 +3817,7 @@ class _InventoryPageState extends State<InventoryPage>
                       Text(NumberFormat('#,###').format(qty),
                           style: TextStyle(
                               color: _isDark
-                                  ? (lowStock ? const Color(0xFFFF6B6B) : Colors.white)
+                                  ? (lowStock ? SoftPalette.red350 : SoftPalette.gray50)
                                   : (lowStock ? _red : _textDark),
                               fontWeight: lowStock ? FontWeight.bold : FontWeight.w500,
                               fontSize: 12.5)),
@@ -3841,7 +3835,7 @@ class _InventoryPageState extends State<InventoryPage>
                             style: TextStyle(
                               fontSize: 9.5,
                               fontWeight: FontWeight.bold,
-                              color: _isDark ? const Color(0xFF5EEAD4) : _tealDark,
+                              color: _isDark ? SoftPalette.teal200 : _tealDark,
                             ),
                           ),
                         ),
@@ -3854,7 +3848,7 @@ class _InventoryPageState extends State<InventoryPage>
                     b['hasMultipleExpiries'] == true ? '$expText (Earliest)' : expText,
                     style: TextStyle(
                         color: _isDark
-                            ? (expSoon ? const Color(0xFFFF6B6B) : Colors.white)
+                            ? (expSoon ? SoftPalette.red350 : SoftPalette.gray50)
                             : (expSoon ? _red : _textDark),
                         fontWeight: expSoon ? FontWeight.bold : FontWeight.normal,
                         fontSize: 12.5))),
@@ -3873,13 +3867,13 @@ class _InventoryPageState extends State<InventoryPage>
       } else {
         handleTap = () {
           if (widget.isDispenser && mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(
+            AppToast.showSnackBar(context, 
               SnackBar(
                 content: const Text(
                   '💡 Dispensers must use "Update Stock" to submit medicine changes for Supervisor approval.',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                  style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold),
                 ),
-                backgroundColor: _isDark ? const Color(0xFF0F766E) : _teal,
+                backgroundColor: _isDark ? SoftPalette.teal550 : _teal,
                 duration: const Duration(seconds: 3),
               ),
             );
@@ -3889,7 +3883,7 @@ class _InventoryPageState extends State<InventoryPage>
 
       return InkWell(
         onTap: handleTap,
-        hoverColor: _isDark ? const Color(0xFF334155) : const Color(0xFFF3F7F6),
+        hoverColor: _isDark ? SoftPalette.slate700 : SoftPalette.gray100,
         child: rowContent,
       );
     }
@@ -3897,9 +3891,9 @@ class _InventoryPageState extends State<InventoryPage>
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 0),
       decoration: BoxDecoration(
-        color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+        color: _isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: _isDark ? const Color(0xFF334155) : Colors.grey.shade200, width: 1.5),
+        border: Border.all(color: _isDark ? SoftPalette.slate700 : SoftPalette.gray100, width: 1.5),
         boxShadow: [
           BoxShadow(
             color: _shadow.withValues(alpha: 0.04),
@@ -3915,7 +3909,7 @@ class _InventoryPageState extends State<InventoryPage>
             children: [
               Container(
                 height: 38,
-                color: _isDark ? const Color(0xFF0F766E) : _teal,
+                color: _isDark ? SoftPalette.teal550 : _teal,
                 child: Row(
                     children: cols.asMap().entries.map((entry) {
                       final idx = entry.key;
@@ -3931,9 +3925,9 @@ class _InventoryPageState extends State<InventoryPage>
                             child: Checkbox(
                               value: _allFilteredSelected,
                               tristate: _selectedBatchKeys.isNotEmpty && !_allFilteredSelected,
-                              activeColor: Colors.white,
+                              activeColor: SoftPalette.gray50,
                               checkColor: _teal,
-                              side: const BorderSide(color: Colors.white, width: 1.5),
+                              side: const BorderSide(color: SoftPalette.gray50, width: 1.5),
                               onChanged: (_) => _toggleSelectAll(),
                             ),
                           ),
@@ -3986,7 +3980,7 @@ class _InventoryPageState extends State<InventoryPage>
                 data.length >= totalCount
                     ? 'Showing all $totalCount medicines'
                     : 'Loading more...',
-                style: TextStyle(color: _isDark ? const Color(0xFF94A3B8) : _textLight, fontSize: 12, fontWeight: FontWeight.w500),
+                style: TextStyle(color: _isDark ? SoftPalette.slate350 : _textLight, fontSize: 12, fontWeight: FontWeight.w500),
               ),
             );
           }
@@ -4008,22 +4002,22 @@ class _InventoryPageState extends State<InventoryPage>
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
               color: isSelected
-                  ? (_isDark ? Colors.red.withValues(alpha: 0.22) : const Color(0xFFFFEBEE))
+                  ? (_isDark ? SoftPalette.red400.withValues(alpha: 0.22) : SoftPalette.pink100m)
                   : (_isDark
-                      ? (isWarning ? const Color(0xFF2D1214) : const Color(0xFF1E293B))
-                      : (isWarning ? const Color(0xFFFFEBEE) : _white)),
+                      ? (isWarning ? SoftPalette.red900 : SoftPalette.slate800)
+                      : (isWarning ? SoftPalette.pink100m : _white)),
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
                 color: isSelected
-                    ? Colors.red.shade600
-                    : (isWarning ? (_isDark ? const Color(0xFFFF6B6B) : _red) : (_isDark ? const Color(0xFF334155) : const Color(0xFFE0E0E0))),
+                    ? SoftPalette.red500
+                    : (isWarning ? (_isDark ? SoftPalette.red350 : _red) : (_isDark ? SoftPalette.slate700 : SoftPalette.gray150)),
                 width: isSelected || isWarning ? 2.0 : 0.8,
               ),
               boxShadow: [
                 BoxShadow(
                     color: isWarning
-                        ? (_isDark ? Colors.red.withValues(alpha: 0.3) : _red.withValues(alpha: 0.18))
-                        : (_isDark ? Colors.black26 : _shadow),
+                        ? (_isDark ? SoftPalette.red400.withValues(alpha: 0.3) : _red.withValues(alpha: 0.18))
+                        : (_isDark ? SoftPalette.gray900A26 : _shadow),
                     blurRadius: isWarning ? 10 : 6,
                     offset: const Offset(0, 3))
               ],
@@ -4040,7 +4034,7 @@ class _InventoryPageState extends State<InventoryPage>
                           height: 22,
                           child: Checkbox(
                             value: isSelected,
-                            activeColor: Colors.red.shade700,
+                            activeColor: SoftPalette.red500,
                             onChanged: (_) => _toggleSelectItem(batchKey),
                           ),
                         ),
@@ -4049,12 +4043,12 @@ class _InventoryPageState extends State<InventoryPage>
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
                           color: isWarning
-                              ? (_isDark ? Colors.red.withValues(alpha: 0.2) : _red.withValues(alpha: 0.1))
-                              : (_isDark ? const Color(0xFF334155) : _green50),
+                              ? (_isDark ? SoftPalette.red400.withValues(alpha: 0.2) : _red.withValues(alpha: 0.1))
+                              : (_isDark ? SoftPalette.slate700 : _green50),
                           borderRadius: BorderRadius.circular(8)),
                       child: _typeIconWidget(type,
                           size: 13,
-                          color: isWarning ? (_isDark ? const Color(0xFFFF6B6B) : _red) : (_isDark ? const Color(0xFF38BDF8) : null)),
+                          color: isWarning ? (_isDark ? SoftPalette.red350 : _red) : (_isDark ? SoftPalette.sky350 : null)),
                     ),
                     const SizedBox(width: 10),
                     Expanded(
@@ -4067,7 +4061,7 @@ class _InventoryPageState extends State<InventoryPage>
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                               color: _isDark
-                                  ? (isWarning ? const Color(0xFFFF6B6B) : Colors.white)
+                                  ? (isWarning ? SoftPalette.red350 : SoftPalette.gray50)
                                   : (isWarning ? _red : _textDark),
                               fontWeight: FontWeight.bold,
                               fontSize: 13.5),
@@ -4085,11 +4079,11 @@ class _InventoryPageState extends State<InventoryPage>
                             child: Container(
                               padding: const EdgeInsets.all(6),
                               decoration: BoxDecoration(
-                                color: Colors.red.withValues(alpha: 0.1),
+                                color: SoftPalette.red400.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.red.withValues(alpha: 0.25)),
+                                border: Border.all(color: SoftPalette.red400.withValues(alpha: 0.25)),
                               ),
-                              child: const Icon(Icons.delete_forever_rounded, size: 15, color: Colors.red),
+                              child: const Icon(Icons.delete_forever_rounded, size: 15, color: SoftPalette.red400),
                             ),
                           ),
                         ),
@@ -4105,19 +4099,19 @@ class _InventoryPageState extends State<InventoryPage>
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFD97706).withValues(alpha: 0.15),
+                                color: SoftPalette.orange400.withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: const Color(0xFFD97706).withValues(alpha: 0.4)),
+                                border: Border.all(color: SoftPalette.orange400.withValues(alpha: 0.4)),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: const [
-                                  Icon(Icons.notification_important_rounded, size: 13, color: Color(0xFFD97706)),
+                                  Icon(Icons.notification_important_rounded, size: 13, color: SoftPalette.orange400),
                                   SizedBox(width: 4),
                                   Text(
                                     'Restock',
                                     style: TextStyle(
-                                      color: Color(0xFFD97706),
+                                      color: SoftPalette.orange400,
                                       fontSize: 11,
                                       fontWeight: FontWeight.bold,
                                     ),
@@ -4145,9 +4139,9 @@ class _InventoryPageState extends State<InventoryPage>
                   Wrap(spacing: 6, runSpacing: 4, children: [
                     _typePill(type),
                     if ((b['dose'] ?? '').toString().isNotEmpty)
-                      _infoBadge(b['dose'].toString(), _isDark ? const Color(0xFF94A3B8) : _textMid),
+                      _infoBadge(b['dose'].toString(), _isDark ? SoftPalette.slate350 : _textMid),
                     if (barcode.isNotEmpty)
-                      _infoBadge(barcode, _isDark ? const Color(0xFF38BDF8) : _indigo, icon: Icons.qr_code_rounded),
+                      _infoBadge(barcode, _isDark ? SoftPalette.sky350 : _indigo, icon: Icons.qr_code_rounded),
                     _priceBadge(price),
                     _expBadge(b['hasMultipleExpiries'] == true ? '$expText (Earliest)' : expText, expSoon),
                     if (_mergeByFormula && (b['_mergedCount'] as int? ?? 1) > 1)
@@ -4163,7 +4157,7 @@ class _InventoryPageState extends State<InventoryPage>
                           style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
-                            color: _isDark ? const Color(0xFF5EEAD4) : _tealDark,
+                            color: _isDark ? SoftPalette.teal200 : _tealDark,
                           ),
                         ),
                       ),
@@ -4183,13 +4177,13 @@ class _InventoryPageState extends State<InventoryPage>
           } else {
             handleCardTap = () {
               if (widget.isDispenser && mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                AppToast.showSnackBar(context, 
                   SnackBar(
                     content: const Text(
                       '💡 Dispensers must use "Update Stock" to submit medicine changes for Supervisor approval.',
-                      style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                      style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold),
                     ),
-                    backgroundColor: _isDark ? const Color(0xFF0F766E) : _teal,
+                    backgroundColor: _isDark ? SoftPalette.teal550 : _teal,
                     duration: const Duration(seconds: 3),
                   ),
                 );
@@ -4207,23 +4201,23 @@ class _InventoryPageState extends State<InventoryPage>
   // Small pill showing the batch barcode (or a muted placeholder when absent)
   Widget _barcodeCell(String barcode) {
     if (barcode.isEmpty) {
-      return Text('—', style: TextStyle(color: _isDark ? const Color(0xFF94A3B8) : _textLight.withValues(alpha: 0.6), fontSize: 12.5));
+      return Text('—', style: TextStyle(color: _isDark ? SoftPalette.slate350 : _textLight.withValues(alpha: 0.6), fontSize: 12.5));
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: _isDark ? const Color(0xFF0C4A6E) : _indigo.withValues(alpha: 0.08),
+        color: _isDark ? SoftPalette.sky700 : _indigo.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: _isDark ? const Color(0xFF0284C7) : _indigo.withValues(alpha: 0.25)),
+        border: Border.all(color: _isDark ? SoftPalette.sky500 : _indigo.withValues(alpha: 0.25)),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.qr_code_rounded, size: 12, color: _isDark ? const Color(0xFF38BDF8) : _indigo),
+        Icon(Icons.qr_code_rounded, size: 12, color: _isDark ? SoftPalette.sky350 : _indigo),
         const SizedBox(width: 4),
         Flexible(
           child: Text(
             barcode,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(color: _isDark ? const Color(0xFF7DD3FC) : _indigo, fontSize: 11, fontWeight: FontWeight.bold),
+            style: TextStyle(color: _isDark ? SoftPalette.sky300 : _indigo, fontSize: 11, fontWeight: FontWeight.bold),
           ),
         ),
       ]),
@@ -4233,10 +4227,10 @@ class _InventoryPageState extends State<InventoryPage>
   void _showEditSheet(Map<String, dynamic> batchData) {
     if (!_isDirectEditAllowed) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           const SnackBar(
             content: Text('🔒 Direct editing is restricted for Dispensers. Use "Update Stock" for Supervisor approval.'),
-            backgroundColor: Colors.orange,
+            backgroundColor: SoftPalette.amber300,
           ),
         );
       }
@@ -4360,7 +4354,7 @@ class _InventoryPageState extends State<InventoryPage>
     final isRegistration = action == 'medicine_registered' ||
         action == 'medicine_registered_directly';
     final isEdited = action == 'medicine_edited';
-    final Color accentColor = isEdited ? _purple : (isRegistration ? _blue : _green600);
+    final Color accentColor = isEdited ? context.adapt(_purple) : (isRegistration ? context.adapt(_blue) : context.adapt(_green600));
     final IconData actionIcon = isEdited
         ? Icons.edit_rounded
         : (isRegistration ? Icons.medication_liquid_rounded : Icons.add_box_rounded);
@@ -4368,14 +4362,14 @@ class _InventoryPageState extends State<InventoryPage>
         ? 'MEDICINE EDITED'
         : (isRegistration ? 'NEW MEDICINE' : 'STOCK ADDED');
     final Color labelBg = isEdited
-        ? const Color(0xFFF3E5F5)
-        : (isRegistration ? const Color(0xFFE3F2FD) : const Color(0xFFE8F5E9));
-    final Color labelFg = isEdited ? _purple : (isRegistration ? _blue : _green600);
+        ? context.adapt(SoftPalette.purple150m)
+        : (isRegistration ? context.adapt(SoftPalette.slate100) : context.adapt(SoftPalette.green100m));
+    final Color labelFg = isEdited ? context.adapt(_purple) : (isRegistration ? context.adapt(_blue) : context.adapt(_green600));
 
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: _white,
+        color: context.adapt(_white),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: accentColor.withValues(alpha: 0.2)),
         boxShadow: [
@@ -4436,40 +4430,40 @@ class _InventoryPageState extends State<InventoryPage>
             ]),
             const SizedBox(height: 6),
             Text(medicineName,
-                style: const TextStyle(
-                    color: _textDark,
+                style: TextStyle(
+                    color: context.adapt(_textDark),
                     fontWeight: FontWeight.bold,
                     fontSize: 15)),
             const SizedBox(height: 6),
             Wrap(spacing: 8, runSpacing: 5, children: [
               if (medicineType.isNotEmpty)
                 _miniChip(medicineType, _teal),
-              if (dose.isNotEmpty) _miniChip(dose, _textMid),
+              if (dose.isNotEmpty) _miniChip(dose, context.adapt(_textMid)),
               _miniChip('+$qtyAdded units', accentColor),
               if (isRegistration && price.isNotEmpty)
                 _miniChip('PKR $price', _orange),
               if (isRegistration && expiry.isNotEmpty)
-                _miniChip('Exp: ${_formatDate(expiry)}', _textMid),
+                _miniChip('Exp: ${_formatDate(expiry)}', context.adapt(_textMid)),
             ]),
             const SizedBox(height: 8),
             Row(children: [
-              const Icon(Icons.person_outline_rounded,
-                  size: 13, color: _textLight),
+              Icon(Icons.person_outline_rounded,
+                  size: 13, color: context.adapt(_textLight)),
               const SizedBox(width: 5),
               Text(performedBy,
-                  style: const TextStyle(
-                      color: _textMid,
+                  style: TextStyle(
+                      color: context.adapt(_textMid),
                       fontSize: 12,
                       fontWeight: FontWeight.w600)),
               if (ts != null) ...[
                 const SizedBox(width: 10),
-                const Icon(Icons.access_time_rounded,
-                    size: 12, color: _textLight),
+                Icon(Icons.access_time_rounded,
+                    size: 12, color: context.adapt(_textLight)),
                 const SizedBox(width: 4),
                 Text(
                   DateFormat('dd MMM yyyy, hh:mm a').format(ts.toDate()),
-                  style: const TextStyle(
-                      color: _textLight, fontSize: 11),
+                  style: TextStyle(
+                      color: context.adapt(_textLight), fontSize: 11),
                 ),
               ]
             ]),
@@ -4485,11 +4479,11 @@ class _InventoryPageState extends State<InventoryPage>
       length: 2,
       child: Column(children: [
         Container(
-          color: _white,
-          child: const TabBar(
+          color: context.adapt(_white),
+          child: TabBar(
             indicatorColor: _teal,
             labelColor: _teal,
-            unselectedLabelColor: _textLight,
+            unselectedLabelColor: context.adapt(_textLight),
             labelStyle: TextStyle(fontWeight: FontWeight.bold),
             isScrollable: false,
             tabs: [
@@ -4640,14 +4634,14 @@ class _InventoryPageState extends State<InventoryPage>
                 .catchError((_) => 'User');
 
     Color badgeBg = switch (requestType) {
-      'edit_medicine' => const Color(0xFFF3E5F5),
-      'delete_medicine' => const Color(0xFFFFEBEE),
-      _ => Colors.grey.shade100,
+      'edit_medicine' => context.adapt(SoftPalette.purple150m),
+      'delete_medicine' => context.adapt(SoftPalette.pink100m),
+      _ => context.adapt(SoftPalette.gray100),
     };
     Color badgeFg = switch (requestType) {
-      'edit_medicine' => _purple,
-      'delete_medicine' => _red,
-      _ => _textMid,
+      'edit_medicine' => context.adapt(_purple),
+      'delete_medicine' => context.adapt(_red),
+      _ => context.adapt(_textMid),
     };
     String typeLabel = switch (requestType) {
       'edit_medicine' => 'EDIT MEDICINE',
@@ -4674,7 +4668,7 @@ class _InventoryPageState extends State<InventoryPage>
     final campLabel = _resolveCampLabel(data);
 
     return Card(
-      color: _green50,
+      color: context.adapt(_green50),
       elevation: status == 'pending' ? 4 : 2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
       child: Padding(
@@ -4689,30 +4683,30 @@ class _InventoryPageState extends State<InventoryPage>
                   'delete_medicine' => 'Delete Medicine Request',
                   _ => 'Inventory Request',
                 },
-                style: const TextStyle(
+                style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
-                    color: _tealDark),
+                    color: context.adapt(_tealDark)),
               ),
             ),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
               decoration: BoxDecoration(
-                color: const Color(0xFF0284C7).withValues(alpha: 0.15),
+                color: SoftPalette.sky500.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFF0284C7).withValues(alpha: 0.3)),
+                border: Border.all(color: SoftPalette.sky500.withValues(alpha: 0.3)),
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(Icons.holiday_village_rounded, size: 13, color: Color(0xFF0284C7)),
+                  const Icon(Icons.holiday_village_rounded, size: 13, color: SoftPalette.sky500),
                   const SizedBox(width: 4),
                   Text(
                     campLabel.toUpperCase(),
                     style: const TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
-                      color: Color(0xFF0284C7),
+                      color: SoftPalette.sky500,
                       letterSpacing: 0.4,
                     ),
                   ),
@@ -4741,33 +4735,33 @@ class _InventoryPageState extends State<InventoryPage>
               const SizedBox(width: 6),
               Text('By: ${snap.data ?? '…'}',
                   style:
-                      const TextStyle(fontSize: 13, color: _textDark)),
+                      TextStyle(fontSize: 13, color: context.adapt(_textDark))),
             ]),
           ),
           const SizedBox(height: 4),
           Row(children: [
-            const Icon(Icons.location_on_rounded, size: 14, color: _tealDark),
+            Icon(Icons.location_on_rounded, size: 14, color: context.adapt(_tealDark)),
             const SizedBox(width: 6),
             Text(
               'Facility Camp: $campLabel',
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12.5,
                 fontWeight: FontWeight.bold,
-                color: _tealDark,
+                color: context.adapt(_tealDark),
               ),
             ),
           ]),
           const SizedBox(height: 4),
           if (ts != null)
             Row(children: [
-              const Icon(Icons.access_time_rounded,
-                  size: 14, color: _textLight),
+              Icon(Icons.access_time_rounded,
+                  size: 14, color: context.adapt(_textLight)),
               const SizedBox(width: 6),
               Text(
                 DateFormat('dd MMM yyyy, hh:mm a')
                     .format(ts.toDate()),
                 style:
-                    const TextStyle(fontSize: 12, color: _textLight),
+                    TextStyle(fontSize: 12, color: context.adapt(_textLight)),
               ),
             ]),
           const SizedBox(height: 12),
@@ -4780,20 +4774,20 @@ class _InventoryPageState extends State<InventoryPage>
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: _white,
+                color: context.adapt(_white),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: _border),
+                border: Border.all(color: context.adapt(_border)),
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.comment_rounded,
-                      size: 14, color: _textLight),
+                  Icon(Icons.comment_rounded,
+                      size: 14, color: context.adapt(_textLight)),
                   const SizedBox(width: 8),
                   Expanded(
                       child: Text('Reason: $reason',
-                          style: const TextStyle(
-                              fontSize: 13, color: _textDark))),
+                          style: TextStyle(
+                              fontSize: 13, color: context.adapt(_textDark)))),
                 ],
               ),
             ),
@@ -4804,8 +4798,8 @@ class _InventoryPageState extends State<InventoryPage>
               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
               decoration: BoxDecoration(
                 color: status == 'approved'
-                    ? const Color(0xFFE8F5E9)
-                    : const Color(0xFFFFEBEE),
+                    ? context.adapt(SoftPalette.green100m)
+                    : context.adapt(SoftPalette.pink100m),
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
                   color: status == 'approved'
@@ -4822,7 +4816,7 @@ class _InventoryPageState extends State<InventoryPage>
                           ? Icons.verified_user_rounded
                           : Icons.gavel_rounded,
                       size: 14,
-                      color: status == 'approved' ? _green600 : _red,
+                      color: status == 'approved' ? context.adapt(_green600) : context.adapt(_red),
                     ),
                     const SizedBox(width: 6),
                     Text(
@@ -4830,7 +4824,7 @@ class _InventoryPageState extends State<InventoryPage>
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: status == 'approved' ? _green600 : _red,
+                        color: status == 'approved' ? context.adapt(_green600) : context.adapt(_red),
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -4840,7 +4834,7 @@ class _InventoryPageState extends State<InventoryPage>
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.bold,
-                          color: status == 'approved' ? _green600 : _red,
+                          color: status == 'approved' ? context.adapt(_green600) : context.adapt(_red),
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -4849,14 +4843,14 @@ class _InventoryPageState extends State<InventoryPage>
                   if (data['reviewedAt'] != null) ...[
                     const SizedBox(height: 4),
                     Row(children: [
-                      const Icon(Icons.access_time_rounded,
-                          size: 12, color: _textLight),
+                      Icon(Icons.access_time_rounded,
+                          size: 12, color: context.adapt(_textLight)),
                       const SizedBox(width: 5),
                       Text(
                         DateFormat('dd MMM yyyy, hh:mm a').format(
                             (data['reviewedAt'] as Timestamp).toDate()),
-                        style: const TextStyle(
-                            fontSize: 11, color: _textLight),
+                        style: TextStyle(
+                            fontSize: 11, color: context.adapt(_textLight)),
                       ),
                     ]),
                   ],
@@ -4966,7 +4960,7 @@ class _InventoryPageState extends State<InventoryPage>
       }
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        AppToast.showSnackBar(context, SnackBar(
           content: Text('Request ${newStatus.toUpperCase()}'),
           backgroundColor: newStatus == 'approved' ? _teal : _red,
           behavior: SnackBarBehavior.floating,
@@ -4976,7 +4970,7 @@ class _InventoryPageState extends State<InventoryPage>
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        AppToast.showSnackBar(context, SnackBar(
           content: Text('Error: $e'),
           backgroundColor: _red,
         ));
@@ -5137,9 +5131,9 @@ class _InventoryPageState extends State<InventoryPage>
       return Container(
         margin: const EdgeInsets.symmetric(vertical: 8),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: context.adapt(SoftPalette.gray50),
           borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: _border.withValues(alpha: 0.5)),
+          border: Border.all(color: context.adapt(_border).withValues(alpha: 0.5)),
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
@@ -5161,12 +5155,12 @@ class _InventoryPageState extends State<InventoryPage>
               return DataRow(cells: [
                 DataCell(Text(f['label']!, style: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12))),
                 DataCell(Text(oldVal, style: TextStyle(
-                  color: isChanged ? Colors.grey : _textDark,
+                  color: isChanged ? context.adapt(SoftPalette.gray350) : context.adapt(_textDark),
                   decoration: isChanged ? TextDecoration.lineThrough : null,
                   fontSize: 12,
                 ))),
                 DataCell(Text(newVal, style: TextStyle(
-                  color: isChanged ? Colors.blue.shade700 : _textDark,
+                  color: isChanged ? context.adapt(SoftPalette.blue500) : context.adapt(_textDark),
                   fontWeight: isChanged ? FontWeight.bold : FontWeight.normal,
                   fontSize: 12,
                 ))),
@@ -5180,9 +5174,9 @@ class _InventoryPageState extends State<InventoryPage>
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Padding(
+        Padding(
           padding: EdgeInsets.only(bottom: 8, top: 4),
-          child: Text('Proposed Changes:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _tealDark)),
+          child: Text('Proposed Changes:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(_tealDark))),
         ),
         ...fields.map((f) {
           final key = f['key'] as String;
@@ -5196,27 +5190,27 @@ class _InventoryPageState extends State<InventoryPage>
             margin: const EdgeInsets.only(bottom: 4),
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: context.adapt(SoftPalette.gray50),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: _border.withValues(alpha: 0.3)),
+              border: Border.all(color: context.adapt(_border).withValues(alpha: 0.3)),
             ),
             child: Row(
               children: [
                 SizedBox(
                   width: 60,
-                  child: Text(label, style: const TextStyle(fontSize: 11, color: _textLight, fontWeight: FontWeight.bold)),
+                  child: Text(label, style: TextStyle(fontSize: 11, color: context.adapt(_textLight), fontWeight: FontWeight.bold)),
                 ),
                 Expanded(
                   child: Wrap(
                     alignment: WrapAlignment.start,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      Text(oldVal, style: const TextStyle(fontSize: 11, color: Colors.grey, decoration: TextDecoration.lineThrough)),
-                      const Padding(
+                      Text(oldVal, style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.gray350), decoration: TextDecoration.lineThrough)),
+                      Padding(
                         padding: EdgeInsets.symmetric(horizontal: 6),
-                        child: Icon(Icons.arrow_forward, size: 10, color: Colors.grey),
+                        child: Icon(Icons.arrow_forward, size: 10, color: context.adapt(SoftPalette.gray350)),
                       ),
-                      Text(newVal, style: TextStyle(fontSize: 12, color: Colors.blue.shade800, fontWeight: FontWeight.bold)),
+                      Text(newVal, style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.blue550), fontWeight: FontWeight.bold)),
                     ],
                   ),
                 ),
@@ -5354,9 +5348,9 @@ class _InventoryPageState extends State<InventoryPage>
             Container(
               padding: const EdgeInsets.all(7),
               decoration: BoxDecoration(
-                  color: _white,
+                  color: context.adapt(_white),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: _border)),
+                  border: Border.all(color: context.adapt(_border))),
               child: _typeIconWidget(type, size: 13),
             ),
             const SizedBox(width: 10),
@@ -5365,20 +5359,20 @@ class _InventoryPageState extends State<InventoryPage>
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
               Text('$name ($type$dose) × $qty',
-                  style: const TextStyle(
+                  style: TextStyle(
                       fontWeight: FontWeight.w600,
                       fontSize: 13,
-                      color: _textDark)),
+                      color: context.adapt(_textDark))),
               const SizedBox(height: 2),
               Row(children: [
                 _miniChip('PKR ${_fmtPrice(price)}', _green600),
                 const SizedBox(width: 6),
-                _miniChip(expiry, _textMid),
+                _miniChip(expiry, context.adapt(_textMid)),
                 const SizedBox(width: 6),
                 _miniChip('Camp: $campLabel', _teal),
                 if (barcode.isNotEmpty) ...[
                   const SizedBox(width: 6),
-                  _miniChip(barcode, _indigo),
+                  _miniChip(barcode, context.adapt(_indigo)),
                 ],
               ]),
             ])),
@@ -5399,7 +5393,7 @@ class _InventoryPageState extends State<InventoryPage>
         child: Row(children: [
           Text(label,
               style: TextStyle(
-                  color: active ? Colors.white : Colors.white70,
+                  color: active ? SoftPalette.gray50 : SoftPalette.gray50A70,
                   fontWeight: FontWeight.w700,
                   fontSize: 12,
                   letterSpacing: 0.3)),
@@ -5410,7 +5404,7 @@ class _InventoryPageState extends State<InventoryPage>
                     ? Icons.arrow_upward_rounded
                     : Icons.arrow_downward_rounded,
                 size: 12,
-                color: Colors.white),
+                color: SoftPalette.gray50),
           ],
         ]),
       ),
@@ -5418,20 +5412,20 @@ class _InventoryPageState extends State<InventoryPage>
   }
 
   static Color _darkTypeColor(String type) => switch (type) {
-        'Tablet' => const Color(0xFF60A5FA),
-        'Capsule' => const Color(0xFFC084FC),
-        'Syrup' => const Color(0xFFFDBA74),
-        'Injection' => const Color(0xFFFCA5A5),
-        'Infusion' => const Color(0xFF5EEAD4),
-        'Drip' => const Color(0xFF5EEAD4),
-        'Drip Set' => const Color(0xFF67E8F9),
-        'Syringe' => const Color(0xFFF472B6),
-        'Cannula' => const Color(0xFFFB7185),
-        'Needle' => const Color(0xFFE879F9),
-        'Nebulization' => const Color(0xFF818CF8),
-        'Dressing Item' => const Color(0xFFCBD5E1),
-        'Consumables' => const Color(0xFF2DD4BF),
-        _ => const Color(0xFFE2E8F0),
+        'Tablet' => SoftPalette.blue350,
+        'Capsule' => SoftPalette.purple350,
+        'Syrup' => SoftPalette.amber200,
+        'Injection' => SoftPalette.red300,
+        'Infusion' => SoftPalette.teal200,
+        'Drip' => SoftPalette.teal200,
+        'Drip Set' => SoftPalette.cyan200,
+        'Syringe' => SoftPalette.pink350,
+        'Cannula' => SoftPalette.red350,
+        'Needle' => SoftPalette.purple350,
+        'Nebulization' => SoftPalette.indigo400,
+        'Dressing Item' => SoftPalette.slate200,
+        'Consumables' => SoftPalette.teal300,
+        _ => SoftPalette.slate150,
       };
 
   Widget _typePill(String type) {
@@ -5463,14 +5457,14 @@ class _InventoryPageState extends State<InventoryPage>
         padding:
             const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
         decoration: BoxDecoration(
-          color: _isDark ? const Color(0xFF14532D).withValues(alpha: 0.35) : const Color(0xFFF3FCF4),
+          color: _isDark ? SoftPalette.green700.withValues(alpha: 0.35) : SoftPalette.green50t,
           borderRadius: BorderRadius.circular(6),
           border: Border.all(
-              color: _isDark ? const Color(0xFF22C55E).withValues(alpha: 0.5) : const Color(0xFF81C784).withValues(alpha: 0.6)),
+              color: _isDark ? SoftPalette.green350.withValues(alpha: 0.5) : SoftPalette.green300.withValues(alpha: 0.6)),
         ),
         child: Text('PKR ${_fmtPrice(price)}',
             style: TextStyle(
-                color: _isDark ? const Color(0xFF4ADE80) : const Color(0xFF2E7D32),
+                color: _isDark ? SoftPalette.green300 : SoftPalette.green550,
                 fontWeight: FontWeight.w800,
                 fontSize: 11.5)),
       );
@@ -5506,18 +5500,18 @@ class _InventoryPageState extends State<InventoryPage>
   Widget _expBadge(String text, bool soon) => Container(
         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
         decoration: BoxDecoration(
-          color: (soon ? _red : (_isDark ? const Color(0xFF334155) : Colors.grey.shade100)).withValues(alpha: 0.18),
+          color: (soon ? _red : (_isDark ? SoftPalette.slate700 : SoftPalette.gray100)).withValues(alpha: 0.18),
           borderRadius: BorderRadius.circular(6),
           border: Border.all(
-              color: (soon ? _red : (_isDark ? const Color(0xFF475569) : Colors.grey.shade300)).withValues(alpha: 0.5),
+              color: (soon ? _red : (_isDark ? SoftPalette.slate600 : SoftPalette.gray150)).withValues(alpha: 0.5),
               width: 0.8),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
-          Icon(Icons.calendar_today_rounded, size: 10, color: soon ? _red : (_isDark ? const Color(0xFF94A3B8) : _textMid)),
+          Icon(Icons.calendar_today_rounded, size: 10, color: soon ? _red : (_isDark ? SoftPalette.slate350 : _textMid)),
           const SizedBox(width: 4),
           Text(text,
               style: TextStyle(
-                  color: soon ? _red : (_isDark ? const Color(0xFFCBD5E1) : _textMid),
+                  color: soon ? _red : (_isDark ? SoftPalette.slate200 : _textMid),
                   fontWeight: soon ? FontWeight.bold : FontWeight.normal,
                   fontSize: 11)),
         ]),
@@ -5526,7 +5520,7 @@ class _InventoryPageState extends State<InventoryPage>
   Widget _statusDot({required bool lowStock, required bool expSoon}) {
     final Color dotColor = lowStock
         ? _red
-        : (expSoon ? _amber : const Color(0xFF2E7D32));
+        : (expSoon ? _amber : SoftPalette.green550);
     
     return Container(
       width: 8,
@@ -5577,14 +5571,14 @@ class _InventoryPageState extends State<InventoryPage>
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, color: Colors.white, size: isTable ? 10 : 12),
+          Icon(icon, color: SoftPalette.gray50, size: isTable ? 10 : 12),
           const SizedBox(width: 5),
           Flexible(
             child: Text(
               label,
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
-                color: Colors.white,
+                color: SoftPalette.gray50,
                 fontSize: isTable ? 8 : 10,
                 fontWeight: FontWeight.w900,
                 letterSpacing: 0.5,
@@ -5634,11 +5628,11 @@ class _InventoryPageState extends State<InventoryPage>
   Widget _emptyState(IconData icon, String msg) => Center(
         child: Column(
             mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(icon, size: 72, color: Colors.grey[300]),
+          Icon(icon, size: 72, color: context.adapt(SoftPalette.gray150)),
           const SizedBox(height: 14),
           Text(msg,
               textAlign: TextAlign.center,
-              style: const TextStyle(color: _textLight, fontSize: 15)),
+              style: TextStyle(color: context.adapt(_textLight), fontSize: 15)),
         ]),
       );
 }
@@ -5669,14 +5663,14 @@ class _EditMedicineSheet extends StatefulWidget {
 }
 
 class _EditMedicineSheetState extends State<_EditMedicineSheet> {
-  static const _teal = Color(0xFF00695C);
-  static const _tealDark = Color(0xFF004D40);
-  static const _green50 = Color(0xFFE8F5E9);
-  static const _green600 = Color(0xFF2E7D32);
-  static const _red = Color(0xFFC62828);
-  static const _border = Color(0xFFB2DFDB);
-  static const _textDark = Color(0xFF1B2631);
-  static const _textLight = Color(0xFF718096);
+  static const _teal = SoftPalette.teal600;
+  static const _tealDark = SoftPalette.teal700;
+  static const _green50 = SoftPalette.green100m;
+  static const _green600 = SoftPalette.green550;
+  static const _red = SoftPalette.red550;
+  static const _border = SoftPalette.teal200;
+  static const _textDark = SoftPalette.slate800;
+  static const _textLight = SoftPalette.slate500;
 
   late final TextEditingController _nameCtrl;
   late final TextEditingController _doseCtrl;
@@ -5820,7 +5814,7 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
     final bottom = MediaQuery.of(context).viewInsets.bottom;
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         borderRadius:
             const BorderRadius.vertical(top: Radius.circular(24)),
       ),
@@ -5833,7 +5827,7 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
             width: 40,
             height: 4,
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF475569) : Colors.grey[300],
+              color: isDark ? SoftPalette.slate600 : SoftPalette.gray150,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -5857,19 +5851,19 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
                   style: TextStyle(
                       fontSize: 17,
                       fontWeight: FontWeight.bold,
-                      color: isDark ? Colors.white : _tealDark)),
+                      color: isDark ? SoftPalette.gray50 : _tealDark)),
               Text('${widget.docIds.length} batch doc(s) will be updated',
                   style: TextStyle(
-                      fontSize: 11, color: isDark ? const Color(0xFF94A3B8) : _textLight)),
+                      fontSize: 11, color: isDark ? SoftPalette.slate350 : _textLight)),
             ]),
           ),
           IconButton(
-            icon: Icon(Icons.close_rounded, color: isDark ? const Color(0xFF94A3B8) : _textLight),
+            icon: Icon(Icons.close_rounded, color: isDark ? SoftPalette.slate350 : _textLight),
             onPressed: () => Navigator.pop(context),
           ),
         ]),
         const SizedBox(height: 16),
-        Divider(height: 1, color: isDark ? const Color(0xFF334155) : null),
+        Divider(height: 1, color: isDark ? SoftPalette.slate700 : null),
         const SizedBox(height: 16),
         Form(
           key: _formKey,
@@ -5891,23 +5885,23 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
                     style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
-                        color: isDark ? const Color(0xFF94A3B8) : _textLight)),
+                        color: isDark ? SoftPalette.slate350 : _textLight)),
                 const SizedBox(height: 6),
                 Container(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 14),
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF0F172A) : _green50,
+                    color: isDark ? SoftPalette.slate900 : _green50,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: isDark ? const Color(0xFF334155) : _border),
+                    border: Border.all(color: isDark ? SoftPalette.slate700 : _border),
                   ),
                   child: DropdownButton<String>(
                     value: _selectedType,
                     isExpanded: true,
                     underline: const SizedBox(),
-                    dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                    dropdownColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                     style: TextStyle(
-                        color: isDark ? Colors.white : _textDark, fontSize: 14),
+                        color: isDark ? SoftPalette.gray50 : _textDark, fontSize: 14),
                     icon: const Icon(Icons.expand_more_rounded,
                         color: _teal),
                     items: widget.medicineTypes
@@ -5993,12 +5987,12 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
                           width: 18,
                           height: 18,
                           child: CircularProgressIndicator(
-                              strokeWidth: 2, color: Colors.white))
+                              strokeWidth: 2, color: SoftPalette.gray50))
                       : const Icon(Icons.save_rounded,
-                          color: Colors.white, size: 18),
+                          color: SoftPalette.gray50, size: 18),
                   label: Text(_saving ? 'Saving…' : 'Save Changes',
                       style: const TextStyle(
-                          color: Colors.white,
+                          color: SoftPalette.gray50,
                           fontWeight: FontWeight.bold,
                           fontSize: 15)),
                   style: ElevatedButton.styleFrom(
@@ -6034,7 +6028,7 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
             style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.w600,
-                color: isDark ? const Color(0xFF94A3B8) : _textLight)),
+                color: isDark ? SoftPalette.slate350 : _textLight)),
         const SizedBox(height: 6),
         TextFormField(
           controller: controller,
@@ -6046,30 +6040,30 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
           cursorColor: _teal,
           style: TextStyle(
               color: enabled
-                  ? (isDark ? Colors.white : _textDark)
-                  : (isDark ? const Color(0xFF64748B) : Colors.grey.shade700),
+                  ? (isDark ? SoftPalette.gray50 : _textDark)
+                  : (isDark ? SoftPalette.slate550 : SoftPalette.gray550),
               fontSize: 14),
           decoration: InputDecoration(
-            prefixIcon: Icon(icon, size: 17, color: enabled ? _teal : Colors.grey),
-            suffixIcon: !enabled ? const Icon(Icons.lock_rounded, size: 16, color: Colors.grey) : null,
+            prefixIcon: Icon(icon, size: 17, color: enabled ? _teal : SoftPalette.gray350),
+            suffixIcon: !enabled ? const Icon(Icons.lock_rounded, size: 16, color: SoftPalette.gray350) : null,
             helperText: helperText,
-            helperStyle: TextStyle(color: Colors.amber.shade900, fontSize: 11, fontWeight: FontWeight.bold),
+            helperStyle: TextStyle(color: SoftPalette.orange350, fontSize: 11, fontWeight: FontWeight.bold),
             filled: true,
             fillColor: enabled
-                ? (isDark ? const Color(0xFF0F172A) : _green50)
-                : (isDark ? const Color(0xFF1E293B) : Colors.grey.shade100),
+                ? (isDark ? SoftPalette.slate900 : _green50)
+                : (isDark ? SoftPalette.slate800 : SoftPalette.gray100),
             border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide: BorderSide.none),
             enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: isDark ? const Color(0xFF334155) : _border)),
+                borderSide: BorderSide(color: isDark ? SoftPalette.slate700 : _border)),
             focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide: const BorderSide(color: _teal, width: 1.5)),
             disabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300)),
+                borderSide: BorderSide(color: isDark ? SoftPalette.slate700 : SoftPalette.gray150)),
             errorBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide: const BorderSide(color: _red)),

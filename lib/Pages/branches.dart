@@ -1,7 +1,9 @@
 // lib/pages/branches.dart
 
 import 'dart:ui' as ui;
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -520,7 +522,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                       onPressed: () => Navigator.pop(ctx),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: t.accent,
-                        foregroundColor: Colors.white,
+                        foregroundColor: SoftPalette.gray50,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
@@ -868,7 +870,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                     mainCount: NumberFormat('#,###').format(totalTokens),
                     trendText: "Today",
                     isPositiveTrend: true,
-                    badgeColor: const Color(0xFF6366F1),
+                    badgeColor: SoftPalette.indigo500,
                     badgeIcon: Icons.people_alt_rounded,
                     subItems: [
                       {'label': 'Zakat (Rs 20)', 'val': NumberFormat('#,###').format(zakatTokens)},
@@ -885,7 +887,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                     mainCount: "PKR $fmtTotal",
                     trendText: "Revenue",
                     isPositiveTrend: true,
-                    badgeColor: const Color(0xFF0D9488),
+                    badgeColor: SoftPalette.teal500,
                     badgeIcon: Icons.account_balance_wallet_rounded,
                     subItems: [
                       {'label': 'Zakat Rec.', 'val': 'Rs $fmtZakat'},
@@ -902,7 +904,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                     mainCount: NumberFormat('#,###').format(prescribed),
                     trendText: "+8% vs yest",
                     isPositiveTrend: true,
-                    badgeColor: const Color(0xFF10B981),
+                    badgeColor: SoftPalette.emerald350,
                     badgeIcon: Icons.assignment_rounded,
                     subItems: [
                       {'label': 'Waiting', 'val': NumberFormat('#,###').format(waitingDoctor)},
@@ -918,7 +920,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                     mainCount: NumberFormat('#,###').format(dispensed),
                     trendText: "+5% vs yest",
                     isPositiveTrend: true,
-                    badgeColor: const Color(0xFFF59E0B),
+                    badgeColor: SoftPalette.amber300,
                     badgeIcon: Icons.medication_liquid_rounded,
                     subItems: [
                       {'label': 'Pending', 'val': NumberFormat('#,###').format(pendingDisp)},
@@ -934,7 +936,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                     mainCount: NumberFormat('#,###').format(peakCount),
                     trendText: records.isNewRecordToday ? "🔥 Record Broken Today!" : peakDate,
                     isPositiveTrend: true,
-                    badgeColor: const Color(0xFFD97706),
+                    badgeColor: SoftPalette.orange400,
                     badgeIcon: Icons.emoji_events_rounded,
                     subItems: [
                       {'label': 'Record Date', 'val': peakDate},
@@ -969,7 +971,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
         border: Border.all(color: t.bgRule.withValues(alpha: 0.8), width: 1),
         boxShadow: [
           BoxShadow(
-            color: isDark ? Colors.black.withValues(alpha: 0.25) : badgeColor.withValues(alpha: 0.04),
+            color: isDark ? SoftPalette.gray900.withValues(alpha: 0.25) : badgeColor.withValues(alpha: 0.04),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -1033,7 +1035,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 5.5, vertical: 2),
                             decoration: BoxDecoration(
-                              color: isPositiveTrend ? const Color(0xFF10B981).withValues(alpha: 0.12) : Colors.red.withValues(alpha: 0.12),
+                              color: isPositiveTrend ? SoftPalette.emerald350.withValues(alpha: 0.12) : SoftPalette.red400.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: Row(
@@ -1042,7 +1044,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                                 Icon(
                                   isPositiveTrend ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded,
                                   size: 10,
-                                  color: isPositiveTrend ? const Color(0xFF10B981) : Colors.red,
+                                  color: isPositiveTrend ? SoftPalette.emerald350 : SoftPalette.red400,
                                 ),
                                 const SizedBox(width: 2),
                                 Text(
@@ -1050,7 +1052,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                                   style: TextStyle(
                                     fontSize: 9,
                                     fontWeight: FontWeight.w700,
-                                    color: isPositiveTrend ? const Color(0xFF10B981) : Colors.red,
+                                    color: isPositiveTrend ? SoftPalette.emerald350 : SoftPalette.red400,
                                   ),
                                 ),
                               ],
@@ -1137,7 +1139,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
         border: Border.all(color: t.bgRule, width: 1),
         boxShadow: [
           BoxShadow(
-            color: isDark ? Colors.black.withValues(alpha: 0.3) : Colors.black.withValues(alpha: 0.02),
+            color: isDark ? SoftPalette.gray900.withValues(alpha: 0.3) : SoftPalette.gray900.withValues(alpha: 0.02),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -1189,9 +1191,9 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
             spacing: 12,
             runSpacing: 6,
             children: [
-              _buildChartLegend("Tokens: $tokensTotal", const Color(0xFF6366F1), t),
-              _buildChartLegend("Prescriptions: $prescTotal", const Color(0xFF10B981), t),
-              _buildChartLegend("Dispensed: $dispTotal", const Color(0xFFF59E0B), t),
+              _buildChartLegend("Tokens: $tokensTotal", SoftPalette.indigo500, t),
+              _buildChartLegend("Prescriptions: $prescTotal", SoftPalette.emerald350, t),
+              _buildChartLegend("Dispensed: $dispTotal", SoftPalette.amber300, t),
             ],
           ),
           const SizedBox(height: 20),
@@ -1201,9 +1203,9 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
             child: CustomPaint(
               painter: _PerformanceMultiLinePainter(
                 theme: t,
-                tokensColor: const Color(0xFF6366F1),
-                prescriptionsColor: const Color(0xFF10B981),
-                dispensaryColor: const Color(0xFFF59E0B),
+                tokensColor: SoftPalette.indigo500,
+                prescriptionsColor: SoftPalette.emerald350,
+                dispensaryColor: SoftPalette.amber300,
                 tokensData: tokensData,
                 prescriptionsData: prescData,
                 dispensaryData: dispData,
@@ -1409,7 +1411,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
         border: Border.all(color: t.bgRule, width: 1),
         boxShadow: [
           BoxShadow(
-            color: isDark ? Colors.black.withValues(alpha: 0.3) : Colors.black.withValues(alpha: 0.02),
+            color: isDark ? SoftPalette.gray900.withValues(alpha: 0.3) : SoftPalette.gray900.withValues(alpha: 0.02),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -1430,7 +1432,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
               ),
               Builder(builder: (context) {
                 final allowsVitals = _isVitalsAllowedForBranchOrCamp(branchId, campId: _selectedCampFilter);
-                final badgeColor = allowsVitals ? const Color(0xFF10B981) : const Color(0xFF6366F1);
+                final badgeColor = allowsVitals ? SoftPalette.emerald350 : SoftPalette.indigo500;
                 return Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                   decoration: BoxDecoration(
@@ -1500,11 +1502,11 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                 if (campOptions.isEmpty) return const SizedBox.shrink();
 
                 final colors = [
-                  const Color(0xFF6366F1),
-                  const Color(0xFFF59E0B),
-                  const Color(0xFF10B981),
-                  const Color(0xFFEC4899),
-                  const Color(0xFF3B82F6),
+                  SoftPalette.indigo500,
+                  SoftPalette.amber300,
+                  SoftPalette.emerald350,
+                  SoftPalette.pink400,
+                  SoftPalette.blue500,
                 ];
 
                 final bDisplayName = branchId == 'all' ? 'All' : _selectedBranchName;
@@ -1519,7 +1521,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                         _buildCampFilterChip('All $bDisplayName (Collective)', _selectedCampFilter == 'all', () {
                           setState(() { _selectedCampFilter = 'all'; _currentPage = 1; });
                           ref.read(branchSubDispensaryFilterProvider.notifier).state = null;
-                        }, const Color(0xFF0D9488), t),
+                        }, SoftPalette.teal500, t),
                         for (int i = 0; i < campOptions.length; i++)
                           _buildCampFilterChip(
                             campOptions[i]['name']!,
@@ -1561,34 +1563,34 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                             ref.read(branchStageFilterProvider.notifier).state = 'all';
                             ref.read(branchTokenCategoryFilterProvider.notifier).state = 'all';
                             setState(() => _currentPage = 1);
-                          }, const Color(0xFF6366F1), t),
+                          }, SoftPalette.indigo500, t),
                           if (allowsVitals || vitalsCount > 0) ...[
                             const SizedBox(width: 8),
                             _buildStageTabPill("🩺 Vitals ($vitalsCount)", vitalsCount, tokenCat == 'vitals', () {
                               ref.read(branchTokenCategoryFilterProvider.notifier).state = 'vitals';
                               setState(() => _currentPage = 1);
-                            }, const Color(0xFF8B5CF6), t),
+                            }, SoftPalette.violet500, t),
                           ],
                           const SizedBox(width: 8),
                           _buildStageTabPill("🎟️ Normal ($normalCount)", normalCount, tokenCat == 'normal', () {
                             ref.read(branchTokenCategoryFilterProvider.notifier).state = 'normal';
                             setState(() => _currentPage = 1);
-                          }, const Color(0xFF0EA5E9), t),
+                          }, SoftPalette.sky400, t),
                           const SizedBox(width: 8),
                           _buildStageTabPill("Waiting for Doctor", waitingDoctorCount, stageFilter == 'waiting_doctor', () {
                             ref.read(branchStageFilterProvider.notifier).state = 'waiting_doctor';
                             setState(() => _currentPage = 1);
-                          }, const Color(0xFFF59E0B), t),
+                          }, SoftPalette.amber300, t),
                           const SizedBox(width: 8),
                           _buildStageTabPill("Waiting for Dispensary", waitingDispCount, stageFilter == 'waiting_dispensary', () {
                             ref.read(branchStageFilterProvider.notifier).state = 'waiting_dispensary';
                             setState(() => _currentPage = 1);
-                          }, const Color(0xFF3B82F6), t),
+                          }, SoftPalette.blue500, t),
                           const SizedBox(width: 8),
                           _buildStageTabPill("Dispensed", dispensedCount, stageFilter == 'dispensed', () {
                             ref.read(branchStageFilterProvider.notifier).state = 'dispensed';
                             setState(() => _currentPage = 1);
-                          }, const Color(0xFF10B981), t),
+                          }, SoftPalette.emerald350, t),
                         ],
                       ),
                     )
@@ -1600,28 +1602,28 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                           ref.read(branchStageFilterProvider.notifier).state = 'all';
                           ref.read(branchTokenCategoryFilterProvider.notifier).state = 'all';
                           setState(() => _currentPage = 1);
-                        }, const Color(0xFF6366F1), t),
+                        }, SoftPalette.indigo500, t),
                         if (allowsVitals || vitalsCount > 0)
                           _buildStageTabPill("🩺 Vitals ($vitalsCount)", vitalsCount, tokenCat == 'vitals', () {
                             ref.read(branchTokenCategoryFilterProvider.notifier).state = 'vitals';
                             setState(() => _currentPage = 1);
-                          }, const Color(0xFF8B5CF6), t),
+                          }, SoftPalette.violet500, t),
                         _buildStageTabPill("🎟️ Normal ($normalCount)", normalCount, tokenCat == 'normal', () {
                           ref.read(branchTokenCategoryFilterProvider.notifier).state = 'normal';
                           setState(() => _currentPage = 1);
-                        }, const Color(0xFF0EA5E9), t),
+                        }, SoftPalette.sky400, t),
                         _buildStageTabPill("Waiting for Doctor", waitingDoctorCount, stageFilter == 'waiting_doctor', () {
                           ref.read(branchStageFilterProvider.notifier).state = 'waiting_doctor';
                           setState(() => _currentPage = 1);
-                        }, const Color(0xFFF59E0B), t),
+                        }, SoftPalette.amber300, t),
                         _buildStageTabPill("Waiting for Dispensary", waitingDispCount, stageFilter == 'waiting_dispensary', () {
                           ref.read(branchStageFilterProvider.notifier).state = 'waiting_dispensary';
                           setState(() => _currentPage = 1);
-                        }, const Color(0xFF3B82F6), t),
+                        }, SoftPalette.blue500, t),
                         _buildStageTabPill("Dispensed", dispensedCount, stageFilter == 'dispensed', () {
                           ref.read(branchStageFilterProvider.notifier).state = 'dispensed';
                           setState(() => _currentPage = 1);
-                        }, const Color(0xFF10B981), t),
+                        }, SoftPalette.emerald350, t),
                       ],
                     );
 
@@ -1827,10 +1829,10 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
 
     final stage = _recordStage(p);
     final statusColor = stage == 'dispensed'
-        ? const Color(0xFF10B981)
+        ? SoftPalette.emerald350
         : stage == 'waiting_dispensary'
-            ? const Color(0xFF3B82F6)
-            : const Color(0xFFF59E0B);
+            ? SoftPalette.blue500
+            : SoftPalette.amber300;
     final statusLabel = stage == 'dispensed'
         ? 'Dispensed'
         : stage == 'waiting_dispensary'
@@ -1905,12 +1907,12 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: isVitalsOnly ? const Color(0xFF8B5CF6).withValues(alpha: 0.15) : t.accent.withValues(alpha: 0.12),
+                      color: isVitalsOnly ? SoftPalette.violet500.withValues(alpha: 0.15) : t.accent.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Icon(
                       isVitalsOnly ? Icons.monitor_heart_rounded : Icons.medical_services_rounded,
-                      color: isVitalsOnly ? const Color(0xFF8B5CF6) : t.accent,
+                      color: isVitalsOnly ? SoftPalette.violet500 : t.accent,
                       size: 24,
                     ),
                   ),
@@ -1929,7 +1931,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                             InkWell(
                               onTap: () {
                                 Clipboard.setData(ClipboardData(text: tokenSerial));
-                                ScaffoldMessenger.of(context).showSnackBar(
+                                AppToast.showSnackBar(context, 
                                   SnackBar(content: Text('Copied $tokenSerial'), duration: const Duration(seconds: 1)),
                                 );
                               },
@@ -1965,13 +1967,13 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                         decoration: BoxDecoration(
                           color: isVitalsOnly
-                              ? const Color(0xFF8B5CF6).withValues(alpha: 0.12)
-                              : const Color(0xFF10B981).withValues(alpha: 0.1),
+                              ? SoftPalette.violet500.withValues(alpha: 0.12)
+                              : SoftPalette.emerald350.withValues(alpha: 0.1),
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(
                             color: isVitalsOnly
-                                ? const Color(0xFF8B5CF6).withValues(alpha: 0.35)
-                                : const Color(0xFF10B981).withValues(alpha: 0.3),
+                                ? SoftPalette.violet500.withValues(alpha: 0.35)
+                                : SoftPalette.emerald350.withValues(alpha: 0.3),
                           ),
                         ),
                         child: Row(
@@ -1979,7 +1981,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                             Icon(
                               isVitalsOnly ? Icons.monitor_heart_outlined : Icons.medication_rounded,
                               size: 18,
-                              color: isVitalsOnly ? const Color(0xFF8B5CF6) : const Color(0xFF10B981),
+                              color: isVitalsOnly ? SoftPalette.violet500 : SoftPalette.emerald350,
                             ),
                             const SizedBox(width: 10),
                             Expanded(
@@ -1991,7 +1993,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                                     style: TextStyle(
                                       fontSize: 13,
                                       fontWeight: FontWeight.w800,
-                                      color: isVitalsOnly ? const Color(0xFF8B5CF6) : const Color(0xFF10B981),
+                                      color: isVitalsOnly ? SoftPalette.violet500 : SoftPalette.emerald350,
                                     ),
                                   ),
                                   Text(
@@ -2098,11 +2100,11 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                               spacing: 12,
                               runSpacing: 10,
                               children: [
-                                _buildVitalPill("Blood Pressure", bp != null ? "$bp mmHg" : "—", Icons.favorite_rounded, const Color(0xFFEF4444), t),
-                                _buildVitalPill("Blood Sugar", sugar != null ? "$sugar mg/dL" : "—", Icons.bloodtype_rounded, const Color(0xFFF59E0B), t),
-                                _buildVitalPill("Temperature", temp != null ? "$temp °F" : "—", Icons.thermostat_rounded, const Color(0xFF0D9488), t),
-                                _buildVitalPill("Weight", weight != null ? "$weight kg" : "—", Icons.scale_rounded, const Color(0xFF3B82F6), t),
-                                _buildVitalPill("Pulse", pulse != null ? "$pulse bpm" : "—", Icons.monitor_heart_rounded, const Color(0xFF8B5CF6), t),
+                                _buildVitalPill("Blood Pressure", bp != null ? "$bp mmHg" : "—", Icons.favorite_rounded, SoftPalette.red400, t),
+                                _buildVitalPill("Blood Sugar", sugar != null ? "$sugar mg/dL" : "—", Icons.bloodtype_rounded, SoftPalette.amber300, t),
+                                _buildVitalPill("Temperature", temp != null ? "$temp °F" : "—", Icons.thermostat_rounded, SoftPalette.teal500, t),
+                                _buildVitalPill("Weight", weight != null ? "$weight kg" : "—", Icons.scale_rounded, SoftPalette.blue500, t),
+                                _buildVitalPill("Pulse", pulse != null ? "$pulse bpm" : "—", Icons.monitor_heart_rounded, SoftPalette.violet500, t),
                               ],
                             ),
                           ],
@@ -2244,7 +2246,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                     label: const Text("Full Profile"),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: t.accent,
-                      foregroundColor: Colors.white,
+                      foregroundColor: SoftPalette.gray50,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
                   ),
@@ -2327,10 +2329,10 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
             final hasPhone = rawPhone.isNotEmpty && rawPhone != 'N/A' && rawPhone != '-';
             final stage = _recordStage(p);
             final statusColor = stage == 'dispensed'
-              ? const Color(0xFF10B981)
+              ? SoftPalette.emerald350
               : stage == 'waiting_dispensary'
-                ? const Color(0xFF3B82F6)
-                : const Color(0xFFF59E0B);
+                ? SoftPalette.blue500
+                : SoftPalette.amber300;
             final statusLabel = stage == 'dispensed'
               ? 'Dispensed'
               : stage == 'waiting_dispensary'
@@ -2354,11 +2356,11 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
 
             Color typeColor;
             if (type == 'zakat') {
-              typeColor = const Color(0xFF6366F1);
+              typeColor = SoftPalette.indigo500;
             } else if (type == 'non-zakat') {
-              typeColor = const Color(0xFF3B82F6);
+              typeColor = SoftPalette.blue500;
             } else if (type == 'gmwf') {
-              typeColor = const Color(0xFF10B981);
+              typeColor = SoftPalette.emerald350;
             } else {
               typeColor = t.textSecondary;
             }
@@ -2410,13 +2412,13 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                     padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                     decoration: BoxDecoration(
                       color: isVitalsOnly
-                          ? const Color(0xFF8B5CF6).withValues(alpha: 0.12)
-                          : const Color(0xFF0EA5E9).withValues(alpha: 0.12),
+                          ? SoftPalette.violet500.withValues(alpha: 0.12)
+                          : SoftPalette.sky400.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(6),
                       border: Border.all(
                         color: isVitalsOnly
-                            ? const Color(0xFF8B5CF6).withValues(alpha: 0.3)
-                            : const Color(0xFF0EA5E9).withValues(alpha: 0.3),
+                            ? SoftPalette.violet500.withValues(alpha: 0.3)
+                            : SoftPalette.sky400.withValues(alpha: 0.3),
                       ),
                     ),
                     child: Row(
@@ -2425,7 +2427,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                         Icon(
                           isVitalsOnly ? Icons.monitor_heart_outlined : Icons.confirmation_number_outlined,
                           size: 11,
-                          color: isVitalsOnly ? const Color(0xFF8B5CF6) : const Color(0xFF0EA5E9),
+                          color: isVitalsOnly ? SoftPalette.violet500 : SoftPalette.sky400,
                         ),
                         const SizedBox(width: 4),
                         Text(
@@ -2433,7 +2435,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                           style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.w700,
-                            color: isVitalsOnly ? const Color(0xFF8B5CF6) : const Color(0xFF0EA5E9),
+                            color: isVitalsOnly ? SoftPalette.violet500 : SoftPalette.sky400,
                           ),
                         ),
                       ],
@@ -2479,8 +2481,8 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                       ? InkWell(
                           onTap: () {
                             Clipboard.setData(ClipboardData(text: rawCnic));
-                            ScaffoldMessenger.of(context).clearSnackBars();
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            AppToast.clear();
+                            AppToast.showSnackBar(context, 
                               SnackBar(
                                 content: Text('Copied CNIC: $formattedCnic'),
                                 duration: const Duration(seconds: 1),
@@ -2532,8 +2534,8 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                       ? InkWell(
                           onTap: () {
                             Clipboard.setData(ClipboardData(text: rawPhone));
-                            ScaffoldMessenger.of(context).clearSnackBars();
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            AppToast.clear();
+                            AppToast.showSnackBar(context, 
                               SnackBar(
                                 content: Text('Copied Phone: $rawPhone'),
                                 duration: const Duration(seconds: 1),
@@ -2547,7 +2549,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                             child: Row(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                const Icon(Icons.phone_rounded, size: 12, color: Color(0xFF10B981)),
+                                const Icon(Icons.phone_rounded, size: 12, color: SoftPalette.emerald350),
                                 const SizedBox(width: 5),
                                 Text(
                                   rawPhone,
@@ -2616,16 +2618,16 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF8B5CF6).withValues(alpha: 0.15),
+                            color: SoftPalette.violet500.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: const Color(0xFF8B5CF6).withValues(alpha: 0.4)),
+                            border: Border.all(color: SoftPalette.violet500.withValues(alpha: 0.4)),
                           ),
                           child: const Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              Icon(Icons.monitor_heart_outlined, size: 11, color: Color(0xFF8B5CF6)),
+                              Icon(Icons.monitor_heart_outlined, size: 11, color: SoftPalette.violet500),
                               SizedBox(width: 4),
-                              Text('Vitals Only', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: Color(0xFF8B5CF6))),
+                              Text('Vitals Only', style: TextStyle(fontSize: 10, fontWeight: FontWeight.w800, color: SoftPalette.violet500)),
                             ],
                           ),
                         )
@@ -2638,10 +2640,10 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                             decoration: BoxDecoration(
-                              color: Colors.deepOrange.withValues(alpha: 0.12),
+                              color: SoftPalette.red400.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(6),
                             ),
-                            child: Text('$days d course', style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.deepOrange)),
+                            child: Text('$days d course', style: const TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: SoftPalette.red400)),
                           ),
                       ],
                     ],
@@ -2671,8 +2673,8 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                         );
                       } else if (val == 'copy') {
                         Clipboard.setData(ClipboardData(text: tokenSerial));
-                        ScaffoldMessenger.of(context).clearSnackBars();
-                        ScaffoldMessenger.of(context).showSnackBar(
+                        AppToast.clear();
+                        AppToast.showSnackBar(context, 
                           SnackBar(
                             content: Text('Copied $tokenSerial'),
                             duration: const Duration(seconds: 1),
@@ -2681,8 +2683,8 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                         );
                       } else if (val == 'copy_cnic' && hasCnic) {
                         Clipboard.setData(ClipboardData(text: rawCnic));
-                        ScaffoldMessenger.of(context).clearSnackBars();
-                        ScaffoldMessenger.of(context).showSnackBar(
+                        AppToast.clear();
+                        AppToast.showSnackBar(context, 
                           SnackBar(
                             content: Text('Copied CNIC: $formattedCnic'),
                             duration: const Duration(seconds: 1),
@@ -2691,8 +2693,8 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                         );
                       } else if (val == 'copy_phone' && hasPhone) {
                         Clipboard.setData(ClipboardData(text: rawPhone));
-                        ScaffoldMessenger.of(context).clearSnackBars();
-                        ScaffoldMessenger.of(context).showSnackBar(
+                        AppToast.clear();
+                        AppToast.showSnackBar(context, 
                           SnackBar(
                             content: Text('Copied Phone: $rawPhone'),
                             duration: const Duration(seconds: 1),
@@ -2754,10 +2756,10 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
     final hasPhone = rawPhone.isNotEmpty && rawPhone != 'N/A' && rawPhone != '-';
     final stage = _recordStage(p);
     final statusColor = stage == 'dispensed'
-        ? const Color(0xFF10B981)
+        ? SoftPalette.emerald350
         : stage == 'waiting_dispensary'
-            ? const Color(0xFF3B82F6)
-            : const Color(0xFFF59E0B);
+            ? SoftPalette.blue500
+            : SoftPalette.amber300;
     final statusLabel = stage == 'dispensed'
         ? 'Dispensed'
         : stage == 'waiting_dispensary'
@@ -2781,11 +2783,11 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
 
     Color typeColor;
     if (type == 'zakat') {
-      typeColor = const Color(0xFF6366F1);
+      typeColor = SoftPalette.indigo500;
     } else if (type == 'non-zakat') {
-      typeColor = const Color(0xFF3B82F6);
+      typeColor = SoftPalette.blue500;
     } else if (type == 'gmwf') {
-      typeColor = const Color(0xFF10B981);
+      typeColor = SoftPalette.emerald350;
     } else {
       typeColor = t.textSecondary;
     }
@@ -2802,7 +2804,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
         border: Border.all(color: t.bgRule),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
+            color: SoftPalette.gray900.withValues(alpha: 0.03),
             blurRadius: 6,
             offset: const Offset(0, 2),
           ),
@@ -2864,10 +2866,10 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3.5),
                         decoration: BoxDecoration(
-                          color: (isVitalsOnly ? const Color(0xFF8B5CF6) : const Color(0xFF0EA5E9)).withValues(alpha: 0.12),
+                          color: (isVitalsOnly ? SoftPalette.violet500 : SoftPalette.sky400).withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(6),
                           border: Border.all(
-                            color: (isVitalsOnly ? const Color(0xFF8B5CF6) : const Color(0xFF0EA5E9)).withValues(alpha: 0.3),
+                            color: (isVitalsOnly ? SoftPalette.violet500 : SoftPalette.sky400).withValues(alpha: 0.3),
                           ),
                         ),
                         child: Row(
@@ -2876,7 +2878,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                             Icon(
                               isVitalsOnly ? Icons.monitor_heart_outlined : Icons.confirmation_number_outlined,
                               size: 10,
-                              color: isVitalsOnly ? const Color(0xFF8B5CF6) : const Color(0xFF0EA5E9),
+                              color: isVitalsOnly ? SoftPalette.violet500 : SoftPalette.sky400,
                             ),
                             const SizedBox(width: 3),
                             Text(
@@ -2884,7 +2886,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                               style: TextStyle(
                                 fontSize: 9,
                                 fontWeight: FontWeight.w800,
-                                color: isVitalsOnly ? const Color(0xFF8B5CF6) : const Color(0xFF0EA5E9),
+                                color: isVitalsOnly ? SoftPalette.violet500 : SoftPalette.sky400,
                               ),
                             ),
                           ],
@@ -3020,8 +3022,8 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                   InkWell(
                     onTap: () {
                       Clipboard.setData(ClipboardData(text: rawCnic));
-                      ScaffoldMessenger.of(context).clearSnackBars();
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      AppToast.clear();
+                      AppToast.showSnackBar(context, 
                         SnackBar(
                           content: Text('Copied CNIC: $formattedCnic'),
                           duration: const Duration(seconds: 1),
@@ -3058,8 +3060,8 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                   InkWell(
                     onTap: () {
                       Clipboard.setData(ClipboardData(text: rawPhone));
-                      ScaffoldMessenger.of(context).clearSnackBars();
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      AppToast.clear();
+                      AppToast.showSnackBar(context, 
                         SnackBar(
                           content: Text('Copied Phone: $rawPhone'),
                           duration: const Duration(seconds: 1),
@@ -3078,7 +3080,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.phone_rounded, size: 11, color: Color(0xFF10B981)),
+                          const Icon(Icons.phone_rounded, size: 11, color: SoftPalette.emerald350),
                           const SizedBox(width: 4),
                           Text(
                             rawPhone,
@@ -3114,10 +3116,10 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF8B5CF6).withValues(alpha: 0.15),
+                          color: SoftPalette.violet500.withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(4),
                         ),
-                        child: const Text('🩺 Vitals Only', style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Color(0xFF8B5CF6))),
+                        child: const Text('🩺 Vitals Only', style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: SoftPalette.violet500)),
                       )
                     else ...[
                       if (visits > 1) ...[
@@ -3129,10 +3131,10 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
                           decoration: BoxDecoration(
-                            color: Colors.deepOrange.withValues(alpha: 0.12),
+                            color: SoftPalette.red400.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(4),
                           ),
-                          child: Text('$days d course', style: const TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Colors.deepOrange)),
+                          child: Text('$days d course', style: const TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: SoftPalette.red400)),
                         ),
                       ],
                     ],
@@ -3471,7 +3473,7 @@ class _PerformanceMultiLinePainter extends CustomPainter {
 
     // Draw dots
     final dotPaint = Paint()..color = color;
-    final dotWhite = Paint()..color = Colors.white;
+    final dotWhite = Paint()..color = SoftPalette.gray50;
     for (int i = 0; i < normalizedPoints.length; i++) {
       final x = i * xStep;
       final y = normalizedPoints[i] * h;

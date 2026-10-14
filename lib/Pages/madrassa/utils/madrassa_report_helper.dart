@@ -1,6 +1,9 @@
 import 'dart:io';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -1228,7 +1231,7 @@ class MadrassaReportHelper {
       debugPrint('Individual PDF export failed: $e\n$st');
       final context = navigatorKey.currentContext;
       if (context != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(content: Text('Failed to generate report: $e')),
         );
       }
@@ -1450,7 +1453,7 @@ class MadrassaReportHelper {
       debugPrint('Individual Excel export failed: $e\n$st');
       final context = navigatorKey.currentContext;
       if (context != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(content: Text('Failed to generate report: $e')),
         );
       }
@@ -1783,7 +1786,7 @@ class MadrassaReportHelper {
                   const SizedBox(height: 12),
                   Container(
                     padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8)),
+                    decoration: BoxDecoration(color: ctx.adapt(SoftPalette.gray100), borderRadius: BorderRadius.circular(8)),
                     child: SelectableText(finalFilePath!,
                         style: const TextStyle(fontSize: 12, fontFamily: 'monospace')),
                   ),
@@ -1794,7 +1797,7 @@ class MadrassaReportHelper {
                   TextButton(
                     onPressed: () {
                       Clipboard.setData(ClipboardData(text: finalFilePath!));
-                      ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(content: Text('Path copied to clipboard!')));
+                      AppToast.showSnackBar(ctx, const SnackBar(content: Text('Path copied to clipboard!')));
                     },
                     child: const Text('COPY PATH'),
                   ),

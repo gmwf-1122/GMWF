@@ -1,10 +1,12 @@
 // lib/pages/dispensary/receptionist/token_screen.dart
 
+import 'package:gmwf/services/cloud/cloud_db.dart';
 import 'package:gmwf/utils/perf_trace.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
-import 'package:another_flushbar/flushbar.dart';
+import 'package:gmwf/design/components/flushbar_compat.dart';
 import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
@@ -112,7 +114,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
     }
   }
 
-  static const Color _teal  = Color(0xFF00695C);
+  static const Color _teal  = SoftPalette.teal600;
 
   bool get _isKarachi {
     final b = widget.branchId.toLowerCase().trim();
@@ -207,12 +209,12 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
               Flushbar(
                 title: '✅ Token Exception Approved',
                 message: 'Reason: $reason (Doctor: $approvedBy)',
-                backgroundColor: Colors.green.shade700,
+                backgroundColor: SoftPalette.green500,
                 duration: const Duration(seconds: 4),
                 flushbarPosition: FlushbarPosition.TOP,
                 margin: const EdgeInsets.all(12),
                 borderRadius: BorderRadius.circular(12),
-                icon: const Icon(Icons.check_circle, color: Colors.white),
+                icon: const Icon(Icons.check_circle, color: SoftPalette.gray50),
               ).show(context);
             }
           });
@@ -257,7 +259,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: const Row(
           children: [
-            Icon(Icons.shield_outlined, color: Colors.teal),
+            Icon(Icons.shield_outlined, color: SoftPalette.teal500),
             SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -288,7 +290,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                 child: const Text('Switch Dispensary'),
               ),
               ElevatedButton(
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
+                style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.teal500, foregroundColor: SoftPalette.gray50),
                 onPressed: () => Navigator.pop(ctx),
                 child: const Text('Confirm'),
               ),
@@ -704,8 +706,9 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
       session: session,
       increment: false,
     );
+    final sessionLetter = CampSessionService.getSessionLetter(session);
     final dispTag = CampSessionService.getDispensaryKeyword(activeCamp, branchId: widget.branchId);
-    final serialStr = '$datePart-$dispTag-${nextSeq.toString().padLeft(3, '0')}';
+    final serialStr = '$datePart$sessionLetter-$dispTag-${nextSeq.toString().padLeft(3, '0')}';
     if (mounted) {
       setState(() {
         _nextSerial = serialStr;
@@ -926,9 +929,9 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
     final looksLikeCnic  = RegExp(r'^\d{5}-\d{7}-\d{1}$').hasMatch(input) || digitsOnly.length == 13;
     final looksLikePhone = RegExp(r'^03\d{9}$').hasMatch(digitsOnly);
     if (!looksLikeCnic && !looksLikePhone) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      AppToast.showSnackBar(context, const SnackBar(
         content: Text('Enter valid CNIC (XXXXX-XXXXXXX-X) or phone (03xxxxxxxxx)'),
-        backgroundColor: Colors.orange,
+        backgroundColor: SoftPalette.amber300,
       ));
       return;
     }
@@ -1151,9 +1154,9 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
 
       if (isAlreadyIssued) {
         debugPrint('[TokenScreen] 🛑 Duplicate token issuance blocked for: $effectivePid');
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        AppToast.showSnackBar(context, SnackBar(
           content: Text('⚠️ A ${isVitalsOnly ? "Vitals Inspection" : "Regular"} token has already been issued for this patient today!'),
-          backgroundColor: Colors.orange,
+          backgroundColor: SoftPalette.amber300,
           duration: const Duration(seconds: 4),
         ));
         return;
@@ -1170,9 +1173,9 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
           : 'Unknown Patient';
 
       if (!hasException && await _tokenExistsToday(patientId, isVitalsOnly: isVitalsOnly)) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        AppToast.showSnackBar(context, SnackBar(
           content: Text('❌ This patient already has a ${isVitalsOnly ? "Vitals Inspection" : "Regular"} token today!'),
-          backgroundColor: Colors.red,
+          backgroundColor: SoftPalette.red400,
           duration: const Duration(seconds: 4),
         ));
         setState(() => _isLoading = false);
@@ -1192,9 +1195,9 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
         final restriction = _medicineRestriction;
         if (restriction != null) {
           if (mounted) {
-            ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+            AppToast.showSnackBar(context, SnackBar(
               content: Text('❌ Patient blocked. Medicine expires in ${restriction['remainingDays']} days.'),
-              backgroundColor: Colors.red,
+              backgroundColor: SoftPalette.red400,
               duration: const Duration(seconds: 4),
             ));
           }
@@ -1332,11 +1335,15 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
         session: session,
         increment: true,
       );
+      final sessionLetter = CampSessionService.getSessionLetter(session);
       final seqPadded = nextSeq.toString().padLeft(3, '0');
-      final serial = '$dateKey-$normDispTag-$seqPadded';
+      final serial = '$dateKey$sessionLetter-$normDispTag-$seqPadded';
       final entryData = <String, dynamic>{
         ...baseData,
         'serial': serial,
+        'dateKey': dateKey,
+        'session': session,
+        'sessionLetter': sessionLetter,
         'dispensaryTag': normDispTag,
         'dispensaryId': effectiveCampId,
         'campId': effectiveCampId,
@@ -1423,10 +1430,10 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
           }
         });
 
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        AppToast.showSnackBar(context, SnackBar(
           content: Text(
               '✅ Token $serial issued to $patientName! [$queueType]'),
-          backgroundColor: Colors.green,
+          backgroundColor: SoftPalette.green400,
           duration: const Duration(seconds: 3),
         ));
       }
@@ -1436,20 +1443,19 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
       if (storedAsSerial) {
         _syncToFirestoreInBackground(dateKey, queueType, serial, entryData);
       } else if (mounted) {
-        ScaffoldMessenger.of(context)
-          ..hideCurrentSnackBar()
-          ..showSnackBar(SnackBar(
+        AppToast.hideCurrent();
+        AppToast.showSnackBar(context, SnackBar(
           content: Text('⚠️ Token $serial was already used by another patient (issued on another desk). '
               'Both records were kept and flagged for supervisor review.'),
-          backgroundColor: Colors.orange.shade800,
+          backgroundColor: SoftPalette.orange400,
           duration: const Duration(seconds: 6),
         ));
       }
     } catch (e, stack) {
       debugPrint('[TokenScreen] Token generation failed: $e\n$stack');
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      AppToast.showSnackBar(context, SnackBar(
           content: Text('Failed to issue token: $e'),
-          backgroundColor: Colors.red));
+          backgroundColor: SoftPalette.red400));
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
@@ -1589,7 +1595,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
         barrierDismissible: false,
         builder: (_) => StatefulBuilder(
           builder: (ctx, setStateDialog) => Dialog(
-            backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+            backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
             shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(24)),
             insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 24),
@@ -1597,9 +1603,9 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
               width: 520,
               constraints: const BoxConstraints(maxHeight: 700),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                 borderRadius: BorderRadius.circular(24),
-                border: isDark ? Border.all(color: const Color(0xFF334155)) : null,
+                border: isDark ? Border.all(color: SoftPalette.slate700) : null,
               ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
@@ -1610,25 +1616,25 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         colors: isDark
-                            ? [const Color(0xFF0F766E), const Color(0xFF0D9488)]
-                            : [Colors.green.shade800, Colors.teal.shade700],
+                            ? [SoftPalette.teal550, SoftPalette.teal500]
+                            : [SoftPalette.green550, SoftPalette.teal550],
                       ),
                       borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.edit_note_rounded, color: Colors.white, size: 26),
+                        const Icon(Icons.edit_note_rounded, color: SoftPalette.gray50, size: 26),
                         const SizedBox(width: 10),
                         const Expanded(
                           child: Text('Edit Patient Details',
                               style: TextStyle(
-                                  color: Colors.white,
+                                  color: SoftPalette.gray50,
                                   fontSize: 18,
                                   fontWeight: FontWeight.w800)),
                         ),
                         IconButton(
                           onPressed: () => Navigator.pop(ctx),
-                          icon: const Icon(Icons.close_rounded, color: Colors.white70, size: 22),
+                          icon: const Icon(Icons.close_rounded, color: SoftPalette.gray50A70, size: 22),
                           padding: EdgeInsets.zero,
                         ),
                       ],
@@ -1678,11 +1684,11 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                   ),
 
                   // Actions
-                  Divider(height: 1, thickness: 1, color: isDark ? const Color(0xFF334155) : Colors.grey.shade200),
+                  Divider(height: 1, thickness: 1, color: isDark ? SoftPalette.slate700 : SoftPalette.gray100),
                   Container(
                     padding: const EdgeInsets.fromLTRB(20, 12, 20, 16),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF0F172A) : Colors.grey.shade50,
+                      color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                       borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24)),
                     ),
                     child: Row(
@@ -1692,7 +1698,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                             onPressed: () => Navigator.pop(ctx),
                             child: Text('Cancel',
                                 style: TextStyle(
-                                    color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700,
+                                    color: isDark ? SoftPalette.slate350 : SoftPalette.gray550,
                                     fontWeight: FontWeight.w600)),
                           ),
                         ),
@@ -1756,16 +1762,16 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                                     cnicController.text = newCnic;
                                   }
                                 });
-                                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                                AppToast.showSnackBar(context, const SnackBar(
                                   content: Text('✅ Patient details & CNIC updated instantly!'),
-                                  backgroundColor: Colors.green,
+                                  backgroundColor: SoftPalette.green400,
                                   duration: Duration(seconds: 3),
                                 ));
                               }
                             },
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.green.shade700,
-                              foregroundColor: Colors.white,
+                              backgroundColor: SoftPalette.green500,
+                              foregroundColor: SoftPalette.gray50,
                               padding: const EdgeInsets.symmetric(vertical: 12),
                               shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(10)),
@@ -1802,7 +1808,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
         Text(title, style: TextStyle(
           fontWeight: FontWeight.bold,
           fontSize: 14,
-          color: isDark ? const Color(0xFF5EEAD4) : Colors.green.shade800,
+          color: isDark ? SoftPalette.teal200 : SoftPalette.green550,
         )),
         const SizedBox(height: 8),
         Wrap(
@@ -1817,11 +1823,11 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                       title: Text(o, style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
-                        color: isDark ? const Color(0xFFE2E8F0) : Colors.black87,
+                        color: isDark ? SoftPalette.slate150 : SoftPalette.gray900A87,
                       )),
                       value: o,
                       groupValue: current,
-                      activeColor: isDark ? const Color(0xFF2DD4BF) : Colors.green.shade700,
+                      activeColor: isDark ? SoftPalette.teal300 : SoftPalette.green500,
                       onChanged: (v) => onChanged(v!),
                     ),
                   ))
@@ -1905,7 +1911,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
       final docId = 'req_exception_${widget.receptionistId}_${DateTime.now().millisecondsSinceEpoch}';
 
       try {
-        await FirebaseFirestore.instance
+        await CloudDb.instance
             .collection('branches')
             .doc(widget.branchId)
             .collection('edit_requests')
@@ -1968,16 +1974,16 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
       });
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+        AppToast.showSnackBar(context, const SnackBar(
           content: Text('✅ Exception request sent to Doctor!'),
-          backgroundColor: Colors.blue,
+          backgroundColor: SoftPalette.blue400,
         ));
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        AppToast.showSnackBar(context, SnackBar(
           content: Text('❌ Failed to send request: $e'),
-          backgroundColor: Colors.redAccent,
+          backgroundColor: SoftPalette.red400,
         ));
       }
     } finally {
@@ -2004,31 +2010,31 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
         buildCounter: maxLen != null ? (_, {required currentLength, required isFocused, maxLength}) => null : null,
         style: TextStyle(
           fontSize: 14,
-          color: isDark ? Colors.white : Colors.black87,
+          color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87,
           fontWeight: FontWeight.w500,
         ),
         decoration: InputDecoration(
           labelText: label,
           labelStyle: TextStyle(
-            color: isDark ? const Color(0xFF5EEAD4) : Colors.green.shade700,
+            color: isDark ? SoftPalette.teal200 : SoftPalette.green500,
             fontWeight: FontWeight.w500,
             fontSize: 12,
           ),
           isDense: true,
-          prefixIcon: Icon(icon, color: isDark ? const Color(0xFF5EEAD4) : Colors.green, size: 20),
+          prefixIcon: Icon(icon, color: isDark ? SoftPalette.teal200 : SoftPalette.green400, size: 20),
           filled: true,
           fillColor: isDark
-              ? (readOnly ? const Color(0xFF0F172A).withValues(alpha: 0.6) : const Color(0xFF0F172A))
-              : (readOnly ? Colors.grey.shade100 : Colors.white),
+              ? (readOnly ? SoftPalette.slate900.withValues(alpha: 0.6) : SoftPalette.slate900)
+              : (readOnly ? SoftPalette.gray100 : SoftPalette.gray50),
           border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300)),
+              borderSide: BorderSide(color: isDark ? SoftPalette.slate700 : SoftPalette.gray150)),
           enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300)),
+              borderSide: BorderSide(color: isDark ? SoftPalette.slate700 : SoftPalette.gray150)),
           focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: isDark ? const Color(0xFF2DD4BF) : Colors.green, width: 2)),
+              borderSide: BorderSide(color: isDark ? SoftPalette.teal300 : SoftPalette.green400, width: 2)),
           contentPadding: const EdgeInsets.symmetric(vertical: 12, horizontal: 16),
         ),
       ),
@@ -2063,14 +2069,14 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
             width: containerWidth,
             padding: EdgeInsets.all(isMobile ? 18 : 30),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1E293B) : Colors.white,
+              color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
-                  color: isDark ? const Color(0xFF334155) : Colors.green.shade200,
+                  color: isDark ? SoftPalette.slate700 : SoftPalette.green300,
                   width: 1.5),
               boxShadow: [
                 BoxShadow(
-                    color: isDark ? Colors.black26 : Colors.green.withValues(alpha: 0.07),
+                    color: isDark ? SoftPalette.gray900A26 : SoftPalette.green400.withValues(alpha: 0.07),
                     blurRadius: 20,
                     offset: const Offset(0, 6)),
               ],
@@ -2083,14 +2089,14 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                       horizontal: isMobile ? 16 : 24,
                       vertical:   isMobile ? 8  : 10),
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF0F766E).withValues(alpha: 0.2) : _teal.withValues(alpha: 0.08),
+                    color: isDark ? SoftPalette.teal550.withValues(alpha: 0.2) : _teal.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(30),
-                    border: Border.all(color: isDark ? const Color(0xFF0F766E) : _teal.withValues(alpha: 0.3)),
+                    border: Border.all(color: isDark ? SoftPalette.teal550 : _teal.withValues(alpha: 0.3)),
                   ),
                   child: Text(
                     'Next Token: ${_nextSerial ?? 'Loading...'}',
                     style: TextStyle(
-                        color: isDark ? const Color(0xFF38BDF8) : _teal, fontWeight: FontWeight.bold,
+                        color: isDark ? SoftPalette.sky350 : _teal, fontWeight: FontWeight.bold,
                         fontSize: isMobile ? 16 : 20, letterSpacing: 0.4),
                   ),
                 ),
@@ -2102,7 +2108,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                     style: TextStyle(
                         fontSize:   isMobile ? 18 : 22,
                         fontWeight: FontWeight.bold,
-                        color:      isDark ? Colors.white : Colors.green[900])),
+                        color:      isDark ? SoftPalette.gray50 : SoftPalette.green600)),
                 SizedBox(height: isMobile ? 18 : 28),
 
                 // CNIC field
@@ -2111,7 +2117,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                   focusNode:    _cnicFocusNode,
                   maxLength:    15,
                   keyboardType: TextInputType.number,
-                  cursorColor:  isDark ? const Color(0xFF38BDF8) : Colors.green[900],
+                  cursorColor:  isDark ? SoftPalette.sky350 : SoftPalette.green600,
                   onChanged: (v) {
                     final d = v.replaceAll(RegExp(r'[^0-9]'), '');
                     if (d.startsWith('03')) {
@@ -2157,23 +2163,23 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                     }
                   },
                   onSubmitted: (_) => triggerSearch(),
-                  style: TextStyle(color: isDark ? Colors.white : Colors.green[900]),
+                  style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.green600),
                   decoration: InputDecoration(
                     labelText:   'Guardian CNIC or Phone',
                     counterText: '',
-                    labelStyle:  TextStyle(color: isDark ? const Color(0xFF94A3B8) : Colors.green),
-                    prefixIcon:  Icon(Icons.badge, color: isDark ? const Color(0xFF38BDF8) : Colors.green),
+                    labelStyle:  TextStyle(color: isDark ? SoftPalette.slate350 : SoftPalette.green400),
+                    prefixIcon:  Icon(Icons.badge, color: isDark ? SoftPalette.sky350 : SoftPalette.green400),
                     suffixIcon:  IconButton(
-                        icon: Icon(Icons.search, color: isDark ? const Color(0xFF38BDF8) : Colors.green),
+                        icon: Icon(Icons.search, color: isDark ? SoftPalette.sky350 : SoftPalette.green400),
                         onPressed: triggerSearch),
-                    filled: true, fillColor: isDark ? const Color(0xFF334155) : Colors.green[50],
+                    filled: true, fillColor: isDark ? SoftPalette.slate700 : SoftPalette.green100m,
                     enabledBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
-                        borderSide: BorderSide(color: isDark ? const Color(0xFF475569) : Colors.green)),
+                        borderSide: BorderSide(color: isDark ? SoftPalette.slate600 : SoftPalette.green400)),
                     focusedBorder: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(10),
                         borderSide:
-                            BorderSide(color: isDark ? const Color(0xFF38BDF8) : Colors.green, width: 2)),
+                            BorderSide(color: isDark ? SoftPalette.sky350 : SoftPalette.green400, width: 2)),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -2183,19 +2189,19 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                     margin: const EdgeInsets.symmetric(vertical: 4),
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF451A1A) : Colors.red[50],
+                        color: isDark ? SoftPalette.red800 : SoftPalette.pink100m,
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: isDark ? Colors.red.shade800 : Colors.red.shade200)),
+                        border: Border.all(color: isDark ? SoftPalette.red550 : SoftPalette.red300)),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(children: [
                           const Icon(Icons.error_outline,
-                              color: Colors.red, size: 18),
+                              color: SoftPalette.red400, size: 18),
                           const SizedBox(width: 8),
                           Expanded(child: Text(_errorMessage!,
                               style: TextStyle(
-                                  color: isDark ? Colors.red.shade200 : Colors.red.shade900,
+                                  color: isDark ? SoftPalette.red300 : SoftPalette.red550,
                                   fontSize: 13,
                                   fontWeight: FontWeight.w600))),
                         ]),
@@ -2206,7 +2212,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                             child: ElevatedButton.icon(
                               style: ElevatedButton.styleFrom(
                                 backgroundColor: _teal,
-                                foregroundColor: Colors.white,
+                                foregroundColor: SoftPalette.gray50,
                                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                               ),
@@ -2240,14 +2246,14 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                     Color cardBg;
                     Color cardBorder;
                     if (hasBoth) {
-                      cardBg = isDark ? const Color(0xFF3B1E1E) : const Color(0xFFFEF2F2);
-                      cardBorder = isDark ? const Color(0xFF7F1D1D) : const Color(0xFFFECACA);
+                      cardBg = isDark ? SoftPalette.red800 : SoftPalette.red100t;
+                      cardBorder = isDark ? SoftPalette.red700 : SoftPalette.red200;
                     } else if (isRestricted && regularToken == null) {
-                      cardBg = isDark ? const Color(0xFF3B2A1E) : const Color(0xFFFFFBEB);
-                      cardBorder = isDark ? const Color(0xFF78350F) : const Color(0xFFFDE68A);
+                      cardBg = isDark ? SoftPalette.orange750m : SoftPalette.yellow50m;
+                      cardBorder = isDark ? SoftPalette.orange700 : SoftPalette.yellow150;
                     } else {
-                      cardBg = isDark ? const Color(0xFF1E293B) : Colors.green[50]!;
-                      cardBorder = isDark ? const Color(0xFF334155) : Colors.green.shade200;
+                      cardBg = isDark ? SoftPalette.slate800 : SoftPalette.green100m;
+                      cardBorder = isDark ? SoftPalette.slate700 : SoftPalette.green300;
                     }
 
                     return Card(
@@ -2267,7 +2273,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                               child: Text(
                                 p['name'] as String? ?? '',
                                 style: TextStyle(
-                                    color: isDark ? Colors.white : (hasBoth ? Colors.red.shade900 : Colors.green[900]),
+                                    color: isDark ? SoftPalette.gray50 : (hasBoth ? SoftPalette.red550 : SoftPalette.green600),
                                     fontWeight: FontWeight.bold,
                                     fontSize: isMobile ? 15 : 16),
                               ),
@@ -2276,7 +2282,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                 decoration: BoxDecoration(
-                                  color: Colors.red.shade600,
+                                  color: SoftPalette.red500,
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Text(
@@ -2286,7 +2292,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                                           ? '🎟️ #${regularToken['serial']}'
                                           : '🎟️ Token Issued'),
                                   style: const TextStyle(
-                                      color: Colors.white,
+                                      color: SoftPalette.gray50,
                                       fontSize: 11,
                                       fontWeight: FontWeight.bold),
                                 ),
@@ -2297,24 +2303,24 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                     decoration: BoxDecoration(
-                                      color: Colors.purple.shade700,
+                                      color: SoftPalette.purple600,
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                     child: Text(
                                       '🩺 Vitals: #${vitalsToken['serial'] ?? 'Issued'}',
-                                      style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.bold),
+                                      style: const TextStyle(color: SoftPalette.gray50, fontSize: 10.5, fontWeight: FontWeight.bold),
                                     ),
                                   ),
                                 if (regularToken != null)
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                     decoration: BoxDecoration(
-                                      color: Colors.teal.shade700,
+                                      color: SoftPalette.teal550,
                                       borderRadius: BorderRadius.circular(6),
                                     ),
                                     child: Text(
                                       '🎟️ Regular: #${regularToken['serial'] ?? 'Issued'}',
-                                      style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.bold),
+                                      style: const TextStyle(color: SoftPalette.gray50, fontSize: 10.5, fontWeight: FontWeight.bold),
                                     ),
                                   ),
                               ])
@@ -2322,13 +2328,13 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                 decoration: BoxDecoration(
-                                  color: Colors.orange.shade700,
+                                  color: SoftPalette.orange350,
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Text(
                                   '💊 ${restriction['remainingDays']}d Left',
                                   style: const TextStyle(
-                                      color: Colors.white,
+                                      color: SoftPalette.gray50,
                                       fontSize: 11,
                                       fontWeight: FontWeight.bold),
                                 ),
@@ -2337,13 +2343,13 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                 decoration: BoxDecoration(
-                                  color: Colors.green.shade600,
+                                  color: SoftPalette.green400,
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: const Text(
                                   '🟢 Available',
                                   style: TextStyle(
-                                      color: Colors.white,
+                                      color: SoftPalette.gray50,
                                       fontSize: 11,
                                       fontWeight: FontWeight.bold),
                                 ),
@@ -2357,24 +2363,24 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                             children: [
                               Text('${cnicInfo.label}: ${cnicInfo.cnic}',
                                   style: TextStyle(
-                                      color: isDark ? const Color(0xFF94A3B8) : Colors.green[800], fontSize: 12)),
+                                      color: isDark ? SoftPalette.slate350 : SoftPalette.green550, fontSize: 12)),
                               Text('Phone: ${p['phone'] ?? '-'}',
                                   style: TextStyle(
-                                      color: isDark ? const Color(0xFF94A3B8) : Colors.green[800], fontSize: 12)),
+                                      color: isDark ? SoftPalette.slate350 : SoftPalette.green550, fontSize: 12)),
                               if (vitalsToken != null && _isVitalsTokenAllowed)
                                 Padding(
                                   padding: const EdgeInsets.only(top: 2),
                                   child: Row(children: [
                                     Container(
                                       width: 8, height: 8,
-                                      decoration: BoxDecoration(color: Colors.purple.shade400, shape: BoxShape.circle),
+                                      decoration: BoxDecoration(color: SoftPalette.purple500, shape: BoxShape.circle),
                                     ),
                                     const SizedBox(width: 6),
                                     Expanded(
                                       child: Text(
                                         'Vitals Inspection: #${vitalsToken['serial'] ?? 'Issued'} (${(vitalsToken['status'] ?? 'waiting').toString().toUpperCase()})',
                                         style: TextStyle(
-                                            color: isDark ? const Color(0xFFC084FC) : Colors.purple.shade900,
+                                            color: isDark ? SoftPalette.purple350 : SoftPalette.violet700,
                                             fontSize: 11,
                                             fontWeight: FontWeight.w600),
                                       ),
@@ -2387,14 +2393,14 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                                   child: Row(children: [
                                     Container(
                                       width: 8, height: 8,
-                                      decoration: BoxDecoration(color: Colors.teal.shade400, shape: BoxShape.circle),
+                                      decoration: BoxDecoration(color: SoftPalette.teal400, shape: BoxShape.circle),
                                     ),
                                     const SizedBox(width: 6),
                                     Expanded(
                                       child: Text(
                                         'Regular Visit: #${regularToken['serial'] ?? 'Issued'} (${(regularToken['status'] ?? 'waiting').toString().toUpperCase()})',
                                         style: TextStyle(
-                                            color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade900,
+                                            color: isDark ? SoftPalette.teal300 : SoftPalette.teal700,
                                             fontSize: 11,
                                             fontWeight: FontWeight.w600),
                                       ),
@@ -2408,7 +2414,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                                     child: Text(
                                       '🩺 Vitals Inspection: 🟢 Available Today',
                                       style: TextStyle(
-                                          color: isDark ? const Color(0xFFA78BFA) : Colors.purple.shade700,
+                                          color: isDark ? SoftPalette.violet350 : SoftPalette.purple600,
                                           fontSize: 11,
                                           fontWeight: FontWeight.w600),
                                     ),
@@ -2419,7 +2425,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                                     child: Text(
                                       '🎟️ Regular Token: 🟢 Available Today',
                                       style: TextStyle(
-                                          color: isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade700,
+                                          color: isDark ? SoftPalette.teal200 : SoftPalette.teal550,
                                           fontSize: 11,
                                           fontWeight: FontWeight.w600),
                                     ),
@@ -2431,9 +2437,9 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                         trailing: ElevatedButton(
                           style: ElevatedButton.styleFrom(
                               backgroundColor: hasBoth
-                                  ? Colors.red.shade600
-                                  : (isRestricted && regularToken == null ? Colors.orange.shade600 : Colors.green[600]),
-                              foregroundColor: Colors.white,
+                                  ? SoftPalette.red500
+                                  : (isRestricted && regularToken == null ? SoftPalette.orange350 : SoftPalette.green400),
+                              foregroundColor: SoftPalette.gray50,
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 16, vertical: 10),
                               minimumSize: const Size(80, 38),
@@ -2453,18 +2459,18 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                       alignment: Alignment.centerLeft,
                       child: TextButton.icon(
                         onPressed: () => setState(() => _patientData = null),
-                        icon: Icon(Icons.close_rounded, size: 16, color: _isDark ? const Color(0xFF38BDF8) : Colors.green),
+                        icon: Icon(Icons.close_rounded, size: 16, color: _isDark ? SoftPalette.sky350 : SoftPalette.green400),
                         label: Text('Deselect Patient',
                             style: TextStyle(
-                                color: _isDark ? const Color(0xFF38BDF8) : Colors.green,
+                                color: _isDark ? SoftPalette.sky350 : SoftPalette.green400,
                                 fontWeight: FontWeight.bold,
                                 fontSize: 13)),
                         style: TextButton.styleFrom(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                          backgroundColor: _isDark ? const Color(0xFF1E293B) : Colors.green.shade50,
+                          backgroundColor: _isDark ? SoftPalette.slate800 : SoftPalette.green100m,
                           shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(8),
-                              side: BorderSide(color: _isDark ? const Color(0xFF334155) : Colors.green.shade200)),
+                              side: BorderSide(color: _isDark ? SoftPalette.slate700 : SoftPalette.green300)),
                         ),
                       ),
                     ),
@@ -2480,9 +2486,9 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                     return Container(
                       padding: EdgeInsets.all(isMobile ? 12 : 16),
                       decoration: BoxDecoration(
-                        color: _isDark ? const Color(0xFF1E293B) : Colors.green[50],
+                        color: _isDark ? SoftPalette.slate800 : SoftPalette.green100m,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: _isDark ? const Color(0xFF334155) : Colors.green.shade200),
+                        border: Border.all(color: _isDark ? SoftPalette.slate700 : SoftPalette.green300),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2494,12 +2500,12 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                                 _patientData!['name'] as String? ?? '',
                                 style: TextStyle(
                                     fontSize:   isMobile ? 17 : 20,
-                                    color:      _isDark ? Colors.white : Colors.green,
+                                    color:      _isDark ? SoftPalette.gray50 : SoftPalette.green400,
                                     fontWeight: FontWeight.bold),
                               )),
                               IconButton(
                                 icon: const Icon(Icons.history_rounded,
-                                    color: Color(0xFF0D9488), size: 24),
+                                    color: SoftPalette.teal500, size: 24),
                                 tooltip: 'Audit History',
                                 padding: EdgeInsets.zero,
                                 constraints: const BoxConstraints(),
@@ -2516,7 +2522,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                               const SizedBox(width: 12),
                               IconButton(
                                 icon: const Icon(Icons.edit,
-                                    color: Colors.orange, size: 24),
+                                    color: SoftPalette.amber300, size: 24),
                                 tooltip: 'Edit Details',
                                 padding: EdgeInsets.zero,
                                 constraints: const BoxConstraints(),
@@ -2555,15 +2561,15 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                             Container(
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
-                                  color: _isDark ? const Color(0xFF450A0A) : Colors.red[50],
+                                  color: _isDark ? SoftPalette.red800 : SoftPalette.pink100m,
                                   borderRadius: BorderRadius.circular(10),
                                   border: Border.all(
-                                      color: _isDark ? const Color(0xFFEF4444) : Colors.red.shade300)),
+                                      color: _isDark ? SoftPalette.red400 : SoftPalette.red400)),
                               child: Column(
                                 children: [
                                   Row(children: [
                                     const Icon(Icons.warning_amber_rounded,
-                                        color: Colors.red, size: 22),
+                                        color: SoftPalette.red400, size: 22),
                                     const SizedBox(width: 8),
                                     Expanded(child: Text(
                                       (regularTodayToken?['status'] == 'skipped' || vitalsTodayToken?['status'] == 'skipped')
@@ -2572,7 +2578,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                                               ? 'Both tokens (Vitals Inspection & Regular Visit) issued today'
                                               : 'Token (#${regularTodayToken?['serial'] ?? vitalsTodayToken?['serial'] ?? 'Issued'}) already issued today'),
                                       style: const TextStyle(
-                                          color:      Colors.red,
+                                          color:      SoftPalette.red400,
                                           fontWeight: FontWeight.bold,
                                           fontSize:   13),
                                     )),
@@ -2585,8 +2591,8 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                                       size: 18),
                                     label: Text(_isExceptionPending ? 'Exception Pending...' : 'Request Exception from Doctor'),
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: _isExceptionPending ? Colors.orange.shade300 : Colors.orange.shade700,
-                                      foregroundColor: Colors.white,
+                                      backgroundColor: _isExceptionPending ? SoftPalette.amber300 : SoftPalette.orange350,
+                                      foregroundColor: SoftPalette.gray50,
                                       minimumSize: const Size(double.infinity, 40),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                     ),
@@ -2599,17 +2605,17 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                             Container(
                               padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
-                                color: _isDark ? const Color(0xFF1E1B4B) : const Color(0xFFF5F3FF),
+                                color: _isDark ? SoftPalette.indigo800 : SoftPalette.violet100m,
                                 borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: _isDark ? const Color(0xFF6366F1) : const Color(0xFFC4B5FD)),
+                                border: Border.all(color: _isDark ? SoftPalette.indigo500 : SoftPalette.violet300),
                               ),
                               child: Row(children: [
-                                Icon(Icons.info_outline, color: _isDark ? const Color(0xFFA5B4FC) : Colors.purple.shade700, size: 20),
+                                Icon(Icons.info_outline, color: _isDark ? SoftPalette.indigo300 : SoftPalette.purple600, size: 20),
                                 const SizedBox(width: 8),
                                 Expanded(child: Text(
                                   '🩺 Vitals token (#${vitalsTodayToken['serial'] ?? 'Issued'}) taken. 🟢 Regular visit token still available today.',
                                   style: TextStyle(
-                                    color: _isDark ? const Color(0xFFE0E7FF) : Colors.purple.shade900,
+                                    color: _isDark ? SoftPalette.slate150 : SoftPalette.violet700,
                                     fontSize: 12,
                                     fontWeight: FontWeight.w600,
                                   ),
@@ -2621,17 +2627,17 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                             Container(
                               padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
-                                color: _isDark ? const Color(0xFF042F2E) : const Color(0xFFF0FDF4),
+                                color: _isDark ? SoftPalette.teal800 : SoftPalette.emerald50m,
                                 borderRadius: BorderRadius.circular(10),
-                                border: Border.all(color: _isDark ? const Color(0xFF14B8A6) : const Color(0xFF86EFAC)),
+                                border: Border.all(color: _isDark ? SoftPalette.teal350 : SoftPalette.emerald200),
                               ),
                               child: Row(children: [
-                                Icon(Icons.info_outline, color: _isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade700, size: 20),
+                                Icon(Icons.info_outline, color: _isDark ? SoftPalette.teal200 : SoftPalette.teal550, size: 20),
                                 const SizedBox(width: 8),
                                 Expanded(child: Text(
                                   '🎟️ Regular visit token (#${regularTodayToken['serial'] ?? 'Issued'}) taken. 🩺 Vitals inspection token still available today.',
                                   style: TextStyle(
-                                    color: _isDark ? const Color(0xFFCCFBF1) : Colors.teal.shade900,
+                                    color: _isDark ? SoftPalette.teal100 : SoftPalette.teal700,
                                     fontSize: 12,
                                     fontWeight: FontWeight.w600,
                                   ),
@@ -2644,21 +2650,21 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                             Container(
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
-                                  color: _isDark ? const Color(0xFF451A03) : Colors.orange[50],
+                                  color: _isDark ? SoftPalette.orange800 : SoftPalette.amber100m,
                                   borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(color: _isDark ? const Color(0xFFF97316) : Colors.orange.shade300)),
+                                  border: Border.all(color: _isDark ? SoftPalette.orange350 : SoftPalette.amber300)),
                               child: Column(
                                 children: [
                                   Row(children: [
                                     Icon(Icons.medication_liquid_outlined,
-                                        color: Colors.orange.shade800, size: 22),
+                                        color: SoftPalette.orange400, size: 22),
                                     const SizedBox(width: 8),
                                     Expanded(child: Text(
                                       _medicineRestriction!['isLastDay'] == true
                                         ? 'Restricted: Medicine expires TODAY (Vitals check still allowed)'
                                         : 'Restricted: Medicine expires in ${_medicineRestriction!['remainingDays']} days (Vitals check still allowed)',
                                       style: TextStyle(
-                                          color:      _isDark ? const Color(0xFFFDBA74) : Colors.orange.shade900,
+                                          color:      _isDark ? SoftPalette.amber200 : SoftPalette.orange400,
                                           fontWeight: FontWeight.bold,
                                           fontSize:   13),
                                     )),
@@ -2671,8 +2677,8 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                                       size: 18),
                                     label: Text(_isExceptionPending ? 'Exception Pending...' : 'Request Exception from Doctor'),
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: _isExceptionPending ? Colors.orange.shade300 : Colors.orange.shade700,
-                                      foregroundColor: Colors.white,
+                                      backgroundColor: _isExceptionPending ? SoftPalette.amber300 : SoftPalette.orange350,
+                                      foregroundColor: SoftPalette.gray50,
                                       minimumSize: const Size(double.infinity, 40),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                     ),
@@ -2691,19 +2697,19 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                                 gradient: cannotIssueToken
                                     ? null
                                     : const LinearGradient(
-                                        colors: [Color(0xFF00A86B), Color(0xFF00875A)],
+                                        colors: [SoftPalette.emerald400, SoftPalette.emerald550],
                                         begin: Alignment.topLeft,
                                         end: Alignment.bottomRight,
                                       ),
                                 color: cannotIssueToken
-                                    ? (_isDark ? const Color(0xFF334155) : Colors.grey[400])
+                                    ? (_isDark ? SoftPalette.slate700 : SoftPalette.gray300)
                                     : null,
                                 borderRadius: BorderRadius.circular(14),
                                 boxShadow: cannotIssueToken
                                     ? null
                                     : [
                                         BoxShadow(
-                                          color: const Color(0xFF00A86B).withValues(alpha: 0.3),
+                                          color: SoftPalette.emerald400.withValues(alpha: 0.3),
                                           blurRadius: 10,
                                           offset: const Offset(0, 3),
                                         ),
@@ -2713,7 +2719,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                                 onPressed: cannotIssueToken ? null : _showVitalsDialog,
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: Colors.transparent,
-                                  foregroundColor: Colors.white,
+                                  foregroundColor: SoftPalette.gray50,
                                   shadowColor: Colors.transparent,
                                   padding: EdgeInsets.symmetric(
                                       vertical: isMobile ? 10 : 12),
@@ -2749,7 +2755,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                 if (_isLoading)
                   const Center(
                       child: CircularProgressIndicator(
-                          color: Colors.green)),
+                          color: SoftPalette.green400)),
               ]),
             ]),
           ),
@@ -2761,10 +2767,10 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
   Widget _infoBadge(IconData icon, String text) => Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 13, color: _isDark ? const Color(0xFF38BDF8) : Colors.green[700]),
+          Icon(icon, size: 13, color: _isDark ? SoftPalette.sky350 : SoftPalette.green500),
           const SizedBox(width: 4),
           Text(text,
-              style: TextStyle(color: _isDark ? const Color(0xFFCBD5E1) : Colors.green[800], fontSize: 12)),
+              style: TextStyle(color: _isDark ? SoftPalette.slate200 : SoftPalette.green550, fontSize: 12)),
         ],
       );
 
@@ -2785,25 +2791,25 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
           {String? hint}) =>
       InputDecoration(
         labelText: label,
-        labelStyle: TextStyle(color: isDark ? const Color(0xFFA7F3D0) : const Color(0xFF064E3B)),
+        labelStyle: TextStyle(color: isDark ? SoftPalette.emerald150 : SoftPalette.emerald700),
         hintText: hint,
-        hintStyle: TextStyle(color: isDark ? const Color(0xFF475569) : const Color(0xFF94A3B8)),
+        hintStyle: TextStyle(color: isDark ? SoftPalette.slate600 : SoftPalette.slate350),
         counterText: '',
         isDense: true,
         prefixIcon: icon != null
-            ? Icon(icon, color: isDark ? const Color(0xFF34D399) : Colors.green.shade700, size: 20)
+            ? Icon(icon, color: isDark ? SoftPalette.emerald300 : SoftPalette.green500, size: 20)
             : null,
         filled: true,
-        fillColor: isDark ? const Color(0xFF02140F) : Colors.white,
+        fillColor: isDark ? SoftPalette.teal900 : SoftPalette.gray50,
         border: OutlineInputBorder(
             borderRadius: const BorderRadius.all(Radius.circular(10)),
-            borderSide: BorderSide(color: isDark ? const Color(0xFF0D382B) : Colors.grey.shade300)),
+            borderSide: BorderSide(color: isDark ? SoftPalette.emerald750 : SoftPalette.gray150)),
         enabledBorder: OutlineInputBorder(
             borderRadius: const BorderRadius.all(Radius.circular(10)),
-            borderSide: BorderSide(color: isDark ? const Color(0xFF0D382B) : Colors.grey.shade300)),
+            borderSide: BorderSide(color: isDark ? SoftPalette.emerald750 : SoftPalette.gray150)),
         focusedBorder: OutlineInputBorder(
             borderRadius: const BorderRadius.all(Radius.circular(10)),
-            borderSide: BorderSide(color: isDark ? const Color(0xFF10B981) : Colors.green.shade700, width: 2)),
+            borderSide: BorderSide(color: isDark ? SoftPalette.emerald350 : SoftPalette.green500, width: 2)),
       );
 
   void _formatTemperatureAutoDot(TextEditingController controller) {
@@ -2872,7 +2878,7 @@ class _VitalsInputDialogState extends State<_VitalsInputDialog> {
   bool isIssuingInDialog = false;
   String? _vitalsError; // shown inside the dialog (a SnackBar would appear behind it)
 
-  static const Color _teal = Color(0xFF00695C);
+  static const Color _teal = SoftPalette.teal600;
 
   @override
   void initState() {
@@ -2929,14 +2935,14 @@ class _VitalsInputDialogState extends State<_VitalsInputDialog> {
       labelText: label,
       hintText: hint,
       prefixIcon: icon != null
-          ? Icon(icon, color: isDark ? const Color(0xFF34D399) : _teal, size: 20)
+          ? Icon(icon, color: isDark ? SoftPalette.emerald300 : _teal, size: 20)
           : null,
-      labelStyle: TextStyle(color: isDark ? const Color(0xFFA7F3D0) : Colors.grey.shade700, fontSize: 13),
-      hintStyle: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey.shade400, fontSize: 12),
+      labelStyle: TextStyle(color: isDark ? SoftPalette.emerald150 : SoftPalette.gray550, fontSize: 13),
+      hintStyle: TextStyle(color: isDark ? SoftPalette.slate550 : SoftPalette.gray300, fontSize: 12),
       filled: true,
-      fillColor: isDark ? const Color(0xFF02140F) : Colors.white,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: isDark ? const Color(0xFF0D382B) : Colors.grey.shade300)),
-      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: isDark ? const Color(0xFF0D382B) : Colors.grey.shade300)),
+      fillColor: isDark ? SoftPalette.teal900 : SoftPalette.gray50,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: isDark ? SoftPalette.emerald750 : SoftPalette.gray150)),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: isDark ? SoftPalette.emerald750 : SoftPalette.gray150)),
       focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: _teal, width: 2)),
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
       isDense: true,
@@ -2995,14 +3001,14 @@ class _VitalsInputDialogState extends State<_VitalsInputDialog> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final dialogBg = isDark ? const Color(0xFF041C16) : Colors.white;
-    final titleBg = isDark ? const Color(0xFF072B21) : Colors.green.shade50;
-    final titleTextColor = isDark ? const Color(0xFF34D399) : Colors.green.shade700;
-    final sectionBg = isDark ? const Color(0xFF02140F) : Colors.grey.shade50;
-    final sectionBorder = isDark ? const Color(0xFF0D382B) : Colors.grey.shade300;
-    final textColor = isDark ? Colors.white : const Color(0xFF0F172A);
-    final labelColor = isDark ? const Color(0xFFA7F3D0) : Colors.grey.shade700;
-    final dialogBorder = isDark ? const Color(0xFF10B981) : Colors.green.shade200;
+    final dialogBg = isDark ? SoftPalette.teal900 : SoftPalette.gray50;
+    final titleBg = isDark ? SoftPalette.emerald800 : SoftPalette.green100m;
+    final titleTextColor = isDark ? SoftPalette.emerald300 : SoftPalette.green500;
+    final sectionBg = isDark ? SoftPalette.teal900 : SoftPalette.gray50;
+    final sectionBorder = isDark ? SoftPalette.emerald750 : SoftPalette.gray150;
+    final textColor = isDark ? SoftPalette.gray50 : SoftPalette.slate900;
+    final labelColor = isDark ? SoftPalette.emerald150 : SoftPalette.gray550;
+    final dialogBorder = isDark ? SoftPalette.emerald350 : SoftPalette.green300;
 
     // Placeholder values like '0' or 'null' (bad records) are not names.
     String cleanPatientName(dynamic v) {
@@ -3105,7 +3111,7 @@ class _VitalsInputDialogState extends State<_VitalsInputDialog> {
                       style: TextStyle(
                         fontSize: 24,
                         fontWeight: FontWeight.bold,
-                        color: isDark ? const Color(0xFF64748B) : Colors.grey,
+                        color: isDark ? SoftPalette.slate550 : SoftPalette.gray350,
                       ),
                     ),
                   ),
@@ -3190,10 +3196,10 @@ class _VitalsInputDialogState extends State<_VitalsInputDialog> {
                   final isSelected = suggestedDays == d;
                   final itemBg = isSelected
                       ? _teal
-                      : (isDark ? const Color(0xFF02140F) : Colors.green.shade50);
+                      : (isDark ? SoftPalette.teal900 : SoftPalette.green100m);
                   final itemBorder = isSelected
                       ? _teal
-                      : (isDark ? const Color(0xFF0D382B) : Colors.green.shade200);
+                      : (isDark ? SoftPalette.emerald750 : SoftPalette.green300);
 
                   return Expanded(
                     child: Padding(
@@ -3215,8 +3221,8 @@ class _VitalsInputDialogState extends State<_VitalsInputDialog> {
                               '$d Day${d > 1 ? 's' : ''}',
                               style: TextStyle(
                                 color: isSelected
-                                    ? Colors.white
-                                    : (isDark ? const Color(0xFF34D399) : _teal),
+                                    ? SoftPalette.gray50
+                                    : (isDark ? SoftPalette.emerald300 : _teal),
                                 fontWeight: FontWeight.bold,
                                 fontSize: 13,
                               ),
@@ -3251,19 +3257,19 @@ class _VitalsInputDialogState extends State<_VitalsInputDialog> {
                 margin: const EdgeInsets.only(bottom: 12),
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF450A0A) : const Color(0xFFFEF2F2),
+                  color: isDark ? SoftPalette.red800 : SoftPalette.red100t,
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: isDark ? const Color(0xFF991B1B) : const Color(0xFFFECACA)),
+                  border: Border.all(color: isDark ? SoftPalette.red600 : SoftPalette.red200),
                 ),
                 child: Row(children: [
-                  Icon(Icons.error_outline_rounded, size: 18, color: isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C)),
+                  Icon(Icons.error_outline_rounded, size: 18, color: isDark ? SoftPalette.red300 : SoftPalette.red550),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(_vitalsError!,
                         style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
-                            color: isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C))),
+                            color: isDark ? SoftPalette.red300 : SoftPalette.red550)),
                   ),
                 ]),
               ),
@@ -3282,7 +3288,7 @@ class _VitalsInputDialogState extends State<_VitalsInputDialog> {
                 ),
                 child: Text('Cancel',
                     style: TextStyle(
-                        color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
+                        color: isDark ? SoftPalette.slate350 : SoftPalette.gray500,
                         fontWeight: FontWeight.w500)),
               ),
               if (widget.allowVitalsToken) ...[
@@ -3295,8 +3301,8 @@ class _VitalsInputDialogState extends State<_VitalsInputDialog> {
                     style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: widget.hasVitalsToday ? Colors.grey : Colors.purple.shade700,
-                    foregroundColor: Colors.white,
+                    backgroundColor: widget.hasVitalsToday ? SoftPalette.gray350 : SoftPalette.purple600,
+                    foregroundColor: SoftPalette.gray50,
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8)),
@@ -3315,8 +3321,8 @@ class _VitalsInputDialogState extends State<_VitalsInputDialog> {
                   style: const TextStyle(fontWeight: FontWeight.w600),
                 ),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: widget.hasRegularToday ? Colors.grey : Colors.green.shade600,
-                  foregroundColor: Colors.white,
+                  backgroundColor: widget.hasRegularToday ? SoftPalette.gray350 : SoftPalette.green400,
+                  foregroundColor: SoftPalette.gray50,
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8)),

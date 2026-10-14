@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -43,9 +45,9 @@ class _DasterkhwaanFoodLogScreenState extends State<DasterkhwaanFoodLogScreen> {
 
   bool get _isDark => Theme.of(context).brightness == Brightness.dark;
 
-  Color get _primaryColor => const Color(0xFF0D9488); // Teal
-  Color get _cookedColor => const Color(0xFFE8572A); // Orange / Cooking
-  Color get _outsideColor => const Color(0xFF6366F1); // Indigo / Hotel Delivery
+  Color get _primaryColor => SoftPalette.teal500; // Teal
+  Color get _cookedColor => SoftPalette.red400; // Orange / Cooking
+  Color get _outsideColor => SoftPalette.indigo500; // Indigo / Hotel Delivery
 
   @override
   Widget build(BuildContext context) {
@@ -53,9 +55,9 @@ class _DasterkhwaanFoodLogScreenState extends State<DasterkhwaanFoodLogScreen> {
     final dateKey = _dateFmt.format(_selectedDate);
 
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+      backgroundColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
       appBar: AppBar(
-        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         elevation: 0,
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -65,14 +67,14 @@ class _DasterkhwaanFoodLogScreenState extends State<DasterkhwaanFoodLogScreen> {
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w800,
-                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
               ),
             ),
             Text(
               'Branch: ${widget.branchId.toUpperCase()} • ${_displayDateFmt.format(_selectedDate)}',
               style: TextStyle(
                 fontSize: 12,
-                color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
               ),
             ),
           ],
@@ -80,7 +82,7 @@ class _DasterkhwaanFoodLogScreenState extends State<DasterkhwaanFoodLogScreen> {
         actions: [
           IconButton(
             tooltip: 'Select Date',
-            icon: Icon(Icons.calendar_month_rounded, color: isDark ? Colors.white70 : const Color(0xFF334155)),
+            icon: Icon(Icons.calendar_month_rounded, color: isDark ? SoftPalette.gray50A70 : SoftPalette.slate700),
             onPressed: _pickDate,
           ),
           const SizedBox(width: 8),
@@ -88,7 +90,7 @@ class _DasterkhwaanFoodLogScreenState extends State<DasterkhwaanFoodLogScreen> {
       ),
       floatingActionButton: FloatingActionButton.extended(
         backgroundColor: _cookedColor,
-        foregroundColor: Colors.white,
+        foregroundColor: SoftPalette.gray50,
         icon: const Icon(Icons.add_rounded),
         label: const Text('Add Food Entry', style: TextStyle(fontWeight: FontWeight.bold)),
         onPressed: () => _openAddFoodLogSheet(context),
@@ -98,7 +100,7 @@ class _DasterkhwaanFoodLogScreenState extends State<DasterkhwaanFoodLogScreen> {
           _buildFilterBar(isDark),
           Expanded(
             child: !Hive.isBoxOpen(LocalStorageService.dasterkhwaanFoodLogsBox)
-                ? const Center(child: CircularProgressIndicator(color: Color(0xFF0D9488)))
+                ? const Center(child: CircularProgressIndicator(color: SoftPalette.teal500))
                 : ValueListenableBuilder<Box>(
                     valueListenable: Hive.box(LocalStorageService.dasterkhwaanFoodLogsBox).listenable(),
                     builder: (context, box, _) {
@@ -150,8 +152,8 @@ class _DasterkhwaanFoodLogScreenState extends State<DasterkhwaanFoodLogScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
-        border: Border(bottom: BorderSide(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0))),
+        color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+        border: Border(bottom: BorderSide(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150)),
       ),
       child: Row(
         children: [
@@ -178,7 +180,7 @@ class _DasterkhwaanFoodLogScreenState extends State<DasterkhwaanFoodLogScreen> {
           color: selected ? color.withValues(alpha: isDark ? 0.25 : 0.12) : Colors.transparent,
           borderRadius: BorderRadius.circular(20),
           border: Border.all(
-            color: selected ? color : (isDark ? const Color(0xFF475569) : const Color(0xFFCBD5E1)),
+            color: selected ? color : (isDark ? SoftPalette.slate600 : SoftPalette.slate200),
             width: selected ? 1.5 : 1,
           ),
         ),
@@ -187,7 +189,7 @@ class _DasterkhwaanFoodLogScreenState extends State<DasterkhwaanFoodLogScreen> {
           style: TextStyle(
             fontSize: 12,
             fontWeight: selected ? FontWeight.w800 : FontWeight.w500,
-            color: selected ? (isDark ? Colors.white : color) : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+            color: selected ? (isDark ? SoftPalette.gray50 : color) : (isDark ? SoftPalette.slate350 : SoftPalette.slate550),
           ),
         ),
       ),
@@ -204,10 +206,10 @@ class _DasterkhwaanFoodLogScreenState extends State<DasterkhwaanFoodLogScreen> {
             Container(
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                color: isDark ? SoftPalette.slate800 : SoftPalette.slate100,
                 shape: BoxShape.circle,
               ),
-              child: Icon(Icons.restaurant_menu_rounded, size: 48, color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8)),
+              child: Icon(Icons.restaurant_menu_rounded, size: 48, color: isDark ? SoftPalette.slate550 : SoftPalette.slate350),
             ),
             const SizedBox(height: 16),
             Text(
@@ -215,14 +217,14 @@ class _DasterkhwaanFoodLogScreenState extends State<DasterkhwaanFoodLogScreen> {
               style: TextStyle(
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
-                color: isDark ? Colors.white : const Color(0xFF1E293B),
+                color: isDark ? SoftPalette.gray50 : SoftPalette.slate800,
               ),
             ),
             const SizedBox(height: 6),
             Text(
               'Tap "Add Food Entry" below to record cooked or hotel food.',
               textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 13, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+              style: TextStyle(fontSize: 13, color: isDark ? SoftPalette.slate350 : SoftPalette.slate550),
             ),
           ],
         ),
@@ -251,12 +253,12 @@ class _DasterkhwaanFoodLogScreenState extends State<DasterkhwaanFoodLogScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+        border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
+            color: SoftPalette.gray900.withValues(alpha: isDark ? 0.2 : 0.04),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -293,7 +295,7 @@ class _DasterkhwaanFoodLogScreenState extends State<DasterkhwaanFoodLogScreen> {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                    color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                     borderRadius: BorderRadius.circular(6),
                     border: Border.all(color: themeColor.withValues(alpha: 0.3)),
                   ),
@@ -306,7 +308,7 @@ class _DasterkhwaanFoodLogScreenState extends State<DasterkhwaanFoodLogScreen> {
                   const SizedBox(width: 8),
                   Text(
                     timeStr,
-                    style: TextStyle(fontSize: 11, color: isDark ? Colors.white60 : const Color(0xFF64748B)),
+                    style: TextStyle(fontSize: 11, color: isDark ? SoftPalette.gray50A60 : SoftPalette.slate550),
                   ),
                 ],
               ],
@@ -331,20 +333,20 @@ class _DasterkhwaanFoodLogScreenState extends State<DasterkhwaanFoodLogScreen> {
                             style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w800,
-                              color: isDark ? Colors.white : const Color(0xFF0F172A),
+                              color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                             ),
                           ),
                           const SizedBox(height: 4),
                           Row(
                             children: [
-                              Icon(Icons.person_outline_rounded, size: 14, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                              Icon(Icons.person_outline_rounded, size: 14, color: isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                               const SizedBox(width: 4),
                               Text(
                                 sourceDetail,
                                 style: TextStyle(
                                   fontSize: 12.5,
                                   fontWeight: FontWeight.w600,
-                                  color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+                                  color: isDark ? SoftPalette.slate200 : SoftPalette.slate600,
                                 ),
                               ),
                             ],
@@ -355,12 +357,12 @@ class _DasterkhwaanFoodLogScreenState extends State<DasterkhwaanFoodLogScreen> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                        color: isDark ? SoftPalette.slate900 : SoftPalette.slate100,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Column(
                         children: [
-                          Text('PORTIONS', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8))),
+                          Text('PORTIONS', style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.slate550 : SoftPalette.slate350)),
                           Text(quantity, style: TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: themeColor)),
                         ],
                       ),
@@ -374,18 +376,18 @@ class _DasterkhwaanFoodLogScreenState extends State<DasterkhwaanFoodLogScreen> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF10B981).withValues(alpha: isDark ? 0.15 : 0.08),
+                      color: SoftPalette.emerald350.withValues(alpha: isDark ? 0.15 : 0.08),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+                      border: Border.all(color: SoftPalette.emerald350.withValues(alpha: 0.3)),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.payments_outlined, size: 14, color: Color(0xFF10B981)),
+                        const Icon(Icons.payments_outlined, size: 14, color: SoftPalette.emerald350),
                         const SizedBox(width: 6),
                         Text(
                           'Purchased Cost: PKR ${item['cost']}',
-                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF10B981)),
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: SoftPalette.emerald350),
                         ),
                       ],
                     ),
@@ -399,7 +401,7 @@ class _DasterkhwaanFoodLogScreenState extends State<DasterkhwaanFoodLogScreen> {
                     style: TextStyle(
                       fontSize: 12,
                       fontStyle: FontStyle.italic,
-                      color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                      color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
                     ),
                   ),
                 ],
@@ -489,11 +491,11 @@ class _AddFoodLogSheetState extends State<_AddFoodLogSheet> {
     final dish = _dishCtrl.text.trim();
     final qty = _qtyCtrl.text.trim();
     if (dish.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter food / dish name')));
+      AppToast.showSnackBar(context, const SnackBar(content: Text('Please enter food / dish name')));
       return;
     }
     if (qty.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter portions / quantity')));
+      AppToast.showSnackBar(context, const SnackBar(content: Text('Please enter portions / quantity')));
       return;
     }
 
@@ -564,16 +566,16 @@ class _AddFoodLogSheetState extends State<_AddFoodLogSheet> {
 
       if (mounted) {
         Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           const SnackBar(
             content: Text('✅ Food entry logged successfully!'),
-            backgroundColor: Color(0xFF10B981),
+            backgroundColor: SoftPalette.emerald350,
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error saving log: $e'), backgroundColor: Colors.red));
+        AppToast.showSnackBar(context, SnackBar(content: Text('Error saving log: $e'), backgroundColor: SoftPalette.red400));
       }
     } finally {
       if (mounted) setState(() => _isSaving = false);
@@ -583,8 +585,8 @@ class _AddFoodLogSheetState extends State<_AddFoodLogSheet> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bg = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final textPrimary = isDark ? Colors.white : const Color(0xFF0F172A);
+    final bg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.slate900;
 
     return Container(
       decoration: BoxDecoration(
@@ -607,7 +609,7 @@ class _AddFoodLogSheetState extends State<_AddFoodLogSheet> {
                 width: 44,
                 height: 4,
                 decoration: BoxDecoration(
-                  color: isDark ? Colors.white24 : Colors.grey.shade300,
+                  color: isDark ? SoftPalette.gray50A24 : SoftPalette.gray150,
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
@@ -615,23 +617,23 @@ class _AddFoodLogSheetState extends State<_AddFoodLogSheet> {
             const SizedBox(height: 16),
             Text('Log Dasterkhwaan Food', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: textPrimary)),
             const SizedBox(height: 4),
-            Text('Record food prepared by cook or received from outside restaurant.', style: TextStyle(fontSize: 12, color: isDark ? Colors.white60 : Colors.grey.shade600)),
+            Text('Record food prepared by cook or received from outside restaurant.', style: TextStyle(fontSize: 12, color: isDark ? SoftPalette.gray50A60 : SoftPalette.gray500)),
             const SizedBox(height: 16),
 
             // Source Selector Tabs
             Container(
               padding: const EdgeInsets.all(4),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                color: isDark ? SoftPalette.slate900 : SoftPalette.slate100,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
                 children: [
                   Expanded(
-                    child: _sourceTab(0, '🔥 Cooked In-House', const Color(0xFFE8572A), isDark),
+                    child: _sourceTab(0, '🔥 Cooked In-House', SoftPalette.red400, isDark),
                   ),
                   Expanded(
-                    child: _sourceTab(1, '🏨 Hotel / Outside', const Color(0xFF6366F1), isDark),
+                    child: _sourceTab(1, '🏨 Hotel / Outside', SoftPalette.indigo500, isDark),
                   ),
                 ],
               ),
@@ -724,13 +726,13 @@ class _AddFoodLogSheetState extends State<_AddFoodLogSheet> {
               height: 48,
               child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: _sourceType == 0 ? const Color(0xFFE8572A) : const Color(0xFF6366F1),
-                  foregroundColor: Colors.white,
+                  backgroundColor: _sourceType == 0 ? SoftPalette.red400 : SoftPalette.indigo500,
+                  foregroundColor: SoftPalette.gray50,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
                 onPressed: _isSaving ? null : _saveEntry,
                 child: _isSaving
-                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                    ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: SoftPalette.gray50, strokeWidth: 2))
                     : const Text('Save Food Log', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
               ),
             ),
@@ -757,7 +759,7 @@ class _AddFoodLogSheetState extends State<_AddFoodLogSheet> {
             style: TextStyle(
               fontSize: 13,
               fontWeight: active ? FontWeight.w800 : FontWeight.w600,
-              color: active ? Colors.white : (isDark ? Colors.white60 : Colors.grey.shade700),
+              color: active ? SoftPalette.gray50 : (isDark ? SoftPalette.gray50A60 : SoftPalette.gray550),
             ),
           ),
         ),
@@ -768,13 +770,13 @@ class _AddFoodLogSheetState extends State<_AddFoodLogSheet> {
   InputDecoration _inputDeco(String label, IconData icon, bool isDark) {
     return InputDecoration(
       labelText: label,
-      labelStyle: TextStyle(fontSize: 13, color: isDark ? Colors.white60 : Colors.grey.shade600),
-      prefixIcon: Icon(icon, size: 18, color: isDark ? Colors.white60 : Colors.grey.shade600),
+      labelStyle: TextStyle(fontSize: 13, color: isDark ? SoftPalette.gray50A60 : SoftPalette.gray500),
+      prefixIcon: Icon(icon, size: 18, color: isDark ? SoftPalette.gray50A60 : SoftPalette.gray500),
       filled: true,
-      fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0))),
-      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0))),
-      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: Color(0xFF0D9488), width: 1.8)),
+      fillColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150)),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150)),
+      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: const BorderSide(color: SoftPalette.teal500, width: 1.8)),
       contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
     );
   }

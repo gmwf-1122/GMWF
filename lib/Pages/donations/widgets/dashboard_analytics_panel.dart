@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:fl_chart/fl_chart.dart';
@@ -218,11 +219,11 @@ class _AnalyticsInsightsDialogState extends State<AnalyticsInsightsDialog> {
         width: 1100,
         constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.94),
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+          color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
           borderRadius: BorderRadius.circular(28),
-          border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+          border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
           boxShadow: [
-            BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.4 : 0.2), blurRadius: 40, offset: const Offset(0, 20)),
+            BoxShadow(color: SoftPalette.gray900.withValues(alpha: isDark ? 0.4 : 0.2), blurRadius: 40, offset: const Offset(0, 20)),
           ],
         ),
         child: Column(
@@ -256,7 +257,7 @@ class _AnalyticsInsightsDialogState extends State<AnalyticsInsightsDialog> {
                             value: 'PKR ${NumberFormat('#,###').format(totalAmt)}',
                             subValue: 'Cash: PKR ${NumberFormat('#,###').format(totalCash)} | Goods: PKR ${NumberFormat('#,###').format(totalGoods)}',
                             icon: Icons.payments_rounded,
-                            color: const Color(0xFF0F172A),
+                            color: SoftPalette.slate900,
                             isPrimary: true,
                           ),
                           const SizedBox(height: 12),
@@ -266,14 +267,14 @@ class _AnalyticsInsightsDialogState extends State<AnalyticsInsightsDialog> {
                                 label: 'TOTAL RECEIPTS',
                                 value: totalCount.toString(),
                                 icon: Icons.receipt_long_rounded,
-                                color: const Color(0xFF6366F1),
+                                color: SoftPalette.indigo500,
                               ),
                               const SizedBox(width: 12),
                               _KPICard(
                                 label: 'AVERAGE VALUE',
                                 value: 'PKR ${NumberFormat('#,###').format(avgDonation)}',
                                 icon: Icons.analytics_rounded,
-                                color: const Color(0xFF0D9488),
+                                color: SoftPalette.teal500,
                               ),
                             ],
                           ),
@@ -287,7 +288,7 @@ class _AnalyticsInsightsDialogState extends State<AnalyticsInsightsDialog> {
                             value: 'PKR ${NumberFormat('#,###').format(totalAmt)}',
                             subValue: 'Cash: PKR ${NumberFormat('#,###').format(totalCash)} | Goods: PKR ${NumberFormat('#,###').format(totalGoods)}',
                             icon: Icons.payments_rounded,
-                            color: const Color(0xFF0F172A),
+                            color: SoftPalette.slate900,
                             isPrimary: true,
                           ),
                           const SizedBox(width: 24),
@@ -295,14 +296,14 @@ class _AnalyticsInsightsDialogState extends State<AnalyticsInsightsDialog> {
                             label: 'TOTAL RECEIPTS',
                             value: totalCount.toString(),
                             icon: Icons.receipt_long_rounded,
-                            color: const Color(0xFF6366F1),
+                            color: SoftPalette.indigo500,
                           ),
                           const SizedBox(width: 24),
                           _KPICard(
                             label: 'AVERAGE VALUE',
                             value: 'PKR ${NumberFormat('#,###').format(avgDonation)}',
                             icon: Icons.analytics_rounded,
-                            color: const Color(0xFF0D9488),
+                            color: SoftPalette.teal500,
                           ),
                         ],
                       ),
@@ -353,14 +354,14 @@ class _AnalyticsInsightsDialogState extends State<AnalyticsInsightsDialog> {
                                       decoration: BoxDecoration(
                                         color: isActive ? AppColors.primary : Colors.transparent,
                                         borderRadius: BorderRadius.circular(6),
-                                        border: Border.all(color: isActive ? AppColors.primary : (isDark ? const Color(0xFF475569) : AppColors.gray200)),
+                                        border: Border.all(color: isActive ? AppColors.primary : (isDark ? SoftPalette.slate600 : AppColors.gray200)),
                                       ),
                                       child: Text(
                                         p.name.toUpperCase(),
                                         style: TextStyle(
                                           fontSize: 9,
                                           fontWeight: FontWeight.w800,
-                                          color: isActive ? Colors.white : (isDark ? const Color(0xFF94A3B8) : AppColors.gray500),
+                                          color: isActive ? SoftPalette.gray50 : (isDark ? SoftPalette.slate350 : AppColors.gray500),
                                         ),
                                       ),
                                     ),
@@ -457,14 +458,14 @@ class _AnalyticsInsightsDialogState extends State<AnalyticsInsightsDialog> {
                                           decoration: BoxDecoration(
                                             color: isActive ? AppColors.primary : Colors.transparent,
                                             borderRadius: BorderRadius.circular(6),
-                                            border: Border.all(color: isActive ? AppColors.primary : AppColors.gray200),
+                                            border: Border.all(color: isActive ? AppColors.primary : context.adapt(AppColors.gray200)),
                                           ),
                                           child: Text(
                                             p.name.toUpperCase(),
                                             style: TextStyle(
                                               fontSize: 9,
                                               fontWeight: FontWeight.w800,
-                                              color: isActive ? Colors.white : AppColors.gray500,
+                                              color: isActive ? SoftPalette.gray50 : context.adapt(AppColors.gray500),
                                             ),
                                           ),
                                         ),
@@ -547,9 +548,9 @@ class _DialogHeader extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.fromLTRB(28, 24, 20, 20),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-        border: Border(bottom: BorderSide(color: isDark ? const Color(0xFF334155) : AppColors.gray100, width: 1.5)),
+        border: Border(bottom: BorderSide(color: isDark ? SoftPalette.slate700 : AppColors.gray100, width: 1.5)),
       ),
       child: Row(
         children: [
@@ -571,16 +572,16 @@ class _DialogHeader extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 22,
                     fontWeight: FontWeight.w900,
-                    color: isDark ? Colors.white : AppColors.gray900,
+                    color: isDark ? SoftPalette.gray50 : AppColors.gray900,
                     letterSpacing: -0.5,
                   ),
                 ),
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    Container(width: 8, height: 8, decoration: const BoxDecoration(color: Color(0xFF10B981), shape: BoxShape.circle)),
+                    Container(width: 8, height: 8, decoration: const BoxDecoration(color: SoftPalette.emerald350, shape: BoxShape.circle)),
                     const SizedBox(width: 8),
-                    Text(branchName.toUpperCase(), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: isDark ? const Color(0xFF94A3B8) : AppColors.gray500, letterSpacing: 1)),
+                    Text(branchName.toUpperCase(), style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: isDark ? SoftPalette.slate350 : AppColors.gray500, letterSpacing: 1)),
                   ],
                 ),
               ],
@@ -588,7 +589,7 @@ class _DialogHeader extends StatelessWidget {
           ),
           IconButton(
             onPressed: () => Navigator.pop(context),
-            icon: Icon(Icons.close_rounded, color: isDark ? Colors.white70 : AppColors.gray400, size: 26),
+            icon: Icon(Icons.close_rounded, color: isDark ? SoftPalette.gray50A70 : AppColors.gray400, size: 26),
           ),
         ],
       ),
@@ -621,19 +622,19 @@ class _KPICard extends StatelessWidget {
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: isPrimary
-            ? (isDark ? const Color(0xFF1E1B4B) : color)
-            : (isDark ? const Color(0xFF1E293B) : Colors.white),
+            ? (isDark ? SoftPalette.indigo800 : color)
+            : (isDark ? SoftPalette.slate800 : SoftPalette.gray50),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
           color: isPrimary
-              ? (isDark ? const Color(0xFF6366F1) : color)
-              : (isDark ? const Color(0xFF334155) : AppColors.gray200.withValues(alpha: 0.6)),
+              ? (isDark ? SoftPalette.indigo500 : color)
+              : (isDark ? SoftPalette.slate700 : AppColors.gray200.withValues(alpha: 0.6)),
         ),
         boxShadow: [
           BoxShadow(
             color: isPrimary
                 ? color.withValues(alpha: 0.3)
-                : Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
+                : SoftPalette.gray900.withValues(alpha: isDark ? 0.2 : 0.04),
             blurRadius: 16,
             offset: const Offset(0, 6),
           ),
@@ -644,10 +645,10 @@ class _KPICard extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: isPrimary ? Colors.white.withValues(alpha: 0.15) : color.withValues(alpha: 0.12),
+              color: isPrimary ? SoftPalette.gray50.withValues(alpha: 0.15) : color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(14),
             ),
-            child: Icon(icon, color: isPrimary ? Colors.white : color, size: 22),
+            child: Icon(icon, color: isPrimary ? SoftPalette.gray50 : color, size: 22),
           ),
           const SizedBox(width: 16),
           Expanded(
@@ -660,8 +661,8 @@ class _KPICard extends StatelessWidget {
                     fontSize: 10,
                     fontWeight: FontWeight.w800,
                     color: isPrimary
-                        ? Colors.white.withValues(alpha: 0.8)
-                        : (isDark ? const Color(0xFF94A3B8) : AppColors.gray500),
+                        ? SoftPalette.gray50.withValues(alpha: 0.8)
+                        : (isDark ? SoftPalette.slate350 : AppColors.gray500),
                     letterSpacing: 1,
                   ),
                 ),
@@ -674,8 +675,8 @@ class _KPICard extends StatelessWidget {
                       fontSize: 20,
                       fontWeight: FontWeight.w900,
                       color: isPrimary
-                          ? Colors.white
-                          : (isDark ? Colors.white : AppColors.gray900),
+                          ? SoftPalette.gray50
+                          : (isDark ? SoftPalette.gray50 : AppColors.gray900),
                       letterSpacing: -0.5,
                     ),
                   ),
@@ -688,8 +689,8 @@ class _KPICard extends StatelessWidget {
                       fontSize: 10,
                       fontWeight: FontWeight.w600,
                       color: isPrimary
-                          ? Colors.white.withValues(alpha: 0.7)
-                          : (isDark ? const Color(0xFF94A3B8) : AppColors.gray500),
+                          ? SoftPalette.gray50.withValues(alpha: 0.7)
+                          : (isDark ? SoftPalette.slate350 : AppColors.gray500),
                     ),
                   ),
                 ],
@@ -716,9 +717,9 @@ class _ChartSection extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: isDark ? const Color(0xFF334155) : AppColors.gray200.withValues(alpha: 0.6)),
+        border: Border.all(color: isDark ? SoftPalette.slate700 : AppColors.gray200.withValues(alpha: 0.6)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -735,7 +736,7 @@ class _ChartSection extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 16,
                         fontWeight: FontWeight.w800,
-                        color: isDark ? Colors.white : AppColors.gray900,
+                        color: isDark ? SoftPalette.gray50 : AppColors.gray900,
                       ),
                     ),
                     const SizedBox(height: 4),
@@ -743,7 +744,7 @@ class _ChartSection extends StatelessWidget {
                       subtitle,
                       style: TextStyle(
                         fontSize: 12,
-                        color: isDark ? const Color(0xFF94A3B8) : AppColors.gray500,
+                        color: isDark ? SoftPalette.slate350 : AppColors.gray500,
                       ),
                     ),
                   ],
@@ -782,7 +783,7 @@ class _CombinedDonutChart extends StatelessWidget {
         value: entry.value,
         title: '${percent.toStringAsFixed(0)}%',
         radius: 60,
-        titleStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
+        titleStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: SoftPalette.gray50),
       ));
     }
 
@@ -797,7 +798,7 @@ class _CombinedDonutChart extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // Major Categories
-            const Text('MAJOR CATEGORIES', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: AppColors.gray400, letterSpacing: 1)),
+            Text('MAJOR CATEGORIES', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: context.adapt(AppColors.gray400), letterSpacing: 1)),
             const SizedBox(height: 12),
             ...catTotals.entries.map((e) {
               final cat = DonationCategory.values.firstWhere((c) => c.name == e.key, orElse: () => DonationCategory.all);
@@ -805,8 +806,8 @@ class _CombinedDonutChart extends StatelessWidget {
             }),
             
             if (subCatTotals.isNotEmpty) ...[
-              const Divider(height: 32, color: AppColors.gray100),
-              const Text('DETAILED PROGRAM BREAKDOWN', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: AppColors.gray400, letterSpacing: 1)),
+              Divider(height: 32, color: context.adapt(AppColors.gray100)),
+              Text('DETAILED PROGRAM BREAKDOWN', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: context.adapt(AppColors.gray400), letterSpacing: 1)),
               const SizedBox(height: 12),
               ...subCatTotals.entries.map((e) {
                 final String label;
@@ -826,8 +827,8 @@ class _CombinedDonutChart extends StatelessWidget {
             ],
 
             if (natureTotals.isNotEmpty) ...[
-              const Divider(height: 32, color: AppColors.gray100),
-              const Text('NATURE OF CONTRIBUTIONS', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: AppColors.gray400, letterSpacing: 1)),
+              Divider(height: 32, color: context.adapt(AppColors.gray100)),
+              Text('NATURE OF CONTRIBUTIONS', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: context.adapt(AppColors.gray400), letterSpacing: 1)),
               const SizedBox(height: 12),
               ...(natureTotals.entries.toList()..sort((a, b) => b.value.compareTo(a.value))).map((e) {
                 final sub = DonationSubtype.values.firstWhere((s) => s.name == e.key, orElse: () => DonationSubtype.general);
@@ -857,8 +858,8 @@ class _LegendRow extends StatelessWidget {
         children: [
           Container(width: isSmall ? 8 : 12, height: isSmall ? 8 : 12, decoration: BoxDecoration(color: color, shape: BoxShape.circle)),
           const SizedBox(width: 12),
-          Expanded(child: Text(label, style: TextStyle(fontSize: isSmall ? 11 : 13, fontWeight: isSmall ? FontWeight.w500 : FontWeight.w700, color: AppColors.gray700))),
-          Text('PKR ${NumberFormat('#,###').format(amount)}', style: GoogleFonts.dmMono(fontSize: isSmall ? 11 : 12, fontWeight: FontWeight.w700, color: AppColors.gray900)),
+          Expanded(child: Text(label, style: TextStyle(fontSize: isSmall ? 11 : 13, fontWeight: isSmall ? FontWeight.w500 : FontWeight.w700, color: context.adapt(AppColors.gray700)))),
+          Text('PKR ${NumberFormat('#,###').format(amount)}', style: GoogleFonts.dmMono(fontSize: isSmall ? 11 : 12, fontWeight: FontWeight.w700, color: context.adapt(AppColors.gray900))),
         ],
       ),
     );
@@ -885,7 +886,7 @@ class _BranchPerformanceList extends StatelessWidget {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text(e.key, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: AppColors.gray800)),
+                  Text(e.key, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: context.adapt(AppColors.gray800))),
                   Text('PKR ${NumberFormat('#,###').format(e.value)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: AppColors.primary)),
                 ],
               ),
@@ -895,7 +896,7 @@ class _BranchPerformanceList extends StatelessWidget {
                 child: LinearProgressIndicator(
                   value: percent,
                   minHeight: 8,
-                  backgroundColor: const Color(0xFFF1F5F9),
+                  backgroundColor: context.adapt(SoftPalette.slate100),
                   valueColor: AlwaysStoppedAnimation<Color>(AppColors.primary.withValues(alpha: 0.8)),
                 ),
               ),
@@ -950,12 +951,12 @@ class _TrendLineChart extends StatelessWidget {
               }
             },
             touchTooltipData: LineTouchTooltipData(
-              getTooltipColor: (spot) => const Color(0xFF1E293B),
+              getTooltipColor: (spot) => SoftPalette.slate800,
               getTooltipItems: (List<LineBarSpot> touchedSpots) {
                 return touchedSpots.map((spot) {
                   return LineTooltipItem(
                     'PKR ${NumberFormat('#,###').format(spot.y)}',
-                    const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                    const TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 12),
                   );
                 }).toList();
               },
@@ -971,7 +972,7 @@ class _TrendLineChart extends StatelessWidget {
                 reservedSize: 40,
                 getTitlesWidget: (val, meta) => Text(
                   val >= 1000 ? '${(val / 1000).toStringAsFixed(0)}K' : val.toStringAsFixed(0),
-                  style: const TextStyle(color: AppColors.gray400, fontSize: 10, fontWeight: FontWeight.w600),
+                  style: TextStyle(color: context.adapt(AppColors.gray400), fontSize: 10, fontWeight: FontWeight.w600),
                 ),
               ),
             ),
@@ -1011,7 +1012,7 @@ class _TrendLineChart extends StatelessWidget {
                     child: Text(
                       label,
                       style: TextStyle(
-                        color: isSelected ? AppColors.primary : AppColors.gray400,
+                        color: isSelected ? AppColors.primary : context.adapt(AppColors.gray400),
                         fontSize: isSelected ? 11 : 10,
                         fontWeight: isSelected ? FontWeight.w900 : FontWeight.w600,
                       ),
@@ -1035,9 +1036,9 @@ class _TrendLineChart extends StatelessWidget {
                   final isSelected = selIdx == index;
                   return FlDotCirclePainter(
                     radius: isSelected ? 7 : 4,
-                    color: isSelected ? AppColors.primary : Colors.white,
+                    color: isSelected ? AppColors.primary : context.adapt(SoftPalette.gray50),
                     strokeWidth: isSelected ? 3 : 2,
-                    strokeColor: isSelected ? const Color(0xFF0F172A) : AppColors.primary,
+                    strokeColor: isSelected ? context.adapt(SoftPalette.slate900) : AppColors.primary,
                   );
                 },
               ),
@@ -1123,7 +1124,7 @@ class _TrendSelectionSummary extends StatelessWidget {
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [const Color(0xFF0F172A), const Color(0xFF1E293B)],
+          colors: [SoftPalette.slate900, SoftPalette.slate800],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -1150,12 +1151,12 @@ class _TrendSelectionSummary extends StatelessWidget {
                   children: [
                     Text(
                       _periodLabel,
-                      style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w800),
+                      style: const TextStyle(color: SoftPalette.gray50, fontSize: 14, fontWeight: FontWeight.w800),
                     ),
                     const SizedBox(height: 2),
                     Text(
                       'PKR ${NumberFormat('#,###').format(selectedTotal)}',
-                      style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 11, fontWeight: FontWeight.w600),
+                      style: TextStyle(color: SoftPalette.gray50.withValues(alpha: 0.7), fontSize: 11, fontWeight: FontWeight.w600),
                     ),
                   ],
                 ),
@@ -1165,7 +1166,7 @@ class _TrendSelectionSummary extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: isUp ? const Color(0xFF10B981).withValues(alpha: 0.2) : const Color(0xFFEF4444).withValues(alpha: 0.2),
+                    color: isUp ? SoftPalette.emerald350.withValues(alpha: 0.2) : SoftPalette.red400.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Row(
@@ -1173,14 +1174,14 @@ class _TrendSelectionSummary extends StatelessWidget {
                     children: [
                       Icon(
                         isUp ? Icons.trending_up_rounded : Icons.trending_down_rounded,
-                        color: isUp ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                        color: isUp ? SoftPalette.emerald350 : SoftPalette.red400,
                         size: 14,
                       ),
                       const SizedBox(width: 6),
                       Text(
                         '${isUp ? '+' : ''}${diffPercent.toStringAsFixed(1)}%',
                         style: TextStyle(
-                          color: isUp ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                          color: isUp ? SoftPalette.emerald350 : SoftPalette.red400,
                           fontSize: 12,
                           fontWeight: FontWeight.w800,
                         ),
@@ -1197,14 +1198,14 @@ class _TrendSelectionSummary extends StatelessWidget {
             const SizedBox(height: 12),
             Text(
               '${isUp ? '+' : ''}PKR ${NumberFormat('#,###').format(diff)} vs previous',
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 10, fontWeight: FontWeight.w600),
+              style: TextStyle(color: SoftPalette.gray50.withValues(alpha: 0.5), fontSize: 10, fontWeight: FontWeight.w600),
             ),
           ],
 
           // Category breakdown
           if (sortedCats.isNotEmpty) ...[
             const SizedBox(height: 16),
-            const Text('CATEGORY BREAKDOWN', style: TextStyle(color: Colors.white54, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1)),
+            const Text('CATEGORY BREAKDOWN', style: TextStyle(color: SoftPalette.gray50A54, fontSize: 9, fontWeight: FontWeight.w900, letterSpacing: 1)),
             const SizedBox(height: 10),
             ...sortedCats.map((e) {
               final cat = DonationCategory.values.firstWhere((c) => c.name == e.key, orElse: () => DonationCategory.all);
@@ -1216,11 +1217,11 @@ class _TrendSelectionSummary extends StatelessWidget {
                     Container(width: 10, height: 10, decoration: BoxDecoration(color: cat.color, shape: BoxShape.circle)),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: Text(cat.label, style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 12, fontWeight: FontWeight.w600)),
+                      child: Text(cat.label, style: TextStyle(color: SoftPalette.gray50.withValues(alpha: 0.9), fontSize: 12, fontWeight: FontWeight.w600)),
                     ),
                     Text(
                       'PKR ${NumberFormat('#,###').format(e.value)}',
-                      style: GoogleFonts.dmMono(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700),
+                      style: GoogleFonts.dmMono(color: SoftPalette.gray50, fontSize: 11, fontWeight: FontWeight.w700),
                     ),
                     const SizedBox(width: 8),
                     SizedBox(
@@ -1228,7 +1229,7 @@ class _TrendSelectionSummary extends StatelessWidget {
                       child: Text(
                         '${percent.toStringAsFixed(0)}%',
                         textAlign: TextAlign.right,
-                        style: TextStyle(color: Colors.white.withValues(alpha: 0.5), fontSize: 10, fontWeight: FontWeight.w700),
+                        style: TextStyle(color: SoftPalette.gray50.withValues(alpha: 0.5), fontSize: 10, fontWeight: FontWeight.w700),
                       ),
                     ),
                   ],
@@ -1245,14 +1246,14 @@ class _TrendSelectionSummary extends StatelessWidget {
               child: LinearProgressIndicator(
                 value: selectedTotal / allTotal,
                 minHeight: 4,
-                backgroundColor: Colors.white.withValues(alpha: 0.1),
+                backgroundColor: SoftPalette.gray50.withValues(alpha: 0.1),
                 valueColor: const AlwaysStoppedAnimation<Color>(AppColors.primary),
               ),
             ),
             const SizedBox(height: 6),
             Text(
               '${(selectedTotal / allTotal * 100).toStringAsFixed(1)}% of total period contributions',
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.4), fontSize: 9, fontWeight: FontWeight.w600),
+              style: TextStyle(color: SoftPalette.gray50.withValues(alpha: 0.4), fontSize: 9, fontWeight: FontWeight.w600),
             ),
           ],
         ],
@@ -1339,13 +1340,13 @@ class _InsightsPanel extends StatelessWidget {
       padding: const EdgeInsets.all(28),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFF1E293B), Color(0xFF0F172A)],
+          colors: [SoftPalette.slate800, SoftPalette.slate900],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(28),
         boxShadow: [
-          BoxShadow(color: const Color(0xFF0F172A).withValues(alpha: 0.3), blurRadius: 20, offset: const Offset(0, 10)),
+          BoxShadow(color: SoftPalette.slate900.withValues(alpha: 0.3), blurRadius: 20, offset: const Offset(0, 10)),
         ],
       ),
       child: Column(
@@ -1355,24 +1356,24 @@ class _InsightsPanel extends StatelessWidget {
             children: [
               Container(
                 padding: const EdgeInsets.all(8),
-                decoration: BoxDecoration(color: Colors.amber.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(10)),
-                child: const Icon(Icons.auto_awesome_rounded, color: Colors.amber, size: 20),
+                decoration: BoxDecoration(color: SoftPalette.amber200.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(10)),
+                child: const Icon(Icons.auto_awesome_rounded, color: SoftPalette.amber200, size: 20),
               ),
               const SizedBox(width: 16),
-              const Text('Smart Insights', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: -0.2)),
+              const Text('Smart Insights', style: TextStyle(color: SoftPalette.gray50, fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: -0.2)),
             ],
           ),
           const SizedBox(height: 24),
-          _InsightItem(icon: Icons.trending_up_rounded, text: 'The highest contribution comes from $topCatName.', color: Colors.blueAccent),
-          _InsightItem(icon: Icons.lightbulb_outline_rounded, text: 'Average contribution per receipt is PKR ${NumberFormat('#,###').format(avgDonation)}.', color: Colors.amberAccent),
-          _InsightItem(icon: Icons.verified_user_rounded, text: 'Total consolidated revenue reached PKR ${NumberFormat('#,###').format(totalAmt)}.', color: const Color(0xFF34D399)),
+          _InsightItem(icon: Icons.trending_up_rounded, text: 'The highest contribution comes from $topCatName.', color: SoftPalette.blue400),
+          _InsightItem(icon: Icons.lightbulb_outline_rounded, text: 'Average contribution per receipt is PKR ${NumberFormat('#,###').format(avgDonation)}.', color: SoftPalette.yellow200),
+          _InsightItem(icon: Icons.verified_user_rounded, text: 'Total consolidated revenue reached PKR ${NumberFormat('#,###').format(totalAmt)}.', color: SoftPalette.emerald300),
           _InsightItem(
             icon: Icons.payments_rounded,
             text: 'Consolidated breakdown: PKR ${NumberFormat('#,###').format(totalCash)} in cash contributions and PKR ${NumberFormat('#,###').format(totalGoods)} in goods/ajnas estimated value.',
-            color: Colors.lightGreenAccent,
+            color: SoftPalette.lime150,
           ),
-          _InsightItem(icon: Icons.history_rounded, text: historyText, color: Colors.cyanAccent),
-          _InsightItem(icon: Icons.online_prediction_rounded, text: forecastText, color: Colors.purpleAccent),
+          _InsightItem(icon: Icons.history_rounded, text: historyText, color: SoftPalette.teal150),
+          _InsightItem(icon: Icons.online_prediction_rounded, text: forecastText, color: SoftPalette.purple400),
         ],
       ),
     );
@@ -1395,7 +1396,7 @@ class _InsightItem extends StatelessWidget {
           Icon(icon, color: color, size: 20),
           const SizedBox(width: 16),
           Expanded(
-            child: Text(text, style: TextStyle(color: Colors.white.withValues(alpha: 0.9), fontSize: 14, fontWeight: FontWeight.w500, height: 1.4)),
+            child: Text(text, style: TextStyle(color: SoftPalette.gray50.withValues(alpha: 0.9), fontSize: 14, fontWeight: FontWeight.w500, height: 1.4)),
           ),
         ],
       ),
@@ -1449,8 +1450,8 @@ class _SubCategoryBarChart extends StatelessWidget {
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.gray700)),
-                        Text('PKR ${NumberFormat('#,###').format(e.value)}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: AppColors.gray900)),
+                        Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: context.adapt(AppColors.gray700))),
+                        Text('PKR ${NumberFormat('#,###').format(e.value)}', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.adapt(AppColors.gray900))),
                       ],
                     ),
                     const SizedBox(height: 4),
@@ -1459,7 +1460,7 @@ class _SubCategoryBarChart extends StatelessWidget {
                       child: LinearProgressIndicator(
                         value: percent,
                         minHeight: 4,
-                        backgroundColor: const Color(0xFFF1F5F9),
+                        backgroundColor: context.adapt(SoftPalette.slate100),
                         valueColor: AlwaysStoppedAnimation<Color>(color.withValues(alpha: 0.7)),
                       ),
                     ),
@@ -1491,8 +1492,8 @@ class _NatureBreakdownChart extends StatelessWidget {
             children: [
               Container(width: 8, height: 8, decoration: BoxDecoration(color: sub.color, shape: BoxShape.circle)),
               const SizedBox(width: 10),
-              Expanded(child: Text(sub.label, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: AppColors.gray600))),
-              Text('PKR ${NumberFormat('#,###').format(e.value)}', style: GoogleFonts.dmMono(fontSize: 12, fontWeight: FontWeight.w700, color: AppColors.gray900)),
+              Expanded(child: Text(sub.label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500, color: context.adapt(AppColors.gray600)))),
+              Text('PKR ${NumberFormat('#,###').format(e.value)}', style: GoogleFonts.dmMono(fontSize: 12, fontWeight: FontWeight.w700, color: context.adapt(AppColors.gray900))),
             ],
           ),
         );
@@ -1528,10 +1529,10 @@ class _DonorRankingList extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(data.name.isEmpty ? 'Walk-in Donor' : data.name.toUpperCase(), 
-                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: AppColors.gray900),
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: context.adapt(AppColors.gray900)),
                         overflow: TextOverflow.ellipsis),
                     Text('${data.count} donations · Joined ${DateFormat('MMM yyyy').format(data.firstSeen)}', 
-                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: AppColors.gray400)),
+                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.w600, color: context.adapt(AppColors.gray400))),
                   ],
                 ),
               ),
@@ -1539,10 +1540,10 @@ class _DonorRankingList extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
                   Text('PKR ${NumberFormat('#,###').format(data.total)}', 
-                      style: GoogleFonts.dmMono(fontSize: 13, fontWeight: FontWeight.w900, color: AppColors.gray900)),
+                      style: GoogleFonts.dmMono(fontSize: 13, fontWeight: FontWeight.w900, color: context.adapt(AppColors.gray900))),
                   Text(
                     'Cash: PKR ${NumberFormat('#,###').format(data.cashTotal)} · Goods: PKR ${NumberFormat('#,###').format(data.goodsTotal)}',
-                    style: const TextStyle(fontSize: 8, fontWeight: FontWeight.w600, color: AppColors.gray500),
+                    style: TextStyle(fontSize: 8, fontWeight: FontWeight.w600, color: context.adapt(AppColors.gray500)),
                   ),
                 ],
               ),
@@ -1570,14 +1571,14 @@ class _FilterTab extends StatelessWidget {
         decoration: BoxDecoration(
           color: isActive ? AppColors.primary : Colors.transparent,
           borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: isActive ? AppColors.primary : AppColors.gray200),
+          border: Border.all(color: isActive ? AppColors.primary : context.adapt(AppColors.gray200)),
         ),
         child: Text(
           label,
           style: TextStyle(
             fontSize: 9,
             fontWeight: FontWeight.w800,
-            color: isActive ? Colors.white : AppColors.gray500,
+            color: isActive ? SoftPalette.gray50 : context.adapt(AppColors.gray500),
           ),
         ),
       ),

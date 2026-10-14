@@ -1,5 +1,9 @@
 // lib/pages/access_revoked_screen.dart
+import 'package:gmwf/services/cloud/cloud_db.dart';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/components/decorative_image.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -40,7 +44,13 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
     _pulseCtrl = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1800),
-    )..repeat(reverse: true);
+    );
+    // Eye comfort: no endless pulse.
+    if (GDecor.reduceMotion) {
+      _pulseCtrl.value = 1.0;
+    } else {
+      _pulseCtrl.repeat(reverse: true);
+    }
     _pulseAnim = Tween<double>(begin: 0.85, end: 1.0).animate(
       CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
     );
@@ -325,23 +335,23 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E293B),
+        backgroundColor: SoftPalette.slate800,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(
           children: [
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: const Color(0xFF38BDF8).withValues(alpha: 0.15),
+                color: SoftPalette.sky350.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.mark_email_unread_rounded, color: Color(0xFF38BDF8), size: 22),
+              child: const Icon(Icons.mark_email_unread_rounded, color: SoftPalette.sky350, size: 22),
             ),
             const SizedBox(width: 12),
             const Expanded(
               child: Text(
                 'Request Access Back',
-                style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                style: TextStyle(color: SoftPalette.gray50, fontSize: 17, fontWeight: FontWeight.bold),
               ),
             ),
           ],
@@ -352,31 +362,31 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
           children: [
             const Text(
               'Your request will be submitted to the HQ Manager. Your account will only be restored once the HQ Manager approves and clicks "Allow".',
-              style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13, height: 1.5),
+              style: TextStyle(color: SoftPalette.slate350, fontSize: 13, height: 1.5),
             ),
             const SizedBox(height: 16),
             const Text(
               'Reason / Note for HQ Manager (Optional)',
-              style: TextStyle(color: Color(0xFFE2E8F0), fontSize: 12, fontWeight: FontWeight.w600),
+              style: TextStyle(color: SoftPalette.slate150, fontSize: 12, fontWeight: FontWeight.w600),
             ),
             const SizedBox(height: 6),
             TextField(
               controller: reasonCtrl,
               maxLines: 2,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
+              style: const TextStyle(color: SoftPalette.gray50, fontSize: 13),
               decoration: InputDecoration(
                 hintText: 'e.g. My account was revoked by mistake during shift...',
-                hintStyle: const TextStyle(color: Color(0xFF64748B), fontSize: 12),
+                hintStyle: const TextStyle(color: SoftPalette.slate550, fontSize: 12),
                 filled: true,
-                fillColor: const Color(0xFF0F172A),
+                fillColor: SoftPalette.slate900,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: Color(0xFF334155)),
+                  borderSide: const BorderSide(color: SoftPalette.slate700),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(10),
-                  borderSide: const BorderSide(color: Color(0xFF334155)),
+                  borderSide: const BorderSide(color: SoftPalette.slate700),
                 ),
               ),
             ),
@@ -385,15 +395,15 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel', style: TextStyle(color: Color(0xFF64748B))),
+            child: const Text('Cancel', style: TextStyle(color: SoftPalette.slate550)),
           ),
           ElevatedButton.icon(
             onPressed: () => Navigator.pop(ctx, true),
             icon: const Icon(Icons.send_rounded, size: 16),
             label: const Text('Submit Request'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF0284C7),
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.sky500,
+              foregroundColor: SoftPalette.gray50,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             ),
@@ -506,7 +516,7 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
 
         if (branch.isNotEmpty && branch != 'all' && branch != 'global') {
           try {
-            await FirebaseFirestore.instance
+            await CloudDb.instance
                 .collection('branches')
                 .doc(branch)
                 .collection('users')
@@ -522,7 +532,7 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
 
         if (branch.isNotEmpty && branch != 'all' && branch != 'global') {
           try {
-            await FirebaseFirestore.instance
+            await CloudDb.instance
                 .collection('branches')
                 .doc(branch)
                 .collection('notifications')
@@ -659,10 +669,10 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
 
   void _showSnack(String msg, {bool success = false}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
+    AppToast.showSnackBar(context, 
       SnackBar(
         content: Text(msg),
-        backgroundColor: success ? const Color(0xFF22C55E) : const Color(0xFFEF4444),
+        backgroundColor: success ? SoftPalette.green350 : SoftPalette.red400,
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         margin: const EdgeInsets.all(16),
@@ -683,7 +693,7 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
     final status = isDeleted ? 'DELETED' : (isCorrupted ? 'PROFILE MISSING' : rawStatus.toUpperCase());
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F172A),
+      backgroundColor: SoftPalette.slate900,
       body: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
@@ -691,12 +701,12 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
             constraints: const BoxConstraints(maxWidth: 480),
             padding: const EdgeInsets.all(32),
             decoration: BoxDecoration(
-              color: const Color(0xFF1E293B),
+              color: SoftPalette.slate800,
               borderRadius: BorderRadius.circular(28),
-              border: Border.all(color: const Color(0xFF334155)),
+              border: Border.all(color: SoftPalette.slate700),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.4),
+                  color: SoftPalette.gray900.withValues(alpha: 0.4),
                   blurRadius: 32,
                   offset: const Offset(0, 12),
                 ),
@@ -716,17 +726,17 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
                     width: 90,
                     height: 90,
                     decoration: BoxDecoration(
-                      color: const Color(0xFFEF4444).withValues(alpha: 0.12),
+                      color: SoftPalette.red400.withValues(alpha: 0.12),
                       shape: BoxShape.circle,
                       border: Border.all(
-                          color: const Color(0xFFEF4444).withValues(alpha: 0.3),
+                          color: SoftPalette.red400.withValues(alpha: 0.3),
                           width: 2),
                     ),
                     child: Icon(
                       isCorrupted
                           ? Icons.warning_amber_rounded
                           : (isDeleted ? Icons.delete_forever_rounded : Icons.no_accounts_rounded),
-                      color: const Color(0xFFEF4444),
+                      color: SoftPalette.red400,
                       size: 46,
                     ),
                   ),
@@ -742,7 +752,7 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
                   style: const TextStyle(
                     fontSize: 26,
                     fontWeight: FontWeight.bold,
-                    color: Colors.white,
+                    color: SoftPalette.gray50,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -753,11 +763,11 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
                       const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                   decoration: BoxDecoration(
                     color: isCorrupted || isDeleted
-                        ? const Color(0xFFEF4444).withValues(alpha: 0.15)
-                        : const Color(0xFF334155),
+                        ? SoftPalette.red400.withValues(alpha: 0.15)
+                        : SoftPalette.slate700,
                     borderRadius: BorderRadius.circular(10),
                     border: isCorrupted || isDeleted
-                        ? Border.all(color: const Color(0xFFEF4444).withValues(alpha: 0.3))
+                        ? Border.all(color: SoftPalette.red400.withValues(alpha: 0.3))
                         : null,
                   ),
                   child: Text(
@@ -768,7 +778,7 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
                             : 'Thank you for your services'),
                     textAlign: TextAlign.center,
                     style: TextStyle(
-                      color: isCorrupted || isDeleted ? const Color(0xFFFCA5A5) : Colors.grey.shade300,
+                      color: isCorrupted || isDeleted ? SoftPalette.red300 : SoftPalette.gray150,
                       fontSize: 13,
                       fontWeight: FontWeight.w600,
                       fontStyle: (isCorrupted || isDeleted) ? FontStyle.normal : FontStyle.italic,
@@ -783,9 +793,9 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
                     width: double.infinity,
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFF59E0B).withValues(alpha: 0.12),
+                      color: SoftPalette.amber300.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.35)),
+                      border: Border.all(color: SoftPalette.amber300.withValues(alpha: 0.35)),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
@@ -795,17 +805,17 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
                             Container(
                               padding: const EdgeInsets.all(8),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFF59E0B).withValues(alpha: 0.2),
+                                color: SoftPalette.amber300.withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(10),
                               ),
-                              child: const Icon(Icons.hourglass_top_rounded, color: Color(0xFFF59E0B), size: 20),
+                              child: const Icon(Icons.hourglass_top_rounded, color: SoftPalette.amber300, size: 20),
                             ),
                             const SizedBox(width: 12),
                             const Expanded(
                               child: Text(
                                 'Restore Request Pending Approval',
                                 style: TextStyle(
-                                  color: Color(0xFFFBBF24),
+                                  color: SoftPalette.amber200,
                                   fontSize: 14,
                                   fontWeight: FontWeight.bold,
                                 ),
@@ -817,7 +827,7 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
                         const Text(
                           'Your restoration request has been forwarded to the HQ Manager. Your account will automatically be restored once the HQ Manager reviews and clicks "Allow".',
                           style: TextStyle(
-                            color: Color(0xFFCBD5E1),
+                            color: SoftPalette.slate200,
                             fontSize: 12.5,
                             height: 1.4,
                           ),
@@ -826,14 +836,14 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
                           const SizedBox(height: 8),
                           Text(
                             'Submitted: ${DateFormat('dd MMM yyyy, hh:mm a').format(DateTime.tryParse(_requestedAt!)?.toLocal() ?? DateTime.now())}',
-                            style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11),
+                            style: const TextStyle(color: SoftPalette.slate350, fontSize: 11),
                           ),
                         ],
                         if (_requestReason != null && _requestReason!.isNotEmpty) ...[
                           const SizedBox(height: 4),
                           Text(
                             'Reason: "$_requestReason"',
-                            style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 11, fontStyle: FontStyle.italic),
+                            style: const TextStyle(color: SoftPalette.slate350, fontSize: 11, fontStyle: FontStyle.italic),
                           ),
                         ],
                       ],
@@ -843,14 +853,14 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0F172A),
+                      color: SoftPalette.slate900,
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: const Color(0xFF334155)),
+                      border: Border.all(color: SoftPalette.slate700),
                     ),
                     child: Row(
                       children: [
                         const Icon(Icons.info_outline_rounded,
-                            color: Color(0xFFEF4444), size: 22),
+                            color: SoftPalette.red400, size: 22),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
@@ -860,7 +870,7 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
                                     ? 'This account was deleted by an administrator. You can no longer access this application with these credentials. Please contact your system administrator.'
                                     : 'Your app access has been revoked. If you believe this is a mistake, request the HQ Manager to restore your account.'),
                             style: const TextStyle(
-                              color: Color(0xFF94A3B8),
+                              color: SoftPalette.slate350,
                               fontSize: 13,
                               height: 1.4,
                             ),
@@ -877,23 +887,23 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
                   width: double.infinity,
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF0F172A).withValues(alpha: 0.5),
+                    color: SoftPalette.slate900.withValues(alpha: 0.5),
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: const Color(0xFF334155)),
+                    border: Border.all(color: SoftPalette.slate700),
                   ),
                   child: Column(
                     children: [
                       _buildDetailRow('Account Name', name),
                       if (email.isNotEmpty) ...[
-                        const Divider(color: Color(0xFF334155), height: 16),
+                        const Divider(color: SoftPalette.slate700, height: 16),
                         _buildDetailRow('Email / Username', email),
                       ],
-                      const Divider(color: Color(0xFF334155), height: 16),
+                      const Divider(color: SoftPalette.slate700, height: 16),
                       _buildDetailRow('Branch', branch.toString()),
-                      const Divider(color: Color(0xFF334155), height: 16),
+                      const Divider(color: SoftPalette.slate700, height: 16),
                       _buildDetailRow('Account Status', status, isBadge: true),
                       if (_restoreRequestPending) ...[
-                        const Divider(color: Color(0xFF334155), height: 16),
+                        const Divider(color: SoftPalette.slate700, height: 16),
                         _buildDetailRow('Restore Request', 'PENDING HQ APPROVAL', isWarningBadge: true),
                       ],
                     ],
@@ -915,7 +925,7 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
                                 height: 18,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2,
-                                  color: Colors.white,
+                                  color: SoftPalette.gray50,
                                 ),
                               )
                             : const Icon(Icons.refresh_rounded, size: 20),
@@ -926,8 +936,8 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
                           style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
                         ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF0284C7),
-                          foregroundColor: Colors.white,
+                          backgroundColor: SoftPalette.sky500,
+                          foregroundColor: SoftPalette.gray50,
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14),
@@ -946,7 +956,7 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
                               ? const SizedBox(
                                   width: 18,
                                   height: 18,
-                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50),
                                 )
                               : const Icon(Icons.auto_fix_high_rounded, size: 20),
                           label: Text(
@@ -954,8 +964,8 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
                             style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
                           ),
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF10B981),
-                            foregroundColor: Colors.white,
+                            backgroundColor: SoftPalette.emerald350,
+                            foregroundColor: SoftPalette.gray50,
                             padding: const EdgeInsets.symmetric(vertical: 16),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                             elevation: 0,
@@ -975,7 +985,7 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
                                 height: 18,
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2,
-                                  color: Colors.white,
+                                  color: SoftPalette.gray50,
                                 ),
                               )
                             : const Icon(Icons.mark_email_unread_rounded, size: 20),
@@ -988,9 +998,9 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
                           style: const TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
                         ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: isCorrupted ? const Color(0xFF334155) : const Color(0xFF22C55E),
-                          foregroundColor: Colors.white,
-                          disabledBackgroundColor: const Color(0xFF22C55E).withValues(alpha: 0.5),
+                          backgroundColor: isCorrupted ? SoftPalette.slate700 : SoftPalette.green350,
+                          foregroundColor: SoftPalette.gray50,
+                          disabledBackgroundColor: SoftPalette.green350.withValues(alpha: 0.5),
                           padding: const EdgeInsets.symmetric(vertical: 16),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(14),
@@ -1006,22 +1016,22 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
                     width: double.infinity,
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF22C55E).withValues(alpha: 0.12),
+                      color: SoftPalette.green350.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
                           color:
-                              const Color(0xFF22C55E).withValues(alpha: 0.3)),
+                              SoftPalette.green350.withValues(alpha: 0.3)),
                     ),
                     child: const Row(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Icon(Icons.check_circle_rounded,
-                            color: Color(0xFF22C55E), size: 22),
+                            color: SoftPalette.green350, size: 22),
                         SizedBox(width: 10),
                         Text(
                           'Access Approved! Restarting...',
                           style: TextStyle(
-                            color: Color(0xFF22C55E),
+                            color: SoftPalette.green350,
                             fontSize: 14,
                             fontWeight: FontWeight.bold,
                           ),
@@ -1043,8 +1053,8 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
                           fontSize: 15, fontWeight: FontWeight.bold),
                     ),
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFFEF4444),
-                      side: const BorderSide(color: Color(0xFFEF4444)),
+                      foregroundColor: SoftPalette.red400,
+                      side: const BorderSide(color: SoftPalette.red400),
                       padding: const EdgeInsets.symmetric(vertical: 16),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
@@ -1067,7 +1077,7 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
         Text(
           label,
           style: const TextStyle(
-              color: Color(0xFF64748B),
+              color: SoftPalette.slate550,
               fontSize: 12,
               fontWeight: FontWeight.w500),
         ),
@@ -1075,15 +1085,15 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: const Color(0xFFF59E0B).withValues(alpha: 0.2),
+              color: SoftPalette.amber300.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(6),
               border: Border.all(
-                  color: const Color(0xFFF59E0B).withValues(alpha: 0.5)),
+                  color: SoftPalette.amber300.withValues(alpha: 0.5)),
             ),
             child: Text(
               value,
               style: const TextStyle(
-                  color: Color(0xFFFCD34D),
+                  color: SoftPalette.yellow200,
                   fontSize: 11,
                   fontWeight: FontWeight.bold),
             ),
@@ -1092,15 +1102,15 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
             decoration: BoxDecoration(
-              color: const Color(0xFFEF4444).withValues(alpha: 0.2),
+              color: SoftPalette.red400.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(6),
               border: Border.all(
-                  color: const Color(0xFFEF4444).withValues(alpha: 0.4)),
+                  color: SoftPalette.red400.withValues(alpha: 0.4)),
             ),
             child: Text(
               value,
               style: const TextStyle(
-                  color: Color(0xFFFCA5A5),
+                  color: SoftPalette.red300,
                   fontSize: 11,
                   fontWeight: FontWeight.bold),
             ),
@@ -1110,7 +1120,7 @@ class _AccessRevokedScreenState extends State<AccessRevokedScreen>
             child: Text(
               value,
               style: const TextStyle(
-                  color: Colors.white,
+                  color: SoftPalette.gray50,
                   fontSize: 13,
                   fontWeight: FontWeight.w600),
               textAlign: TextAlign.right,

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:google_fonts/google_fonts.dart';
+import '../design/components/app_toast.dart';
 
 /// Standardized, premium UI/UX feedback system used across all departments and modules
 /// (Dispensary, Madrassa, Dasterkhwaan, School, Office, Donations).
@@ -23,10 +25,10 @@ class AppFeedback {
       context,
       message: message,
       subtitle: subtitle ?? 'Saved locally • Syncing to cloud',
-      backgroundColor: const Color(0xFF065F46), // Deep emerald
-      borderColor: const Color(0xFF10B981),
+      backgroundColor: SoftPalette.emerald600, // Deep emerald
+      borderColor: SoftPalette.emerald350,
       icon: Icons.check_circle_rounded,
-      iconColor: const Color(0xFF34D399),
+      iconColor: SoftPalette.emerald300,
       duration: duration,
       onAction: onAction,
       actionLabel: actionLabel,
@@ -47,10 +49,10 @@ class AppFeedback {
       context,
       message: message,
       subtitle: subtitle,
-      backgroundColor: const Color(0xFF78350F), // Warm amber-brown
-      borderColor: const Color(0xFFF59E0B),
+      backgroundColor: SoftPalette.orange700, // Warm amber-brown
+      borderColor: SoftPalette.amber300,
       icon: Icons.warning_amber_rounded,
-      iconColor: const Color(0xFFFBBF24),
+      iconColor: SoftPalette.amber200,
       duration: duration,
       onAction: onAction,
       actionLabel: actionLabel,
@@ -71,10 +73,10 @@ class AppFeedback {
       context,
       message: message,
       subtitle: subtitle,
-      backgroundColor: const Color(0xFF7F1D1D), // Deep crimson
-      borderColor: const Color(0xFFEF4444),
+      backgroundColor: SoftPalette.red700, // Deep crimson
+      borderColor: SoftPalette.red400,
       icon: Icons.error_outline_rounded,
-      iconColor: const Color(0xFFF87171),
+      iconColor: SoftPalette.red350,
       duration: duration,
       onAction: onAction,
       actionLabel: actionLabel,
@@ -95,10 +97,10 @@ class AppFeedback {
       context,
       message: message,
       subtitle: subtitle,
-      backgroundColor: const Color(0xFF1E293B), // Slate / Navy
-      borderColor: const Color(0xFF38BDF8),
+      backgroundColor: SoftPalette.slate800, // Slate / Navy
+      borderColor: SoftPalette.sky350,
       icon: Icons.info_outline_rounded,
-      iconColor: const Color(0xFF38BDF8),
+      iconColor: SoftPalette.sky350,
       duration: duration,
       onAction: onAction,
       actionLabel: actionLabel,
@@ -117,88 +119,17 @@ class AppFeedback {
     VoidCallback? onAction,
     String? actionLabel,
   }) {
-    final messenger = ScaffoldMessenger.maybeOf(context);
-    if (messenger == null) return;
-
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(
-      SnackBar(
-        elevation: 6,
-        behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-        backgroundColor: backgroundColor,
-        duration: duration,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(14),
-          side: BorderSide(color: borderColor.withValues(alpha: 0.35), width: 1),
-        ),
-        content: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: iconColor.withValues(alpha: 0.18),
-                shape: BoxShape.circle,
-              ),
-              child: Icon(icon, color: iconColor, size: 20),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    message,
-                    style: GoogleFonts.dmSans(
-                      color: Colors.white,
-                      fontSize: 13.5,
-                      fontWeight: FontWeight.w600,
-                      letterSpacing: -0.1,
-                    ),
-                  ),
-                  if (subtitle != null && subtitle.trim().isNotEmpty) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      subtitle,
-                      style: GoogleFonts.dmSans(
-                        color: Colors.white70,
-                        fontSize: 11.5,
-                        fontWeight: FontWeight.w400,
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-            if (onAction != null && actionLabel != null) ...[
-              const SizedBox(width: 8),
-              TextButton(
-                onPressed: () {
-                  messenger.hideCurrentSnackBar();
-                  onAction();
-                },
-                style: TextButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  minimumSize: Size.zero,
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                  backgroundColor: Colors.white.withValues(alpha: 0.12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-                child: Text(
-                  actionLabel,
-                  style: GoogleFonts.dmSans(
-                    color: Colors.white,
-                    fontSize: 11.5,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
+    // Rendered by the app-wide toast system (bottom-right / top on phones, ✕, max 3).
+    final hasDetail = subtitle != null && subtitle.trim().isNotEmpty;
+    AppToast.show(
+      title: hasDetail ? message : null,
+      message: hasDetail ? subtitle : message,
+      icon: icon,
+      background: backgroundColor,
+      accent: iconColor,
+      duration: duration,
+      actionLabel: actionLabel,
+      onAction: onAction,
     );
   }
 }
@@ -232,8 +163,8 @@ class AppFeedbackNoticeCard extends StatelessWidget {
         title: title,
         subtitle: subtitle,
         icon: Icons.warning_amber_rounded,
-        color: const Color(0xFFD97706),
-        backgroundColor: const Color(0xFFFEF3C7),
+        color: SoftPalette.orange400,
+        backgroundColor: SoftPalette.yellow100,
         trailing: trailing,
       );
 
@@ -246,8 +177,8 @@ class AppFeedbackNoticeCard extends StatelessWidget {
         title: title,
         subtitle: subtitle,
         icon: Icons.info_outline_rounded,
-        color: const Color(0xFF0284C7),
-        backgroundColor: const Color(0xFFE0F2FE),
+        color: SoftPalette.sky500,
+        backgroundColor: SoftPalette.slate100,
         trailing: trailing,
       );
 
@@ -260,14 +191,14 @@ class AppFeedbackNoticeCard extends StatelessWidget {
         title: title,
         subtitle: subtitle,
         icon: Icons.check_circle_outline_rounded,
-        color: const Color(0xFF059669),
-        backgroundColor: const Color(0xFFD1FAE5),
+        color: SoftPalette.emerald500,
+        backgroundColor: SoftPalette.emerald100,
         trailing: trailing,
       );
 
   @override
   Widget build(BuildContext context) {
-    final effectiveColor = color ?? const Color(0xFF4F46E5);
+    final effectiveColor = color ?? SoftPalette.indigo550;
     final effectiveBg = backgroundColor ?? effectiveColor.withValues(alpha: 0.08);
 
     return Container(

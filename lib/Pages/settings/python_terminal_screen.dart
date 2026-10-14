@@ -1,7 +1,9 @@
 // lib/pages/settings/python_terminal_screen.dart - Terminal runner screen
 
 import 'dart:async';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../services/python_runner_service.dart';
@@ -34,15 +36,15 @@ class PythonTerminalScreen extends StatelessWidget {
         }
       },
       child: Scaffold(
-        backgroundColor: const Color(0xFF0B0F19), // Deepest Onyx/Slate
+        backgroundColor: SoftPalette.slate900, // Deepest Onyx/Slate
         appBar: AppBar(
           automaticallyImplyLeading: false,
-          backgroundColor: const Color(0xFF0F172A), // Slate 900
+          backgroundColor: SoftPalette.slate900, // Slate 900
           elevation: 0,
           leading: isEmbedded
               ? null
               : IconButton(
-                  icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+                  icon: const Icon(Icons.arrow_back_rounded, color: SoftPalette.gray50),
                   onPressed: () {
                     if (onBack != null) {
                       onBack!();
@@ -56,11 +58,11 @@ class PythonTerminalScreen extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF38BDF8).withValues(alpha: 0.15),
+                  color: SoftPalette.sky350.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFF38BDF8).withValues(alpha: 0.3)),
+                  border: Border.all(color: SoftPalette.sky350.withValues(alpha: 0.3)),
                 ),
-                child: const Icon(Icons.terminal_rounded, color: Color(0xFF38BDF8), size: 20),
+                child: const Icon(Icons.terminal_rounded, color: SoftPalette.sky350, size: 20),
               ),
               const SizedBox(width: 12),
               Column(
@@ -70,14 +72,14 @@ class PythonTerminalScreen extends StatelessWidget {
                     'Python Biometric & Hardware Terminal',
                     style: GoogleFonts.outfit(
                       fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                      color: SoftPalette.gray50,
                       fontSize: 17,
                     ),
                   ),
                   Text(
                     'Live execution console for ZKTeco hardware daemons & scripts',
                     style: GoogleFonts.inter(
-                      color: const Color(0xFF94A3B8),
+                      color: SoftPalette.slate350,
                       fontSize: 11,
                     ),
                   ),
@@ -87,7 +89,7 @@ class PythonTerminalScreen extends StatelessWidget {
           ),
           actions: [
             IconButton(
-              icon: const Icon(Icons.help_outline_rounded, color: Color(0xFF94A3B8)),
+              icon: const Icon(Icons.help_outline_rounded, color: SoftPalette.slate350),
               tooltip: 'Terminal Guide & Help',
               onPressed: () => _showHelpDialog(context),
             ),
@@ -107,15 +109,15 @@ class PythonTerminalScreen extends StatelessWidget {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF0F172A),
+        backgroundColor: SoftPalette.slate900,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
-            const Icon(Icons.info_outline_rounded, color: Color(0xFF38BDF8)),
+            const Icon(Icons.info_outline_rounded, color: SoftPalette.sky350),
             const SizedBox(width: 10),
             Text(
               'Python Terminal Guide',
-              style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 18),
+              style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: SoftPalette.gray50, fontSize: 18),
             ),
           ],
         ),
@@ -148,18 +150,18 @@ class PythonTerminalScreen extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF1E293B),
+                    color: SoftPalette.slate800,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: const Color(0xFF334155)),
+                    border: Border.all(color: SoftPalette.slate700),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.lightbulb_outline_rounded, color: Color(0xFFFBBF24), size: 20),
+                      const Icon(Icons.lightbulb_outline_rounded, color: SoftPalette.amber200, size: 20),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
                           'The terminal runs in the background. You can navigate between pages while scripts continue running!',
-                          style: GoogleFonts.inter(color: const Color(0xFFCBD5E1), fontSize: 12),
+                          style: GoogleFonts.inter(color: SoftPalette.slate200, fontSize: 12),
                         ),
                       ),
                     ],
@@ -173,8 +175,8 @@ class PythonTerminalScreen extends StatelessWidget {
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF2563EB),
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.blue550,
+              foregroundColor: SoftPalette.gray50,
             ),
             child: const Text('Got it'),
           ),
@@ -187,9 +189,9 @@ class PythonTerminalScreen extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(title, style: GoogleFonts.firaCode(fontWeight: FontWeight.bold, color: const Color(0xFF38BDF8), fontSize: 13)),
+        Text(title, style: GoogleFonts.firaCode(fontWeight: FontWeight.bold, color: SoftPalette.sky350, fontSize: 13)),
         const SizedBox(height: 3),
-        Text(desc, style: GoogleFonts.inter(color: const Color(0xFF94A3B8), fontSize: 12)),
+        Text(desc, style: GoogleFonts.inter(color: SoftPalette.slate350, fontSize: 12)),
       ],
     );
   }
@@ -333,10 +335,10 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
       buffer.writeln('[${l.formattedTime}] ${l.text}');
     }
     Clipboard.setData(ClipboardData(text: buffer.toString()));
-    ScaffoldMessenger.of(context).showSnackBar(
+    AppToast.showSnackBar(context, 
       const SnackBar(
         content: Text('📋 Terminal output copied to clipboard!'),
-        backgroundColor: Color(0xFF0F766E),
+        backgroundColor: SoftPalette.teal550,
         duration: Duration(seconds: 2),
       ),
     );
@@ -352,7 +354,7 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
             .toList();
 
     return Container(
-      color: const Color(0xFF0B0F19), // Ultra-dark modern terminal background
+      color: SoftPalette.slate900, // Ultra-dark modern terminal background
       child: Column(
         children: [
           _buildStatusBar(isRunning),
@@ -374,9 +376,9 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: const BoxDecoration(
-        color: Color(0xFF0F172A),
+        color: SoftPalette.slate900,
         border: Border(
-          bottom: BorderSide(color: Color(0xFF1E293B), width: 1),
+          bottom: BorderSide(color: SoftPalette.slate800, width: 1),
         ),
       ),
       child: Row(
@@ -385,10 +387,10 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
             decoration: BoxDecoration(
-              color: isRunning ? const Color(0xFF065F46) : const Color(0xFF334155),
+              color: isRunning ? SoftPalette.emerald600 : SoftPalette.slate700,
               borderRadius: BorderRadius.circular(20),
               border: Border.all(
-                color: isRunning ? const Color(0xFF10B981) : const Color(0xFF64748B),
+                color: isRunning ? SoftPalette.emerald350 : SoftPalette.slate550,
                 width: 1.2,
               ),
             ),
@@ -399,12 +401,12 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
                   width: 8,
                   height: 8,
                   decoration: BoxDecoration(
-                    color: isRunning ? const Color(0xFF34D399) : const Color(0xFF94A3B8),
+                    color: isRunning ? SoftPalette.emerald300 : SoftPalette.slate350,
                     shape: BoxShape.circle,
                     boxShadow: isRunning
                         ? [
                             BoxShadow(
-                              color: const Color(0xFF34D399).withValues(alpha: 0.8),
+                              color: SoftPalette.emerald300.withValues(alpha: 0.8),
                               blurRadius: 6,
                               spreadRadius: 2,
                             ),
@@ -418,7 +420,7 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
                   style: GoogleFonts.inter(
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
-                    color: isRunning ? const Color(0xFFECFDF5) : const Color(0xFFCBD5E1),
+                    color: isRunning ? SoftPalette.emerald50 : SoftPalette.slate200,
                     letterSpacing: 0.5,
                   ),
                 ),
@@ -431,18 +433,18 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
           if (isRunning) ...[
             Text(
               'PID: $pid',
-              style: GoogleFonts.firaCode(fontSize: 12, color: const Color(0xFF38BDF8), fontWeight: FontWeight.w600),
+              style: GoogleFonts.firaCode(fontSize: 12, color: SoftPalette.sky350, fontWeight: FontWeight.w600),
             ),
             const SizedBox(width: 12),
-            Container(width: 1, height: 14, color: const Color(0xFF334155)),
+            Container(width: 1, height: 14, color: SoftPalette.slate700),
             const SizedBox(width: 12),
             Row(
               children: [
-                const Icon(Icons.timer_outlined, size: 14, color: Color(0xFF94A3B8)),
+                const Icon(Icons.timer_outlined, size: 14, color: SoftPalette.slate350),
                 const SizedBox(width: 4),
                 Text(
                   uptimeStr,
-                  style: GoogleFonts.firaCode(fontSize: 12, color: const Color(0xFFE2E8F0)),
+                  style: GoogleFonts.firaCode(fontSize: 12, color: SoftPalette.slate150),
                 ),
               ],
             ),
@@ -460,10 +462,10 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: _runner.isAutoStartEnabled ? const Color(0xFF065F46).withValues(alpha: 0.3) : const Color(0xFF1E293B),
+                color: _runner.isAutoStartEnabled ? SoftPalette.emerald600.withValues(alpha: 0.3) : SoftPalette.slate800,
                 borderRadius: BorderRadius.circular(6),
                 border: Border.all(
-                  color: _runner.isAutoStartEnabled ? const Color(0xFF10B981) : const Color(0xFF334155),
+                  color: _runner.isAutoStartEnabled ? SoftPalette.emerald350 : SoftPalette.slate700,
                 ),
               ),
               child: Row(
@@ -471,14 +473,14 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
                   Icon(
                     _runner.isAutoStartEnabled ? Icons.bolt_rounded : Icons.flash_off_rounded,
                     size: 14,
-                    color: _runner.isAutoStartEnabled ? const Color(0xFF34D399) : const Color(0xFF94A3B8),
+                    color: _runner.isAutoStartEnabled ? SoftPalette.emerald300 : SoftPalette.slate350,
                   ),
                   const SizedBox(width: 5),
                   Text(
                     _runner.isAutoStartEnabled ? 'Auto-Start: ON' : 'Auto-Start: OFF',
                     style: GoogleFonts.inter(
                       fontSize: 11,
-                      color: _runner.isAutoStartEnabled ? const Color(0xFF6EE7B7) : const Color(0xFF94A3B8),
+                      color: _runner.isAutoStartEnabled ? SoftPalette.emerald200 : SoftPalette.slate350,
                       fontWeight: _runner.isAutoStartEnabled ? FontWeight.bold : FontWeight.w500,
                     ),
                   ),
@@ -495,17 +497,17 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: const Color(0xFF1E293B),
+                color: SoftPalette.slate800,
                 borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: const Color(0xFF334155)),
+                border: Border.all(color: SoftPalette.slate700),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.settings_suggest_rounded, size: 14, color: Color(0xFF38BDF8)),
+                  const Icon(Icons.settings_suggest_rounded, size: 14, color: SoftPalette.sky350),
                   const SizedBox(width: 6),
                   Text(
                     'Python: ${_runner.pythonVersion}',
-                    style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF94A3B8), fontWeight: FontWeight.w500),
+                    style: GoogleFonts.inter(fontSize: 11, color: SoftPalette.slate350, fontWeight: FontWeight.w500),
                   ),
                 ],
               ),
@@ -520,9 +522,9 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: const BoxDecoration(
-        color: Color(0xFF131C2E),
+        color: SoftPalette.slate900,
         border: Border(
-          bottom: BorderSide(color: Color(0xFF1E293B), width: 1),
+          bottom: BorderSide(color: SoftPalette.slate800, width: 1),
         ),
       ),
       child: Wrap(
@@ -535,20 +537,20 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
             height: 38,
             padding: const EdgeInsets.symmetric(horizontal: 10),
             decoration: BoxDecoration(
-              color: const Color(0xFF1E293B),
+              color: SoftPalette.slate800,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xFF334155)),
+              border: Border.all(color: SoftPalette.slate700),
             ),
             child: DropdownButtonHideUnderline(
               child: DropdownButton<String>(
                 value: _selectedScript,
-                dropdownColor: const Color(0xFF1E293B),
-                icon: const Icon(Icons.keyboard_arrow_down_rounded, color: Color(0xFF94A3B8), size: 18),
-                style: GoogleFonts.firaCode(color: Colors.white, fontSize: 12),
+                dropdownColor: SoftPalette.slate800,
+                icon: const Icon(Icons.keyboard_arrow_down_rounded, color: SoftPalette.slate350, size: 18),
+                style: GoogleFonts.firaCode(color: SoftPalette.gray50, fontSize: 12),
                 items: _availableScripts.map((s) {
                   return DropdownMenuItem<String>(
                     value: s['file'],
-                    child: Text(s['file']!, style: const TextStyle(color: Color(0xFFE2E8F0))),
+                    child: Text(s['file']!, style: const TextStyle(color: SoftPalette.slate150)),
                   );
                 }).toList(),
                 onChanged: isRunning
@@ -573,24 +575,24 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
             child: TextField(
               controller: _argsController,
               enabled: !isRunning,
-              style: GoogleFonts.firaCode(color: const Color(0xFFE2E8F0), fontSize: 11),
+              style: GoogleFonts.firaCode(color: SoftPalette.slate150, fontSize: 11),
               decoration: InputDecoration(
                 hintText: 'Arguments (e.g. --once)',
-                hintStyle: GoogleFonts.firaCode(color: const Color(0xFF64748B), fontSize: 11),
+                hintStyle: GoogleFonts.firaCode(color: SoftPalette.slate550, fontSize: 11),
                 filled: true,
-                fillColor: const Color(0xFF1E293B),
+                fillColor: SoftPalette.slate800,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Color(0xFF334155)),
+                  borderSide: const BorderSide(color: SoftPalette.slate700),
                 ),
                 enabledBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Color(0xFF334155)),
+                  borderSide: const BorderSide(color: SoftPalette.slate700),
                 ),
                 focusedBorder: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(8),
-                  borderSide: const BorderSide(color: Color(0xFF38BDF8)),
+                  borderSide: const BorderSide(color: SoftPalette.sky350),
                 ),
               ),
             ),
@@ -602,10 +604,10 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
             icon: const Icon(Icons.play_arrow_rounded, size: 18),
             label: const Text('Start Daemon'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF059669),
-              foregroundColor: Colors.white,
-              disabledBackgroundColor: const Color(0xFF064E3B).withValues(alpha: 0.4),
-              disabledForegroundColor: const Color(0xFF6EE7B7).withValues(alpha: 0.4),
+              backgroundColor: SoftPalette.emerald500,
+              foregroundColor: SoftPalette.gray50,
+              disabledBackgroundColor: SoftPalette.emerald700.withValues(alpha: 0.4),
+              disabledForegroundColor: SoftPalette.emerald200.withValues(alpha: 0.4),
               elevation: 0,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -618,10 +620,10 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
             icon: const Icon(Icons.stop_rounded, size: 18),
             label: const Text('Stop'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
-              foregroundColor: Colors.white,
-              disabledBackgroundColor: const Color(0xFF7F1D1D).withValues(alpha: 0.3),
-              disabledForegroundColor: const Color(0xFFFCA5A5).withValues(alpha: 0.3),
+              backgroundColor: SoftPalette.red500,
+              foregroundColor: SoftPalette.gray50,
+              disabledBackgroundColor: SoftPalette.red700.withValues(alpha: 0.3),
+              disabledForegroundColor: SoftPalette.red300.withValues(alpha: 0.3),
               elevation: 0,
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -630,21 +632,21 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
 
           // Restart Button
           IconButton(
-            icon: const Icon(Icons.refresh_rounded, size: 18, color: Color(0xFF94A3B8)),
+            icon: const Icon(Icons.refresh_rounded, size: 18, color: SoftPalette.slate350),
             tooltip: 'Restart Process',
             onPressed: _restartScript,
           ),
 
           // Clear Output
           IconButton(
-            icon: const Icon(Icons.delete_sweep_rounded, size: 18, color: Color(0xFF94A3B8)),
+            icon: const Icon(Icons.delete_sweep_rounded, size: 18, color: SoftPalette.slate350),
             tooltip: 'Clear Console Output',
             onPressed: () => _runner.clearLogs(),
           ),
 
           // Copy Output
           IconButton(
-            icon: const Icon(Icons.copy_rounded, size: 16, color: Color(0xFF94A3B8)),
+            icon: const Icon(Icons.copy_rounded, size: 16, color: SoftPalette.slate350),
             tooltip: 'Copy All Logs to Clipboard',
             onPressed: _copyAllLogs,
           ),
@@ -656,10 +658,10 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
               decoration: BoxDecoration(
-                color: _autoScroll ? const Color(0xFF2563EB).withValues(alpha: 0.2) : Colors.transparent,
+                color: _autoScroll ? SoftPalette.blue550.withValues(alpha: 0.2) : Colors.transparent,
                 borderRadius: BorderRadius.circular(6),
                 border: Border.all(
-                  color: _autoScroll ? const Color(0xFF3B82F6) : const Color(0xFF334155),
+                  color: _autoScroll ? SoftPalette.blue500 : SoftPalette.slate700,
                 ),
               ),
               child: Row(
@@ -668,14 +670,14 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
                   Icon(
                     Icons.vertical_align_bottom_rounded,
                     size: 14,
-                    color: _autoScroll ? const Color(0xFF60A5FA) : const Color(0xFF94A3B8),
+                    color: _autoScroll ? SoftPalette.blue350 : SoftPalette.slate350,
                   ),
                   const SizedBox(width: 4),
                   Text(
                     'Auto-scroll',
                     style: GoogleFonts.inter(
                       fontSize: 11,
-                      color: _autoScroll ? const Color(0xFF93C5FD) : const Color(0xFF94A3B8),
+                      color: _autoScroll ? SoftPalette.blue300 : SoftPalette.slate350,
                       fontWeight: _autoScroll ? FontWeight.bold : FontWeight.normal,
                     ),
                   ),
@@ -690,15 +692,15 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
             height: 34,
             child: TextField(
               controller: _searchFilterController,
-              style: GoogleFonts.inter(color: Colors.white, fontSize: 11),
+              style: GoogleFonts.inter(color: SoftPalette.gray50, fontSize: 11),
               onChanged: (v) => setState(() => _searchFilter = v),
               decoration: InputDecoration(
                 hintText: 'Filter logs...',
-                hintStyle: GoogleFonts.inter(color: const Color(0xFF64748B), fontSize: 11),
-                prefixIcon: const Icon(Icons.search_rounded, size: 14, color: Color(0xFF64748B)),
+                hintStyle: GoogleFonts.inter(color: SoftPalette.slate550, fontSize: 11),
+                prefixIcon: const Icon(Icons.search_rounded, size: 14, color: SoftPalette.slate550),
                 prefixIconConstraints: const BoxConstraints(minWidth: 26),
                 filled: true,
-                fillColor: const Color(0xFF1E293B),
+                fillColor: SoftPalette.slate800,
                 contentPadding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(6),
@@ -721,17 +723,17 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: const Color(0xFF1E293B),
+                color: SoftPalette.slate800,
                 shape: BoxShape.circle,
-                border: Border.all(color: const Color(0xFF334155)),
+                border: Border.all(color: SoftPalette.slate700),
               ),
-              child: const Icon(Icons.terminal_rounded, size: 36, color: Color(0xFF64748B)),
+              child: const Icon(Icons.terminal_rounded, size: 36, color: SoftPalette.slate550),
             ),
             const SizedBox(height: 16),
             Text(
               'Terminal Console Ready',
               style: GoogleFonts.outfit(
-                color: const Color(0xFFE2E8F0),
+                color: SoftPalette.slate150,
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
               ),
@@ -739,7 +741,7 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
             const SizedBox(height: 6),
             Text(
               'Select a script above and click "Start Daemon" to begin live execution.',
-              style: GoogleFonts.inter(color: const Color(0xFF94A3B8), fontSize: 12),
+              style: GoogleFonts.inter(color: SoftPalette.slate350, fontSize: 12),
             ),
           ],
         ),
@@ -766,34 +768,34 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
 
     switch (line.type) {
       case TerminalLineType.system:
-        textColor = const Color(0xFF38BDF8); // Cyan
+        textColor = SoftPalette.sky350; // Cyan
         fontWeight = FontWeight.w600;
         break;
       case TerminalLineType.prompt:
-        textColor = const Color(0xFFFBBF24); // Amber
+        textColor = SoftPalette.amber200; // Amber
         fontWeight = FontWeight.bold;
         break;
       case TerminalLineType.success:
-        textColor = const Color(0xFF34D399); // Emerald
+        textColor = SoftPalette.emerald300; // Emerald
         fontWeight = FontWeight.w600;
         break;
       case TerminalLineType.error:
-        textColor = const Color(0xFFF87171); // Red
+        textColor = SoftPalette.red350; // Red
         fontWeight = FontWeight.w600;
-        backgroundColor = const Color(0xFF7F1D1D).withValues(alpha: 0.15);
+        backgroundColor = SoftPalette.red700.withValues(alpha: 0.15);
         break;
       case TerminalLineType.warning:
-        textColor = const Color(0xFFFBBF24); // Yellow/Amber
+        textColor = SoftPalette.amber200; // Yellow/Amber
         break;
       case TerminalLineType.punch:
-        textColor = const Color(0xFFA78BFA); // Purple
+        textColor = SoftPalette.violet350; // Purple
         fontWeight = FontWeight.bold;
         break;
       case TerminalLineType.stderr:
-        textColor = const Color(0xFFFB923C); // Orange
+        textColor = SoftPalette.orange350; // Orange
         break;
       case TerminalLineType.stdout:
-        textColor = const Color(0xFFE2E8F0); // Off-white / light slate
+        textColor = SoftPalette.slate150; // Off-white / light slate
         break;
     }
 
@@ -813,7 +815,7 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
             child: Text(
               '$lineNumber',
               style: GoogleFonts.firaCode(
-                color: const Color(0xFF475569),
+                color: SoftPalette.slate600,
                 fontSize: 11,
               ),
               textAlign: TextAlign.right,
@@ -825,7 +827,7 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
           Text(
             '[${line.formattedTime}]',
             style: GoogleFonts.firaCode(
-              color: const Color(0xFF64748B),
+              color: SoftPalette.slate550,
               fontSize: 11,
             ),
           ),
@@ -858,7 +860,7 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
 
     return Container(
       height: 36,
-      color: const Color(0xFF0F172A),
+      color: SoftPalette.slate900,
       padding: const EdgeInsets.symmetric(horizontal: 12),
       child: ListView.separated(
         scrollDirection: Axis.horizontal,
@@ -868,9 +870,9 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
           final c = chips[index];
           return ActionChip(
             label: Text(c['label']!),
-            labelStyle: GoogleFonts.inter(color: const Color(0xFF94A3B8), fontSize: 11),
-            backgroundColor: const Color(0xFF1E293B),
-            side: const BorderSide(color: Color(0xFF334155)),
+            labelStyle: GoogleFonts.inter(color: SoftPalette.slate350, fontSize: 11),
+            backgroundColor: SoftPalette.slate800,
+            side: const BorderSide(color: SoftPalette.slate700),
             padding: const EdgeInsets.symmetric(horizontal: 4),
             onPressed: () {
               if (c['action'] == 'clear') {
@@ -895,9 +897,9 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: const BoxDecoration(
-        color: Color(0xFF0F172A),
+        color: SoftPalette.slate900,
         border: Border(
-          top: BorderSide(color: Color(0xFF1E293B), width: 1),
+          top: BorderSide(color: SoftPalette.slate800, width: 1),
         ),
       ),
       child: Row(
@@ -905,7 +907,7 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
           Text(
             '❯',
             style: GoogleFonts.firaCode(
-              color: const Color(0xFF10B981),
+              color: SoftPalette.emerald350,
               fontSize: 16,
               fontWeight: FontWeight.bold,
             ),
@@ -915,12 +917,12 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
             child: TextField(
               controller: _inputController,
               onSubmitted: (_) => _sendStdinInput(),
-              style: GoogleFonts.firaCode(color: Colors.white, fontSize: 13),
+              style: GoogleFonts.firaCode(color: SoftPalette.gray50, fontSize: 13),
               decoration: InputDecoration(
                 hintText: isRunning
                     ? 'Send stdin input to running script...'
                     : 'Run custom command (e.g. pip install pyzk)...',
-                hintStyle: GoogleFonts.firaCode(color: const Color(0xFF64748B), fontSize: 12),
+                hintStyle: GoogleFonts.firaCode(color: SoftPalette.slate550, fontSize: 12),
                 isDense: true,
                 contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 border: InputBorder.none,
@@ -928,7 +930,7 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.send_rounded, color: Color(0xFF38BDF8), size: 18),
+            icon: const Icon(Icons.send_rounded, color: SoftPalette.sky350, size: 18),
             tooltip: 'Send Input / Command',
             onPressed: () {
               if (isRunning) {
@@ -958,15 +960,15 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
-          backgroundColor: const Color(0xFF0F172A),
+          backgroundColor: SoftPalette.slate900,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Row(
             children: [
-              const Icon(Icons.memory_rounded, color: Color(0xFF38BDF8)),
+              const Icon(Icons.memory_rounded, color: SoftPalette.sky350),
               const SizedBox(width: 10),
               Text(
                 'Python Environment & Packages',
-                style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 18),
+                style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: SoftPalette.gray50, fontSize: 18),
               ),
             ],
           ),
@@ -986,20 +988,20 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
                   const SizedBox(height: 16),
                   Text(
                     'Custom Python Executable Path (Optional):',
-                    style: GoogleFonts.inter(color: const Color(0xFF94A3B8), fontSize: 12),
+                    style: GoogleFonts.inter(color: SoftPalette.slate350, fontSize: 12),
                   ),
                   const SizedBox(height: 6),
                   TextField(
                     controller: customPathCtrl,
-                    style: GoogleFonts.firaCode(color: Colors.white, fontSize: 12),
+                    style: GoogleFonts.firaCode(color: SoftPalette.gray50, fontSize: 12),
                     decoration: InputDecoration(
                       hintText: 'C:\\Python314\\python.exe',
-                      hintStyle: GoogleFonts.firaCode(color: const Color(0xFF64748B), fontSize: 11),
+                      hintStyle: GoogleFonts.firaCode(color: SoftPalette.slate550, fontSize: 11),
                       filled: true,
-                      fillColor: const Color(0xFF1E293B),
+                      fillColor: SoftPalette.slate800,
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: Color(0xFF334155)),
+                        borderSide: const BorderSide(color: SoftPalette.slate700),
                       ),
                     ),
                   ),
@@ -1012,8 +1014,8 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
                     icon: const Icon(Icons.download_rounded, size: 18),
                     label: const Text('Install Required Packages (pip install)'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF2563EB),
-                      foregroundColor: Colors.white,
+                      backgroundColor: SoftPalette.blue550,
+                      foregroundColor: SoftPalette.gray50,
                       minimumSize: const Size.fromHeight(40),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
@@ -1025,7 +1027,7 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: const Text('Cancel', style: TextStyle(color: Color(0xFF94A3B8))),
+              child: const Text('Cancel', style: TextStyle(color: SoftPalette.slate350)),
             ),
             ElevatedButton(
               onPressed: () {
@@ -1033,8 +1035,8 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
                 Navigator.pop(ctx);
               },
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF10B981),
-                foregroundColor: Colors.white,
+                backgroundColor: SoftPalette.emerald350,
+                foregroundColor: SoftPalette.gray50,
               ),
               child: const Text('Save & Re-detect'),
             ),
@@ -1054,13 +1056,13 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
             width: 120,
             child: Text(
               label,
-              style: GoogleFonts.inter(color: const Color(0xFF64748B), fontSize: 12, fontWeight: FontWeight.w600),
+              style: GoogleFonts.inter(color: SoftPalette.slate550, fontSize: 12, fontWeight: FontWeight.w600),
             ),
           ),
           Expanded(
             child: Text(
               value,
-              style: GoogleFonts.firaCode(color: const Color(0xFFE2E8F0), fontSize: 12),
+              style: GoogleFonts.firaCode(color: SoftPalette.slate150, fontSize: 12),
             ),
           ),
         ],

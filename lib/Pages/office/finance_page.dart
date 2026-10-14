@@ -1,6 +1,7 @@
 // lib/pages/office/finance_page.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/design_system.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -28,13 +29,13 @@ import 'bank_accounts_sheet.dart';
 
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
-const _kAccent     = Color(0xFF0F9A7A);
-const _kBg         = Color(0xFFFBFDFF);
-const _kBgCard     = Color(0xFFFFFFFF);
-const _kBorder     = Color(0xFFF1F5F9);
-const _kTextPrimary   = Color(0xFF111827);
-const _kTextSecondary = Color(0xFF6B7280);
-const _kTextTertiary  = Color(0xFF9CA3AF);
+const _kAccent     = SoftPalette.emerald500;
+const _kBg         = SoftPalette.gray50;
+const _kBgCard     = SoftPalette.gray50;
+const _kBorder     = SoftPalette.slate100;
+const _kTextPrimary   = SoftPalette.slate900;
+const _kTextSecondary = SoftPalette.slate550;
+const _kTextTertiary  = SoftPalette.slate350;
 const _kMobileBreak   = 700.0;
 
 class FinancePage extends StatefulWidget {
@@ -243,17 +244,17 @@ class _FinancePageState extends State<FinancePage> {
     // Strict Finance Gating
     if (!PermissionService().isFinanceUser(userRole) && !widget.isAdmin) {
       return Scaffold(
-        backgroundColor: _kBg,
+        backgroundColor: context.adapt(_kBg),
         body: Center(
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.lock_outline_rounded, size: 64, color: Colors.red),
+              const Icon(Icons.lock_outline_rounded, size: 64, color: SoftPalette.red400),
               const SizedBox(height: 16),
-              const Text('Access Restricted', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: _kTextPrimary)),
+              Text('Access Restricted', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: context.adapt(_kTextPrimary))),
               const SizedBox(height: 8),
-              const Text('You do not have permissions to access the Finance & HR module.',
-                  style: TextStyle(fontSize: 13, color: _kTextSecondary), textAlign: TextAlign.center),
+              Text('You do not have permissions to access the Finance & HR module.',
+                  style: TextStyle(fontSize: 13, color: context.adapt(_kTextSecondary)), textAlign: TextAlign.center),
               const SizedBox(height: 20),
               ElevatedButton(
                 onPressed: () => Navigator.pop(context),
@@ -518,7 +519,7 @@ class _FinancePageState extends State<FinancePage> {
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 minimumSize: Size.zero,
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                foregroundColor: Colors.red,
+                foregroundColor: SoftPalette.red400,
               ),
               icon: const Icon(Icons.clear, size: 14),
               label: const Text('Reset', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
@@ -600,7 +601,7 @@ class _FinancePageState extends State<FinancePage> {
           children: [
             Icon(
               isSyncing ? Icons.sync_rounded : (isOnline ? Icons.cloud_done_rounded : Icons.cloud_off_rounded),
-              color: isSyncing ? Colors.orange : (isOnline ? _kAccent : Colors.blue),
+              color: isSyncing ? SoftPalette.amber300 : (isOnline ? _kAccent : SoftPalette.blue400),
             ),
             const SizedBox(width: 10),
             const Text('Sync & Cloud Status', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
@@ -612,13 +613,13 @@ class _FinancePageState extends State<FinancePage> {
           children: [
             Row(
               children: [
-                Text('Connectivity: ', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                Text('Connectivity: ', style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.gray500))),
                 Text(
                   isOnline ? 'Online (Connected)' : 'Offline (Local Only)',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
-                    color: isOnline ? _kAccent : Colors.blue,
+                    color: isOnline ? _kAccent : SoftPalette.blue400,
                   ),
                 ),
               ],
@@ -626,13 +627,13 @@ class _FinancePageState extends State<FinancePage> {
             const SizedBox(height: 6),
             Row(
               children: [
-                Text('Pipeline State: ', style: TextStyle(fontSize: 12, color: Colors.grey[600])),
+                Text('Pipeline State: ', style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.gray500))),
                 Text(
                   isSyncing ? 'Active (Uploading / Downloading)' : (_pendingSyncCount > 0 ? 'Queued (Awaiting Flush)' : 'Idle (All Synchronized)'),
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
-                    color: isSyncing ? Colors.orange : (_pendingSyncCount > 0 ? Colors.amber[800] : _kAccent),
+                    color: isSyncing ? SoftPalette.amber300 : (_pendingSyncCount > 0 ? SoftPalette.orange350 : _kAccent),
                   ),
                 ),
               ],
@@ -646,7 +647,7 @@ class _FinancePageState extends State<FinancePage> {
             if (typeCounts.isEmpty)
               Container(
                 padding: const EdgeInsets.all(10),
-                decoration: BoxDecoration(color: const Color(0xFFD1FAE5), borderRadius: BorderRadius.circular(8)),
+                decoration: BoxDecoration(color: context.adapt(SoftPalette.emerald100), borderRadius: BorderRadius.circular(8)),
                 child: const Row(children: [
                   Icon(Icons.check_circle_rounded, color: _kAccent, size: 16),
                   SizedBox(width: 8),
@@ -656,7 +657,7 @@ class _FinancePageState extends State<FinancePage> {
             else
               Container(
                 constraints: const BoxConstraints(maxHeight: 160),
-                decoration: BoxDecoration(color: const Color(0xFFF8FAFC), borderRadius: BorderRadius.circular(8), border: Border.all(color: const Color(0xFFE2E8F0))),
+                decoration: BoxDecoration(color: context.adapt(SoftPalette.gray50), borderRadius: BorderRadius.circular(8), border: Border.all(color: context.adapt(SoftPalette.slate150))),
                 child: ListView(
                   shrinkWrap: true,
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
@@ -668,8 +669,8 @@ class _FinancePageState extends State<FinancePage> {
                         Text(e.key.replaceAll('save_', '').replaceAll('_', ' '), style: const TextStyle(fontSize: 11.5)),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                          decoration: BoxDecoration(color: Colors.amber.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(10)),
-                          child: Text('${e.value}', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.brown)),
+                          decoration: BoxDecoration(color: context.adapt(SoftPalette.amber200).withValues(alpha: 0.2), borderRadius: BorderRadius.circular(10)),
+                          child: Text('${e.value}', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.orange600m))),
                         ),
                       ],
                     ),
@@ -691,7 +692,7 @@ class _FinancePageState extends State<FinancePage> {
                       TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
                       ElevatedButton(
                         onPressed: () => Navigator.pop(c, true),
-                        style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+                        style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.red400, foregroundColor: SoftPalette.gray50),
                         child: const Text('Clear Queue'),
                       ),
                     ],
@@ -703,12 +704,12 @@ class _FinancePageState extends State<FinancePage> {
                   if (ctx.mounted) Navigator.pop(ctx);
                 }
               },
-              child: const Text('Clear Stuck Queue', style: TextStyle(color: Colors.red, fontSize: 12)),
+              child: const Text('Clear Stuck Queue', style: TextStyle(color: SoftPalette.red400, fontSize: 12)),
             ),
           ElevatedButton.icon(
             icon: const Icon(Icons.sync_rounded, size: 14),
             label: const Text('Sync Now', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
-            style: ElevatedButton.styleFrom(backgroundColor: _kAccent, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: _kAccent, foregroundColor: SoftPalette.gray50),
             onPressed: () {
               Navigator.pop(ctx);
               _triggerDownloadForActiveBranch(force: true);
@@ -728,14 +729,14 @@ class _FinancePageState extends State<FinancePage> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
-            color: Colors.red.withValues(alpha: 0.12),
+            color: SoftPalette.red400.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.red.withValues(alpha: 0.4)),
+            border: Border.all(color: SoftPalette.red400.withValues(alpha: 0.4)),
           ),
           child: const Row(mainAxisSize: MainAxisSize.min, children: [
-            Icon(Icons.warning_amber_rounded, color: Colors.red, size: 12),
+            Icon(Icons.warning_amber_rounded, color: SoftPalette.red400, size: 12),
             SizedBox(width: 4),
-            Text('Needs Review', style: TextStyle(color: Colors.red, fontSize: 10, fontWeight: FontWeight.bold)),
+            Text('Needs Review', style: TextStyle(color: SoftPalette.red400, fontSize: 10, fontWeight: FontWeight.bold)),
           ]),
         ),
       );
@@ -747,14 +748,14 @@ class _FinancePageState extends State<FinancePage> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
-            color: Colors.orange.withValues(alpha: 0.12),
+            color: SoftPalette.amber300.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+            border: Border.all(color: SoftPalette.amber300.withValues(alpha: 0.4)),
           ),
           child: const Row(mainAxisSize: MainAxisSize.min, children: [
-            SizedBox(width: 8, height: 8, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.orange)),
+            SizedBox(width: 8, height: 8, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.amber300)),
             SizedBox(width: 6),
-            Text('Syncing...', style: TextStyle(color: Colors.orange, fontSize: 10, fontWeight: FontWeight.bold)),
+            Text('Syncing...', style: TextStyle(color: SoftPalette.amber300, fontSize: 10, fontWeight: FontWeight.bold)),
           ]),
         ),
       );
@@ -766,14 +767,14 @@ class _FinancePageState extends State<FinancePage> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           decoration: BoxDecoration(
-            color: Colors.amber.withValues(alpha: 0.15),
+            color: context.adapt(SoftPalette.amber200).withValues(alpha: 0.15),
             borderRadius: BorderRadius.circular(20),
-            border: Border.all(color: Colors.amber.withValues(alpha: 0.5)),
+            border: Border.all(color: context.adapt(SoftPalette.amber200).withValues(alpha: 0.5)),
           ),
           child: Row(mainAxisSize: MainAxisSize.min, children: [
-            const Icon(Icons.cloud_upload_outlined, color: Colors.amber, size: 12),
+            const Icon(Icons.cloud_upload_outlined, color: SoftPalette.amber200, size: 12),
             const SizedBox(width: 4),
-            Text('$_pendingSyncCount Queued', style: TextStyle(color: Colors.amber[800], fontSize: 10, fontWeight: FontWeight.bold)),
+            Text('$_pendingSyncCount Queued', style: TextStyle(color: SoftPalette.orange350, fontSize: 10, fontWeight: FontWeight.bold)),
           ]),
         ),
       );
@@ -785,16 +786,16 @@ class _FinancePageState extends State<FinancePage> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
-          color: isOnline ? const Color(0xFFD1FAE5) : Colors.blue.withValues(alpha: 0.12),
+          color: isOnline ? context.adapt(SoftPalette.emerald100) : SoftPalette.blue400.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: isOnline ? const Color(0xFF6EE7B7) : Colors.blue.withValues(alpha: 0.4)),
+          border: Border.all(color: isOnline ? context.adapt(SoftPalette.emerald200) : SoftPalette.blue400.withValues(alpha: 0.4)),
         ),
         child: Row(mainAxisSize: MainAxisSize.min, children: [
           Icon(isOnline ? Icons.check_circle_outline_rounded : Icons.offline_pin_outlined,
-              color: isOnline ? _kAccent : Colors.blue, size: 12),
+              color: isOnline ? _kAccent : SoftPalette.blue400, size: 12),
           const SizedBox(width: 4),
           Text(isOnline ? '✓ Synced' : '● Offline',
-              style: TextStyle(color: isOnline ? _kAccent : Colors.blue, fontSize: 10, fontWeight: FontWeight.bold)),
+              style: TextStyle(color: isOnline ? _kAccent : SoftPalette.blue400, fontSize: 10, fontWeight: FontWeight.bold)),
         ]),
       ),
     );
@@ -857,14 +858,14 @@ class _FinancePageState extends State<FinancePage> {
   }
 
 
-  Widget _buildLockedAudit() => const Center(
+  Widget _buildLockedAudit() => Center(
     child: Column(mainAxisSize: MainAxisSize.min, children: [
-      Icon(Icons.lock_outline_rounded, size: 54, color: _kTextTertiary),
+      Icon(Icons.lock_outline_rounded, size: 54, color: context.adapt(_kTextTertiary)),
       SizedBox(height: 14),
-      Text('Access Restricted', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: _kTextSecondary)),
+      Text('Access Restricted', style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: context.adapt(_kTextSecondary))),
       SizedBox(height: 6),
       Text('You do not have permissions to view audit trails.',
-          style: TextStyle(fontSize: 12, color: _kTextTertiary), textAlign: TextAlign.center),
+          style: TextStyle(fontSize: 12, color: context.adapt(_kTextTertiary)), textAlign: TextAlign.center),
     ]),
   );
 
@@ -873,12 +874,12 @@ class _FinancePageState extends State<FinancePage> {
     showDialog(
       context: ctx,
       builder: (dCtx) => AlertDialog(
-        backgroundColor: _kBgCard,
+        backgroundColor: context.adapt(_kBgCard),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Row(children: [
+        title: Row(children: [
           Icon(Icons.download_outlined, color: _kAccent),
           SizedBox(width: 8),
-          Text('Export Reports', style: TextStyle(color: _kTextPrimary, fontWeight: FontWeight.bold, fontSize: 16)),
+          Text('Export Reports', style: TextStyle(color: context.adapt(_kTextPrimary), fontWeight: FontWeight.bold, fontSize: 16)),
         ]),
         content: SizedBox(
           width: 500,
@@ -887,7 +888,7 @@ class _FinancePageState extends State<FinancePage> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(dCtx),
-            child: const Text('Close', style: TextStyle(color: _kTextSecondary)),
+            child: Text('Close', style: TextStyle(color: context.adapt(_kTextSecondary))),
           )
         ],
       ),
@@ -938,16 +939,16 @@ class _FinancePageState extends State<FinancePage> {
       return SingleChildScrollView(
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           const SizedBox(height: 8),
-          const Text('Report Type:', style: TextStyle(color: _kTextSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
+          Text('Report Type:', style: TextStyle(color: context.adapt(_kTextSecondary), fontSize: 12, fontWeight: FontWeight.bold)),
           const SizedBox(height: 6),
           DropdownButtonFormField<String>(
-            dropdownColor: _kBgCard, value: selType,
-            style: const TextStyle(color: _kTextPrimary, fontSize: 13),
+            dropdownColor: context.adapt(_kBgCard), value: selType,
+            style: TextStyle(color: context.adapt(_kTextPrimary), fontSize: 13),
             decoration: InputDecoration(
-              filled: true, fillColor: _kBg,
+              filled: true, fillColor: context.adapt(_kBg),
               contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-              border: OutlineInputBorder(borderSide: const BorderSide(color: _kBorder), borderRadius: BorderRadius.circular(8)),
-              enabledBorder: OutlineInputBorder(borderSide: const BorderSide(color: _kBorder), borderRadius: BorderRadius.circular(8)),
+              border: OutlineInputBorder(borderSide: BorderSide(color: context.adapt(_kBorder)), borderRadius: BorderRadius.circular(8)),
+              enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: context.adapt(_kBorder)), borderRadius: BorderRadius.circular(8)),
             ),
             items: const [
               DropdownMenuItem(value: 'branch_pdf', child: Text('Bank Transfer Slip (PDF)')),
@@ -959,17 +960,17 @@ class _FinancePageState extends State<FinancePage> {
           ),
           if (isPayroll) ...[
             const SizedBox(height: 12),
-            const Text('Department:', style: TextStyle(color: _kTextSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
+            Text('Department:', style: TextStyle(color: context.adapt(_kTextSecondary), fontSize: 12, fontWeight: FontWeight.bold)),
             const SizedBox(height: 6),
             DropdownButtonFormField<String>(
-              dropdownColor: _kBgCard, value: selDept,
+              dropdownColor: context.adapt(_kBgCard), value: selDept,
               decoration: InputDecoration(
-                filled: true, fillColor: _kBg,
+                filled: true, fillColor: context.adapt(_kBg),
                 contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                border: OutlineInputBorder(borderSide: const BorderSide(color: _kBorder), borderRadius: BorderRadius.circular(8)),
-                enabledBorder: OutlineInputBorder(borderSide: const BorderSide(color: _kBorder), borderRadius: BorderRadius.circular(8)),
+                border: OutlineInputBorder(borderSide: BorderSide(color: context.adapt(_kBorder)), borderRadius: BorderRadius.circular(8)),
+                enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: context.adapt(_kBorder)), borderRadius: BorderRadius.circular(8)),
               ),
-              style: const TextStyle(color: _kTextPrimary, fontSize: 13),
+              style: TextStyle(color: context.adapt(_kTextPrimary), fontSize: 13),
               items: depts.map((d) => DropdownMenuItem(value: d, child: Text(d))).toList(),
               onChanged: (v) {
                 if (v != null) {
@@ -982,17 +983,17 @@ class _FinancePageState extends State<FinancePage> {
             ),
             if (isKarachi) ...[
               const SizedBox(height: 12),
-              const Text('Camp / Location:', style: TextStyle(color: _kTextSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
+              Text('Camp / Location:', style: TextStyle(color: context.adapt(_kTextSecondary), fontSize: 12, fontWeight: FontWeight.bold)),
               const SizedBox(height: 6),
               DropdownButtonFormField<String>(
-                dropdownColor: _kBgCard, value: selCamp,
+                dropdownColor: context.adapt(_kBgCard), value: selCamp,
                 decoration: InputDecoration(
-                  filled: true, fillColor: _kBg,
+                  filled: true, fillColor: context.adapt(_kBg),
                   contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  border: OutlineInputBorder(borderSide: const BorderSide(color: _kBorder), borderRadius: BorderRadius.circular(8)),
-                  enabledBorder: OutlineInputBorder(borderSide: const BorderSide(color: _kBorder), borderRadius: BorderRadius.circular(8)),
+                  border: OutlineInputBorder(borderSide: BorderSide(color: context.adapt(_kBorder)), borderRadius: BorderRadius.circular(8)),
+                  enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: context.adapt(_kBorder)), borderRadius: BorderRadius.circular(8)),
                 ),
-                style: const TextStyle(color: _kTextPrimary, fontSize: 13),
+                style: TextStyle(color: context.adapt(_kTextPrimary), fontSize: 13),
                 items: const [
                   DropdownMenuItem(value: 'All Camps', child: Text('All Camps / Main Branch')),
                   DropdownMenuItem(value: 'Haji Camp', child: Text('Haji Camp Dispensary')),
@@ -1009,7 +1010,7 @@ class _FinancePageState extends State<FinancePage> {
               ),
             ],
             const SizedBox(height: 12),
-            const Text('Staff Members Scope:', style: TextStyle(color: _kTextSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
+            Text('Staff Members Scope:', style: TextStyle(color: context.adapt(_kTextSecondary), fontSize: 12, fontWeight: FontWeight.bold)),
             const SizedBox(height: 6),
             Row(
               children: [
@@ -1037,7 +1038,7 @@ class _FinancePageState extends State<FinancePage> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Text('Select people to export:', style: TextStyle(fontSize: 11, color: _kTextSecondary, fontWeight: FontWeight.w600)),
+                  Text('Select people to export:', style: TextStyle(fontSize: 11, color: context.adapt(_kTextSecondary), fontWeight: FontWeight.w600)),
                   Row(
                     children: [
                       TextButton(
@@ -1051,7 +1052,7 @@ class _FinancePageState extends State<FinancePage> {
                       ),
                       TextButton(
                         onPressed: () => setS(() => selectedEmpIds.clear()),
-                        child: const Text('Clear', style: TextStyle(fontSize: 11, color: Colors.grey)),
+                        child: Text('Clear', style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.gray350))),
                       ),
                     ],
                   ),
@@ -1060,14 +1061,14 @@ class _FinancePageState extends State<FinancePage> {
               Container(
                 constraints: const BoxConstraints(maxHeight: 180),
                 decoration: BoxDecoration(
-                  color: _kBg,
+                  color: context.adapt(_kBg),
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: _kBorder),
+                  border: Border.all(color: context.adapt(_kBorder)),
                 ),
                 child: filteredStaff.isEmpty
-                    ? const Padding(
+                    ? Padding(
                         padding: EdgeInsets.all(16),
-                        child: Center(child: Text('No employees found matching filter', style: TextStyle(color: _kTextSecondary, fontSize: 12))),
+                        child: Center(child: Text('No employees found matching filter', style: TextStyle(color: context.adapt(_kTextSecondary), fontSize: 12))),
                       )
                     : ListView.builder(
                         shrinkWrap: true,
@@ -1088,7 +1089,7 @@ class _FinancePageState extends State<FinancePage> {
                             title: Text(name, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
                             subtitle: Text(
                               '$role • $dept${camp.isNotEmpty ? ' [$camp]' : ''}',
-                              style: const TextStyle(fontSize: 10, color: _kTextSecondary),
+                              style: TextStyle(fontSize: 10, color: context.adapt(_kTextSecondary)),
                             ),
                             onChanged: (chk) {
                               setS(() {
@@ -1106,7 +1107,7 @@ class _FinancePageState extends State<FinancePage> {
             ],
           ],
           const SizedBox(height: 12),
-          const Text('Month:', style: TextStyle(color: _kTextSecondary, fontSize: 12, fontWeight: FontWeight.bold)),
+          Text('Month:', style: TextStyle(color: context.adapt(_kTextSecondary), fontSize: 12, fontWeight: FontWeight.bold)),
           const SizedBox(height: 6),
           Row(children: [
             IconButton(
@@ -1120,9 +1121,9 @@ class _FinancePageState extends State<FinancePage> {
               child: Container(
                 alignment: Alignment.center,
                 padding: const EdgeInsets.symmetric(vertical: 8),
-                decoration: BoxDecoration(border: Border.all(color: _kBorder), borderRadius: BorderRadius.circular(8)),
+                decoration: BoxDecoration(border: Border.all(color: context.adapt(_kBorder)), borderRadius: BorderRadius.circular(8)),
                 child: Text(DateFormat('MMMM yyyy').format(DateFormat('yyyy-MM').parse(selMonth)),
-                    style: const TextStyle(color: _kTextPrimary, fontWeight: FontWeight.bold, fontSize: 13)),
+                    style: TextStyle(color: context.adapt(_kTextPrimary), fontWeight: FontWeight.bold, fontSize: 13)),
               ),
             ),
             IconButton(
@@ -1137,7 +1138,7 @@ class _FinancePageState extends State<FinancePage> {
           SizedBox(
             width: double.infinity, height: 44,
             child: ElevatedButton.icon(
-              style: ElevatedButton.styleFrom(backgroundColor: _kAccent, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: _kAccent, foregroundColor: SoftPalette.gray50),
               icon: const Icon(Icons.download_outlined, size: 16),
               label: const Text('Export Now', style: TextStyle(fontWeight: FontWeight.bold)),
               onPressed: () async {

@@ -1,6 +1,7 @@
 // lib/pages/office/xlsx_import_helper.dart
 
 import 'package:excel/excel.dart' hide Border, BorderStyle;
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -207,17 +208,17 @@ class XlsxImportHelper {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                           decoration: BoxDecoration(
-                            color: statusMessage.startsWith('✓') ? Colors.green.withOpacity(0.08)
-                                : (statusMessage.startsWith('Error') || statusMessage.startsWith('Import failed')) ? Colors.red.withOpacity(0.08)
+                            color: statusMessage.startsWith('✓') ? SoftPalette.green400.withOpacity(0.08)
+                                : (statusMessage.startsWith('Error') || statusMessage.startsWith('Import failed')) ? SoftPalette.red400.withOpacity(0.08)
                                 : t.bgCardAlt,
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: statusMessage.startsWith('✓') ? Colors.green.withOpacity(0.3)
-                                : (statusMessage.startsWith('Error') || statusMessage.startsWith('Import failed')) ? Colors.red.withOpacity(0.3)
+                            border: Border.all(color: statusMessage.startsWith('✓') ? SoftPalette.green400.withOpacity(0.3)
+                                : (statusMessage.startsWith('Error') || statusMessage.startsWith('Import failed')) ? SoftPalette.red400.withOpacity(0.3)
                                 : t.bgRule),
                           ),
                           child: Text(statusMessage, style: TextStyle(fontSize: 11,
-                            color: statusMessage.startsWith('✓') ? Colors.green
-                                : (statusMessage.startsWith('Error') || statusMessage.startsWith('Import failed')) ? Colors.red
+                            color: statusMessage.startsWith('✓') ? SoftPalette.green400
+                                : (statusMessage.startsWith('Error') || statusMessage.startsWith('Import failed')) ? SoftPalette.red400
                                 : t.textSecondary)),
                         ),
                       ],
@@ -241,13 +242,13 @@ class XlsxImportHelper {
                 if (previewRows.length > 1)
                   ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: t.accent, foregroundColor: Colors.white,
+                      backgroundColor: t.accent, foregroundColor: SoftPalette.gray50,
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
                     onPressed: isImporting ? null : runImport,
                     icon: isImporting
-                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50))
                         : const Icon(Icons.upload_outlined, size: 16),
                     label: Text(isImporting ? 'Importing...' : 'Import ${previewRows.length - 1} Records',
                       style: const TextStyle(fontWeight: FontWeight.bold)),

@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -163,9 +166,9 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
           _childParentConflicts.removeWhere((c) => c['hiveKey'] == hiveKey);
           _processingConflictKeys.remove(hiveKey);
         });
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        AppToast.showSnackBar(context, SnackBar(
           content: Text("✅ Removed registration for $name. Medical history preserved intact."),
-          backgroundColor: const Color(0xFF0D9488),
+          backgroundColor: SoftPalette.teal500,
         ));
       }
       _log("✨ Registration $hiveKey deleted locally and queued for background Firestore sync.");
@@ -192,9 +195,9 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
           _childParentConflicts.removeWhere((c) => c['hiveKey'] == hiveKey);
           _processingConflictKeys.remove(hiveKey);
         });
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        AppToast.showSnackBar(context, SnackBar(
           content: Text("✅ Migrated $name to canonical ID: $newId"),
-          backgroundColor: const Color(0xFF10B981),
+          backgroundColor: SoftPalette.emerald350,
         ));
       }
       _log("✨ Migrated $hiveKey to $newId and scheduled background sync.");
@@ -218,7 +221,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancel")),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.red400, foregroundColor: SoftPalette.gray50),
             child: const Text("Delete Registrations"),
           ),
         ],
@@ -248,9 +251,9 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
         _childParentConflicts.clear();
         _isProcessing = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      AppToast.showSnackBar(context, SnackBar(
         content: Text("✅ Cleaned $count patient registrations. Medical history preserved."),
-        backgroundColor: const Color(0xFF0D9488),
+        backgroundColor: SoftPalette.teal500,
       ));
     }
     _log("✨ Batch clean complete: Deleted $count corrupted registrations, medical history intact.");
@@ -278,9 +281,9 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
         _childParentConflicts.clear();
         _isProcessing = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      AppToast.showSnackBar(context, SnackBar(
         content: Text("✅ Migrated $count records to canonical child IDs."),
-        backgroundColor: const Color(0xFF10B981),
+        backgroundColor: SoftPalette.emerald350,
       ));
     }
     _log("✨ Batch migration complete: Converted $count child records to canonical format.");
@@ -297,11 +300,11 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
       );
       if (mounted) {
         setState(() => _isProcessing = false);
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        AppToast.showSnackBar(context, SnackBar(
           content: Text(count > 0
               ? "✅ Updated $count patient(s) with formatted CNIC (xxxxx-xxxxxxx-x). Queued for background sync."
               : "✅ All patient CNICs are already properly formatted (xxxxx-xxxxxxx-x)."),
-          backgroundColor: const Color(0xFF0D9488),
+          backgroundColor: SoftPalette.teal500,
         ));
       }
       _log("✨ Completed CNIC formatting: $count records updated to xxxxx-xxxxxxx-x and queued for sync.");
@@ -439,7 +442,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               title: const Row(
                 children: [
-                  Icon(Icons.check_circle_rounded, color: Colors.green, size: 28),
+                  Icon(Icons.check_circle_rounded, color: SoftPalette.green400, size: 28),
                   SizedBox(width: 10),
                   Text("All Records Clean"),
                 ],
@@ -453,7 +456,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                   onPressed: () => Navigator.pop(ctx),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
+                    foregroundColor: SoftPalette.gray50,
                   ),
                   child: const Text("OK"),
                 ),
@@ -572,7 +575,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
           _isProcessing = false;
           _progress = 1.0;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text("Successfully repaired $fixedLocal patient records and scheduled sync!"),
             backgroundColor: AppColors.primary,
@@ -725,7 +728,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               title: const Row(
                 children: [
-                  Icon(Icons.check_circle_rounded, color: Colors.green, size: 28),
+                  Icon(Icons.check_circle_rounded, color: SoftPalette.green400, size: 28),
                   SizedBox(width: 10),
                   Text("Serials In Sync"),
                 ],
@@ -739,7 +742,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                   onPressed: () => Navigator.pop(ctx),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
-                    foregroundColor: Colors.white,
+                    foregroundColor: SoftPalette.gray50,
                   ),
                   child: const Text("OK"),
                 ),
@@ -982,10 +985,10 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
           _isProcessing = false;
           _progress = 1.0;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text("Reconciliation complete: Merged ${selectedItems.length} records and enqueued for sync."),
-            backgroundColor: Colors.green,
+            backgroundColor: SoftPalette.green400,
           ),
         );
       }
@@ -1072,10 +1075,10 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
       _log("🎉 Fix & Heal Completed! Total legacy records healed: $totalHealed.");
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text("✅ Schema Heal Complete! $totalHealed legacy records fixed."),
-            backgroundColor: Colors.green,
+            backgroundColor: SoftPalette.green400,
           ),
         );
       }
@@ -1091,7 +1094,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
       builder: (ctx) => AlertDialog(
         title: const Row(
           children: [
-            Icon(Icons.warning_amber_rounded, color: Colors.redAccent),
+            Icon(Icons.warning_amber_rounded, color: SoftPalette.red400),
             SizedBox(width: 8),
             Text("Purge Bogus Branches & Bloat?"),
           ],
@@ -1107,7 +1110,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text("Cancel")),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.red400, foregroundColor: SoftPalette.gray50),
             child: const Text("Start Structure Purge"),
           ),
         ],
@@ -1131,10 +1134,10 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
 
       setState(() => _progress = 1.0);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           const SnackBar(
             content: Text("✅ Structure Sanitization completed successfully!"),
-            backgroundColor: Color(0xFF10B981),
+            backgroundColor: SoftPalette.emerald350,
           ),
         );
       }
@@ -1719,11 +1722,11 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.adapt(SoftPalette.gray50),
         border: Border(top: BorderSide(color: AppColors.gray200)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: SoftPalette.gray900.withValues(alpha: 0.05),
             blurRadius: 10,
             offset: const Offset(0, -4),
           )
@@ -1767,7 +1770,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
             style: TextStyle(
               fontFamily: 'monospace',
               fontSize: 11,
-              color: latestLog.contains("❌") ? Colors.red : AppColors.gray600,
+              color: latestLog.contains("❌") ? SoftPalette.red400 : AppColors.gray600,
             ),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
@@ -2187,10 +2190,10 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
         _processingPrescriptionKeys.remove(key);
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text("Error: $e"),
-            backgroundColor: Colors.red,
+            backgroundColor: SoftPalette.red400,
           ),
         );
       }
@@ -2256,10 +2259,10 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
     });
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         const SnackBar(
           content: Text("Bulk local prescription cleanup completed! Background sync queued."),
-          backgroundColor: Colors.green,
+          backgroundColor: SoftPalette.green400,
         ),
       );
     }
@@ -2271,7 +2274,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
       builder: (ctx) => AlertDialog(
         title: const Row(
           children: [
-            Icon(Icons.hub_rounded, color: Color(0xFF0D9488)),
+            Icon(Icons.hub_rounded, color: SoftPalette.teal500),
             SizedBox(width: 8),
             Text("Unify All Branches"),
           ],
@@ -2293,8 +2296,8 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF0D9488),
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.teal500,
+              foregroundColor: SoftPalette.gray50,
             ),
             child: const Text("Unify All Branches"),
           ),
@@ -2321,9 +2324,9 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
           _progress = 1.0;
           _currentBranch = "";
         });
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+        AppToast.showSnackBar(context, SnackBar(
           content: Text("✅ Unified $count records across all branches! Duplicates purged and sync queued."),
-          backgroundColor: const Color(0xFF0D9488),
+          backgroundColor: SoftPalette.teal500,
           duration: const Duration(seconds: 4),
         ));
       }
@@ -2514,10 +2517,10 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
       });
       
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         const SnackBar(
           content: Text("Group merged locally! Sync queued."),
-          backgroundColor: Colors.green,
+          backgroundColor: SoftPalette.green400,
           duration: Duration(seconds: 2),
         ),
       );
@@ -2536,10 +2539,10 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
         _disappearingGroupKeys.remove(groupKey);
       });
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: Text("Merge failed: $e"),
-          backgroundColor: Colors.red,
+          backgroundColor: SoftPalette.red400,
         ),
       );
     }
@@ -2647,7 +2650,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
     });
 
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
+    AppToast.showSnackBar(context, 
       SnackBar(
         content: Text("Finished merging duplicates locally under letter '$letter'. Background sync queued."),
         backgroundColor: AppColors.primary,
@@ -2710,12 +2713,12 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: context.adapt(SoftPalette.gray50),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: AppColors.gray200),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.02),
+                color: SoftPalette.gray900.withValues(alpha: 0.02),
                 blurRadius: 4,
                 offset: const Offset(0, 2),
               ),
@@ -2780,12 +2783,12 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 6),
           decoration: BoxDecoration(
-            color: isSelected ? Colors.white : Colors.transparent,
+            color: isSelected ? context.adapt(SoftPalette.gray50) : Colors.transparent,
             borderRadius: BorderRadius.circular(10),
             boxShadow: isSelected
                 ? [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.05),
+                      color: SoftPalette.gray900.withValues(alpha: 0.05),
                       blurRadius: 4,
                       offset: const Offset(0, 2),
                     ),
@@ -2827,7 +2830,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                     style: const TextStyle(
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                      color: SoftPalette.gray50,
                     ),
                   ),
                 ),
@@ -2854,7 +2857,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
           "Data Integrity & Cleanup",
           style: TextStyle(fontWeight: FontWeight.bold),
         ),
-        backgroundColor: Colors.white,
+        backgroundColor: context.adapt(SoftPalette.gray50),
         elevation: 0,
         centerTitle: true,
       ),
@@ -2870,7 +2873,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                   label: "Local Patients",
                   value: _localPatientsCount.toString(),
                   icon: Icons.people_alt_rounded,
-                  color: const Color(0xFF0D9488),
+                  color: SoftPalette.teal500,
                   onTap: _scanAndPreviewPatientRepairs,
                 ),
                 const SizedBox(width: 12),
@@ -2878,7 +2881,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                   label: "Child/Parent Conflicts",
                   value: conflictsCount.toString(),
                   icon: Icons.family_restroom_rounded,
-                  color: const Color(0xFFE11D48),
+                  color: SoftPalette.red500,
                   onTap: () => setState(() => _activeTab = 0),
                 ),
                 const SizedBox(width: 12),
@@ -2894,7 +2897,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                   label: "Sync Queue Pending",
                   value: _syncQueuePendingCount.toString(),
                   icon: Icons.cloud_sync_rounded,
-                  color: const Color(0xFF7C3AED),
+                  color: SoftPalette.violet550,
                   onTap: null,
                 ),
               ],
@@ -2918,7 +2921,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                     title: "Child & Parent Conflicts",
                     icon: Icons.child_care_rounded,
                     count: conflictsCount,
-                    badgeColor: const Color(0xFFE11D48),
+                    badgeColor: SoftPalette.red500,
                   ),
                   _buildTabButton(
                     index: 1,
@@ -2932,7 +2935,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                     title: "Prescription Cleanups",
                     icon: Icons.medication_outlined,
                     count: prescriptionsCount,
-                    badgeColor: const Color(0xFF10B981),
+                    badgeColor: SoftPalette.emerald350,
                   ),
                   _buildTabButton(
                     index: 3,
@@ -2955,8 +2958,8 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                     icon: const Icon(Icons.preview_rounded, size: 18),
                     label: const Text('Preview & Repair Patient IDs'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF0D9488),
-                      foregroundColor: Colors.white,
+                      backgroundColor: SoftPalette.teal500,
+                      foregroundColor: SoftPalette.gray50,
                       padding: const EdgeInsets.symmetric(vertical: 13),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       elevation: 0,
@@ -2970,8 +2973,8 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                     icon: const Icon(Icons.badge_outlined, size: 18),
                     label: const Text('Format CNICs (xxxxx-xxxxxxx-x)'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF0284C7),
-                      foregroundColor: Colors.white,
+                      backgroundColor: SoftPalette.sky500,
+                      foregroundColor: SoftPalette.gray50,
                       padding: const EdgeInsets.symmetric(vertical: 13),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       elevation: 0,
@@ -2985,8 +2988,8 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                     icon: const Icon(Icons.compare_arrows_rounded, size: 18),
                     label: const Text('Preview & Fix Serials/Dispensary'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF7C3AED),
-                      foregroundColor: Colors.white,
+                      backgroundColor: SoftPalette.violet550,
+                      foregroundColor: SoftPalette.gray50,
                       padding: const EdgeInsets.symmetric(vertical: 13),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       elevation: 0,
@@ -3000,8 +3003,8 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                     icon: const Icon(Icons.hub_rounded, size: 18),
                     label: const Text('Unify All Branches (Rx/Disp/Serials)'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF0D9488),
-                      foregroundColor: Colors.white,
+                      backgroundColor: SoftPalette.teal500,
+                      foregroundColor: SoftPalette.gray50,
                       padding: const EdgeInsets.symmetric(vertical: 13),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       elevation: 0,
@@ -3033,7 +3036,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const CircularProgressIndicator(color: Color(0xFFE11D48)),
+            const CircularProgressIndicator(color: SoftPalette.red500),
             const SizedBox(height: 20),
             const Text(
               "Scanning patient registry for child & parent conflicts...",
@@ -3055,7 +3058,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.family_restroom_rounded, size: 72, color: const Color(0xFFE11D48).withValues(alpha: 0.8)),
+            Icon(Icons.family_restroom_rounded, size: 72, color: SoftPalette.red500.withValues(alpha: 0.8)),
             const SizedBox(height: 24),
             const Text(
               "Child & Parent CNIC Conflict Resolution",
@@ -3079,8 +3082,8 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
               icon: const Icon(Icons.search_rounded),
               label: const Text("Scan for Child / Parent Conflicts"),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFE11D48),
-                foregroundColor: Colors.white,
+                backgroundColor: SoftPalette.red500,
+                foregroundColor: SoftPalette.gray50,
                 padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 18),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 elevation: 0,
@@ -3101,10 +3104,10 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
               Container(
                 padding: const EdgeInsets.all(20),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                  color: SoftPalette.emerald350.withValues(alpha: 0.1),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.verified_user_rounded, size: 64, color: Color(0xFF10B981)),
+                child: const Icon(Icons.verified_user_rounded, size: 64, color: SoftPalette.emerald350),
               ),
               const SizedBox(height: 24),
               const Text(
@@ -3122,8 +3125,8 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                 icon: const Icon(Icons.refresh_rounded),
                 label: const Text("Scan Again"),
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: const Color(0xFF10B981),
-                  side: const BorderSide(color: Color(0xFF10B981), width: 2),
+                  foregroundColor: SoftPalette.emerald350,
+                  side: const BorderSide(color: SoftPalette.emerald350, width: 2),
                   padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 ),
@@ -3144,7 +3147,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
         // Filter & Batch Actions Bar
         Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: context.adapt(SoftPalette.gray50),
             border: Border(bottom: BorderSide(color: AppColors.gray200)),
           ),
           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
@@ -3162,11 +3165,11 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                     label: Text("All (${_childParentConflicts.length})"),
                     selected: _conflictFilter == 'all',
                     onSelected: (_) => setState(() => _conflictFilter = 'all'),
-                    selectedColor: const Color(0xFFE11D48).withValues(alpha: 0.15),
+                    selectedColor: SoftPalette.red500.withValues(alpha: 0.15),
                     labelStyle: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 12,
-                      color: _conflictFilter == 'all' ? const Color(0xFFE11D48) : AppColors.gray700,
+                      color: _conflictFilter == 'all' ? SoftPalette.red500 : AppColors.gray700,
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -3174,11 +3177,11 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                     label: Text("Raw CNIC ($rawCnicCount)"),
                     selected: _conflictFilter == 'raw_cnic',
                     onSelected: (_) => setState(() => _conflictFilter = 'raw_cnic'),
-                    selectedColor: Colors.orange.withValues(alpha: 0.15),
+                    selectedColor: SoftPalette.amber300.withValues(alpha: 0.15),
                     labelStyle: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 12,
-                      color: _conflictFilter == 'raw_cnic' ? Colors.orange.shade800 : AppColors.gray700,
+                      color: _conflictFilter == 'raw_cnic' ? SoftPalette.orange400 : AppColors.gray700,
                     ),
                   ),
                   const SizedBox(width: 8),
@@ -3186,11 +3189,11 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                     label: Text("Shared CNIC ($sharedCnicCount)"),
                     selected: _conflictFilter == 'shared_cnic',
                     onSelected: (_) => setState(() => _conflictFilter = 'shared_cnic'),
-                    selectedColor: Colors.purple.withValues(alpha: 0.15),
+                    selectedColor: SoftPalette.purple550.withValues(alpha: 0.15),
                     labelStyle: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 12,
-                      color: _conflictFilter == 'shared_cnic' ? Colors.purple.shade800 : AppColors.gray700,
+                      color: _conflictFilter == 'shared_cnic' ? context.adapt(SoftPalette.purple600) : AppColors.gray700,
                     ),
                   ),
                 ],
@@ -3215,8 +3218,8 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                     icon: const Icon(Icons.drive_file_rename_outline_rounded, size: 16),
                     label: const Text("Migrate All to Canonical IDs"),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF10B981),
-                      foregroundColor: Colors.white,
+                      backgroundColor: SoftPalette.emerald350,
+                      foregroundColor: SoftPalette.gray50,
                       elevation: 0,
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -3228,8 +3231,8 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                     icon: const Icon(Icons.delete_sweep_rounded, size: 16),
                     label: const Text("Delete Conflicted Registrations (Preserve History)"),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFE11D48),
-                      foregroundColor: Colors.white,
+                      backgroundColor: SoftPalette.red500,
+                      foregroundColor: SoftPalette.gray50,
                       elevation: 0,
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -3247,7 +3250,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
               ? Center(
                   child: Text(
                     "No conflict records match the selected filter.",
-                    style: TextStyle(color: Colors.grey.shade600),
+                    style: TextStyle(color: context.adapt(SoftPalette.gray500)),
                   ),
                 )
               : ListView.builder(
@@ -3288,8 +3291,8 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                                   height: 44,
                                   decoration: BoxDecoration(
                                     color: isChild
-                                        ? const Color(0xFFFEF3C7)
-                                        : const Color(0xFFDBEAFE),
+                                        ? context.adapt(SoftPalette.yellow100)
+                                        : context.adapt(SoftPalette.slate150),
                                     shape: BoxShape.circle,
                                   ),
                                   alignment: Alignment.center,
@@ -3320,8 +3323,8 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                             decoration: BoxDecoration(
                                               color: isChild
-                                                  ? const Color(0xFFFEF3C7)
-                                                  : const Color(0xFFDBEAFE),
+                                                  ? context.adapt(SoftPalette.yellow100)
+                                                  : context.adapt(SoftPalette.slate150),
                                               borderRadius: BorderRadius.circular(6),
                                             ),
                                             child: Text(
@@ -3330,8 +3333,8 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                                                 fontSize: 11,
                                                 fontWeight: FontWeight.bold,
                                                 color: isChild
-                                                    ? const Color(0xFF92400E)
-                                                    : const Color(0xFF1E40AF),
+                                                    ? context.adapt(SoftPalette.orange600)
+                                                    : context.adapt(SoftPalette.blue600),
                                               ),
                                             ),
                                           ),
@@ -3354,14 +3357,14 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                                       const SizedBox(height: 6),
                                       Row(
                                         children: [
-                                          Text("CNIC / Key: ", style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                                          Text("CNIC / Key: ", style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.gray500))),
                                           Text(
                                             cnic.isNotEmpty ? cnic : hiveKey,
                                             style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
                                           ),
                                           if (guardianCnic.isNotEmpty) ...[
                                             const SizedBox(width: 14),
-                                            Text("Guardian CNIC: ", style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                                            Text("Guardian CNIC: ", style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.gray500))),
                                             Text(
                                               guardianCnic,
                                               style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
@@ -3381,13 +3384,13 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                         decoration: BoxDecoration(
-                                          color: Colors.orange.shade50,
+                                          color: context.adapt(SoftPalette.amber100m),
                                           borderRadius: BorderRadius.circular(6),
-                                          border: Border.all(color: Colors.orange.shade200),
+                                          border: Border.all(color: context.adapt(SoftPalette.amber200)),
                                         ),
                                         child: Text(
                                           "⚠️ Raw Parent CNIC",
-                                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.orange.shade900),
+                                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: SoftPalette.orange400),
                                         ),
                                       ),
                                     if (hasCnicCollision) ...[
@@ -3395,13 +3398,13 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                         decoration: BoxDecoration(
-                                          color: Colors.purple.shade50,
+                                          color: context.adapt(SoftPalette.purple150m),
                                           borderRadius: BorderRadius.circular(6),
-                                          border: Border.all(color: Colors.purple.shade200),
+                                          border: Border.all(color: SoftPalette.purple350),
                                         ),
                                         child: Text(
                                           "⚡ CNIC Shared with Other Profile",
-                                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.purple.shade900),
+                                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.violet700)),
                                         ),
                                       ),
                                     ],
@@ -3422,18 +3425,18 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                                    color: SoftPalette.teal500.withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(6),
-                                    border: Border.all(color: const Color(0xFF0D9488).withValues(alpha: 0.3)),
+                                    border: Border.all(color: SoftPalette.teal500.withValues(alpha: 0.3)),
                                   ),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      const Icon(Icons.shield_outlined, size: 14, color: Color(0xFF0D9488)),
+                                      const Icon(Icons.shield_outlined, size: 14, color: SoftPalette.teal500),
                                       const SizedBox(width: 6),
                                       Text(
                                         "History Preserved: $linkedVisits Visits • $linkedPrescriptions Prescriptions",
-                                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Color(0xFF0D9488)),
+                                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: SoftPalette.teal500),
                                       ),
                                     ],
                                   ),
@@ -3444,7 +3447,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                                   const SizedBox(
                                     width: 20,
                                     height: 20,
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFE11D48)),
+                                    child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.red500),
                                   )
                                 else
                                   Row(
@@ -3455,8 +3458,8 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                                         icon: const Icon(Icons.delete_outline_rounded, size: 16),
                                         label: const Text("Delete Registration (Keep History)"),
                                         style: OutlinedButton.styleFrom(
-                                          foregroundColor: const Color(0xFFE11D48),
-                                          side: const BorderSide(color: Color(0xFFE11D48)),
+                                          foregroundColor: SoftPalette.red500,
+                                          side: const BorderSide(color: SoftPalette.red500),
                                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                         ),
@@ -3467,8 +3470,8 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                                         icon: const Icon(Icons.drive_file_rename_outline_rounded, size: 16),
                                         label: const Text("Migrate to Child ID"),
                                         style: ElevatedButton.styleFrom(
-                                          backgroundColor: const Color(0xFF10B981),
-                                          foregroundColor: Colors.white,
+                                          backgroundColor: SoftPalette.emerald350,
+                                          foregroundColor: SoftPalette.gray50,
                                           elevation: 0,
                                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -3541,7 +3544,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
               label: const Text("Scan Database for Duplicates"),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
+                foregroundColor: SoftPalette.gray50,
                 padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 18),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 elevation: 0,
@@ -3613,7 +3616,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
         // A-Z Horizontal Chip Bar
         Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: context.adapt(SoftPalette.gray50),
             border: Border(bottom: BorderSide(color: AppColors.gray200)),
           ),
           padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 24),
@@ -3660,14 +3663,14 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                                 letter,
                                 style: TextStyle(
                                   fontWeight: FontWeight.bold,
-                                  color: isSelected ? Colors.white : AppColors.gray800,
+                                  color: isSelected ? SoftPalette.gray50 : AppColors.gray800,
                                 ),
                               ),
                               const SizedBox(width: 6),
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                 decoration: BoxDecoration(
-                                  color: isSelected ? Colors.white.withValues(alpha: 0.2) : AppColors.gray300,
+                                  color: isSelected ? SoftPalette.gray50.withValues(alpha: 0.2) : AppColors.gray300,
                                   borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: Text(
@@ -3675,7 +3678,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                                   style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.bold,
-                                    color: isSelected ? Colors.white : AppColors.gray700,
+                                    color: isSelected ? SoftPalette.gray50 : AppColors.gray700,
                                   ),
                                 ),
                               ),
@@ -3765,10 +3768,10 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                       key: ValueKey("merged_$groupKey"),
                       margin: const EdgeInsets.only(bottom: 24),
                       elevation: 0,
-                      color: Colors.green.shade50,
+                      color: context.adapt(SoftPalette.green100m),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16),
-                        side: BorderSide(color: Colors.green.shade200, width: 1.5),
+                        side: BorderSide(color: SoftPalette.green300, width: 1.5),
                       ),
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 20.0),
@@ -3777,12 +3780,12 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                             Container(
                               padding: const EdgeInsets.all(8),
                               decoration: BoxDecoration(
-                                color: Colors.green.shade100,
+                                color: context.adapt(SoftPalette.green200),
                                 shape: BoxShape.circle,
                               ),
                               child: Icon(
                                 Icons.check_circle_rounded,
-                                color: Colors.green.shade700,
+                                color: SoftPalette.green500,
                                 size: 28,
                               ),
                             ),
@@ -3796,7 +3799,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                                     style: TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.bold,
-                                      color: Colors.green.shade900,
+                                      color: context.adapt(SoftPalette.green600),
                                     ),
                                   ),
                                   const SizedBox(height: 4),
@@ -3804,7 +3807,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                                     "Database references and prescriptions updated live.",
                                     style: TextStyle(
                                       fontSize: 12,
-                                      color: Colors.green.shade700,
+                                      color: SoftPalette.green500,
                                       fontWeight: FontWeight.w500,
                                     ),
                                   ),
@@ -3922,7 +3925,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                                     label: const Text("Merge Group Now"),
                                     style: ElevatedButton.styleFrom(
                                       backgroundColor: AppColors.primary,
-                                      foregroundColor: Colors.white,
+                                      foregroundColor: SoftPalette.gray50,
                                       elevation: 0,
                                       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -3971,7 +3974,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         decoration: BoxDecoration(
-          color: isSelected ? AppColors.primaryLight.withValues(alpha: 0.5) : Colors.white,
+          color: isSelected ? AppColors.primaryLight.withValues(alpha: 0.5) : context.adapt(SoftPalette.gray50),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(
             color: isSelected ? AppColors.primary : AppColors.gray200,
@@ -4028,10 +4031,10 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: idIsAuthoritative ? Colors.purple.shade50 : AppColors.gray100,
+                color: idIsAuthoritative ? context.adapt(SoftPalette.purple150m) : AppColors.gray100,
                 borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: idIsAuthoritative ? Colors.purple.shade200 : AppColors.gray300,
+                  color: idIsAuthoritative ? SoftPalette.purple350 : AppColors.gray300,
                 ),
               ),
               child: Row(
@@ -4039,7 +4042,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                   Icon(
                     idIsAuthoritative ? Icons.check_circle : Icons.help_outline,
                     size: 14,
-                    color: idIsAuthoritative ? Colors.purple.shade700 : AppColors.gray500,
+                    color: idIsAuthoritative ? context.adapt(SoftPalette.purple600) : AppColors.gray500,
                   ),
                   const SizedBox(width: 6),
                   Expanded(
@@ -4049,7 +4052,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                         fontFamily: 'monospace',
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
-                        color: idIsAuthoritative ? Colors.purple.shade800 : AppColors.gray800,
+                        color: idIsAuthoritative ? context.adapt(SoftPalette.purple600) : AppColors.gray800,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -4133,11 +4136,11 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
   Color _getStatusColor(String status) {
     switch (status.trim().toLowerCase()) {
       case 'zakat':
-        return const Color(0xFF1565C0);
+        return SoftPalette.blue550;
       case 'non-zakat':
-        return const Color(0xFF6A1B9A);
+        return SoftPalette.purple600;
       case 'gmwf':
-        return const Color(0xFF2E7D32);
+        return SoftPalette.green550;
       default:
         return AppColors.gray500;
     }
@@ -4169,7 +4172,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
           Expanded(
             child: Container(
               decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.05),
+                color: context.adapt(SoftPalette.gray900).withValues(alpha: 0.05),
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: AppColors.gray200),
               ),
@@ -4179,9 +4182,9 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                 itemBuilder: (context, index) {
                   final log = _logs[index];
                   Color textColor = AppColors.gray800;
-                  if (log.contains("❌")) textColor = Colors.red;
-                  if (log.contains("✨")) textColor = Colors.green;
-                  if (log.contains("🔧")) textColor = Colors.orange.shade700;
+                  if (log.contains("❌")) textColor = SoftPalette.red400;
+                  if (log.contains("✨")) textColor = SoftPalette.green400;
+                  if (log.contains("🔧")) textColor = SoftPalette.orange350;
                   return Padding(
                     padding: const EdgeInsets.only(bottom: 4),
                     child: Text(
@@ -4222,8 +4225,8 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                     _isProcessing ? "Processing..." : "Fix & Heal All Legacy Data",
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF10B981),
-                    foregroundColor: Colors.white,
+                    backgroundColor: SoftPalette.emerald350,
+                    foregroundColor: SoftPalette.gray50,
                     padding: const EdgeInsets.symmetric(vertical: 16),
                   ),
                 ),
@@ -4239,8 +4242,8 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
             ),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.red500,
+              foregroundColor: SoftPalette.gray50,
               padding: const EdgeInsets.symmetric(vertical: 16),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
@@ -4254,14 +4257,14 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: Colors.blue.shade50,
+        color: context.adapt(SoftPalette.slate100),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.blue.shade200),
+        border: Border.all(color: SoftPalette.sky300),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(Icons.info_outline, color: Colors.blue.shade700),
+          Icon(Icons.info_outline, color: SoftPalette.blue500),
           const SizedBox(width: 16),
           const Expanded(
             child: Text(
@@ -4331,7 +4334,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
               label: const Text("Scan Local Prescriptions"),
               style: ElevatedButton.styleFrom(
                 backgroundColor: AppColors.primary,
-                foregroundColor: Colors.white,
+                foregroundColor: SoftPalette.gray50,
                 padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 18),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                 elevation: 0,
@@ -4351,11 +4354,11 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
             children: [
               Container(
                 padding: const EdgeInsets.all(20),
-                decoration: const BoxDecoration(
-                  color: Color(0xFFE8F5E9),
+                decoration: BoxDecoration(
+                  color: context.adapt(SoftPalette.green100m),
                   shape: BoxShape.circle,
                 ),
-                child: const Icon(Icons.done_all_rounded, size: 64, color: Colors.green),
+                child: const Icon(Icons.done_all_rounded, size: 64, color: SoftPalette.green400),
               ),
               const SizedBox(height: 24),
               const Text(
@@ -4396,7 +4399,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
         // Prescription Summary Panel
         Container(
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: context.adapt(SoftPalette.gray50),
             border: Border(bottom: BorderSide(color: AppColors.gray200)),
           ),
           padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 24),
@@ -4427,8 +4430,8 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                     icon: const Icon(Icons.hub_rounded, size: 16),
                     label: const Text("Unify All Branches"),
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: const Color(0xFF0D9488),
-                      side: const BorderSide(color: Color(0xFF0D9488), width: 1.5),
+                      foregroundColor: SoftPalette.teal500,
+                      side: const BorderSide(color: SoftPalette.teal500, width: 1.5),
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
@@ -4440,7 +4443,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                     label: const Text("Bulk Merge & Clean All"),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
-                      foregroundColor: Colors.white,
+                      foregroundColor: SoftPalette.gray50,
                       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       elevation: 0,
@@ -4483,15 +4486,15 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
     IconData statusIcon;
 
     if (status == 'already_merged') {
-      statusColor = Colors.green;
+      statusColor = SoftPalette.green400;
       statusLabel = "Already Merged (Clean)";
       statusIcon = Icons.check_circle_outline;
     } else if (status == 'needs_merge') {
-      statusColor = Colors.orange;
+      statusColor = SoftPalette.amber300;
       statusLabel = "Needs Merge";
       statusIcon = Icons.sync;
     } else {
-      statusColor = Colors.red;
+      statusColor = SoftPalette.red400;
       statusLabel = "Orphaned (No Serial Visit)";
       statusIcon = Icons.warning_amber_rounded;
     }
@@ -4564,7 +4567,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
             ),
             const SizedBox(height: 8),
             if (medicines.isEmpty)
-              const Text("No medicines in this prescription.", style: TextStyle(fontSize: 12, color: Colors.grey))
+              const Text("No medicines in this prescription.", style: TextStyle(fontSize: 12, color: SoftPalette.gray350))
             else
               Wrap(
                 spacing: 8,
@@ -4598,15 +4601,15 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                     children: [
                       TextButton(
                         onPressed: () => _mergeAndCleanPrescription(key, forceRecreateSerial: false),
-                        style: TextButton.styleFrom(foregroundColor: Colors.red),
+                        style: TextButton.styleFrom(foregroundColor: SoftPalette.red400),
                         child: const Text("Delete Prescription Only"),
                       ),
                       const SizedBox(width: 12),
                       ElevatedButton(
                         onPressed: () => _mergeAndCleanPrescription(key, forceRecreateSerial: true),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green,
-                          foregroundColor: Colors.white,
+                          backgroundColor: SoftPalette.green400,
+                          foregroundColor: SoftPalette.gray50,
                           elevation: 0,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         ),
@@ -4619,7 +4622,7 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                     onPressed: () => _mergeAndCleanPrescription(key, forceRecreateSerial: false),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: AppColors.primary,
-                      foregroundColor: Colors.white,
+                      foregroundColor: SoftPalette.gray50,
                       elevation: 0,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
@@ -4629,8 +4632,8 @@ class _DataCleanupScreenState extends State<DataCleanupScreen> {
                   ElevatedButton(
                     onPressed: () => _mergeAndCleanPrescription(key, forceRecreateSerial: false),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green,
-                      foregroundColor: Colors.white,
+                      backgroundColor: SoftPalette.green400,
+                      foregroundColor: SoftPalette.gray50,
                       elevation: 0,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
@@ -4737,10 +4740,10 @@ class _PatientRepairPreviewModalState extends State<_PatientRepairPreviewModal> 
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF0D9488).withValues(alpha: 0.1),
+                    color: SoftPalette.teal500.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.fact_check_rounded, color: Color(0xFF0D9488), size: 28),
+                  child: const Icon(Icons.fact_check_rounded, color: SoftPalette.teal500, size: 28),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -4754,7 +4757,7 @@ class _PatientRepairPreviewModalState extends State<_PatientRepairPreviewModal> 
                       const SizedBox(height: 3),
                       Text(
                         "Review proposed individual IDs and schema updates before applying changes.",
-                        style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600),
+                        style: TextStyle(fontSize: 12.5, color: context.adapt(SoftPalette.gray500)),
                       ),
                     ],
                   ),
@@ -4810,17 +4813,17 @@ class _PatientRepairPreviewModalState extends State<_PatientRepairPreviewModal> 
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
-                color: const Color(0xFFF0FDF4),
+                color: context.adapt(SoftPalette.emerald50m),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFFBBF7D0)),
+                border: Border.all(color: context.adapt(SoftPalette.emerald150)),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.info_outline, size: 16, color: Color(0xFF16A34A)),
+                  const Icon(Icons.info_outline, size: 16, color: SoftPalette.green400),
                   const SizedBox(width: 8),
                   Text(
                     "Total Detected: ${_items.length} records  •  Selected for Fix: $_selectedCount records",
-                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF15803D)),
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.green550)),
                   ),
                 ],
               ),
@@ -4833,7 +4836,7 @@ class _PatientRepairPreviewModalState extends State<_PatientRepairPreviewModal> 
                   ? Center(
                       child: Text(
                         _searchQuery.isEmpty ? "No records require repair." : "No matching records found for '$_searchQuery'",
-                        style: TextStyle(color: Colors.grey.shade600),
+                        style: TextStyle(color: context.adapt(SoftPalette.gray500)),
                       ),
                     )
                   : ListView.builder(
@@ -4846,7 +4849,7 @@ class _PatientRepairPreviewModalState extends State<_PatientRepairPreviewModal> 
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10),
                             side: BorderSide(
-                              color: item.isSelected ? const Color(0xFF0D9488) : AppColors.gray200,
+                              color: item.isSelected ? SoftPalette.teal500 : AppColors.gray200,
                               width: item.isSelected ? 1.5 : 1.0,
                             ),
                           ),
@@ -4857,7 +4860,7 @@ class _PatientRepairPreviewModalState extends State<_PatientRepairPreviewModal> 
                               children: [
                                 Checkbox(
                                   value: item.isSelected,
-                                  activeColor: const Color(0xFF0D9488),
+                                  activeColor: SoftPalette.teal500,
                                   onChanged: (val) {
                                     setState(() {
                                       item.isSelected = val ?? false;
@@ -4896,12 +4899,12 @@ class _PatientRepairPreviewModalState extends State<_PatientRepairPreviewModal> 
                                           if (item.cnic.isNotEmpty)
                                             Text(
                                               "CNIC: ${item.cnic}  ",
-                                              style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                                              style: TextStyle(fontSize: 12, color: ctx.adapt(SoftPalette.gray550)),
                                             ),
                                           if (item.guardianCnic.isNotEmpty)
                                             Text(
                                               "Guardian: ${item.guardianCnic}  ",
-                                              style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+                                              style: TextStyle(fontSize: 12, color: ctx.adapt(SoftPalette.gray550)),
                                             ),
                                         ],
                                       ),
@@ -4918,23 +4921,23 @@ class _PatientRepairPreviewModalState extends State<_PatientRepairPreviewModal> 
                                             Expanded(
                                               child: Row(
                                                 children: [
-                                                  const Text("Current ID: ", style: TextStyle(fontSize: 11.5, color: Colors.grey)),
+                                                  const Text("Current ID: ", style: TextStyle(fontSize: 11.5, color: SoftPalette.gray350)),
                                                   Text(
                                                     item.currentPatientId,
-                                                    style: const TextStyle(fontSize: 11.5, color: Colors.red, fontWeight: FontWeight.bold),
+                                                    style: const TextStyle(fontSize: 11.5, color: SoftPalette.red400, fontWeight: FontWeight.bold),
                                                   ),
                                                 ],
                                               ),
                                             ),
-                                            const Icon(Icons.arrow_forward_rounded, size: 14, color: Colors.grey),
+                                            const Icon(Icons.arrow_forward_rounded, size: 14, color: SoftPalette.gray350),
                                             const SizedBox(width: 8),
                                             Expanded(
                                               child: Row(
                                                 children: [
-                                                  const Text("Proposed Clean ID: ", style: TextStyle(fontSize: 11.5, color: Colors.grey)),
+                                                  const Text("Proposed Clean ID: ", style: TextStyle(fontSize: 11.5, color: SoftPalette.gray350)),
                                                   Text(
                                                     item.proposedPatientId,
-                                                    style: const TextStyle(fontSize: 11.5, color: Color(0xFF0D9488), fontWeight: FontWeight.bold),
+                                                    style: const TextStyle(fontSize: 11.5, color: SoftPalette.teal500, fontWeight: FontWeight.bold),
                                                   ),
                                                 ],
                                               ),
@@ -4942,7 +4945,7 @@ class _PatientRepairPreviewModalState extends State<_PatientRepairPreviewModal> 
                                             Container(
                                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                               decoration: BoxDecoration(
-                                                color: item.proposedIsAdult ? const Color(0xFFDBEAFE) : const Color(0xFFFEF3C7),
+                                                color: item.proposedIsAdult ? ctx.adapt(SoftPalette.slate150) : ctx.adapt(SoftPalette.yellow100),
                                                 borderRadius: BorderRadius.circular(4),
                                               ),
                                               child: Text(
@@ -4950,7 +4953,7 @@ class _PatientRepairPreviewModalState extends State<_PatientRepairPreviewModal> 
                                                 style: TextStyle(
                                                   fontSize: 10.5,
                                                   fontWeight: FontWeight.bold,
-                                                  color: item.proposedIsAdult ? const Color(0xFF1E40AF) : const Color(0xFF92400E),
+                                                  color: item.proposedIsAdult ? ctx.adapt(SoftPalette.blue600) : ctx.adapt(SoftPalette.orange600),
                                                 ),
                                               ),
                                             ),
@@ -4989,8 +4992,8 @@ class _PatientRepairPreviewModalState extends State<_PatientRepairPreviewModal> 
                   icon: const Icon(Icons.check_circle_outline, size: 18),
                   label: Text("Apply Fixes to Selected ($_selectedCount)"),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF0D9488),
-                    foregroundColor: Colors.white,
+                    backgroundColor: SoftPalette.teal500,
+                    foregroundColor: SoftPalette.gray50,
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
@@ -5097,10 +5100,10 @@ class _SerialsDispensaryPreviewModalState extends State<_SerialsDispensaryPrevie
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF7C3AED).withValues(alpha: 0.1),
+                    color: SoftPalette.violet550.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(10),
                   ),
-                  child: const Icon(Icons.compare_arrows_rounded, color: Color(0xFF7C3AED), size: 28),
+                  child: Icon(Icons.compare_arrows_rounded, color: context.adapt(SoftPalette.violet550), size: 28),
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -5114,7 +5117,7 @@ class _SerialsDispensaryPreviewModalState extends State<_SerialsDispensaryPrevie
                       const SizedBox(height: 3),
                       Text(
                         "Review clinical data merges and legacy dispensary document cleanup before applying.",
-                        style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600),
+                        style: TextStyle(fontSize: 12.5, color: context.adapt(SoftPalette.gray500)),
                       ),
                     ],
                   ),
@@ -5170,17 +5173,17 @@ class _SerialsDispensaryPreviewModalState extends State<_SerialsDispensaryPrevie
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
               decoration: BoxDecoration(
-                color: const Color(0xFFF5F3FF),
+                color: context.adapt(SoftPalette.violet100m),
                 borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: const Color(0xFFDDD6FE)),
+                border: Border.all(color: context.adapt(SoftPalette.violet200)),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.info_outline, size: 16, color: Color(0xFF7C3AED)),
+                  Icon(Icons.info_outline, size: 16, color: context.adapt(SoftPalette.violet550)),
                   const SizedBox(width: 8),
                   Text(
                     "Total Discrepancies: ${_items.length} records  •  Selected to Fix: $_selectedCount records",
-                    style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: Color(0xFF6D28D9)),
+                    style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.violet550)),
                   ),
                 ],
               ),
@@ -5193,7 +5196,7 @@ class _SerialsDispensaryPreviewModalState extends State<_SerialsDispensaryPrevie
                   ? Center(
                       child: Text(
                         _searchQuery.isEmpty ? "No discrepancies found." : "No matching records found for '$_searchQuery'",
-                        style: TextStyle(color: Colors.grey.shade600),
+                        style: TextStyle(color: context.adapt(SoftPalette.gray500)),
                       ),
                     )
                   : ListView.builder(
@@ -5206,7 +5209,7 @@ class _SerialsDispensaryPreviewModalState extends State<_SerialsDispensaryPrevie
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(10),
                             side: BorderSide(
-                              color: item.isSelected ? const Color(0xFF7C3AED) : AppColors.gray200,
+                              color: item.isSelected ? ctx.adapt(SoftPalette.violet550) : AppColors.gray200,
                               width: item.isSelected ? 1.5 : 1.0,
                             ),
                           ),
@@ -5217,7 +5220,7 @@ class _SerialsDispensaryPreviewModalState extends State<_SerialsDispensaryPrevie
                               children: [
                                 Checkbox(
                                   value: item.isSelected,
-                                  activeColor: const Color(0xFF7C3AED),
+                                  activeColor: SoftPalette.violet550,
                                   onChanged: (val) {
                                     setState(() {
                                       item.isSelected = val ?? false;
@@ -5253,7 +5256,7 @@ class _SerialsDispensaryPreviewModalState extends State<_SerialsDispensaryPrevie
                                       const SizedBox(height: 4),
                                       Text(
                                         "Patient: ${item.patientName}",
-                                        style: TextStyle(fontSize: 12.5, color: Colors.grey.shade700),
+                                        style: TextStyle(fontSize: 12.5, color: ctx.adapt(SoftPalette.gray550)),
                                       ),
                                       const SizedBox(height: 8),
                                       // Diff / Action Box
@@ -5268,27 +5271,27 @@ class _SerialsDispensaryPreviewModalState extends State<_SerialsDispensaryPrevie
                                             Expanded(
                                               child: Row(
                                                 children: [
-                                                  const Text("Current Status: ", style: TextStyle(fontSize: 11.5, color: Colors.grey)),
+                                                  const Text("Current Status: ", style: TextStyle(fontSize: 11.5, color: SoftPalette.gray350)),
                                                   Text(
                                                     item.currentStatus,
                                                     style: TextStyle(
                                                       fontSize: 11.5,
-                                                      color: item.currentStatus == 'dispensed' ? Colors.green : Colors.orange.shade800,
+                                                      color: item.currentStatus == 'dispensed' ? SoftPalette.green400 : SoftPalette.orange400,
                                                       fontWeight: FontWeight.bold,
                                                     ),
                                                   ),
                                                 ],
                                               ),
                                             ),
-                                            const Icon(Icons.arrow_forward_rounded, size: 14, color: Colors.grey),
+                                            const Icon(Icons.arrow_forward_rounded, size: 14, color: SoftPalette.gray350),
                                             const SizedBox(width: 8),
                                             Expanded(
                                               child: Row(
                                                 children: [
-                                                  const Text("Target Status: ", style: TextStyle(fontSize: 11.5, color: Colors.grey)),
+                                                  const Text("Target Status: ", style: TextStyle(fontSize: 11.5, color: SoftPalette.gray350)),
                                                   Text(
                                                     item.proposedStatus,
-                                                    style: const TextStyle(fontSize: 11.5, color: Color(0xFF7C3AED), fontWeight: FontWeight.bold),
+                                                    style: TextStyle(fontSize: 11.5, color: ctx.adapt(SoftPalette.violet550), fontWeight: FontWeight.bold),
                                                   ),
                                                 ],
                                               ),
@@ -5297,15 +5300,15 @@ class _SerialsDispensaryPreviewModalState extends State<_SerialsDispensaryPrevie
                                               Container(
                                                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                                 decoration: BoxDecoration(
-                                                  color: const Color(0xFFD1FAE5),
+                                                  color: ctx.adapt(SoftPalette.emerald100),
                                                   borderRadius: BorderRadius.circular(4),
                                                 ),
-                                                child: const Text(
+                                                child: Text(
                                                   "+ Prescription",
                                                   style: TextStyle(
                                                     fontSize: 10.5,
                                                     fontWeight: FontWeight.bold,
-                                                    color: Color(0xFF065F46),
+                                                    color: ctx.adapt(SoftPalette.emerald600),
                                                   ),
                                                 ),
                                               ),
@@ -5344,8 +5347,8 @@ class _SerialsDispensaryPreviewModalState extends State<_SerialsDispensaryPrevie
                   icon: const Icon(Icons.check_circle_outline, size: 18),
                   label: Text("Apply Reconciliation to Selected ($_selectedCount)"),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF7C3AED),
-                    foregroundColor: Colors.white,
+                    backgroundColor: SoftPalette.violet550,
+                    foregroundColor: SoftPalette.gray50,
                     padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),

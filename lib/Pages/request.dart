@@ -1,4 +1,6 @@
+import 'package:gmwf/services/cloud/cloud_db.dart';
 import 'dart:async';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -31,27 +33,27 @@ class RequestUtils {
   }
 
   static Color getBadgeColor(String type, {bool isDark = false}) => switch (type) {
-        'dispense'            => isDark ? const Color(0xFF0F766E).withValues(alpha: 0.35) : Colors.teal.shade100,
-        'add_stock'           => isDark ? const Color(0xFF0F766E).withValues(alpha: 0.35) : Colors.teal.shade100,
-        'change_prescription' => isDark ? const Color(0xFF0F766E).withValues(alpha: 0.35) : Colors.teal.shade100,
-        'token_reversal'      => isDark ? const Color(0xFF991B1B).withValues(alpha: 0.35) : Colors.red.shade100,
-        'edit_medicine'       => isDark ? const Color(0xFF0F766E).withValues(alpha: 0.35) : Colors.teal.shade100,
-        'delete_medicine'     => isDark ? const Color(0xFF991B1B).withValues(alpha: 0.35) : Colors.red.shade100,
-        'patient_edit'        => isDark ? const Color(0xFF854D0E).withValues(alpha: 0.35) : Colors.yellow.shade100,
-        'token_exception'     => isDark ? const Color(0xFF9A3412).withValues(alpha: 0.35) : Colors.orange.shade100,
-        _                     => isDark ? const Color(0xFF334155) : Colors.grey.shade300,
+        'dispense'            => isDark ? SoftPalette.teal550.withValues(alpha: 0.35) : SoftPalette.teal200,
+        'add_stock'           => isDark ? SoftPalette.teal550.withValues(alpha: 0.35) : SoftPalette.teal200,
+        'change_prescription' => isDark ? SoftPalette.teal550.withValues(alpha: 0.35) : SoftPalette.teal200,
+        'token_reversal'      => isDark ? SoftPalette.red600.withValues(alpha: 0.35) : SoftPalette.red200,
+        'edit_medicine'       => isDark ? SoftPalette.teal550.withValues(alpha: 0.35) : SoftPalette.teal200,
+        'delete_medicine'     => isDark ? SoftPalette.red600.withValues(alpha: 0.35) : SoftPalette.red200,
+        'patient_edit'        => isDark ? SoftPalette.orange600.withValues(alpha: 0.35) : SoftPalette.yellow100,
+        'token_exception'     => isDark ? SoftPalette.red600.withValues(alpha: 0.35) : SoftPalette.amber150,
+        _                     => isDark ? SoftPalette.slate700 : SoftPalette.gray150,
       };
 
   static Color getTextColor(String type, {bool isDark = false}) => switch (type) {
-        'dispense'            => isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade800,
-        'add_stock'           => isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade800,
-        'change_prescription' => isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade800,
-        'token_reversal'      => isDark ? const Color(0xFFFCA5A5) : Colors.red.shade800,
-        'edit_medicine'       => isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade800,
-        'delete_medicine'     => isDark ? const Color(0xFFFCA5A5) : Colors.red.shade800,
-        'patient_edit'        => isDark ? const Color(0xFFFDE047) : Colors.yellow.shade900,
-        'token_exception'     => isDark ? const Color(0xFFFDBA74) : Colors.orange.shade800,
-        _                     => isDark ? Colors.grey.shade300 : Colors.grey.shade800,
+        'dispense'            => isDark ? SoftPalette.teal200 : SoftPalette.teal600,
+        'add_stock'           => isDark ? SoftPalette.teal200 : SoftPalette.teal600,
+        'change_prescription' => isDark ? SoftPalette.teal200 : SoftPalette.teal600,
+        'token_reversal'      => isDark ? SoftPalette.red300 : SoftPalette.red550,
+        'edit_medicine'       => isDark ? SoftPalette.teal200 : SoftPalette.teal600,
+        'delete_medicine'     => isDark ? SoftPalette.red300 : SoftPalette.red550,
+        'patient_edit'        => isDark ? SoftPalette.yellow150 : SoftPalette.orange350,
+        'token_exception'     => isDark ? SoftPalette.amber200 : SoftPalette.orange400,
+        _                     => isDark ? SoftPalette.gray150 : SoftPalette.gray700,
       };
 
   static String resolveRequestCampName(Map<String, dynamic> data, [String defaultBranch = 'karachi']) {
@@ -259,16 +261,16 @@ class _RequestPageState extends State<RequestPage>
       appBar: AppBar(
         automaticallyImplyLeading: !isWrapped,
         toolbarHeight: isWrapped ? 0 : kToolbarHeight,
-        backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.teal.shade800,
-        foregroundColor: Colors.white,
+        backgroundColor: isDark ? SoftPalette.slate900 : SoftPalette.teal600,
+        foregroundColor: SoftPalette.gray50,
         elevation: 0,
         title: isWrapped ? null : const Text('Requests',
             style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
         bottom: TabBar(
           controller: _tabCtrl,
-          indicatorColor: isDark ? const Color(0xFF2DD4BF) : Colors.white,
-          labelColor: isDark ? const Color(0xFF2DD4BF) : Colors.white,
-          unselectedLabelColor: Colors.white70,
+          indicatorColor: isDark ? SoftPalette.teal300 : SoftPalette.gray50,
+          labelColor: isDark ? SoftPalette.teal300 : SoftPalette.gray50,
+          unselectedLabelColor: SoftPalette.gray50A70,
           tabs: const [
             Tab(text: 'Pending', icon: Icon(Icons.pending_actions)),
             Tab(text: 'Approved', icon: Icon(Icons.check_circle)),
@@ -587,7 +589,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
 
     if (!Hive.isBoxOpen('local_edit_requests')) {
       return const Center(
-          child: CircularProgressIndicator(color: Colors.teal));
+          child: CircularProgressIndicator(color: SoftPalette.teal500));
     }
 
     final editBox = Hive.box('local_edit_requests');
@@ -682,19 +684,19 @@ class _StableRequestTabState extends State<_StableRequestTab>
           _toastShownForPending = true;
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
+              AppToast.showSnackBar(context, 
                 SnackBar(
                   behavior: SnackBarBehavior.floating,
-                  backgroundColor: const Color(0xFF0F766E),
+                  backgroundColor: SoftPalette.teal550,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   content: Row(
                     children: [
-                      const Icon(Icons.notifications_active_rounded, color: Color(0xFF2DD4BF), size: 20),
+                      const Icon(Icons.notifications_active_rounded, color: SoftPalette.teal300, size: 20),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
                           'You have ${eligibleDocs.length} pending request${eligibleDocs.length > 1 ? "s" : ""} awaiting your approval',
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                          style: const TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 13),
                         ),
                       ),
                     ],
@@ -718,7 +720,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                           ? Icons.check_circle_outline
                           : Icons.cancel_outlined,
                   size: 80,
-                  color: Colors.teal.shade600,
+                  color: SoftPalette.teal500,
                 ),
                 const SizedBox(height: 16),
                 Text(
@@ -728,7 +730,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                           ? 'No Approved Requests'
                           : 'No Rejected Requests',
                   style: const TextStyle(
-                      color: Colors.teal,
+                      color: SoftPalette.teal500,
                       fontSize: 20,
                       fontWeight: FontWeight.bold),
                 ),
@@ -744,7 +746,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
             await _syncFromFirestore();
             if (mounted) setState(() {});
           },
-          color: Colors.teal,
+          color: SoftPalette.teal500,
           child: Column(
             children: [
               if (widget.status == 'pending' && canApproveAny) ...[
@@ -755,17 +757,17 @@ class _StableRequestTabState extends State<_StableRequestTab>
                     margin: const EdgeInsets.fromLTRB(12, 12, 12, 4),
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF134E4A).withValues(alpha: 0.4) : Colors.teal.shade50,
+                      color: isDark ? SoftPalette.teal700.withValues(alpha: 0.4) : SoftPalette.teal100m,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: isDark ? const Color(0xFF0D9488) : Colors.teal.shade200,
+                        color: isDark ? SoftPalette.teal500 : SoftPalette.teal300,
                         width: 1,
                       ),
                     ),
                     child: Row(
                       children: [
                         Icon(Icons.pending_actions_rounded,
-                            color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800, size: 20),
+                            color: isDark ? SoftPalette.teal300 : SoftPalette.teal600, size: 20),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -775,7 +777,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                             style: TextStyle(
                               fontSize: 14,
                               fontWeight: FontWeight.bold,
-                              color: isDark ? Colors.white : Colors.teal.shade900,
+                              color: isDark ? SoftPalette.gray50 : SoftPalette.teal700,
                             ),
                           ),
                         ),
@@ -785,7 +787,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                                 ? const SizedBox(
                                     width: 14,
                                     height: 14,
-                                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                    child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50),
                                   )
                                 : const Icon(Icons.done_all_rounded, size: 16),
                             label: Text(
@@ -793,8 +795,8 @@ class _StableRequestTabState extends State<_StableRequestTab>
                               style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
                             ),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: isDark ? const Color(0xFF0F766E) : Colors.teal.shade700,
-                              foregroundColor: Colors.white,
+                              backgroundColor: isDark ? SoftPalette.teal550 : SoftPalette.teal550,
+                              foregroundColor: SoftPalette.gray50,
                               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                               elevation: 2,
@@ -870,12 +872,12 @@ class _StableRequestTabState extends State<_StableRequestTab>
       final campLabel = RequestUtils.resolveRequestCampName(data, widget.branchId);
 
       return Card(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         elevation: widget.status == 'pending' ? (isDark ? 3 : 5) : 1,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
           side: BorderSide(
-            color: isDark ? const Color(0xFF334155) : const Color(0xFFCCFBF1),
+            color: isDark ? SoftPalette.slate700 : SoftPalette.teal100,
             width: 1,
           ),
         ),
@@ -891,30 +893,30 @@ class _StableRequestTabState extends State<_StableRequestTab>
                     style: TextStyle(
                       fontSize: 17,
                       fontWeight: FontWeight.bold,
-                      color: isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade800,
+                      color: isDark ? SoftPalette.teal200 : SoftPalette.teal600,
                     ),
                   ),
                 ),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF0284C7).withValues(alpha: 0.25) : const Color(0xFFE0F2FE),
+                    color: isDark ? SoftPalette.sky500.withValues(alpha: 0.25) : SoftPalette.slate100,
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: isDark ? const Color(0xFF38BDF8).withValues(alpha: 0.4) : const Color(0xFFBAE6FD),
+                      color: isDark ? SoftPalette.sky350.withValues(alpha: 0.4) : SoftPalette.slate150,
                     ),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.holiday_village_rounded, size: 14, color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0369A1)),
+                      Icon(Icons.holiday_village_rounded, size: 14, color: isDark ? SoftPalette.sky350 : SoftPalette.sky550),
                       const SizedBox(width: 5),
                       Text(
                         campLabel.toUpperCase(),
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
-                          color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0369A1),
+                          color: isDark ? SoftPalette.sky350 : SoftPalette.sky550,
                           letterSpacing: 0.4,
                         ),
                       ),
@@ -947,23 +949,23 @@ class _StableRequestTabState extends State<_StableRequestTab>
               ]),
               const SizedBox(height: 10),
               Row(children: [
-                Icon(Icons.person_rounded, size: 16, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
+                Icon(Icons.person_rounded, size: 16, color: isDark ? SoftPalette.teal300 : SoftPalette.teal600),
                 const SizedBox(width: 8),
                 Text(
                   'By: $name',
-                  style: TextStyle(fontSize: 13.5, color: isDark ? Colors.white70 : Colors.black87),
+                  style: TextStyle(fontSize: 13.5, color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
                 ),
               ]),
               const SizedBox(height: 4),
               Row(children: [
-                Icon(Icons.location_on_rounded, size: 16, color: isDark ? const Color(0xFF38BDF8) : Colors.teal.shade800),
+                Icon(Icons.location_on_rounded, size: 16, color: isDark ? SoftPalette.sky350 : SoftPalette.teal600),
                 const SizedBox(width: 8),
                 Expanded(
                   child: RichText(
                     text: TextSpan(
                       style: TextStyle(
                         fontSize: 13,
-                        color: isDark ? Colors.white70 : Colors.black87,
+                        color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87,
                       ),
                       children: [
                         const TextSpan(text: 'Facility Camp: '),
@@ -971,12 +973,12 @@ class _StableRequestTabState extends State<_StableRequestTab>
                           text: campLabel,
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            color: isDark ? const Color(0xFF38BDF8) : Colors.teal.shade900,
+                            color: isDark ? SoftPalette.sky350 : SoftPalette.teal700,
                           ),
                         ),
                         TextSpan(
                           text: ' (${(data['branchId'] ?? widget.branchId).toString().toUpperCase()})',
-                          style: TextStyle(fontSize: 11.5, color: isDark ? Colors.white38 : Colors.grey.shade600),
+                          style: TextStyle(fontSize: 11.5, color: isDark ? SoftPalette.gray50A38 : SoftPalette.gray500),
                         ),
                       ],
                     ),
@@ -986,24 +988,24 @@ class _StableRequestTabState extends State<_StableRequestTab>
               if (ts != null) ...[
                 const SizedBox(height: 4),
                 Row(children: [
-                  Icon(Icons.schedule_rounded, size: 14, color: isDark ? Colors.white38 : Colors.black38),
+                  Icon(Icons.schedule_rounded, size: 14, color: isDark ? SoftPalette.gray50A38 : SoftPalette.gray900A38),
                   const SizedBox(width: 6),
                   Text(
                     'Requested: ${DateFormat('dd MMM yyyy, hh:mm a').format(ts.toDate())}',
-                    style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.black54),
+                    style: TextStyle(fontSize: 12, color: isDark ? SoftPalette.gray50A54 : SoftPalette.gray900A54),
                   ),
                 ]),
               ],
               if (widget.status == 'approved') ...[
                 const SizedBox(height: 6),
                 Row(children: [
-                  Icon(Icons.verified_user_rounded, size: 14, color: isDark ? const Color(0xFF34D399) : Colors.teal.shade700),
+                  Icon(Icons.verified_user_rounded, size: 14, color: isDark ? SoftPalette.emerald300 : SoftPalette.teal550),
                   const SizedBox(width: 6),
                   Text(
                     'Approved by: ${approverName ?? 'Doctor'}',
                     style: TextStyle(
                       fontSize: 12, 
-                      color: isDark ? const Color(0xFF34D399) : Colors.teal.shade700, 
+                      color: isDark ? SoftPalette.emerald300 : SoftPalette.teal550, 
                       fontWeight: FontWeight.bold
                     ),
                   ),
@@ -1012,13 +1014,13 @@ class _StableRequestTabState extends State<_StableRequestTab>
               if (widget.status == 'rejected') ...[
                 const SizedBox(height: 6),
                 Row(children: [
-                  Icon(Icons.remove_circle_rounded, size: 14, color: isDark ? const Color(0xFFF87171) : Colors.red.shade700),
+                  Icon(Icons.remove_circle_rounded, size: 14, color: isDark ? SoftPalette.red350 : SoftPalette.red500),
                   const SizedBox(width: 6),
                   Text(
                     'Rejected by: ${approverName ?? 'Doctor'}',
                     style: TextStyle(
                       fontSize: 12, 
-                      color: isDark ? const Color(0xFFF87171) : Colors.red.shade700, 
+                      color: isDark ? SoftPalette.red350 : SoftPalette.red500, 
                       fontWeight: FontWeight.bold
                     ),
                   ),
@@ -1031,7 +1033,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                   style: TextStyle(
                     fontSize: 13.5,
                     fontWeight: FontWeight.bold,
-                    color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800,
+                    color: isDark ? SoftPalette.teal300 : SoftPalette.teal600,
                   ),
                 ),
               ],
@@ -1053,9 +1055,9 @@ class _StableRequestTabState extends State<_StableRequestTab>
                   width: double.infinity,
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                    color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                    border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1065,7 +1067,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                         style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.bold,
-                          color: isDark ? Colors.white60 : Colors.black54,
+                          color: isDark ? SoftPalette.gray50A60 : SoftPalette.gray900A54,
                         ),
                       ),
                       const SizedBox(height: 2),
@@ -1073,7 +1075,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                         reason,
                         style: TextStyle(
                           fontSize: 13,
-                          color: isDark ? Colors.white : Colors.black87,
+                          color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87,
                         ),
                       ),
                     ],
@@ -1086,9 +1088,9 @@ class _StableRequestTabState extends State<_StableRequestTab>
                   width: double.infinity,
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF134E4A).withValues(alpha: 0.3) : Colors.teal.shade50,
+                    color: isDark ? SoftPalette.teal700.withValues(alpha: 0.3) : SoftPalette.teal100m,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: isDark ? const Color(0xFF0D9488) : Colors.teal.shade200),
+                    border: Border.all(color: isDark ? SoftPalette.teal500 : SoftPalette.teal300),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1098,7 +1100,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                         style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.bold,
-                          color: isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade900,
+                          color: isDark ? SoftPalette.teal200 : SoftPalette.teal700,
                         ),
                       ),
                       const SizedBox(height: 2),
@@ -1107,7 +1109,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                         style: TextStyle(
                           fontSize: 13,
                           fontWeight: FontWeight.w600,
-                          color: isDark ? Colors.white : Colors.teal.shade800,
+                          color: isDark ? SoftPalette.gray50 : SoftPalette.teal600,
                         ),
                       ),
                     ],
@@ -1122,8 +1124,8 @@ class _StableRequestTabState extends State<_StableRequestTab>
                     children: [
                       OutlinedButton(
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: Colors.red.shade400,
-                          side: BorderSide(color: Colors.red.shade400),
+                          foregroundColor: SoftPalette.red400,
+                          side: BorderSide(color: SoftPalette.red400),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         ),
@@ -1134,8 +1136,8 @@ class _StableRequestTabState extends State<_StableRequestTab>
                       const SizedBox(width: 12),
                       ElevatedButton(
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: isDark ? const Color(0xFF0F766E) : Colors.teal.shade700,
-                          foregroundColor: Colors.white,
+                          backgroundColor: isDark ? SoftPalette.teal550 : SoftPalette.teal550,
+                          foregroundColor: SoftPalette.gray50,
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
                           elevation: 1,
@@ -1153,9 +1155,9 @@ class _StableRequestTabState extends State<_StableRequestTab>
                     alignment: Alignment.centerRight,
                     child: Chip(
                       label: const Text('PENDING APPROVAL'),
-                      backgroundColor: isDark ? const Color(0xFF78350F).withValues(alpha: 0.4) : Colors.orange.withValues(alpha: 0.1),
+                      backgroundColor: isDark ? SoftPalette.orange700.withValues(alpha: 0.4) : SoftPalette.amber300.withValues(alpha: 0.1),
                       labelStyle: TextStyle(
-                          color: isDark ? const Color(0xFFFDBA74) : Colors.orange.shade800,
+                          color: isDark ? SoftPalette.amber200 : SoftPalette.orange400,
                           fontWeight: FontWeight.bold,
                           fontSize: 10),
                     ),
@@ -1166,12 +1168,12 @@ class _StableRequestTabState extends State<_StableRequestTab>
                   child: Chip(
                     label: Text(widget.status.toUpperCase()),
                     backgroundColor: widget.status == 'approved' 
-                        ? (isDark ? const Color(0xFF064E3B) : Colors.teal.withValues(alpha: 0.15))
-                        : (isDark ? const Color(0xFF7F1D1D) : Colors.red.withValues(alpha: 0.1)),
+                        ? (isDark ? SoftPalette.emerald700 : SoftPalette.teal500.withValues(alpha: 0.15))
+                        : (isDark ? SoftPalette.red700 : SoftPalette.red400.withValues(alpha: 0.1)),
                     labelStyle: TextStyle(
                         color: widget.status == 'approved' 
-                            ? (isDark ? const Color(0xFF6EE7B7) : Colors.teal.shade800)
-                            : (isDark ? const Color(0xFFFCA5A5) : Colors.red.shade800),
+                            ? (isDark ? SoftPalette.emerald200 : SoftPalette.teal600)
+                            : (isDark ? SoftPalette.red300 : SoftPalette.red550),
                         fontWeight: FontWeight.bold),
                   ),
                 ),
@@ -1182,24 +1184,24 @@ class _StableRequestTabState extends State<_StableRequestTab>
     } catch (e, stack) {
       debugPrint('[RequestCard Error] ${doc.id}: $e\n$stack');
       return Card(
-        color: Colors.red.shade50,
+        color: context.adapt(SoftPalette.pink100m),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
-          side: BorderSide(color: Colors.red.shade200),
+          side: BorderSide(color: SoftPalette.red300),
         ),
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: Row(
             children: [
-              const Icon(Icons.error_outline_rounded, color: Colors.red, size: 24),
+              const Icon(Icons.error_outline_rounded, color: SoftPalette.red400, size: 24),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Could not display request (${doc.id})', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.red, fontSize: 13)),
+                    Text('Could not display request (${doc.id})', style: const TextStyle(fontWeight: FontWeight.bold, color: SoftPalette.red400, fontSize: 13)),
                     const SizedBox(height: 2),
-                    Text('$e', style: TextStyle(fontSize: 11, color: Colors.red.shade900)),
+                    Text('$e', style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.red550))),
                   ],
                 ),
               ),
@@ -1230,14 +1232,14 @@ class _StableRequestTabState extends State<_StableRequestTab>
     final canEdit = widget.status == 'pending';
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+        color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+        border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
       ),
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
         child: DataTable(
-          headingRowColor: WidgetStateProperty.all(isDark ? const Color(0xFF1E293B) : Colors.teal.shade50),
+          headingRowColor: WidgetStateProperty.all(isDark ? SoftPalette.slate800 : SoftPalette.teal100m),
           columns: const [
             DataColumn(label: Text('Formula', style: TextStyle(fontWeight: FontWeight.bold))),
             DataColumn(label: Text('Type', style: TextStyle(fontWeight: FontWeight.bold))),
@@ -1250,20 +1252,20 @@ class _StableRequestTabState extends State<_StableRequestTab>
           rows: List<DataRow>.generate(items.length, (index) {
             final m = items[index];
             return DataRow(cells: [
-              DataCell(Text(m['name']?.toString() ?? '', style: TextStyle(color: isDark ? Colors.white : Colors.black87))),
+              DataCell(Text(m['name']?.toString() ?? '', style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87))),
               DataCell(Row(children: [
                 _typeIcon(m['type']),
                 const SizedBox(width: 6),
-                Text(m['type']?.toString() ?? '', style: TextStyle(color: isDark ? Colors.white70 : Colors.black87))
+                Text(m['type']?.toString() ?? '', style: TextStyle(color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87))
               ])),
-              DataCell(Text(m['dose']?.toString() ?? '', style: TextStyle(color: isDark ? Colors.white70 : Colors.black87))),
-              DataCell(Text('${m['quantity'] ?? 0}', style: TextStyle(color: isDark ? Colors.white70 : Colors.black87))),
-              DataCell(Text('PKR ${m['price'] ?? 0}', style: TextStyle(color: isDark ? Colors.white70 : Colors.black87))),
-              DataCell(Text(_formatDate(m['expiryDate']), style: TextStyle(color: isDark ? Colors.white70 : Colors.black87))),
+              DataCell(Text(m['dose']?.toString() ?? '', style: TextStyle(color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87))),
+              DataCell(Text('${m['quantity'] ?? 0}', style: TextStyle(color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87))),
+              DataCell(Text('PKR ${m['price'] ?? 0}', style: TextStyle(color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87))),
+              DataCell(Text(_formatDate(m['expiryDate']), style: TextStyle(color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87))),
               DataCell(
                 canEdit
                     ? IconButton(
-                        icon: Icon(Icons.edit_outlined, size: 18, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
+                        icon: Icon(Icons.edit_outlined, size: 18, color: isDark ? SoftPalette.teal300 : SoftPalette.teal600),
                         onPressed: () =>
                             _showEditItemDialog(requestId, index, m),
                       )
@@ -1299,9 +1301,9 @@ class _StableRequestTabState extends State<_StableRequestTab>
             margin: const EdgeInsets.symmetric(vertical: 3),
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+              color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+              border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
             ),
             child: Row(children: [
               _typeIcon(type),
@@ -1309,7 +1311,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
               Expanded(
                 child: RichText(
                   text: TextSpan(
-                    style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                    style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
                     children: [
                       TextSpan(
                           text: '$name ($type$dose) × $qty',
@@ -1318,7 +1320,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                       TextSpan(
                           text: '\nPKR $price | $expiry',
                           style: TextStyle(
-                              fontSize: 12, color: isDark ? Colors.white54 : Colors.black54)),
+                              fontSize: 12, color: isDark ? SoftPalette.gray50A54 : SoftPalette.gray900A54)),
                     ],
                   ),
                 ),
@@ -1326,7 +1328,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
               canEdit
                   ? IconButton(
                       icon: Icon(Icons.edit_outlined,
-                          size: 18, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
+                          size: 18, color: isDark ? SoftPalette.teal300 : SoftPalette.teal600),
                       onPressed: () =>
                           _showEditItemDialog(requestId, index, m),
                     )
@@ -1350,7 +1352,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
       'Nebulization' => FontAwesomeIcons.cloud,
       _             => FontAwesomeIcons.pills,
     };
-    return Icon(icon, size: 16, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800);
+    return Icon(icon, size: 16, color: isDark ? SoftPalette.teal300 : SoftPalette.teal600);
   }
 
   Widget _buildPatientChanges(
@@ -1454,10 +1456,10 @@ class _StableRequestTabState extends State<_StableRequestTab>
 
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+        color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+          color: isDark ? SoftPalette.slate700 : SoftPalette.slate150,
           width: 1,
         ),
       ),
@@ -1468,14 +1470,14 @@ class _StableRequestTabState extends State<_StableRequestTab>
           Row(
             children: [
               Icon(Icons.compare_arrows_rounded,
-                  size: 18, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
+                  size: 18, color: isDark ? SoftPalette.teal300 : SoftPalette.teal600),
               const SizedBox(width: 6),
               Text(
                 'Patient Data Comparison',
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 13.5,
-                  color: isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade900,
+                  color: isDark ? SoftPalette.teal200 : SoftPalette.teal700,
                 ),
               ),
             ],
@@ -1489,7 +1491,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                 dataRowMinHeight: 32,
                 dataRowMaxHeight: 48,
                 headingRowColor: WidgetStateProperty.all(
-                  isDark ? const Color(0xFF1E293B) : Colors.teal.shade50,
+                  isDark ? SoftPalette.slate800 : SoftPalette.teal100m,
                 ),
                 columns: [
                   DataColumn(
@@ -1498,7 +1500,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 12.5,
-                        color: isDark ? Colors.white : Colors.teal.shade900,
+                        color: isDark ? SoftPalette.gray50 : SoftPalette.teal700,
                       ),
                     ),
                   ),
@@ -1508,7 +1510,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 12.5,
-                        color: isDark ? Colors.white : Colors.teal.shade900,
+                        color: isDark ? SoftPalette.gray50 : SoftPalette.teal700,
                       ),
                     ),
                   ),
@@ -1518,7 +1520,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 12.5,
-                        color: isDark ? Colors.white : Colors.teal.shade900,
+                        color: isDark ? SoftPalette.gray50 : SoftPalette.teal700,
                       ),
                     ),
                   ),
@@ -1535,16 +1537,16 @@ class _StableRequestTabState extends State<_StableRequestTab>
                         style: TextStyle(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w600,
-                          color: isDark ? Colors.white70 : Colors.black87,
+                          color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87,
                         ),
                       )),
                       DataCell(Text(
                         oldVal,
                         style: TextStyle(
                           fontSize: 12.5,
-                          color: isDark ? Colors.white60 : Colors.black87,
+                          color: isDark ? SoftPalette.gray50A60 : SoftPalette.gray900A87,
                           decoration: isChanged ? TextDecoration.lineThrough : null,
-                          decorationColor: Colors.red.shade400,
+                          decorationColor: SoftPalette.red400,
                         ),
                       )),
                       DataCell(
@@ -1552,10 +1554,10 @@ class _StableRequestTabState extends State<_StableRequestTab>
                             ? Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                 decoration: BoxDecoration(
-                                  color: isDark ? const Color(0xFF0369A1).withValues(alpha: 0.3) : Colors.blue.shade50,
+                                  color: isDark ? SoftPalette.sky550.withValues(alpha: 0.3) : SoftPalette.slate100,
                                   borderRadius: BorderRadius.circular(6),
                                   border: Border.all(
-                                    color: isDark ? const Color(0xFF38BDF8) : Colors.blue.shade300,
+                                    color: isDark ? SoftPalette.sky350 : SoftPalette.sky350,
                                     width: 1,
                                   ),
                                 ),
@@ -1564,7 +1566,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                                   style: TextStyle(
                                     fontSize: 12.5,
                                     fontWeight: FontWeight.bold,
-                                    color: isDark ? const Color(0xFF7DD3FC) : Colors.blue.shade900,
+                                    color: isDark ? SoftPalette.sky300 : SoftPalette.blue600,
                                   ),
                                 ),
                               )
@@ -1572,7 +1574,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                                 newVal,
                                 style: TextStyle(
                                   fontSize: 12.5,
-                                  color: isDark ? Colors.white60 : Colors.black87,
+                                  color: isDark ? SoftPalette.gray50A60 : SoftPalette.gray900A87,
                                 ),
                               ),
                       ),
@@ -1600,7 +1602,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
-                            color: isDark ? Colors.white70 : Colors.black87,
+                            color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87,
                           ),
                         ),
                       ),
@@ -1610,7 +1612,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                           oldVal,
                           style: TextStyle(
                             fontSize: 12,
-                            color: isChanged ? Colors.red.shade400 : (isDark ? Colors.white60 : Colors.black87),
+                            color: isChanged ? SoftPalette.red400 : (isDark ? SoftPalette.gray50A60 : SoftPalette.gray900A87),
                             decoration: isChanged ? TextDecoration.lineThrough : null,
                           ),
                         ),
@@ -1618,7 +1620,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 4),
                         child: Icon(Icons.arrow_forward_rounded,
-                            size: 14, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal),
+                            size: 14, color: isDark ? SoftPalette.teal300 : SoftPalette.teal500),
                       ),
                       Expanded(
                         flex: 4,
@@ -1628,8 +1630,8 @@ class _StableRequestTabState extends State<_StableRequestTab>
                             fontSize: 12,
                             fontWeight: isChanged ? FontWeight.bold : FontWeight.normal,
                             color: isChanged
-                                ? (isDark ? const Color(0xFF7DD3FC) : Colors.blue.shade900)
-                                : (isDark ? Colors.white70 : Colors.black87),
+                                ? (isDark ? SoftPalette.sky300 : SoftPalette.blue600)
+                                : (isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
                           ),
                         ),
                       ),
@@ -1645,11 +1647,11 @@ class _StableRequestTabState extends State<_StableRequestTab>
               child: ElevatedButton.icon(
                 onPressed: () => _showEditPatientDialog(
                     requestId, proposedData, originalData),
-                icon: const Icon(Icons.edit_note_rounded, size: 16, color: Colors.white),
+                icon: const Icon(Icons.edit_note_rounded, size: 16, color: SoftPalette.gray50),
                 label: const Text('Edit Proposed', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: isDark ? const Color(0xFF0F766E) : Colors.teal.shade700,
-                  foregroundColor: Colors.white,
+                  backgroundColor: isDark ? SoftPalette.teal550 : SoftPalette.teal550,
+                  foregroundColor: SoftPalette.gray50,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   elevation: 1,
@@ -1698,9 +1700,9 @@ class _StableRequestTabState extends State<_StableRequestTab>
 
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+        color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+        border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
       ),
       padding: const EdgeInsets.all(10),
       child: Column(
@@ -1710,7 +1712,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
             style: TextStyle(
               fontWeight: FontWeight.bold, 
               fontSize: 13.5, 
-              color: isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade900,
+              color: isDark ? SoftPalette.teal200 : SoftPalette.teal700,
             )),
           const SizedBox(height: 8),
           if (isWide)
@@ -1720,7 +1722,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                 headingRowHeight: 36,
                 dataRowMinHeight: 32,
                 dataRowMaxHeight: 48,
-                headingRowColor: WidgetStateProperty.all(isDark ? const Color(0xFF1E293B) : Colors.teal.shade50),
+                headingRowColor: WidgetStateProperty.all(isDark ? SoftPalette.slate800 : SoftPalette.teal100m),
                 columns: const [
                   DataColumn(label: Text('Field', style: TextStyle(fontWeight: FontWeight.bold))),
                   DataColumn(label: Text('Original', style: TextStyle(fontWeight: FontWeight.bold))),
@@ -1734,16 +1736,16 @@ class _StableRequestTabState extends State<_StableRequestTab>
                   final isChanged = oldVal != newVal && newVal != '—';
                   
                   return DataRow(cells: [
-                    DataCell(Text(label, style: TextStyle(fontSize: 12.5, color: isDark ? Colors.white70 : Colors.black87))),
+                    DataCell(Text(label, style: TextStyle(fontSize: 12.5, color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87))),
                     DataCell(Text(oldVal, style: TextStyle(
                       fontSize: 12.5,
-                      color: isDark ? Colors.white60 : Colors.black87,
+                      color: isDark ? SoftPalette.gray50A60 : SoftPalette.gray900A87,
                       decoration: isChanged ? TextDecoration.lineThrough : null,
-                      decorationColor: Colors.red.shade400,
+                      decorationColor: SoftPalette.red400,
                     ))),
                     DataCell(Text(newVal, style: TextStyle(
                       fontSize: 12.5,
-                      color: isChanged ? (isDark ? const Color(0xFF7DD3FC) : Colors.blue.shade900) : (isDark ? Colors.white70 : Colors.black87),
+                      color: isChanged ? (isDark ? SoftPalette.sky300 : SoftPalette.blue600) : (isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
                       fontWeight: isChanged ? FontWeight.bold : FontWeight.normal,
                     ))),
                   ]);
@@ -1764,13 +1766,13 @@ class _StableRequestTabState extends State<_StableRequestTab>
                   padding: const EdgeInsets.symmetric(vertical: 4),
                   child: Row(
                     children: [
-                      Expanded(flex: 3, child: Text('$label:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: isDark ? Colors.white70 : Colors.black87))),
-                      Expanded(flex: 3, child: Text(oldVal, style: const TextStyle(decoration: TextDecoration.lineThrough, color: Colors.red, fontSize: 12))),
+                      Expanded(flex: 3, child: Text('$label:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87))),
+                      Expanded(flex: 3, child: Text(oldVal, style: const TextStyle(decoration: TextDecoration.lineThrough, color: SoftPalette.red400, fontSize: 12))),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 4),
-                        child: Icon(Icons.arrow_forward_rounded, size: 12, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal),
+                        child: Icon(Icons.arrow_forward_rounded, size: 12, color: isDark ? SoftPalette.teal300 : SoftPalette.teal500),
                       ),
-                      Expanded(flex: 4, child: Text(newVal, style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? const Color(0xFF7DD3FC) : Colors.blue.shade900, fontSize: 12))),
+                      Expanded(flex: 4, child: Text(newVal, style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? SoftPalette.sky300 : SoftPalette.blue600, fontSize: 12))),
                     ],
                   ),
                 );
@@ -1791,18 +1793,18 @@ class _StableRequestTabState extends State<_StableRequestTab>
     return Container(
       padding: const EdgeInsets.all(10),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+        color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+        border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Text("Token Details:",
             style: TextStyle(
-                fontWeight: FontWeight.bold, color: isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade800)),
+                fontWeight: FontWeight.bold, color: isDark ? SoftPalette.teal200 : SoftPalette.teal600)),
         const SizedBox(height: 6),
-        Text("Token Serial: $tokenSerial", style: TextStyle(color: isDark ? Colors.white70 : Colors.black87)),
-        Text("Patient ID: $patientId", style: TextStyle(color: isDark ? Colors.white70 : Colors.black87)),
-        Text("Queue: $queueType", style: TextStyle(color: isDark ? Colors.white70 : Colors.black87)),
+        Text("Token Serial: $tokenSerial", style: TextStyle(color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87)),
+        Text("Patient ID: $patientId", style: TextStyle(color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87)),
+        Text("Queue: $queueType", style: TextStyle(color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87)),
       ]),
     );
   }
@@ -1817,22 +1819,22 @@ class _StableRequestTabState extends State<_StableRequestTab>
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF78350F).withValues(alpha: 0.3) : Colors.orange.shade50,
+        color: isDark ? SoftPalette.orange700.withValues(alpha: 0.3) : SoftPalette.amber100m,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: isDark ? const Color(0xFFB45309) : Colors.orange.shade200),
+        border: Border.all(color: isDark ? SoftPalette.orange500 : SoftPalette.amber200),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
-          Icon(Icons.warning_amber_rounded, color: isDark ? const Color(0xFFFDBA74) : Colors.orange.shade800, size: 20),
+          Icon(Icons.warning_amber_rounded, color: isDark ? SoftPalette.amber200 : SoftPalette.orange400, size: 20),
           const SizedBox(width: 8),
-          Text("Restriction Details:", style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? const Color(0xFFFED7AA) : Colors.orange.shade900)),
+          Text("Restriction Details:", style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? SoftPalette.amber150 : SoftPalette.orange400)),
         ]),
         const SizedBox(height: 8),
-        Text("Patient ID: $patientId", style: TextStyle(color: isDark ? Colors.white70 : Colors.black87)),
+        Text("Patient ID: $patientId", style: TextStyle(color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87)),
         Text(isLastDay 
           ? "Status: Medicine expires TODAY"
           : "Status: Medicine expires in $remDays days",
-          style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? const Color(0xFFFDBA74) : Colors.orange.shade900)),
+          style: TextStyle(fontWeight: FontWeight.w600, color: isDark ? SoftPalette.amber200 : SoftPalette.orange400)),
       ]),
     );
   }
@@ -1842,19 +1844,19 @@ class _StableRequestTabState extends State<_StableRequestTab>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E3A8A).withValues(alpha: 0.3) : Colors.blue.shade50,
+        color: isDark ? SoftPalette.blue700.withValues(alpha: 0.3) : SoftPalette.slate100,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: isDark ? const Color(0xFF3B82F6) : Colors.blue.shade200),
+        border: Border.all(color: isDark ? SoftPalette.blue500 : SoftPalette.sky300),
       ),
       child: Row(children: [
-        Icon(Icons.info_outline, size: 16, color: isDark ? const Color(0xFF93C5FD) : Colors.blue.shade800),
+        Icon(Icons.info_outline, size: 16, color: isDark ? SoftPalette.blue300 : SoftPalette.blue550),
         const SizedBox(width: 8),
         Expanded(
           child: Text(
             "This request must be reviewed by a Doctor.",
             style: TextStyle(
               fontSize: 12, 
-              color: isDark ? const Color(0xFF93C5FD) : Colors.blue.shade800, 
+              color: isDark ? SoftPalette.blue300 : SoftPalette.blue550, 
               fontWeight: FontWeight.bold
             ),
           ),
@@ -1942,9 +1944,9 @@ class _StableRequestTabState extends State<_StableRequestTab>
       }
     }
 
-    final dialogBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final fieldBg  = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC);
-    final borderSide = isDark ? const BorderSide(color: Color(0xFF334155)) : BorderSide(color: Colors.teal.shade200);
+    final dialogBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final fieldBg  = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+    final borderSide = isDark ? const BorderSide(color: SoftPalette.slate700) : BorderSide(color: SoftPalette.teal300);
 
     await showDialog(
       context: context,
@@ -1953,15 +1955,15 @@ class _StableRequestTabState extends State<_StableRequestTab>
           backgroundColor: dialogBg,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
-            side: isDark ? const BorderSide(color: Color(0xFF334155)) : BorderSide.none,
+            side: isDark ? const BorderSide(color: SoftPalette.slate700) : BorderSide.none,
           ),
           title: Row(children: [
-            Icon(Icons.edit_note_rounded, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
+            Icon(Icons.edit_note_rounded, color: isDark ? SoftPalette.teal300 : SoftPalette.teal600),
             const SizedBox(width: 8),
             Text("Edit Proposed Changes",
                 style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    color: isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade900)),
+                    color: isDark ? SoftPalette.teal200 : SoftPalette.teal700)),
           ]),
           content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
@@ -1970,7 +1972,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                 decoration: BoxDecoration(
                   color: fieldBg,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: isDark ? const Color(0xFF334155) : Colors.teal.shade100),
+                  border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.teal200),
                 ),
                 child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1978,23 +1980,23 @@ class _StableRequestTabState extends State<_StableRequestTab>
                       Text("Patient Type",
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
-                            color: isDark ? Colors.white : Colors.black87,
+                            color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87,
                           )),
                       Row(children: [
                         Expanded(
                             child: RadioListTile<bool>(
-                                title: Text("Adult", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+                                title: Text("Adult", style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87)),
                                 value: false,
                                 groupValue: isChild,
-                                activeColor: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade700,
+                                activeColor: isDark ? SoftPalette.teal300 : SoftPalette.teal550,
                                 onChanged: (v) =>
                                     setState(() => isChild = v!))),
                         Expanded(
                             child: RadioListTile<bool>(
-                                title: Text("Child", style: TextStyle(color: isDark ? Colors.white : Colors.black87)),
+                                title: Text("Child", style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87)),
                                 value: true,
                                 groupValue: isChild,
-                                activeColor: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade700,
+                                activeColor: isDark ? SoftPalette.teal300 : SoftPalette.teal550,
                                 onChanged: (v) =>
                                     setState(() => isChild = v!))),
                       ]),
@@ -2004,104 +2006,104 @@ class _StableRequestTabState extends State<_StableRequestTab>
               TextField(
                 controller: cnicCtrl,
                 readOnly: true,
-                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
                 decoration: InputDecoration(
                   labelText: isChild ? "Guardian CNIC" : "CNIC",
-                  labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+                  labelStyle: TextStyle(color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
                   prefixIcon:
-                      Icon(Icons.badge, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
+                      Icon(Icons.badge, color: isDark ? SoftPalette.teal300 : SoftPalette.teal600),
                   filled: true,
                   fillColor: fieldBg,
                   enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: borderSide),
-                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? const Color(0xFF2DD4BF) : Colors.teal)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? SoftPalette.teal300 : SoftPalette.teal500)),
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: nameCtrl,
-                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
                 decoration: InputDecoration(
                   labelText: "Full Name",
-                  labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+                  labelStyle: TextStyle(color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
                   prefixIcon:
-                      Icon(Icons.person, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
+                      Icon(Icons.person, color: isDark ? SoftPalette.teal300 : SoftPalette.teal600),
                   filled: true,
                   fillColor: fieldBg,
                   enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: borderSide),
-                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? const Color(0xFF2DD4BF) : Colors.teal)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? SoftPalette.teal300 : SoftPalette.teal500)),
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: phoneCtrl,
-                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
                 decoration: InputDecoration(
                   labelText: "Phone (optional)",
-                  labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+                  labelStyle: TextStyle(color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
                   prefixIcon:
-                      Icon(Icons.phone, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
+                      Icon(Icons.phone, color: isDark ? SoftPalette.teal300 : SoftPalette.teal600),
                   filled: true,
                   fillColor: fieldBg,
                   enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: borderSide),
-                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? const Color(0xFF2DD4BF) : Colors.teal)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? SoftPalette.teal300 : SoftPalette.teal500)),
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: dobCtrl,
-                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
                 decoration: InputDecoration(
                   labelText: "DOB (dd-MM-yyyy)",
-                  labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+                  labelStyle: TextStyle(color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
                   prefixIcon:
-                      Icon(Icons.cake, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
+                      Icon(Icons.cake, color: isDark ? SoftPalette.teal300 : SoftPalette.teal600),
                   filled: true,
                   fillColor: fieldBg,
                   enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: borderSide),
-                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? const Color(0xFF2DD4BF) : Colors.teal)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? SoftPalette.teal300 : SoftPalette.teal500)),
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: bloodGroupCtrl,
-                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
                 decoration: InputDecoration(
                   labelText: "Blood Group",
-                  labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+                  labelStyle: TextStyle(color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
                   prefixIcon: Icon(Icons.bloodtype,
-                      color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
+                      color: isDark ? SoftPalette.teal300 : SoftPalette.teal600),
                   filled: true,
                   fillColor: fieldBg,
                   enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: borderSide),
-                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? const Color(0xFF2DD4BF) : Colors.teal)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? SoftPalette.teal300 : SoftPalette.teal500)),
                 ),
               ),
               const SizedBox(height: 16),
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text("Status",
-                    style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87)),
+                    style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87)),
               ),
               Row(children: [
                 Expanded(child: RadioListTile<String>(
-                    title: Text("Zakat", style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 12)),
+                    title: Text("Zakat", style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87, fontSize: 12)),
                     value: "Zakat",
                     groupValue: selectedStatus,
-                    activeColor: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade700,
+                    activeColor: isDark ? SoftPalette.teal300 : SoftPalette.teal550,
                     onChanged: (v) =>
                         setState(() => selectedStatus = v!))),
                 Expanded(child: RadioListTile<String>(
-                    title: Text("Non-Zakat", style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 12)),
+                    title: Text("Non-Zakat", style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87, fontSize: 12)),
                     value: "Non-Zakat",
                     groupValue: selectedStatus,
-                    activeColor: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade700,
+                    activeColor: isDark ? SoftPalette.teal300 : SoftPalette.teal550,
                     onChanged: (v) =>
                         setState(() => selectedStatus = v!))),
                 Expanded(child: RadioListTile<String>(
-                    title: Text("GMWF", style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 12)),
+                    title: Text("GMWF", style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87, fontSize: 12)),
                     value: "GMWF",
                     groupValue: selectedStatus,
-                    activeColor: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade700,
+                    activeColor: isDark ? SoftPalette.teal300 : SoftPalette.teal550,
                     onChanged: (v) =>
                         setState(() => selectedStatus = v!))),
               ]),
@@ -2109,28 +2111,28 @@ class _StableRequestTabState extends State<_StableRequestTab>
               Align(
                 alignment: Alignment.centerLeft,
                 child: Text("Gender",
-                    style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87)),
+                    style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87)),
               ),
               Row(children: [
                 Expanded(child: RadioListTile<String>(
-                    title: Text("Male", style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 12)),
+                    title: Text("Male", style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87, fontSize: 12)),
                     value: "Male",
                     groupValue: selectedGender,
-                    activeColor: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade700,
+                    activeColor: isDark ? SoftPalette.teal300 : SoftPalette.teal550,
                     onChanged: (v) =>
                         setState(() => selectedGender = v!))),
                 Expanded(child: RadioListTile<String>(
-                    title: Text("Female", style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 12)),
+                    title: Text("Female", style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87, fontSize: 12)),
                     value: "Female",
                     groupValue: selectedGender,
-                    activeColor: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade700,
+                    activeColor: isDark ? SoftPalette.teal300 : SoftPalette.teal550,
                     onChanged: (v) =>
                         setState(() => selectedGender = v!))),
                 Expanded(child: RadioListTile<String>(
-                    title: Text("Other", style: TextStyle(color: isDark ? Colors.white : Colors.black87, fontSize: 12)),
+                    title: Text("Other", style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87, fontSize: 12)),
                     value: "Other",
                     groupValue: selectedGender,
-                    activeColor: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade700,
+                    activeColor: isDark ? SoftPalette.teal300 : SoftPalette.teal550,
                     onChanged: (v) =>
                         setState(() => selectedGender = v!))),
               ]),
@@ -2140,12 +2142,12 @@ class _StableRequestTabState extends State<_StableRequestTab>
             TextButton(
               onPressed: () => Navigator.pop(ctx),
               child: Text("Cancel",
-                  style: TextStyle(color: isDark ? Colors.white70 : Colors.teal.shade800)),
+                  style: TextStyle(color: isDark ? SoftPalette.gray50A70 : SoftPalette.teal600)),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: isDark ? const Color(0xFF0F766E) : Colors.teal.shade700,
-                foregroundColor: Colors.white,
+                backgroundColor: isDark ? SoftPalette.teal550 : SoftPalette.teal550,
+                foregroundColor: SoftPalette.gray50,
               ),
               onPressed: () async {
                 DateTime? dob;
@@ -2174,7 +2176,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                     .doc(requestId)
                     .update({'draftData': newProposed});
                 Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
+                AppToast.showSnackBar(context, 
                     const SnackBar(content: Text('Draft updated')));
               },
               child: const Text("Save Draft"),
@@ -2191,26 +2193,26 @@ class _StableRequestTabState extends State<_StableRequestTab>
     return showDialog<String>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: isDark ? const BorderSide(color: Color(0xFF334155)) : BorderSide.none,
+          side: isDark ? const BorderSide(color: SoftPalette.slate700) : BorderSide.none,
         ),
         title: Text(
           '${action == 'approved' ? 'Approval' : 'Rejection'} Reason',
-          style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+          style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
         ),
         content: TextField(
           controller: ctrl,
-          style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+          style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
           decoration: InputDecoration(
             hintText: 'Enter reason for $action...',
-            hintStyle: TextStyle(color: isDark ? Colors.white54 : Colors.grey),
+            hintStyle: TextStyle(color: isDark ? SoftPalette.gray50A54 : SoftPalette.gray350),
             filled: true,
-            fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+            fillColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+              borderSide: BorderSide(color: isDark ? SoftPalette.slate700 : SoftPalette.gray150),
             ),
           ),
           maxLines: 3,
@@ -2218,18 +2220,18 @@ class _StableRequestTabState extends State<_StableRequestTab>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text('Cancel', style: TextStyle(color: isDark ? Colors.white70 : Colors.grey)),
+            child: Text('Cancel', style: TextStyle(color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray350)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: action == 'approved'
-                  ? (isDark ? const Color(0xFF0F766E) : Colors.teal)
-                  : Colors.red,
-              foregroundColor: Colors.white,
+                  ? (isDark ? SoftPalette.teal550 : SoftPalette.teal500)
+                  : SoftPalette.red400,
+              foregroundColor: SoftPalette.gray50,
             ),
             onPressed: () {
               if (ctrl.text.trim().isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                AppToast.showSnackBar(context, 
                   const SnackBar(content: Text('Reason is required'))
                 );
                 return;
@@ -2271,10 +2273,10 @@ class _StableRequestTabState extends State<_StableRequestTab>
     }).toList();
 
     if (eligibleDocs.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         const SnackBar(
           content: Text('No requests eligible for your role to approve.'),
-          backgroundColor: Colors.orange,
+          backgroundColor: SoftPalette.amber300,
         ),
       );
       return;
@@ -2283,35 +2285,35 @@ class _StableRequestTabState extends State<_StableRequestTab>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: isDark ? const BorderSide(color: Color(0xFF334155)) : BorderSide.none,
+          side: isDark ? const BorderSide(color: SoftPalette.slate700) : BorderSide.none,
         ),
         title: Row(
           children: [
-            Icon(Icons.done_all_rounded, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade700, size: 26),
+            Icon(Icons.done_all_rounded, color: isDark ? SoftPalette.teal300 : SoftPalette.teal550, size: 26),
             const SizedBox(width: 10),
             Text(
               'Approve All Requests?',
-              style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+              style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
             ),
           ],
         ),
         content: Text(
           'Are you sure you want to approve all ${eligibleDocs.length} pending request${eligibleDocs.length > 1 ? 's' : ''}?\n\n'
           'This will execute and update inventory, tokens, and records for all pending items at once.',
-          style: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+          style: TextStyle(color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Cancel', style: TextStyle(color: isDark ? Colors.white60 : Colors.grey)),
+            child: Text('Cancel', style: TextStyle(color: isDark ? SoftPalette.gray50A60 : SoftPalette.gray350)),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: isDark ? const Color(0xFF0F766E) : Colors.teal.shade700,
-              foregroundColor: Colors.white,
+              backgroundColor: isDark ? SoftPalette.teal550 : SoftPalette.teal550,
+              foregroundColor: SoftPalette.gray50,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
             onPressed: () => Navigator.pop(ctx, true),
@@ -2373,14 +2375,14 @@ class _StableRequestTabState extends State<_StableRequestTab>
 
     if (mounted) {
       setState(() => _isApprovingAll = false);
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: Text(
             errorCount == 0
                 ? '✅ Successfully approved all $approvedCount requests!'
                 : '✅ Approved $approvedCount requests ($errorCount failed).',
           ),
-          backgroundColor: errorCount == 0 ? Colors.teal.shade700 : Colors.orange,
+          backgroundColor: errorCount == 0 ? SoftPalette.teal550 : SoftPalette.amber300,
           duration: const Duration(seconds: 4),
         ),
       );
@@ -2435,7 +2437,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
     final candidateBranches = _resolveTargetBranches();
     for (final bId in candidateBranches) {
       try {
-        final ref = FirebaseFirestore.instance
+        final ref = CloudDb.instance
             .collection('branches')
             .doc(bId)
             .collection(collection)
@@ -2849,7 +2851,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
         final candidateBranches = _resolveTargetBranches();
         for (final bId in candidateBranches) {
           try {
-            final targetRef = FirebaseFirestore.instance
+            final targetRef = CloudDb.instance
                 .collection('branches')
                 .doc(bId)
                 .collection(collection)
@@ -2913,17 +2915,17 @@ class _StableRequestTabState extends State<_StableRequestTab>
         });
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      AppToast.showSnackBar(context, SnackBar(
         content: Text("Request ${newStatus.toUpperCase()}"),
         backgroundColor: newStatus == 'approved'
-            ? Colors.teal.shade700
-            : Colors.red,
+            ? SoftPalette.teal550
+            : SoftPalette.red400,
       ));
     } catch (e, stack) {
       debugPrint('❌ _updateStatus error: $e');
       debugPrint(stack.toString());
-      ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error: $e"), backgroundColor: Colors.red));
+      AppToast.showSnackBar(context, 
+          SnackBar(content: Text("Error: $e"), backgroundColor: SoftPalette.red400));
     }
   }
 
@@ -3275,9 +3277,9 @@ class _StableRequestTabState extends State<_StableRequestTab>
     final reqSnap = await reqRef.get();
     final status  = reqSnap.data()?['status']?.toString() ?? '';
     if (status != 'pending') {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      AppToast.showSnackBar(context, const SnackBar(
           content: Text('Cannot edit — request is not pending'),
-          backgroundColor: Colors.orange));
+          backgroundColor: SoftPalette.amber300));
       return;
     }
 
@@ -3293,9 +3295,9 @@ class _StableRequestTabState extends State<_StableRequestTab>
         : (item['expiryDate']?.toString() ?? '');
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final dialogBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final fieldBg  = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC);
-    final borderSide = isDark ? const BorderSide(color: Color(0xFF334155)) : BorderSide(color: Colors.teal.shade200);
+    final dialogBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final fieldBg  = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+    final borderSide = isDark ? const BorderSide(color: SoftPalette.slate700) : BorderSide(color: SoftPalette.teal300);
 
     await showDialog(
       context: context,
@@ -3320,61 +3322,61 @@ class _StableRequestTabState extends State<_StableRequestTab>
           backgroundColor: dialogBg,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
-            side: isDark ? const BorderSide(color: Color(0xFF334155)) : BorderSide.none,
+            side: isDark ? const BorderSide(color: SoftPalette.slate700) : BorderSide.none,
           ),
           title: Text(
             'Edit Item',
             style: TextStyle(
               fontWeight: FontWeight.bold,
-              color: isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade900,
+              color: isDark ? SoftPalette.teal200 : SoftPalette.teal700,
             ),
           ),
           content: SingleChildScrollView(
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               TextField(
                 controller: nameCtrl,
-                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
                 decoration: InputDecoration(
                   labelText: 'Name',
-                  labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+                  labelStyle: TextStyle(color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
                   prefixIcon:
-                      Icon(Icons.medication, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
+                      Icon(Icons.medication, color: isDark ? SoftPalette.teal300 : SoftPalette.teal600),
                   filled: true,
                   fillColor: fieldBg,
                   enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: borderSide),
-                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? const Color(0xFF2DD4BF) : Colors.teal)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? SoftPalette.teal300 : SoftPalette.teal500)),
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: qtyCtrl,
                 keyboardType: TextInputType.number,
-                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
                 decoration: InputDecoration(
                   labelText: 'Quantity',
-                  labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+                  labelStyle: TextStyle(color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
                   prefixIcon:
-                      Icon(Icons.inventory, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
+                      Icon(Icons.inventory, color: isDark ? SoftPalette.teal300 : SoftPalette.teal600),
                   filled: true,
                   fillColor: fieldBg,
                   enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: borderSide),
-                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? const Color(0xFF2DD4BF) : Colors.teal)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? SoftPalette.teal300 : SoftPalette.teal500)),
                 ),
               ),
               const SizedBox(height: 12),
               TextField(
                 controller: priceCtrl,
                 keyboardType: TextInputType.number,
-                style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
                 decoration: InputDecoration(
                   labelText: 'Price (PKR)',
-                  labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+                  labelStyle: TextStyle(color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
                   prefixIcon: Icon(Icons.attach_money,
-                      color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
+                      color: isDark ? SoftPalette.teal300 : SoftPalette.teal600),
                   filled: true,
                   fillColor: fieldBg,
                   enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: borderSide),
-                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? const Color(0xFF2DD4BF) : Colors.teal)),
+                  focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? SoftPalette.teal300 : SoftPalette.teal500)),
                 ),
               ),
               const SizedBox(height: 12),
@@ -3384,23 +3386,23 @@ class _StableRequestTabState extends State<_StableRequestTab>
                     readOnly: true,
                     controller:
                         TextEditingController(text: expiryStr),
-                    style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                    style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
                     decoration: InputDecoration(
                       labelText: 'Expiry',
-                      labelStyle: TextStyle(color: isDark ? Colors.white70 : Colors.black87),
+                      labelStyle: TextStyle(color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
                       prefixIcon: Icon(Icons.calendar_month,
-                          color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
+                          color: isDark ? SoftPalette.teal300 : SoftPalette.teal600),
                       filled: true,
                       fillColor: fieldBg,
                       enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: borderSide),
-                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? const Color(0xFF2DD4BF) : Colors.teal)),
+                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide(color: isDark ? SoftPalette.teal300 : SoftPalette.teal500)),
                     ),
                   ),
                 ),
                 IconButton(
                     onPressed: pickDate,
                     icon: Icon(Icons.calendar_today,
-                        color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800)),
+                        color: isDark ? SoftPalette.teal300 : SoftPalette.teal600)),
               ]),
             ]),
           ),
@@ -3408,10 +3410,10 @@ class _StableRequestTabState extends State<_StableRequestTab>
             TextButton(
                 onPressed: () => Navigator.pop(context),
                 child: Text("Cancel",
-                    style: TextStyle(color: isDark ? Colors.white70 : Colors.teal.shade800))),
+                    style: TextStyle(color: isDark ? SoftPalette.gray50A70 : SoftPalette.teal600))),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                  backgroundColor: isDark ? const Color(0xFF0F766E) : Colors.teal.shade700),
+                  backgroundColor: isDark ? SoftPalette.teal550 : SoftPalette.teal550),
               onPressed: () async {
                 final newName  = nameCtrl.text.trim();
                 final newQty   = int.tryParse(qtyCtrl.text.trim()) ?? 0;
@@ -3419,7 +3421,7 @@ class _StableRequestTabState extends State<_StableRequestTab>
                     int.tryParse(priceCtrl.text.trim()) ?? 0;
 
                 if (newName.isEmpty || newQty <= 0) {
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  AppToast.showSnackBar(context, 
                       const SnackBar(content: Text('Invalid input')));
                   return;
                 }
@@ -3433,12 +3435,12 @@ class _StableRequestTabState extends State<_StableRequestTab>
                 await _editItemInRequestAsDraft(
                     requestId, itemIndex, updatedItem);
                 Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
+                AppToast.showSnackBar(context, 
                     const SnackBar(
                         content: Text('Item updated in draft')));
               },
               child: const Text("Save",
-                  style: TextStyle(color: Colors.white)),
+                  style: TextStyle(color: SoftPalette.gray50)),
             ),
           ],
         );

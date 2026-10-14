@@ -1,10 +1,13 @@
 import 'package:gmwf/utils/debounced_box_listenable.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:connectivity_plus/connectivity_plus.dart';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:another_flushbar/flushbar.dart';
+import 'package:gmwf/design/components/flushbar_compat.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 
@@ -30,6 +33,7 @@ import 'package:gmwf/pages/request.dart';
 import 'package:gmwf/widgets/update_dialog_widget.dart';
 import 'package:gmwf/services/prescription_template_service.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
+import 'package:gmwf/design/design_system.dart';
 
 class DoctorScreen extends StatefulWidget {
   final String branchId;
@@ -95,7 +99,7 @@ class _DoctorScreenState extends State<DoctorScreen>
     });
   }
 
-  static const Color _teal = Color(0xFF00695C);
+  static const Color _teal = SoftPalette.teal600;
 
   int _rightPanelKey = 0;
 
@@ -308,10 +312,10 @@ class _DoctorScreenState extends State<DoctorScreen>
       // and notify the doctor so approved stock is immediately visible.
       if (mounted) {
         setState(() {});
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('✅ Request approved: ${data['title'] ?? data['requestType'] ?? 'Stock Request'}'),
-            backgroundColor: Colors.green.shade700,
+            backgroundColor: SoftPalette.green500,
             duration: const Duration(seconds: 4),
             behavior: SnackBarBehavior.floating,
           ),
@@ -320,10 +324,10 @@ class _DoctorScreenState extends State<DoctorScreen>
     } else if (type == RealtimeEvents.requestRejected || type == 'request_rejected') {
       if (mounted) {
         setState(() {});
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('❌ Request rejected: ${data['title'] ?? data['requestType'] ?? 'Stock Request'}'),
-            backgroundColor: Colors.red.shade700,
+            backgroundColor: SoftPalette.red500,
             duration: const Duration(seconds: 4),
             behavior: SnackBarBehavior.floating,
           ),
@@ -410,10 +414,10 @@ class _DoctorScreenState extends State<DoctorScreen>
       setState(() {});
       final tokenKey = 'doc_token_${widget.branchId}_$serial';
       if (NotificationDeduper.shouldShow(tokenKey, window: const Duration(minutes: 5))) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('🎟️ New token: ${data['patientName'] ?? '#${data['serial']}'}'),
-            backgroundColor: Colors.green.shade700,
+            backgroundColor: SoftPalette.green500,
             duration: const Duration(seconds: 4),
             behavior: SnackBarBehavior.floating,
           ),
@@ -487,10 +491,10 @@ class _DoctorScreenState extends State<DoctorScreen>
     if (serial != null && serial == _selectedPatientData?['serial']) {
       if (mounted) {
         setState(() => _selectedPatientData?['dispenseStatus'] = 'dispensed');
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('💊 Patient #$serial has been dispensed'),
-            backgroundColor: Colors.purple.shade700,
+            backgroundColor: SoftPalette.purple600,
             duration: const Duration(seconds: 3),
             behavior: SnackBarBehavior.floating,
           ),
@@ -523,10 +527,10 @@ class _DoctorScreenState extends State<DoctorScreen>
       final online = results.any((r) => r != ConnectivityResult.none);
       if (_online != online && mounted) {
         setState(() => _online = online);
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text(online ? 'Internet restored' : 'Offline (LAN still works)'),
-            backgroundColor: online ? Colors.green.shade700 : Colors.orange.shade700,
+            backgroundColor: online ? SoftPalette.green500 : SoftPalette.orange350,
             duration: const Duration(seconds: 3),
             behavior: SnackBarBehavior.floating,
           ),
@@ -551,10 +555,10 @@ class _DoctorScreenState extends State<DoctorScreen>
       }
       if (mounted) {
         setState(() {});
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text(_online ? 'Sync completed (LAN & Cloud)' : 'LAN Sync completed (Outbox flushed)'),
-            backgroundColor: Colors.green.shade700,
+            backgroundColor: SoftPalette.green500,
             duration: const Duration(seconds: 3),
             behavior: SnackBarBehavior.floating,
           ),
@@ -562,10 +566,10 @@ class _DoctorScreenState extends State<DoctorScreen>
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('Sync failed: $e'),
-            backgroundColor: Colors.red.shade700,
+            backgroundColor: SoftPalette.red500,
             duration: const Duration(seconds: 3),
             behavior: SnackBarBehavior.floating,
           ),
@@ -577,6 +581,8 @@ class _DoctorScreenState extends State<DoctorScreen>
   }
 
   Future<void> _logout() async {
+    final confirm = await showLogoutDialog(context);
+    if (confirm != true || !mounted) return;
     try { _connectionSub?.cancel(); _connSub?.cancel(); _realtimeSub?.cancel(); } catch (_) {}
     ConnectionManager().stop().catchError((_) {});
     await AuthService().signOut();
@@ -613,7 +619,9 @@ class _DoctorScreenState extends State<DoctorScreen>
         }
       }
       final rawPresc = rawEntry['prescription'];
-      final prescription = (rawPresc is Map) ? Map<String, dynamic>.from(rawPresc) : null;
+      final prescription = (rawPresc is Map)
+          ? PatientHistoryPanel.unwrapPrescriptionData(Map<String, dynamic>.from(rawPresc))
+          : null;
 
       final docName = _username ?? widget.doctorName;
       final docId = widget.doctorId;
@@ -640,20 +648,22 @@ class _DoctorScreenState extends State<DoctorScreen>
         }
       }
 
+      final medsList = prescription != null
+          ? (prescription['prescriptions'] ?? prescription['medicines'] ?? prescription['items'])
+          : null;
       _prescriptions
         ..clear()
-        ..addAll(prescription != null
-            ? List<Map<String, dynamic>>.from(
-                (prescription['prescriptions'] as List<dynamic>?)
-                    ?.map((e) => Map<String, dynamic>.from(e as Map)) ?? [])
+        ..addAll(medsList is List
+            ? medsList.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
             : []);
 
+      final labsList = prescription != null
+          ? (prescription['labResults'] ?? prescription['labTests'] ?? prescription['tests'])
+          : null;
       _labResults
         ..clear()
-        ..addAll(prescription != null
-            ? List<Map<String, dynamic>>.from(
-                (prescription['labResults'] as List<dynamic>?)
-                    ?.map((e) => Map<String, dynamic>.from(e as Map)) ?? [])
+        ..addAll(labsList is List
+            ? labsList.whereType<Map>().map((e) => Map<String, dynamic>.from(e)).toList()
             : []);
 
       _complaintController.text = prescription?['complaint']?.toString() ?? '';
@@ -745,10 +755,10 @@ class _DoctorScreenState extends State<DoctorScreen>
       }));
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('⏩ Patient #$serial skipped'),
-            backgroundColor: Colors.orange.shade800,
+            backgroundColor: SoftPalette.orange400,
             duration: const Duration(seconds: 2),
             behavior: SnackBarBehavior.floating,
           ),
@@ -797,24 +807,77 @@ class _DoctorScreenState extends State<DoctorScreen>
 
   void _applyRepeatData(Map<String, dynamic> d) {
     if (!mounted) return;
+    final unwrapped = PatientHistoryPanel.unwrapPrescriptionData(d);
+
+    // Collect prescriptions from all possible keys
+    final rawMeds = unwrapped['prescriptions'] ??
+        unwrapped['medicines'] ??
+        unwrapped['items'] ??
+        unwrapped['oralMedicines'] ??
+        unwrapped['prescriptionList'] ??
+        unwrapped['dispensedMedicines'];
+
+    final parsedMeds = <Map<String, dynamic>>[];
+    if (rawMeds is List) {
+      for (final item in rawMeds) {
+        if (item is Map) {
+          final m = Map<String, dynamic>.from(item);
+          final name = (m['name'] ?? m['displayName'] ?? m['medicineName'] ?? m['medName'] ?? m['title'] ?? '').toString().trim();
+          if (name.isNotEmpty) {
+            m['name'] = name;
+            m['displayName'] = name;
+            parsedMeds.add(m);
+          }
+        } else if (item is String && item.trim().isNotEmpty) {
+          parsedMeds.add({
+            'name': item.trim(),
+            'displayName': item.trim(),
+            'type': 'Tablet',
+            'dosage': '1',
+            'timing': 'BD',
+            'quantity': 1,
+          });
+        }
+      }
+    }
+
+    // Collect labs
+    final rawLabs = unwrapped['labResults'] ??
+        unwrapped['labTests'] ??
+        unwrapped['tests'] ??
+        unwrapped['lab_tests'] ??
+        unwrapped['physiotherapies'];
+
+    final parsedLabs = <Map<String, dynamic>>[];
+    if (rawLabs is List) {
+      for (final item in rawLabs) {
+        if (item is Map) {
+          parsedLabs.add(Map<String, dynamic>.from(item));
+        } else if (item is String && item.trim().isNotEmpty) {
+          parsedLabs.add({'name': item.trim()});
+        }
+      }
+    }
+
+    final complaint = (unwrapped['complaint'] ?? unwrapped['condition'] ?? unwrapped['patientCondition'] ?? '').toString().trim();
+    final diagnosis = (unwrapped['diagnosis'] ?? unwrapped['patientDiagnosis'] ?? unwrapped['finalDiagnosis'] ?? '').toString().trim();
+
     setState(() {
-      _complaintController.text = d['complaint']?.toString() ?? '';
-      _diagnosisController.text = d['diagnosis']?.toString() ?? '';
+      if (complaint.isNotEmpty) _complaintController.text = complaint;
+      if (diagnosis.isNotEmpty) _diagnosisController.text = diagnosis;
       _prescriptions
         ..clear()
-        ..addAll((d['prescriptions'] as List<dynamic>?)
-                ?.map((e) => Map<String, dynamic>.from(e as Map)).toList() ?? []);
+        ..addAll(parsedMeds);
       _labResults
         ..clear()
-        ..addAll((d['labResults'] as List<dynamic>?)
-                ?.map((e) => Map<String, dynamic>.from(e as Map)).toList() ?? []);
+        ..addAll(parsedLabs);
       _bumpPanelKey();
     });
 
-    ScaffoldMessenger.of(context).showSnackBar(
+    AppToast.showSnackBar(context, 
       SnackBar(
         content: Text('🔁 Repeated — ${_prescriptions.length} medicine(s), ${_labResults.length} lab test(s)'),
-        backgroundColor: Colors.teal.shade700,
+        backgroundColor: SoftPalette.teal550,
         duration: const Duration(seconds: 3),
         behavior: SnackBarBehavior.floating,
       ),
@@ -855,14 +918,14 @@ class _DoctorScreenState extends State<DoctorScreen>
                 final isLoading = snapshot.connectionState == ConnectionState.waiting;
 
                 return AlertDialog(
-                  backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                  backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
                   titlePadding: EdgeInsets.zero,
                   contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 20),
                   title: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF0F172A) : const Color(0xFF004D40),
+                      color: isDark ? SoftPalette.slate900 : SoftPalette.teal700,
                       borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
                     ),
                     child: Row(
@@ -870,10 +933,10 @@ class _DoctorScreenState extends State<DoctorScreen>
                         Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: Colors.white.withValues(alpha: 0.15),
+                            color: SoftPalette.gray50.withValues(alpha: 0.15),
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: const Icon(Icons.collections_bookmark_rounded, color: Colors.white, size: 20),
+                          child: const Icon(Icons.collections_bookmark_rounded, color: SoftPalette.gray50, size: 20),
                         ),
                         const SizedBox(width: 12),
                         const Expanded(
@@ -882,18 +945,18 @@ class _DoctorScreenState extends State<DoctorScreen>
                             children: [
                               Text(
                                 'Disease Templates & Presets',
-                                style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                                style: TextStyle(color: SoftPalette.gray50, fontSize: 16, fontWeight: FontWeight.bold),
                               ),
                               SizedBox(height: 2),
                               Text(
                                 'Manage re-usable clinical templates for rapid prescribing',
-                                style: TextStyle(color: Colors.white70, fontSize: 11),
+                                style: TextStyle(color: SoftPalette.gray50A70, fontSize: 11),
                               ),
                             ],
                           ),
                         ),
                         IconButton(
-                          icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                          icon: const Icon(Icons.close_rounded, color: SoftPalette.gray50A70),
                           onPressed: () => Navigator.pop(dialogCtx),
                         ),
                       ],
@@ -905,9 +968,9 @@ class _DoctorScreenState extends State<DoctorScreen>
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         if (isLoading)
-                          const Padding(
+                          Padding(
                             padding: EdgeInsets.symmetric(vertical: 40),
-                            child: Center(child: CircularProgressIndicator(color: _teal)),
+                            child: Center(child: CircularProgressIndicator(color: context.adapt(_teal))),
                           )
                         else if (templates.isEmpty)
                           Padding(
@@ -915,14 +978,14 @@ class _DoctorScreenState extends State<DoctorScreen>
                             child: Column(
                               mainAxisSize: MainAxisSize.min,
                               children: [
-                                Icon(Icons.bookmark_border_rounded, size: 48, color: isDark ? const Color(0xFF475569) : Colors.grey.shade400),
+                                Icon(Icons.bookmark_border_rounded, size: 48, color: isDark ? SoftPalette.slate600 : SoftPalette.gray300),
                                 const SizedBox(height: 12),
                                 Text(
                                   'No Presets Created Yet',
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 15,
-                                    color: isDark ? Colors.white : Colors.grey.shade800,
+                                    color: isDark ? SoftPalette.gray50 : SoftPalette.gray700,
                                   ),
                                 ),
                                 const SizedBox(height: 6),
@@ -931,7 +994,7 @@ class _DoctorScreenState extends State<DoctorScreen>
                                   textAlign: TextAlign.center,
                                   style: TextStyle(
                                     fontSize: 12,
-                                    color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
+                                    color: isDark ? SoftPalette.slate350 : SoftPalette.gray500,
                                   ),
                                 ),
                               ],
@@ -956,10 +1019,10 @@ class _DoctorScreenState extends State<DoctorScreen>
                                 return Container(
                                   padding: const EdgeInsets.all(12),
                                   decoration: BoxDecoration(
-                                    color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                                    color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                                     borderRadius: BorderRadius.circular(14),
                                     border: Border.all(
-                                      color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                                      color: isDark ? SoftPalette.slate700 : SoftPalette.slate150,
                                       width: 1,
                                     ),
                                   ),
@@ -971,10 +1034,10 @@ class _DoctorScreenState extends State<DoctorScreen>
                                           Container(
                                             padding: const EdgeInsets.all(8),
                                             decoration: BoxDecoration(
-                                              color: isDark ? const Color(0xFF134E4A) : const Color(0xFFE0F2F1),
+                                              color: isDark ? SoftPalette.teal700 : SoftPalette.teal100m,
                                               borderRadius: BorderRadius.circular(10),
                                             ),
-                                            child: FaIcon(iconData, size: 14, color: isDark ? const Color(0xFF2DD4BF) : _teal),
+                                            child: FaIcon(iconData, size: 14, color: isDark ? SoftPalette.teal300 : _teal),
                                           ),
                                           const SizedBox(width: 10),
                                           Expanded(
@@ -986,7 +1049,7 @@ class _DoctorScreenState extends State<DoctorScreen>
                                                   style: TextStyle(
                                                     fontWeight: FontWeight.bold,
                                                     fontSize: 14,
-                                                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                                    color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                                                   ),
                                                 ),
                                                 if (diagnosis.isNotEmpty)
@@ -994,7 +1057,7 @@ class _DoctorScreenState extends State<DoctorScreen>
                                                     'Dx: $diagnosis',
                                                     style: TextStyle(
                                                       fontSize: 11.5,
-                                                      color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700,
+                                                      color: isDark ? SoftPalette.slate350 : SoftPalette.gray550,
                                                     ),
                                                     maxLines: 1,
                                                     overflow: TextOverflow.ellipsis,
@@ -1016,8 +1079,8 @@ class _DoctorScreenState extends State<DoctorScreen>
                                               icon: const Icon(Icons.bolt_rounded, size: 14),
                                               label: const Text('Apply', style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold)),
                                               style: ElevatedButton.styleFrom(
-                                                backgroundColor: isDark ? const Color(0xFF0D9488) : _teal,
-                                                foregroundColor: Colors.white,
+                                                backgroundColor: isDark ? SoftPalette.teal500 : _teal,
+                                                foregroundColor: SoftPalette.gray50,
                                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -1025,7 +1088,7 @@ class _DoctorScreenState extends State<DoctorScreen>
                                             ),
                                           const SizedBox(width: 6),
                                           IconButton(
-                                            icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.redAccent),
+                                            icon: Icon(Icons.delete_outline_rounded, size: 18, color: context.adapt(SoftPalette.red400)),
                                             tooltip: 'Delete Template',
                                             padding: EdgeInsets.zero,
                                             constraints: const BoxConstraints(),
@@ -1042,8 +1105,8 @@ class _DoctorScreenState extends State<DoctorScreen>
                                                     ),
                                                     ElevatedButton(
                                                       onPressed: () => Navigator.pop(confirmCtx, true),
-                                                      style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
-                                                      child: const Text('Delete', style: TextStyle(color: Colors.white)),
+                                                      style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.red400),
+                                                      child: const Text('Delete', style: TextStyle(color: SoftPalette.gray50)),
                                                     ),
                                                   ],
                                                 ),
@@ -1071,14 +1134,14 @@ class _DoctorScreenState extends State<DoctorScreen>
                                             return Container(
                                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                               decoration: BoxDecoration(
-                                                color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                                                color: isDark ? SoftPalette.slate800 : SoftPalette.slate150,
                                                 borderRadius: BorderRadius.circular(6),
                                               ),
                                               child: Text(
                                                 mTiming.isNotEmpty ? '$mName ($mTiming)' : mName,
                                                 style: TextStyle(
                                                   fontSize: 10,
-                                                  color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155),
+                                                  color: isDark ? SoftPalette.slate200 : SoftPalette.slate700,
                                                 ),
                                               ),
                                             );
@@ -1138,10 +1201,10 @@ class _DoctorScreenState extends State<DoctorScreen>
           width: 38,
           height: 38,
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+              color: isDark ? SoftPalette.slate700 : SoftPalette.slate150,
               width: 1,
             ),
           ),
@@ -1149,7 +1212,7 @@ class _DoctorScreenState extends State<DoctorScreen>
             child: Icon(
               Icons.more_vert_rounded,
               size: 20,
-              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF0F5B46),
+              color: isDark ? SoftPalette.slate350 : SoftPalette.emerald600,
             ),
           ),
         );
@@ -1157,13 +1220,13 @@ class _DoctorScreenState extends State<DoctorScreen>
         return PopupMenuButton<String>(
           tooltip: 'Menu',
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+          color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
           elevation: 8,
           offset: const Offset(0, 46),
           icon: pendingApprovals > 0
               ? Badge(
-                  label: Text('$pendingApprovals', style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold)),
-                  backgroundColor: Colors.amber.shade800,
+                  label: Text('$pendingApprovals', style: const TextStyle(fontSize: 9, color: SoftPalette.gray50, fontWeight: FontWeight.bold)),
+                  backgroundColor: SoftPalette.orange350,
                   child: menuBtn,
                 )
               : menuBtn,
@@ -1226,11 +1289,11 @@ class _DoctorScreenState extends State<DoctorScreen>
               value: 'templates',
               child: Row(
                 children: [
-                  Icon(Icons.collections_bookmark_outlined, size: 18, color: isDark ? const Color(0xFF2DD4BF) : _teal),
+                  Icon(Icons.collections_bookmark_outlined, size: 18, color: isDark ? SoftPalette.teal300 : _teal),
                   const SizedBox(width: 10),
                   Text(
                     'Disease Templates & Presets',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isDark ? Colors.white : const Color(0xFF1E293B)),
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.gray50 : SoftPalette.slate800),
                   ),
                 ],
               ),
@@ -1239,11 +1302,11 @@ class _DoctorScreenState extends State<DoctorScreen>
               value: 'inventory',
               child: Row(
                 children: [
-                  Icon(Icons.inventory_2_outlined, size: 18, color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0F5B46)),
+                  Icon(Icons.inventory_2_outlined, size: 18, color: isDark ? SoftPalette.sky350 : SoftPalette.emerald600),
                   const SizedBox(width: 10),
                   Text(
                     'Medicine Inventory',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isDark ? Colors.white : const Color(0xFF1E293B)),
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.gray50 : SoftPalette.slate800),
                   ),
                 ],
               ),
@@ -1255,14 +1318,14 @@ class _DoctorScreenState extends State<DoctorScreen>
                   children: [
                     Badge(
                       isLabelVisible: pendingApprovals > 0,
-                      label: Text('$pendingApprovals', style: const TextStyle(fontSize: 9, color: Colors.white, fontWeight: FontWeight.bold)),
-                      backgroundColor: Colors.amber.shade800,
-                      child: Icon(Icons.approval_rounded, size: 18, color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706)),
+                      label: Text('$pendingApprovals', style: const TextStyle(fontSize: 9, color: SoftPalette.gray50, fontWeight: FontWeight.bold)),
+                      backgroundColor: SoftPalette.orange350,
+                      child: Icon(Icons.approval_rounded, size: 18, color: isDark ? SoftPalette.amber200 : SoftPalette.orange400),
                     ),
                     const SizedBox(width: 10),
                     Text(
                       'Stock Requests',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isDark ? Colors.white : const Color(0xFF1E293B)),
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.gray50 : SoftPalette.slate800),
                     ),
                   ],
                 ),
@@ -1271,11 +1334,11 @@ class _DoctorScreenState extends State<DoctorScreen>
               value: 'settings',
               child: Row(
                 children: [
-                  Icon(Icons.manage_accounts_outlined, size: 18, color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0F5B46)),
+                  Icon(Icons.manage_accounts_outlined, size: 18, color: isDark ? SoftPalette.sky350 : SoftPalette.emerald600),
                   const SizedBox(width: 10),
                   Text(
                     'Edit Account Settings',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isDark ? Colors.white : const Color(0xFF1E293B)),
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.gray50 : SoftPalette.slate800),
                   ),
                 ],
               ),
@@ -1285,11 +1348,11 @@ class _DoctorScreenState extends State<DoctorScreen>
               value: 'sync',
               child: Row(
                 children: [
-                  Icon(Icons.sync_rounded, size: 18, color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0F5B46)),
+                  Icon(Icons.sync_rounded, size: 18, color: isDark ? SoftPalette.sky350 : SoftPalette.emerald600),
                   const SizedBox(width: 10),
                   Text(
                     _isSyncing ? 'Syncing...' : 'Sync Database',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isDark ? Colors.white : const Color(0xFF1E293B)),
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.gray50 : SoftPalette.slate800),
                   ),
                 ],
               ),
@@ -1298,11 +1361,11 @@ class _DoctorScreenState extends State<DoctorScreen>
               value: 'theme',
               child: Row(
                 children: [
-                  Icon(isDark ? Icons.wb_sunny_outlined : Icons.dark_mode_outlined, size: 18, color: isDark ? const Color(0xFFFBBF24) : const Color(0xFF0F5B46)),
+                  Icon(isDark ? Icons.wb_sunny_outlined : Icons.dark_mode_outlined, size: 18, color: isDark ? SoftPalette.amber200 : SoftPalette.emerald600),
                   const SizedBox(width: 10),
                   Text(
                     isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isDark ? Colors.white : const Color(0xFF1E293B)),
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.gray50 : SoftPalette.slate800),
                   ),
                 ],
               ),
@@ -1312,11 +1375,11 @@ class _DoctorScreenState extends State<DoctorScreen>
               value: 'logout',
               child: Row(
                 children: [
-                  Icon(Icons.logout_rounded, size: 18, color: Colors.red.shade400),
+                  Icon(Icons.logout_rounded, size: 18, color: context.adapt(SoftPalette.red400)),
                   const SizedBox(width: 10),
                   Text(
                     'Logout',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.red.shade400),
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.red400)),
                   ),
                 ],
               ),
@@ -1333,12 +1396,12 @@ class _DoctorScreenState extends State<DoctorScreen>
       end: Alignment.bottomRight,
       colors: isDark
           ? [
-              const Color(0xFF0F172A),
-              const Color(0xFF1E293B),
+              SoftPalette.slate900,
+              SoftPalette.slate800,
             ]
           : [
-              const Color(0xFF004D40), // Premium Emerald Teal
-              const Color(0xFF00796B), // Clean Jade Teal
+              SoftPalette.teal700, // Premium Emerald Teal
+              SoftPalette.teal550, // Clean Jade Teal
             ],
     );
 
@@ -1374,9 +1437,9 @@ class _DoctorScreenState extends State<DoctorScreen>
               preferredSize: const Size.fromHeight(44),
               child: TabBar(
                 controller: _tabController,
-                indicatorColor: const Color(0xFF00A86B),
-                labelColor: const Color(0xFF00A86B),
-                unselectedLabelColor: Colors.grey,
+                indicatorColor: SoftPalette.emerald400,
+                labelColor: SoftPalette.emerald400,
+                unselectedLabelColor: SoftPalette.gray350,
                 labelStyle: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
                 tabs: const [
                   Tab(icon: Icon(Icons.people, size: 18), text: 'Queue'),
@@ -1391,12 +1454,12 @@ class _DoctorScreenState extends State<DoctorScreen>
 
   Widget _buildPrescriptionPanel() {
     if (_selectedPatientData == null) {
-      return const Center(
+      return Center(
         child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-          Icon(Icons.medical_services_outlined, size: 60, color: Colors.grey),
+          Icon(Icons.medical_services_outlined, size: 60, color: context.adapt(SoftPalette.gray350)),
           SizedBox(height: 12),
           Text('Select a patient from the Queue tab',
-              style: TextStyle(fontSize: 16, color: Colors.grey), textAlign: TextAlign.center),
+              style: TextStyle(fontSize: 16, color: context.adapt(SoftPalette.gray350)), textAlign: TextAlign.center),
         ]),
       );
     }
@@ -1447,9 +1510,9 @@ class _DoctorScreenState extends State<DoctorScreen>
 
   Widget _buildHistoryPanel() {
     if (_selectedPatientData == null) {
-      return const Center(
+      return Center(
         child: Text('Select a patient to view history',
-            style: TextStyle(fontSize: 16, color: Colors.grey), textAlign: TextAlign.center),
+            style: TextStyle(fontSize: 16, color: context.adapt(SoftPalette.gray350)), textAlign: TextAlign.center),
       );
     }
     return Column(
@@ -1458,12 +1521,12 @@ class _DoctorScreenState extends State<DoctorScreen>
         Padding(
           padding: const EdgeInsets.fromLTRB(12, 10, 10, 4),
           child: Row(children: [
-            const Icon(Icons.history_edu_rounded, color: _teal, size: 18),
+            Icon(Icons.history_edu_rounded, color: context.adapt(_teal), size: 18),
             const SizedBox(width: 6),
-            const Expanded(
+            Expanded(
               child: Text('Visit History',
                   style: TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w800, color: _teal)),
+                      fontSize: 13, fontWeight: FontWeight.w800, color: context.adapt(_teal))),
             ),
             TextButton.icon(
               onPressed: _openFullHistory,
@@ -1471,12 +1534,12 @@ class _DoctorScreenState extends State<DoctorScreen>
               label: const Text('All Visits',
                   style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700)),
               style: TextButton.styleFrom(
-                foregroundColor: _teal,
+                foregroundColor: context.adapt(_teal),
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(8),
-                  side: const BorderSide(color: _teal, width: 1),
+                  side: BorderSide(color: context.adapt(_teal), width: 1),
                 ),
               ),
             ),
@@ -1508,8 +1571,8 @@ class _DoctorScreenState extends State<DoctorScreen>
           begin: Alignment.topCenter,
           end: Alignment.bottomCenter,
           colors: isDark
-              ? [const Color(0xFF0B1120), const Color(0xFF0F172A)]
-              : [const Color(0xFFE8F5E9), const Color(0xFFF1F8E9)],
+              ? [SoftPalette.slate900, SoftPalette.slate900]
+              : [SoftPalette.green100m, SoftPalette.lime100m],
         ),
       ),
       child: Column(
@@ -1525,16 +1588,16 @@ class _DoctorScreenState extends State<DoctorScreen>
     if (widget.isEmbedded) return body;
 
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFE8F5E9),
+      backgroundColor: isDark ? SoftPalette.slate900 : SoftPalette.green100m,
       appBar: _buildAppBar(isMobile, isDark),
       body: body,
     );
   }
 
   Widget _buildMobileBody(bool isDark) {
-    final cardColor = isDark ? const Color(0xFF1E293B) : Colors.white;
+    final cardColor = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
     final cardBorder = isDark
-        ? const BorderSide(color: Color(0xFF334155), width: 1)
+        ? const BorderSide(color: SoftPalette.slate700, width: 1)
         : BorderSide.none;
 
     return TabBarView(
@@ -1613,10 +1676,10 @@ class _DoctorScreenState extends State<DoctorScreen>
   }
 
   Widget _buildDesktopBody(bool isDark) {
-    final cardColor = isDark ? const Color(0xFF1E293B) : Colors.white;
+    final cardColor = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
     final cardBorder = isDark
-        ? const BorderSide(color: Color(0xFF334155), width: 1)
-        : const BorderSide(color: Color(0xFFE2E8F0), width: 1);
+        ? const BorderSide(color: SoftPalette.slate700, width: 1)
+        : const BorderSide(color: SoftPalette.slate150, width: 1);
 
     return Padding(
       padding: const EdgeInsets.all(14),

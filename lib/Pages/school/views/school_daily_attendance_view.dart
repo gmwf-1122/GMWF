@@ -99,7 +99,7 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: SchoolTheme.statusAbsent,
-              foregroundColor: Colors.white,
+              foregroundColor: SoftPalette.gray50,
             ),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Discard Changes'),
@@ -127,7 +127,7 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
 
   Future<void> _saveAttendance(Map<String, dynamic> currentEntries) async {
     if (_localChanges.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         const SnackBar(
           content: Text('No new attendance changes to save.'),
           duration: Duration(seconds: 1),
@@ -154,7 +154,7 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
 
       _localChanges.clear();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             backgroundColor: SchoolTheme.statusPresent,
             content: Text('Attendance successfully saved for $dateKey!'),
@@ -164,7 +164,7 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             backgroundColor: SchoolTheme.statusAbsent,
             content: Text('Error saving attendance: $e'),
@@ -189,9 +189,9 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
           margin: const EdgeInsets.all(24),
           padding: const EdgeInsets.all(32),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: context.adapt(SoftPalette.gray50),
             borderRadius: SchoolTheme.radius20,
-            border: Border.all(color: SchoolTheme.borderLight),
+            border: Border.all(color: context.adapt(SchoolTheme.borderLight)),
             boxShadow: SchoolTheme.cardShadow,
           ),
           child: Column(
@@ -199,26 +199,26 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
             children: [
               Container(
                 padding: const EdgeInsets.all(16),
-                decoration: const BoxDecoration(
-                  color: SchoolTheme.statusLeaveBg,
+                decoration: BoxDecoration(
+                  color: context.adapt(SchoolTheme.statusLeaveBg),
                   shape: BoxShape.circle,
                 ),
                 child: const Icon(Icons.assignment_ind_rounded, size: 40, color: SchoolTheme.statusLeave),
               ),
               const SizedBox(height: 20),
-              const Text(
+              Text(
                 'Homeroom Class Required',
                 style: TextStyle(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: SchoolTheme.textDark,
+                  color: context.adapt(SchoolTheme.textDark),
                 ),
               ),
               const SizedBox(height: 8),
               Text(
                 'Logged in as @${widget.editorName}. You are not currently assigned to a homeroom class. Teachers can only view and mark attendance for their assigned class. Please contact your School Principal or Admin to assign your homeroom class.',
                 textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 13, color: SchoolTheme.textMid, height: 1.5),
+                style: TextStyle(fontSize: 13, color: context.adapt(SchoolTheme.textMid), height: 1.5),
               ),
             ],
           ),
@@ -238,19 +238,19 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
         }
       },
       child: Scaffold(
-        backgroundColor: SchoolTheme.bgLight,
+        backgroundColor: context.adapt(SchoolTheme.bgLight),
         body: Column(
           children: [
             // Executive Leave Toggle Banner (Highest Authority only)
             if (_isHighestAuthority) ...[
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                color: effectiveAllowLeave ? SchoolTheme.statusLeaveBg : SchoolTheme.primaryLight,
+                color: effectiveAllowLeave ? context.adapt(SchoolTheme.statusLeaveBg) : context.adapt(SchoolTheme.primaryLight),
                 child: Row(
                   children: [
                     Icon(
                       effectiveAllowLeave ? Icons.event_available_rounded : Icons.event_busy_rounded,
-                      color: effectiveAllowLeave ? SchoolTheme.statusLeave : SchoolTheme.primary,
+                      color: effectiveAllowLeave ? SchoolTheme.statusLeave : context.adapt(SchoolTheme.primary),
                       size: 20,
                     ),
                     const SizedBox(width: 10),
@@ -262,7 +262,7 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
-                          color: effectiveAllowLeave ? SchoolTheme.statusLeave : SchoolTheme.primaryDark,
+                          color: effectiveAllowLeave ? SchoolTheme.statusLeave : context.adapt(SchoolTheme.primaryDark),
                         ),
                       ),
                     ),
@@ -280,7 +280,7 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
                       icon: Icon(effectiveAllowLeave ? Icons.block_rounded : Icons.check_circle_rounded, size: 14),
                       label: Text(effectiveAllowLeave ? 'Disable Leave' : 'Enable Leave', style: const TextStyle(fontSize: 11)),
                       style: TextButton.styleFrom(
-                        foregroundColor: effectiveAllowLeave ? SchoolTheme.statusAbsent : SchoolTheme.primary,
+                        foregroundColor: effectiveAllowLeave ? SchoolTheme.statusAbsent : context.adapt(SchoolTheme.primary),
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       ),
                     ),
@@ -293,8 +293,8 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
             Container(
               padding: EdgeInsets.symmetric(horizontal: isMobile ? 12 : 20, vertical: 12),
               decoration: BoxDecoration(
-                color: Colors.white,
-                border: Border(bottom: BorderSide(color: SchoolTheme.borderLight)),
+                color: context.adapt(SoftPalette.gray50),
+                border: Border(bottom: BorderSide(color: context.adapt(SchoolTheme.borderLight))),
               ),
               child: Wrap(
                 spacing: 12,
@@ -330,19 +330,19 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                           decoration: BoxDecoration(
-                            color: SchoolTheme.primaryLight,
+                            color: context.adapt(SchoolTheme.primaryLight),
                             borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: SchoolTheme.primary.withValues(alpha: 0.3)),
+                            border: Border.all(color: context.adapt(SchoolTheme.primary).withValues(alpha: 0.3)),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.calendar_month_rounded, color: SchoolTheme.primary, size: 16),
+                              Icon(Icons.calendar_month_rounded, color: context.adapt(SchoolTheme.primary), size: 16),
                               const SizedBox(width: 6),
                               Text(
                                 DateFormat('dd MMM yyyy').format(_selectedDate),
-                                style: const TextStyle(
-                                  color: SchoolTheme.primary,
+                                style: TextStyle(
+                                  color: context.adapt(SchoolTheme.primary),
                                   fontWeight: FontWeight.bold,
                                   fontSize: 12.5,
                                 ),
@@ -356,14 +356,14 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF1F5F9),
+                          color: context.adapt(SoftPalette.slate100),
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: SchoolTheme.borderLight),
+                          border: Border.all(color: context.adapt(SchoolTheme.borderLight)),
                         ),
                         child: DropdownButtonHideUnderline(
                           child: DropdownButton<String>(
                             value: _selectedGradeFilter,
-                            icon: const Icon(Icons.arrow_drop_down_rounded, color: SchoolTheme.textMid),
+                            icon: Icon(Icons.arrow_drop_down_rounded, color: context.adapt(SchoolTheme.textMid)),
                             items: _gradeOptions.map((g) {
                               return DropdownMenuItem(
                                 value: g,
@@ -388,7 +388,7 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
                       if (_isTeacher)
                         SchoolBadge(
                           label: 'Assigned Class: $_selectedGradeFilter',
-                          color: SchoolTheme.primary,
+                          color: context.adapt(SchoolTheme.primary),
                           fontSize: 11,
                         ),
                     ],
@@ -437,7 +437,7 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
                                     ? const SizedBox(
                                         width: 14,
                                         height: 14,
-                                        child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                        child: CircularProgressIndicator(color: SoftPalette.gray50, strokeWidth: 2),
                                       )
                                     : const Icon(Icons.save_rounded, size: 15),
                                 label: Text(
@@ -446,7 +446,7 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
                                 ),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: SchoolTheme.primary,
-                                  foregroundColor: Colors.white,
+                                  foregroundColor: SoftPalette.gray50,
                                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                   elevation: 0,
@@ -487,13 +487,13 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
                       child: Column(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.person_off_rounded, size: 56, color: Colors.grey.shade300),
+                          Icon(Icons.person_off_rounded, size: 56, color: context.adapt(SoftPalette.gray150)),
                           const SizedBox(height: 12),
                           Text(
                             _isTeacher
                                 ? 'No students enrolled in your assigned class ($_selectedGradeFilter).'
                                 : 'No students found for class filter: $_selectedGradeFilter',
-                            style: const TextStyle(color: SchoolTheme.textMid, fontSize: 14, fontWeight: FontWeight.bold),
+                            style: TextStyle(color: context.adapt(SchoolTheme.textMid), fontSize: 14, fontWeight: FontWeight.bold),
                           ),
                         ],
                       ),
@@ -528,12 +528,12 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
                           return Container(
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                             decoration: BoxDecoration(
-                              color: Colors.white,
+                              color: context.adapt(SoftPalette.gray50),
                               borderRadius: SchoolTheme.radius14,
                               border: Border.all(
                                 color: _localChanges.containsKey(sId)
-                                    ? SchoolTheme.primary.withValues(alpha: 0.5)
-                                    : SchoolTheme.borderLight,
+                                    ? context.adapt(SchoolTheme.primary).withValues(alpha: 0.5)
+                                    : context.adapt(SchoolTheme.borderLight),
                                 width: _localChanges.containsKey(sId) ? 1.5 : 1.0,
                               ),
                               boxShadow: SchoolTheme.cardShadow,
@@ -567,10 +567,10 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
                                     children: [
                                       Text(
                                         name,
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           fontWeight: FontWeight.bold,
                                           fontSize: 14,
-                                          color: SchoolTheme.textDark,
+                                          color: context.adapt(SchoolTheme.textDark),
                                         ),
                                       ),
                                       const SizedBox(height: 2),
@@ -581,7 +581,7 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
                                         children: [
                                           Text(
                                             'Grade $grade - Sec $section',
-                                            style: const TextStyle(color: SchoolTheme.textMuted, fontSize: 11.5),
+                                            style: TextStyle(color: context.adapt(SchoolTheme.textMuted), fontSize: 11.5),
                                           ),
                                           InkWell(
                                             onTap: () {
@@ -695,10 +695,10 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
           height: 36,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: isSelected ? activeColor : const Color(0xFFF1F5F9),
+            color: isSelected ? activeColor : context.adapt(SoftPalette.slate100),
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
-              color: isSelected ? activeColor : SchoolTheme.borderLight,
+              color: isSelected ? activeColor : context.adapt(SchoolTheme.borderLight),
               width: 1.2,
             ),
           ),
@@ -707,7 +707,7 @@ class _SchoolDailyAttendanceViewState extends State<SchoolDailyAttendanceView> {
             style: TextStyle(
               fontSize: 13,
               fontWeight: FontWeight.bold,
-              color: isSelected ? Colors.white : SchoolTheme.textMid,
+              color: isSelected ? SoftPalette.gray50 : context.adapt(SchoolTheme.textMid),
             ),
           ),
         ),

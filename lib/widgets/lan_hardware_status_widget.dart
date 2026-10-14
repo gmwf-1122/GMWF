@@ -1,6 +1,7 @@
 // lib/widgets/lan_hardware_status_widget.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../services/lan_hardware_scanner_service.dart';
@@ -18,7 +19,15 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
   @override
   void initState() {
     super.initState();
-    LanHardwareScannerService().startMonitoring();
+    // Only while this panel is on screen; the refresh button still scans on demand.
+    LanHardwareScannerService().startMonitoring(intervalSeconds: 60);
+  }
+
+  @override
+  void dispose() {
+    // It kept pinging the devices every 15 s for the rest of the session after the panel closed.
+    LanHardwareScannerService().stopMonitoring();
+    super.dispose();
   }
 
   Future<void> _manualRefresh() async {
@@ -43,13 +52,13 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
   Color _getCategoryColor(String category) {
     switch (category.toLowerCase()) {
       case 'biometric':
-        return const Color(0xFF0EA5E9); // Sky Blue
+        return SoftPalette.sky400; // Sky Blue
       case 'printer':
-        return const Color(0xFF8B5CF6); // Purple
+        return SoftPalette.violet500; // Purple
       case 'router':
-        return const Color(0xFFF59E0B); // Amber
+        return SoftPalette.amber300; // Amber
       default:
-        return const Color(0xFF64748B);
+        return SoftPalette.slate550;
     }
   }
 
@@ -68,10 +77,10 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
 
         return Card(
           elevation: 0,
-          color: isDark ? const Color(0xFF0F172A) : Colors.white,
+          color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(16),
-            side: BorderSide(color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0)),
+            side: BorderSide(color: isDark ? SoftPalette.slate800 : SoftPalette.slate150),
           ),
           child: Padding(
             padding: const EdgeInsets.all(16),
@@ -83,11 +92,11 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF0F766E).withOpacity(0.25) : const Color(0xFFECFDF5),
+                        color: isDark ? SoftPalette.teal550.withOpacity(0.25) : SoftPalette.emerald50,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFF10B981).withOpacity(0.4)),
+                        border: Border.all(color: SoftPalette.emerald350.withOpacity(0.4)),
                       ),
-                      child: const Icon(Icons.hub_rounded, color: Color(0xFF10B981), size: 22),
+                      child: const Icon(Icons.hub_rounded, color: SoftPalette.emerald350, size: 22),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
@@ -99,12 +108,12 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
                             style: GoogleFonts.outfit(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
-                              color: isDark ? Colors.white : const Color(0xFF0F172A),
+                              color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                             ),
                           ),
                           Text(
                             'Real-time network ping status for Biometrics, Thermal Printers & Gateway',
-                            style: GoogleFonts.inter(fontSize: 12, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                            style: GoogleFonts.inter(fontSize: 12, color: isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                           ),
                         ],
                       ),
@@ -113,11 +122,11 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
                         color: onlineCount > 0
-                            ? (isDark ? const Color(0xFF064E3B).withOpacity(0.4) : const Color(0xFFECFDF5))
-                            : (isDark ? const Color(0xFF7F1D1D).withOpacity(0.4) : const Color(0xFFFEF2F2)),
+                            ? (isDark ? SoftPalette.emerald700.withOpacity(0.4) : SoftPalette.emerald50)
+                            : (isDark ? SoftPalette.red700.withOpacity(0.4) : SoftPalette.red100t),
                         borderRadius: BorderRadius.circular(20),
                         border: Border.all(
-                          color: onlineCount > 0 ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                          color: onlineCount > 0 ? SoftPalette.emerald350 : SoftPalette.red400,
                           width: 0.8,
                         ),
                       ),
@@ -127,8 +136,8 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
                           fontSize: 12,
                           fontWeight: FontWeight.bold,
                           color: onlineCount > 0
-                              ? (isDark ? const Color(0xFF34D399) : const Color(0xFF047857))
-                              : (isDark ? const Color(0xFFF87171) : const Color(0xFFB91C1C)),
+                              ? (isDark ? SoftPalette.emerald300 : SoftPalette.emerald550)
+                              : (isDark ? SoftPalette.red350 : SoftPalette.red550),
                         ),
                       ),
                     ),
@@ -140,14 +149,14 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
                               height: 18,
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
-                          : Icon(Icons.refresh_rounded, size: 20, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                          : Icon(Icons.refresh_rounded, size: 20, color: isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                       tooltip: 'Ping All LAN Hardware',
                       onPressed: _isRefreshing ? null : _manualRefresh,
                     ),
                   ],
                 ),
                 const SizedBox(height: 16),
-                Divider(height: 1, color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
+                Divider(height: 1, color: isDark ? SoftPalette.slate800 : SoftPalette.slate100),
                 const SizedBox(height: 12),
 
                 // Device Cards Grid / List
@@ -164,13 +173,13 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                       decoration: BoxDecoration(
                         color: dev.isOnline
-                            ? (isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC))
-                            : (isDark ? const Color(0xFF3B1219) : const Color(0xFFFFF1F2)),
+                            ? (isDark ? SoftPalette.slate800 : SoftPalette.gray50)
+                            : (isDark ? SoftPalette.red800 : SoftPalette.red100m),
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
                           color: dev.isOnline
-                              ? (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0))
-                              : (isDark ? const Color(0xFF7F1D1D) : const Color(0xFFFECDD3)),
+                              ? (isDark ? SoftPalette.slate700 : SoftPalette.slate150)
+                              : (isDark ? SoftPalette.red700 : SoftPalette.red200),
                         ),
                       ),
                       child: Row(
@@ -193,19 +202,19 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
                                   style: GoogleFonts.inter(
                                     fontSize: 13,
                                     fontWeight: FontWeight.w600,
-                                    color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                    color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                                   ),
                                 ),
                                 Row(
                                   children: [
                                     Text(
                                       'IP: ${dev.ipAddress}:${dev.port}',
-                                      style: GoogleFonts.inter(fontSize: 11, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                                      style: GoogleFonts.inter(fontSize: 11, color: isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                                     ),
                                     const SizedBox(width: 8),
                                     Text(
                                       '• Checked: ${DateFormat('hh:mm:ss a').format(dev.lastChecked)}',
-                                      style: GoogleFonts.inter(fontSize: 11, color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8)),
+                                      style: GoogleFonts.inter(fontSize: 11, color: isDark ? SoftPalette.slate550 : SoftPalette.slate350),
                                     ),
                                   ],
                                 ),
@@ -217,11 +226,11 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                             decoration: BoxDecoration(
                               color: dev.isOnline
-                                  ? (isDark ? const Color(0xFF064E3B).withOpacity(0.5) : const Color(0xFFDCFCE7))
-                                  : (isDark ? const Color(0xFF7F1D1D).withOpacity(0.5) : const Color(0xFFFEE2E2)),
+                                  ? (isDark ? SoftPalette.emerald700.withOpacity(0.5) : SoftPalette.emerald100)
+                                  : (isDark ? SoftPalette.red700.withOpacity(0.5) : SoftPalette.red150m),
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
-                                color: dev.isOnline ? const Color(0xFF10B981).withOpacity(0.5) : const Color(0xFFEF4444).withOpacity(0.5),
+                                color: dev.isOnline ? SoftPalette.emerald350.withOpacity(0.5) : SoftPalette.red400.withOpacity(0.5),
                                 width: 0.8,
                               ),
                             ),
@@ -232,7 +241,7 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
                                   width: 7,
                                   height: 7,
                                   decoration: BoxDecoration(
-                                    color: dev.isOnline ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                                    color: dev.isOnline ? SoftPalette.emerald350 : SoftPalette.red400,
                                     shape: BoxShape.circle,
                                   ),
                                 ),
@@ -243,8 +252,8 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
                                     fontSize: 11,
                                     fontWeight: FontWeight.bold,
                                     color: dev.isOnline
-                                        ? (isDark ? const Color(0xFF34D399) : const Color(0xFF15803D))
-                                        : (isDark ? const Color(0xFFF87171) : const Color(0xFFB91C1C)),
+                                        ? (isDark ? SoftPalette.emerald300 : SoftPalette.green550)
+                                        : (isDark ? SoftPalette.red350 : SoftPalette.red550),
                                   ),
                                 ),
                               ],

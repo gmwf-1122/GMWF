@@ -14,7 +14,6 @@ import 'package:uuid/uuid.dart';
 
 import 'local_storage_service.dart';
 import 'sync_service.dart';
-import 'network_health_service.dart';
 import '../models/donation_box_models.dart';
 import '../realtime/realtime_manager.dart';
 import '../realtime/realtime_events.dart';
@@ -755,19 +754,9 @@ class DonationBoxStorage {
           ),
         );
       }
-      // Direct cloud push fallback if online
-      try {
-        if (NetworkHealthService().isStableOnline) {
-          final bId = LocalStorageService.sanitizeBranchId(box.branchId, fallback: 'karachi');
-          unawaited(FirebaseFirestore.instance
-              .collection('branches')
-              .doc(bId)
-              .collection('donation_boxes')
-              .doc(box.id)
-              .set(box.toMap()..remove('syncStatus'), SetOptions(merge: true))
-              .catchError((_) {}));
-        }
-      } catch (_) {}
+      // Uploaded by the queued item above. The direct write that was here was a second
+      // write of the same document, left in the SDK's hidden queue whenever Firestore
+      // did not answer (and sent again later, costing quota twice).
       SyncService().triggerUpload(force: true);
     } catch (e) {
       debugPrint('[DonationBoxStorage] Enqueue box sync failed: $e');
@@ -793,19 +782,9 @@ class DonationBoxStorage {
           ),
         );
       }
-      // Direct cloud push fallback if online
-      try {
-        if (NetworkHealthService().isStableOnline) {
-          final bId = LocalStorageService.sanitizeBranchId(opening.branchId, fallback: 'karachi');
-          unawaited(FirebaseFirestore.instance
-              .collection('branches')
-              .doc(bId)
-              .collection('donation_box_openings')
-              .doc(opening.id)
-              .set(opening.toMap()..remove('syncStatus'), SetOptions(merge: true))
-              .catchError((_) {}));
-        }
-      } catch (_) {}
+      // Uploaded by the queued item above. The direct write that was here was a second
+      // write of the same document, left in the SDK's hidden queue whenever Firestore
+      // did not answer (and sent again later, costing quota twice).
       SyncService().triggerUpload(force: true);
     } catch (e) {
       debugPrint('[DonationBoxStorage] Enqueue opening sync failed: $e');

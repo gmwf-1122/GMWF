@@ -1,6 +1,7 @@
 // lib/pages/dispensary/receptionist/receptionist_screen.dart
 
 import 'package:gmwf/utils/perf_trace.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:gmwf/utils/debounced_box_listenable.dart';
 import 'dart:async';
 import 'package:connectivity_plus/connectivity_plus.dart';
@@ -9,7 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:another_flushbar/flushbar.dart';
+import 'package:gmwf/design/components/flushbar_compat.dart';
 import 'package:gmwf/services/auth_service.dart';
 import 'package:gmwf/services/local_storage_service.dart';
 import 'package:gmwf/services/local_storage_service.dart' as lss;
@@ -26,7 +27,12 @@ import '../../../utils/notification_deduper.dart';
 import 'package:gmwf/services/cloud_messaging_service.dart';
 import 'patient_register.dart';
 import 'token_screen.dart';
+import '../widgets/desk_summary_card.dart';
+import '../widgets/pharmacy_pane.dart';
+import '../widgets/connection_status_same.dart';
+import 'token_tally.dart';
 import 'package:gmwf/design/design_system.dart';
+import '../../../services/dispensary_preferences_service.dart';
 
 class ReceptionistScreen extends StatefulWidget {
   final String branchId;
@@ -35,6 +41,11 @@ class ReceptionistScreen extends StatefulWidget {
   final bool isEmbedded;
   final bool suppressPrescriptionNotifications;
 
+  /// Hybrid "Pharmacy" layout (all-in-one desk). When set, this screen lays out
+  /// Reception | Today's Tokens | the host's dispense pane, with the
+  /// "Today's collection" strip on top. All reception logic stays here.
+  final ReceptionistPharmacySlots? pharmacy;
+
   const ReceptionistScreen({
     super.key,
     required this.branchId,
@@ -42,9 +53,32 @@ class ReceptionistScreen extends StatefulWidget {
     required this.receptionistName,
     this.isEmbedded = false,
     this.suppressPrescriptionNotifications = false,
+    this.pharmacy,
   });
   @override
   State<ReceptionistScreen> createState() => _ReceptionistScreenState();
+}
+
+/// What the Hybrid desk plugs into the Receptionist's Pharmacy layout.
+class ReceptionistPharmacySlots {
+  /// Right-hand pane (the dispense form).
+  final Widget dispensePane;
+
+  /// Serial loaded in the dispense form (highlighted in Today's Tokens).
+  final String? dispensingSerial;
+
+  /// A "Waiting for Dispense" row was tapped: load it in the dispense form.
+  final ValueChanged<Map<String, dynamic>> onDispenseRequested;
+
+  /// The shift filter of Today's Tokens changed ('all', 'morning', …).
+  final ValueChanged<String> onSessionFilterChanged;
+
+  const ReceptionistPharmacySlots({
+    required this.dispensePane,
+    required this.dispensingSerial,
+    required this.onDispenseRequested,
+    required this.onSessionFilterChanged,
+  });
 }
 
 class _ReceptionistScreenState extends State<ReceptionistScreen>
@@ -82,7 +116,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
   final Set<String> _pendingReversalSerials = <String>{};
   bool _isSubmittingReversal = false;
 
-  static const Color _teal = Color(0xFF00695C);
+  static const Color _teal = SoftPalette.teal600;
   static const int _tabToken = 0;
   // ignore: unused_field
   static const int _tabLog = 1;
@@ -138,7 +172,10 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
     _connectionStatus = ConnectionManager().status;
     _connectionSub = ConnectionManager().statusStream.listen((status) {
-      if (mounted) setState(() => _connectionStatus = status);
+      // The status is only shown in the standalone app bar; skip repeats and embedded rebuilds.
+      final changed = !status.sameAs(_connectionStatus);
+      _connectionStatus = status;
+      if (mounted && changed && !widget.isEmbedded) setState(() {});
     });
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -341,12 +378,12 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
           Container(
             padding: const EdgeInsets.all(5),
             decoration: BoxDecoration(
-              color: const Color(0xFF10B981).withValues(alpha: 0.25),
+              color: SoftPalette.emerald350.withValues(alpha: 0.25),
               shape: BoxShape.circle,
             ),
             child: const Icon(
               Icons.notifications_active_rounded,
-              color: Color(0xFF10B981),
+              color: SoftPalette.emerald350,
               size: 18,
             ),
           ),
@@ -357,7 +394,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
               style: TextStyle(
                 fontWeight: FontWeight.w800,
                 fontSize: 14.5,
-                color: Colors.white,
+                color: SoftPalette.gray50,
                 letterSpacing: -0.2,
               ),
             ),
@@ -369,19 +406,19 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         child: RichText(
           text: TextSpan(
             style: const TextStyle(
-                fontSize: 13, color: Color(0xFFCBD5E1), height: 1.3),
+                fontSize: 13, color: SoftPalette.slate200, height: 1.3),
             children: [
               TextSpan(
                 text: doctorName.isNotEmpty ? '$doctorName ' : 'Doctor ',
                 style: const TextStyle(
-                    fontWeight: FontWeight.bold, color: Colors.white),
+                    fontWeight: FontWeight.bold, color: SoftPalette.gray50),
               ),
               const TextSpan(text: 'finished consultation for '),
               TextSpan(
                 text: '$tokenDisplay $patientName',
                 style: const TextStyle(
                   fontWeight: FontWeight.w900,
-                  color: Color(0xFF34D399),
+                  color: SoftPalette.emerald300,
                 ),
               ),
               const TextSpan(
@@ -390,7 +427,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
           ),
         ),
       ),
-      backgroundColor: const Color(0xFF0F172A),
+      backgroundColor: SoftPalette.slate900,
       borderRadius: BorderRadius.circular(16),
       margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
@@ -399,18 +436,18 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       animationDuration: const Duration(milliseconds: 350),
       boxShadows: [
         BoxShadow(
-          color: const Color(0xFF10B981).withValues(alpha: 0.35),
+          color: SoftPalette.emerald350.withValues(alpha: 0.35),
           blurRadius: 18,
           spreadRadius: 1,
           offset: const Offset(0, 4),
         ),
         BoxShadow(
-          color: Colors.black.withValues(alpha: 0.5),
+          color: SoftPalette.gray900.withValues(alpha: 0.5),
           blurRadius: 12,
           offset: const Offset(0, 4),
         ),
       ],
-      borderColor: const Color(0xFF10B981).withValues(alpha: 0.6),
+      borderColor: SoftPalette.emerald350.withValues(alpha: 0.6),
       borderWidth: 1.4,
     ).show(context);
   }
@@ -557,7 +594,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       if (mounted) {
         Flushbar(
           message: _online ? 'Full sync completed (LAN & Cloud)' : 'LAN Sync completed (Outbox flushed)',
-          backgroundColor: Colors.green.shade700,
+          backgroundColor: SoftPalette.green500,
           duration: const Duration(seconds: 3),
         ).show(context);
       }
@@ -565,7 +602,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       if (mounted) {
         Flushbar(
           message: 'Sync failed: $e',
-          backgroundColor: Colors.red.shade700,
+          backgroundColor: SoftPalette.red500,
           duration: const Duration(seconds: 4),
         ).show(context);
       }
@@ -608,6 +645,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
   Future<void> _logout() async {
     if (_isLoggingOut) return;
+    final confirm = await showLogoutDialog(context);
+    if (confirm != true || !mounted) return;
     if (mounted) setState(() => _isLoggingOut = true);
     try { _connectionSub?.cancel(); _connSub?.cancel(); _realtimeSub?.cancel(); } catch (_) {}
     ConnectionManager().stop().catchError((_) {});
@@ -663,7 +702,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       if (mounted) {
         Flushbar(
           message: 'A reversal request for Token #$serial is already pending supervisor review.',
-          backgroundColor: Colors.amber[900]!,
+          backgroundColor: SoftPalette.orange350,
           duration: const Duration(seconds: 3),
         ).show(context);
       }
@@ -683,7 +722,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
           if (mounted) {
             Flushbar(
               message: 'Token #$serial already has an active reversal request awaiting approval.',
-              backgroundColor: Colors.amber[900]!,
+              backgroundColor: SoftPalette.orange350,
               duration: const Duration(seconds: 3),
             ).show(context);
           }
@@ -698,7 +737,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Request Token Reversal',
-            style: TextStyle(color: Colors.orange)),
+            style: TextStyle(color: SoftPalette.amber300)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -724,7 +763,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
             icon: const Icon(Icons.undo),
             label: const Text('Send Request'),
             style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.orange[800]),
+                backgroundColor: SoftPalette.orange400),
             onPressed: () => Navigator.of(ctx).pop(true),
           ),
         ],
@@ -814,7 +853,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       if (mounted) {
         Flushbar(
           message: 'Reversal request sent for #$serial',
-          backgroundColor: Colors.orange[800]!,
+          backgroundColor: SoftPalette.orange400,
           duration: const Duration(seconds: 4),
         ).show(context);
       }
@@ -823,7 +862,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       if (mounted) {
         Flushbar(
           message: 'Failed to send request: $e',
-          backgroundColor: Colors.red,
+          backgroundColor: SoftPalette.red400,
           duration: const Duration(seconds: 5),
         ).show(context);
       }
@@ -917,6 +956,11 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       return true;
     }
 
+    // On offline or single receptionist branch, never hide tokens from the desk when logged in generically:
+    if (myName.isEmpty || myName == 'receptionist' || myName == 'user' || myName == 'doctor') {
+      return true;
+    }
+
     if (cBy.isNotEmpty || cName.isNotEmpty) {
       return false;
     }
@@ -946,7 +990,24 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       }
     }
 
-    // Never accept yesterday's tokens regardless of status (waiting, skipped, in-progress, etc.)
+    // 2. Rollover & Clock Skew Tolerance:
+    // If a token was issued in the last 24 hours or is actively in progress/waiting,
+    // NEVER hide it from the receptionist's desk!
+    final status = (e['status'] as String?)?.toLowerCase().trim() ?? '';
+    final isWaitingOrActive = status == 'waiting' || status == 'in_consultation' || status == 'in consultation' || status == 'skipped';
+
+    if (rawTime != null) {
+      final dt = DateTime.tryParse(rawTime.toString());
+      if (dt != null) {
+        final ageHours = DateTime.now().difference(dt).inHours.abs();
+        if (ageHours < 24 && (isWaitingOrActive || ageHours < 16)) {
+          return true;
+        }
+      }
+    } else if (isWaitingOrActive) {
+      return true;
+    }
+
     return false;
   }
 
@@ -1209,20 +1270,24 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
           return Padding(
             padding: const EdgeInsets.only(right: 6),
             child: InkWell(
-              onTap: () => setState(() => _selectedSessionFilter = id),
+              onTap: () {
+                setState(() => _selectedSessionFilter = id);
+                // Pharmacy tab: the dispense form follows the same shift filter.
+                widget.pharmacy?.onSessionFilterChanged(id);
+              },
               borderRadius: BorderRadius.circular(20),
               child: AnimatedContainer(
                 duration: const Duration(milliseconds: 200),
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: isSelected
-                      ? const Color(0xFF00875A)
-                      : (_isDark ? const Color(0xFF334155) : Colors.grey.shade100),
+                      ? SoftPalette.emerald550
+                      : (_isDark ? SoftPalette.slate700 : SoftPalette.gray100),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
                     color: isSelected
-                        ? const Color(0xFF00875A)
-                        : (_isDark ? const Color(0xFF475569) : Colors.grey.shade300),
+                        ? SoftPalette.emerald550
+                        : (_isDark ? SoftPalette.slate600 : SoftPalette.gray150),
                     width: 1.2,
                   ),
                 ),
@@ -1235,8 +1300,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                         fontSize: 11.5,
                         fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
                         color: isSelected
-                            ? Colors.white
-                            : (_isDark ? Colors.white70 : Colors.black87),
+                            ? SoftPalette.gray50
+                            : (_isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
                       ),
                     ),
                     const SizedBox(width: 5),
@@ -1244,8 +1309,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                       padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                       decoration: BoxDecoration(
                         color: isSelected
-                            ? Colors.white.withValues(alpha: 0.25)
-                            : (_isDark ? const Color(0xFF1E293B) : Colors.grey.shade300),
+                            ? SoftPalette.gray50.withValues(alpha: 0.25)
+                            : (_isDark ? SoftPalette.slate800 : SoftPalette.gray150),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Text(
@@ -1254,8 +1319,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
                           color: isSelected
-                              ? Colors.white
-                              : (_isDark ? const Color(0xFF38BDF8) : const Color(0xFF00796B)),
+                              ? SoftPalette.gray50
+                              : (_isDark ? SoftPalette.sky350 : SoftPalette.teal550),
                         ),
                       ),
                     ),
@@ -1281,10 +1346,10 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       height: 30,
       padding: const EdgeInsets.symmetric(horizontal: 8),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF334155) : Colors.grey.shade100,
+        color: isDark ? SoftPalette.slate700 : SoftPalette.gray100,
         borderRadius: BorderRadius.circular(8),
         border: Border.all(
-          color: isDark ? const Color(0xFF475569) : Colors.grey.shade300,
+          color: isDark ? SoftPalette.slate600 : SoftPalette.gray150,
         ),
       ),
       child: DropdownButtonHideUnderline(
@@ -1292,12 +1357,12 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
           value: items.any((i) => i['id'] == value) ? value : items.first['id'],
           isDense: true,
           icon: Icon(Icons.arrow_drop_down,
-              size: 16, color: isDark ? const Color(0xFF38BDF8) : _teal),
-          dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+              size: 16, color: isDark ? SoftPalette.sky350 : _teal),
+          dropdownColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w600,
-            color: isDark ? Colors.white : Colors.black87,
+            color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87,
           ),
           items: items.map((i) {
             return DropdownMenuItem<String>(
@@ -1306,7 +1371,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.w600,
-                    color: isDark ? Colors.white : Colors.black87,
+                    color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87,
                   )),
             );
           }).toList(),
@@ -1320,42 +1385,18 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     try {
       final todayEntries = precomputedEntries ?? _getFilteredTodayTokens();
 
-      int zakat = 0, nonZakat = 0, gmwf = 0;
-      int zakatAmount = 0, nonZakatAmount = 0;
-
-      for (final e in todayEntries) {
-        var qt = (e['queueType'] as String?)?.toLowerCase().trim() ?? 'unknown';
-        if (_isKarachi && (qt == 'non-zakat' || qt.contains('non'))) {
-          qt = 'zakat';
-        }
-        final days = _getDaysOfMedicine(e);
-        switch (qt) {
-          case 'zakat':
-            zakat++;
-            zakatAmount += 20 * days;
-            break;
-          case 'non-zakat':
-            nonZakat++;
-            nonZakatAmount += 100 * days;
-            break;
-          case 'gmwf':
-            gmwf++;
-            break;
-          default:
-            zakat++;
-            zakatAmount += 20 * days;
-        }
-      }
-
-      final total = zakat + nonZakat + gmwf;
-      final totalAmount = zakatAmount + nonZakatAmount;
+      final tally = TokenTally.of(todayEntries, isKarachi: _isKarachi);
+      final zakat = tally.zakat, nonZakat = tally.nonZakat, gmwf = tally.gmwf;
+      final zakatAmount = tally.zakatAmount, nonZakatAmount = tally.nonZakatAmount;
+      final total = tally.total;
+      final totalAmount = tally.totalAmount;
 
       final cards = [
         _compactSummaryCard(
           _isKarachi ? 'PKR 20' : 'Zakat',
           zakat,
           'PKR $zakatAmount',
-          const Color(0xFF00875A), // Solid Emerald Green
+          SoftPalette.emerald550, // Solid Emerald Green
           Icons.volunteer_activism_rounded,
           isMobile: isMobile,
         ),
@@ -1363,17 +1404,17 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
           _isKarachi ? 'PKR 100' : 'Non-Zakat',
           nonZakat,
           _isKarachi && nonZakat == 0 ? 'Disabled 🔒' : 'PKR $nonZakatAmount',
-          const Color(0xFF00875A),
+          SoftPalette.emerald550,
           Icons.person_outline_rounded,
           isMobile: isMobile,
           isOutlined: true,
-          outlineColor: const Color(0xFF00875A), // Green Outline on White Card
+          outlineColor: SoftPalette.emerald550, // Green Outline on White Card
         ),
         _compactSummaryCard(
           'GMWF',
           gmwf,
           'PKR 0',
-          const Color(0xFFD97706), // Solid Amber
+          SoftPalette.orange400, // Solid Amber
           null,
           isImage: true,
           isMobile: isMobile,
@@ -1382,11 +1423,11 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
           'Total',
           total,
           'PKR $totalAmount',
-          const Color(0xFFD97706),
+          SoftPalette.orange400,
           Icons.people_outline_rounded,
           isMobile: isMobile,
           isOutlined: true,
-          outlineColor: const Color(0xFFD97706), // Amber Outline on White Card
+          outlineColor: SoftPalette.orange400, // Amber Outline on White Card
         ),
       ];
 
@@ -1406,15 +1447,23 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     }
   }
 
-  int _getDaysOfMedicine(Map<String, dynamic> entry) {
-    final topLevel = entry['daysOfMedicine'];
-    if (topLevel is int) return topLevel.clamp(1, 99);
-    final presc = entry['prescription'];
-    if (presc is Map) {
-      final nested = presc['daysOfMedicine'];
-      if (nested is int) return nested.clamp(1, 99);
-    }
-    return 1;
+  int _getDaysOfMedicine(Map<String, dynamic> entry) => TokenTally.daysOfMedicine(entry);
+
+  /// Shares today's collection (same numbers as the summary) to WhatsApp.
+  void _shareCollectionToWhatsApp([List<Map<String, dynamic>>? entries]) {
+    final tally = TokenTally.of(entries ?? _getFilteredTodayTokens(), isKarachi: _isKarachi);
+    final place = CampSessionService.getBranchAndCampDisplayName(
+      branchName: _branchName ?? LocalStorageService.getBranchName(widget.branchId),
+      branchId: widget.branchId,
+      campId: CampSessionService.getActiveCamp(widget.branchId),
+    );
+    shareTextToWhatsApp(buildCollectionSummary(
+      tally: tally,
+      place: place,
+      date: DateFormat('d MMM yyyy').format(DateTime.now()),
+      shift: _selectedSessionFilter,
+      username: (_username?.isNotEmpty == true) ? _username! : widget.receptionistName,
+    ));
   }
 
   Widget _compactSummaryCard(
@@ -1428,110 +1477,18 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     bool isOutlined = false,
     Color? outlineColor,
   }) {
-    final effectiveOutline = outlineColor ?? solidColor;
-    final bgColor = isOutlined
-        ? (_isDark ? const Color(0xFF1E293B) : Colors.white)
-        : solidColor;
-    final primaryTextColor = isOutlined
-        ? (_isDark ? Colors.white : effectiveOutline)
-        : Colors.white;
-    final secondaryTextColor = isOutlined
-        ? (_isDark
-            ? const Color(0xFF94A3B8)
-            : effectiveOutline.withValues(alpha: 0.85))
-        : Colors.white.withValues(alpha: 0.85);
-
-    return Container(
-      height: isMobile ? 66 : 76,
-      decoration: BoxDecoration(
-        color: bgColor,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: isOutlined
-              ? effectiveOutline
-              : Colors.white.withValues(alpha: 0.22),
-          width: isOutlined ? 1.6 : 1.2,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: isOutlined
-                ? effectiveOutline.withValues(alpha: _isDark ? 0.25 : 0.15)
-                : solidColor.withValues(alpha: _isDark ? 0.45 : 0.35),
-            blurRadius: isOutlined ? 10 : 14,
-            spreadRadius: 1,
-            offset: const Offset(0, 4),
-          ),
-          BoxShadow(
-            color: Colors.black.withValues(alpha: _isDark ? 0.30 : 0.06),
-            blurRadius: 6,
-            offset: const Offset(0, 2),
-          ),
-        ],
-      ),
-      padding: EdgeInsets.symmetric(
-        horizontal: isMobile ? 5 : 10,
-        vertical: isMobile ? 4 : 8,
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Flexible(
-                child: Text(
-                  title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: primaryTextColor,
-                    fontSize: isMobile ? 9.5 : 12,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: 0.1,
-                  ),
-                ),
-              ),
-              const SizedBox(width: 2),
-              if (isImage)
-                Image.asset(
-                  'assets/logo/gmwf-1.webp',
-                  height: isMobile ? 12 : 17,
-                  fit: BoxFit.contain,
-                )
-              else if (icon != null)
-                Icon(icon, size: isMobile ? 12 : 16, color: primaryTextColor),
-            ],
-          ),
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              FittedBox(
-                fit: BoxFit.scaleDown,
-                child: Text(
-                  '$count',
-                  style: TextStyle(
-                    color: primaryTextColor,
-                    fontSize: isMobile ? 16 : 22,
-                    fontWeight: FontWeight.w900,
-                    height: 1.0,
-                  ),
-                ),
-              ),
-              if (!isMobile)
-                Text(
-                  amount,
-                  style: TextStyle(
-                    color: secondaryTextColor,
-                    fontSize: 10,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-            ],
-          ),
-        ],
-      ),
+    // Shared with the Dispense Queue / Hybrid Pharmacy view (same look everywhere).
+    return DeskSummaryCard(
+      title: title,
+      count: count,
+      amount: amount,
+      solidColor: solidColor,
+      icon: icon,
+      isImage: isImage,
+      isMobile: isMobile,
+      isOutlined: isOutlined,
+      outlineColor: outlineColor,
+      isDark: _isDark,
     );
   }
 
@@ -1552,7 +1509,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
           'No tokens issued today',
           style: TextStyle(
               fontSize: 14,
-              color: _isDark ? const Color(0xFF94A3B8) : Colors.grey),
+              color: _isDark ? SoftPalette.slate350 : SoftPalette.gray350),
         ),
       );
     }
@@ -1561,7 +1518,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       itemCount: rawList.length,
       separatorBuilder: (_, _) => Divider(
           height: 1,
-          color: _isDark ? const Color(0xFF334155) : Colors.grey.shade200),
+          color: _isDark ? SoftPalette.slate700 : SoftPalette.gray100),
       itemBuilder: (context, i) {
         final e = rawList[i];
         final serial = e['serial'] as String? ?? 'N/A';
@@ -1680,31 +1637,31 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         String displayType;
         if (_isKarachi) {
           if (effectiveQueueType == 'zakat') {
-            badgeColor = Colors.green.shade600;
+            badgeColor = SoftPalette.green400;
             displayType = 'PKR 20';
           } else if (effectiveQueueType == 'gmwf') {
-            badgeColor = Colors.orange.shade600;
+            badgeColor = SoftPalette.orange350;
             displayType = 'GMWF';
           } else {
-            badgeColor = Colors.green.shade600;
+            badgeColor = SoftPalette.green400;
             displayType = 'PKR 20';
           }
         } else {
           switch (queueTypeRaw) {
             case 'zakat':
-              badgeColor = Colors.green.shade600;
+              badgeColor = SoftPalette.green400;
               displayType = 'Zakat';
               break;
             case 'non-zakat':
-              badgeColor = Colors.blue.shade600;
+              badgeColor = SoftPalette.blue500;
               displayType = 'Non-Zakat';
               break;
             case 'gmwf':
-              badgeColor = Colors.orange.shade600;
+              badgeColor = SoftPalette.orange350;
               displayType = 'GMWF';
               break;
             default:
-              badgeColor = Colors.grey.shade600;
+              badgeColor = SoftPalette.gray500;
               displayType = 'Zakat';
           }
         }
@@ -1726,33 +1683,33 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
 
         if (isDispensed) {
           statusLabel = 'Dispensed';
-          statusBg = _isDark ? const Color(0xFF14532D) : Colors.green.shade50;
-          statusText = _isDark ? const Color(0xFF86EFAC) : Colors.green.shade800;
+          statusBg = _isDark ? SoftPalette.green700 : SoftPalette.green100m;
+          statusText = _isDark ? SoftPalette.emerald200 : SoftPalette.green550;
           statusIcon = Icons.check_circle_outline_rounded;
         } else if (isWaitingToDispense) {
           statusLabel = 'Waiting for Dispense';
-          statusBg = _isDark ? const Color(0xFF1E3A5F) : Colors.blue.shade50;
-          statusText = _isDark ? const Color(0xFF93C5FD) : Colors.blue.shade800;
+          statusBg = _isDark ? SoftPalette.blue750 : SoftPalette.slate100;
+          statusText = _isDark ? SoftPalette.blue300 : SoftPalette.blue550;
           statusIcon = Icons.medication_outlined;
         } else if (s == 'with_doctor' || s == 'with doctor' || s == 'in_consultation') {
           statusLabel = 'With Doctor';
-          statusBg = _isDark ? const Color(0xFF3B1D5F) : Colors.purple.shade50;
-          statusText = _isDark ? const Color(0xFFD8B4FE) : Colors.purple.shade800;
+          statusBg = _isDark ? SoftPalette.violet750 : SoftPalette.purple150m;
+          statusText = _isDark ? SoftPalette.purple300 : SoftPalette.purple600;
           statusIcon = Icons.medical_services_outlined;
         } else if (s == 'cancelled' || s == 'reversed') {
           statusLabel = 'Cancelled';
-          statusBg = _isDark ? const Color(0xFF450A0A) : Colors.red.shade50;
-          statusText = _isDark ? const Color(0xFFFCA5A5) : Colors.red.shade800;
+          statusBg = _isDark ? SoftPalette.red800 : SoftPalette.pink100m;
+          statusText = _isDark ? SoftPalette.red300 : SoftPalette.red550;
           statusIcon = Icons.cancel_outlined;
         } else if (s == 'skipped') {
           statusLabel = 'Skipped';
-          statusBg = _isDark ? const Color(0xFF334155) : Colors.grey.shade200;
-          statusText = _isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700;
+          statusBg = _isDark ? SoftPalette.slate700 : SoftPalette.gray100;
+          statusText = _isDark ? SoftPalette.slate350 : SoftPalette.gray550;
           statusIcon = Icons.skip_next_rounded;
         } else {
           statusLabel = 'Waiting';
-          statusBg = _isDark ? const Color(0xFF451A03) : Colors.amber.shade50;
-          statusText = _isDark ? const Color(0xFFFCD34D) : Colors.amber.shade900;
+          statusBg = _isDark ? SoftPalette.orange800 : SoftPalette.yellow50;
+          statusText = _isDark ? SoftPalette.yellow200 : SoftPalette.orange350;
           statusIcon = Icons.hourglass_empty_rounded;
         }
 
@@ -1779,19 +1736,30 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
           campTag = 'HAJI';
         }
 
-        return Container(
+        // Pharmacy tab: the row loaded in the dispense form is outlined for visual tracking.
+        // STRICT ENFORCEMENT: Only the smallest waiting token is automatically selected.
+        // Manual clicking or selecting rows to jump the queue is strictly disabled.
+        final pharmacy = widget.pharmacy;
+        final dispensingSerial = pharmacy?.dispensingSerial?.trim().toUpperCase() ?? '';
+        final isDispensingRow = dispensingSerial.isNotEmpty && serial.trim().toUpperCase() == dispensingSerial;
+        const VoidCallback? onRowTap = null;
+
+        final row = Container(
           margin: const EdgeInsets.symmetric(vertical: 2.5),
           padding: EdgeInsets.symmetric(
               horizontal: isMobile ? 8 : 12, vertical: 6),
           decoration: BoxDecoration(
             color: _isDark
-                ? const Color(0xFF1E293B)
-                : Colors.white,
+                ? SoftPalette.slate800
+                : SoftPalette.gray50,
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-                color: _isDark
-                    ? const Color(0xFF334155)
-                    : Colors.grey.shade200),
+                color: isDispensingRow
+                    ? (_isDark ? SoftPalette.teal350 : SoftPalette.teal600)
+                    : (_isDark
+                        ? SoftPalette.slate700
+                        : SoftPalette.gray100),
+                width: isDispensingRow ? 1.6 : 1),
           ),
           child: Row(
             children: [
@@ -1806,7 +1774,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                 child: Text(
                   '#$seqNumber',
                   style: const TextStyle(
-                    color: Colors.white,
+                    color: SoftPalette.gray50,
                     fontWeight: FontWeight.bold,
                     fontSize: 13,
                   ),
@@ -1829,8 +1797,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                               fontWeight: FontWeight.bold,
                               fontSize: isMobile ? 13 : 14,
                               color: _isDark
-                                  ? Colors.white
-                                  : Colors.black87,
+                                  ? SoftPalette.gray50
+                                  : SoftPalette.gray900A87,
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -1841,14 +1809,14 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                             padding: const EdgeInsets.symmetric(
                                 horizontal: 4, vertical: 1),
                             decoration: BoxDecoration(
-                              color: Colors.deepOrange,
+                              color: SoftPalette.red400,
                               borderRadius:
                                   BorderRadius.circular(6),
                             ),
                             child: Text(
                               '×$days d',
                               style: const TextStyle(
-                                  color: Colors.white,
+                                  color: SoftPalette.gray50,
                                   fontSize: 9,
                                   fontWeight: FontWeight.bold),
                             ),
@@ -1870,14 +1838,14 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                                 ? null
                                 : () {
                                     Clipboard.setData(ClipboardData(text: displayCnic));
-                                    ScaffoldMessenger.of(context).clearSnackBars();
-                                    ScaffoldMessenger.of(context).showSnackBar(
+                                    AppToast.clear();
+                                    AppToast.showSnackBar(context, 
                                       SnackBar(
                                         content: Row(
                                           mainAxisSize: MainAxisSize.min,
                                           children: [
                                             const Icon(Icons.check_circle,
-                                                color: Colors.white, size: 16),
+                                                color: SoftPalette.gray50, size: 16),
                                             const SizedBox(width: 8),
                                             Text('Copied: $displayCnic',
                                                 style: const TextStyle(fontSize: 12)),
@@ -1903,8 +1871,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                                       fontSize: 11,
                                       fontWeight: FontWeight.w600,
                                       color: _isDark
-                                          ? const Color(0xFF38BDF8)
-                                          : const Color(0xFF00796B),
+                                          ? SoftPalette.sky350
+                                          : SoftPalette.teal550,
                                       decoration: (displayCnic.isNotEmpty && displayCnic != '-')
                                           ? TextDecoration.underline
                                           : TextDecoration.none,
@@ -1917,8 +1885,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                                       Icons.copy,
                                       size: 10,
                                       color: _isDark
-                                          ? const Color(0xFF38BDF8)
-                                          : const Color(0xFF00796B),
+                                          ? SoftPalette.sky350
+                                          : SoftPalette.teal550,
                                     ),
                                   ],
                                 ],
@@ -1929,21 +1897,21 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                         Text('•',
                             style: TextStyle(
                                 fontSize: 9,
-                                color: Colors.grey.shade400)),
+                                color: context.adapt(SoftPalette.gray300))),
                         Text(
                           DateFormat('hh:mm a').format(timestamp),
                           style: TextStyle(
                             fontSize: 11,
                             color: _isDark
-                                ? const Color(0xFF94A3B8)
-                                : Colors.grey.shade600,
+                                ? SoftPalette.slate350
+                                : SoftPalette.gray500,
                           ),
                         ),
                         if ((e['session'] as String?)?.isNotEmpty == true) ...[
                           Text('•',
                               style: TextStyle(
                                   fontSize: 9,
-                                  color: Colors.grey.shade400)),
+                                  color: context.adapt(SoftPalette.gray300))),
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 3, vertical: 1),
                             child: Text(
@@ -1952,8 +1920,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                                 fontSize: 10,
                                 fontWeight: FontWeight.w600,
                                 color: e['session'].toString().toLowerCase().contains('morn')
-                                    ? Colors.amber.shade700
-                                    : Colors.indigo.shade400,
+                                    ? SoftPalette.amber300
+                                    : SoftPalette.indigo500,
                               ),
                             ),
                           ),
@@ -1962,13 +1930,13 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                           Text('•',
                               style: TextStyle(
                                   fontSize: 9,
-                                  color: Colors.grey.shade400)),
+                                  color: context.adapt(SoftPalette.gray300))),
                           Text(
                             campTag,
                             style: TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.w600,
-                              color: Colors.teal.shade600,
+                              color: SoftPalette.teal500,
                             ),
                           ),
                         ],
@@ -1976,13 +1944,13 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                           Text('•',
                               style: TextStyle(
                                   fontSize: 9,
-                                  color: Colors.grey.shade400)),
+                                  color: context.adapt(SoftPalette.gray300))),
                           Text(
                             'PKR $tokenAmount',
                             style: TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
-                              color: Colors.orange.shade800,
+                              color: SoftPalette.orange400,
                             ),
                           ),
                         ],
@@ -2046,7 +2014,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                 const SizedBox(width: 2),
                 IconButton(
                   icon: const Icon(Icons.undo,
-                      color: Colors.redAccent, size: 16),
+                      color: SoftPalette.red400, size: 16),
                   tooltip: 'Cancel / Reverse Token',
                   padding: EdgeInsets.zero,
                   constraints: const BoxConstraints(
@@ -2055,6 +2023,16 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                 ),
               ],
             ],
+          ),
+        );
+        if (onRowTap == null) return row;
+        return Tooltip(
+          message: isDispensingRow ? 'In the dispense form' : 'Dispense this patient',
+          waitDuration: const Duration(milliseconds: 600),
+          child: InkWell(
+            onTap: onRowTap,
+            borderRadius: BorderRadius.circular(10),
+            child: row,
           ),
         );
       },
@@ -2072,7 +2050,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         builder: (context, snapshot) {
           if (!snapshot.hasData || snapshot.data == null || !snapshot.data!.isOpen) {
             return const Scaffold(
-              body: Center(child: CircularProgressIndicator(color: Color(0xFF00875A))),
+              body: Center(child: CircularProgressIndicator(color: SoftPalette.emerald550)),
             );
           }
           final isDark = snapshot.data!.get('is_dark_mode', defaultValue: false) == true;
@@ -2093,13 +2071,15 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
   Widget _buildScaffoldWithTheme(BuildContext context, bool isDark, bool isMobile) {
     final body = Container(
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F8F5),
+        color: isDark ? SoftPalette.slate900 : SoftPalette.emerald100t,
       ),
       child: Column(
         children: [
           ClockSkewWarningBanner(branchId: widget.branchId),
           Expanded(
-            child: isMobile ? _buildMobileBody() : _buildDesktopBody(),
+            child: widget.pharmacy != null
+                ? _buildPharmacyBody(isMobile)
+                : (isMobile ? _buildMobileBody() : _buildDesktopBody()),
           ),
         ],
       ),
@@ -2108,7 +2088,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     if (widget.isEmbedded) return body;
 
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F8F5),
+      backgroundColor: isDark ? SoftPalette.slate900 : SoftPalette.emerald100t,
       appBar: _buildAppBar(isMobile),
       body: body,
     );
@@ -2126,7 +2106,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                 return const Center(
                   child: Padding(
                     padding: EdgeInsets.all(24),
-                    child: CircularProgressIndicator(color: Color(0xFF00875A)),
+                    child: CircularProgressIndicator(color: SoftPalette.emerald550),
                   ),
                 );
               }
@@ -2135,7 +2115,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
               return const Center(
                 child: Padding(
                   padding: EdgeInsets.all(24),
-                  child: CircularProgressIndicator(color: Color(0xFF00875A)),
+                  child: CircularProgressIndicator(color: SoftPalette.emerald550),
                 ),
               );
             }
@@ -2155,7 +2135,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                   return const Center(
                     child: Padding(
                       padding: EdgeInsets.all(24),
-                      child: CircularProgressIndicator(color: Color(0xFF00875A)),
+                      child: CircularProgressIndicator(color: SoftPalette.emerald550),
                     ),
                   );
                 }
@@ -2164,7 +2144,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                 return const Center(
                   child: Padding(
                     padding: EdgeInsets.all(24),
-                    child: CircularProgressIndicator(color: Color(0xFF00875A)),
+                    child: CircularProgressIndicator(color: SoftPalette.emerald550),
                   ),
                 );
               }
@@ -2174,7 +2154,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         return const Center(
           child: Padding(
             padding: EdgeInsets.all(24),
-            child: CircularProgressIndicator(color: Color(0xFF00875A)),
+            child: CircularProgressIndicator(color: SoftPalette.emerald550),
           ),
         );
       },
@@ -2242,6 +2222,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                     onPressed: _refreshTokenLog,
                     tooltip: 'Refresh token list',
                   ),
+                  WhatsAppShareButton(onPressed: _shareCollectionToWhatsApp),
                 ]),
                 const SizedBox(height: 4),
                 Row(
@@ -2250,7 +2231,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                       '${_getFilteredTodayTokens().length} total',
                       style: TextStyle(
                         fontSize: 12,
-                        color: _isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700,
+                        color: _isDark ? SoftPalette.slate350 : SoftPalette.gray550,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -2292,6 +2273,262 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     ]);
   }
 
+  /// Register Patient or Issue Token (with vitals) — shared by the desktop body
+  /// and the Hybrid Pharmacy layout.
+  Widget _buildReceptionForm() {
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 120),
+      child: _activeSection == 'register'
+          ? PatientRegisterPage(
+              key: _registerKey,
+              branchId: widget.branchId,
+              receptionistId: widget.receptionistId,
+              initialCnic: _pendingCnic,
+              onPatientRegistered: _onPatientRegistered,
+            )
+          : TokenScreen(
+              key: _tokenKey,
+              branchId: widget.branchId,
+              receptionistId: widget.receptionistId,
+              receptionistName: widget.receptionistName,
+              initialCnic: _pendingCnic,
+              targetPatientId: _pendingPatientId,
+              onPatientNotFound: _handlePatientNotFound,
+            ),
+    );
+  }
+
+  // ── Hybrid "Pharmacy" layout ──────────────────────────────────────────────
+  //   [ Today's collection strip (Zakat / Non-Zakat / GMWF / Issued by me) ⓦ ]
+  //   [ Reception (Register | Token & Vitals) ][ Today's Tokens ][ Dispense ]
+  // Reception and Today's Tokens are this screen's own widgets and handlers
+  // (reverse token, shift filter, refresh…); the dispense pane comes from the host.
+
+  Widget _buildPharmacyBody(bool isNarrow) {
+    final slots = widget.pharmacy!;
+    const gap = kPharmacyPad;
+
+    final strip = ValueListenableBuilder<int>(
+      valueListenable: _refreshNotifier,
+      builder: (context, _, _) => _buildWithEntriesListenable((context, _, _) {
+        final todayEntries = _getFilteredTodayTokens();
+        return TodayCollectionStrip(
+          tally: TokenTally.of(todayEntries, isKarachi: _isKarachi),
+          isKarachi: _isKarachi,
+          onShare: () => _shareCollectionToWhatsApp(todayEntries),
+        );
+      }),
+    );
+
+    return ValueListenableBuilder<Box>(
+      valueListenable: DispensaryPreferencesService.pharmacyPaneOrderListenable(widget.receptionistId),
+      builder: (context, _, _) {
+        final paneOrder = DispensaryPreferencesService.getPharmacyPanes(widget.receptionistId);
+
+        Widget buildChildPane(String id) {
+          switch (id) {
+            case 'dispense':
+              return slots.dispensePane;
+            case 'reception':
+              return _pharmacyReceptionPane();
+            case 'tokens':
+            default:
+              return _pharmacyTokensPane();
+          }
+        }
+
+        return LayoutBuilder(builder: (context, box) {
+          if (isNarrow || box.maxWidth < 900) {
+            return DefaultTabController(
+              key: ValueKey('narrow_tabs_${paneOrder.join('_')}'),
+              length: 3,
+              child: Column(
+                children: [
+                  Padding(padding: const EdgeInsets.fromLTRB(gap, gap, gap, 0), child: strip),
+                  _pharmacyNarrowTabBar(paneOrder),
+                  Expanded(
+                    child: Padding(
+                      padding: const EdgeInsets.all(gap),
+                      child: TabBarView(
+                        children: paneOrder.map(buildChildPane).toList(),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }
+
+          // Desktop view: build columns according to preferred order
+          final isLargeScreen = box.maxWidth >= 1300;
+          Widget panes;
+          if (isLargeScreen) {
+            final columns = <Widget>[];
+            for (int i = 0; i < paneOrder.length; i++) {
+              if (i > 0) columns.add(const SizedBox(width: gap));
+              final id = paneOrder[i];
+              if (id == 'tokens') {
+                columns.add(SizedBox(
+                  width: box.maxWidth >= 1700 ? 460 : 380,
+                  child: _pharmacyTokensPane(),
+                ));
+              } else if (id == 'reception') {
+                columns.add(Expanded(flex: 5, child: _pharmacyReceptionPane()));
+              } else {
+                columns.add(Expanded(flex: 6, child: slots.dispensePane));
+              }
+            }
+            panes = Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: columns,
+            );
+          } else {
+            // Below 1300px: first pane on left, other two stacked on right
+            final firstId = paneOrder[0];
+            final secondId = paneOrder[1];
+            final thirdId = paneOrder[2];
+
+            Widget firstWidget = firstId == 'tokens'
+                ? SizedBox(width: 360, child: _pharmacyTokensPane())
+                : Expanded(flex: 5, child: buildChildPane(firstId));
+
+            panes = Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                firstWidget,
+                const SizedBox(width: gap),
+                Expanded(
+                  flex: firstId == 'tokens' ? 1 : 6,
+                  child: Column(
+                    children: [
+                      Expanded(child: buildChildPane(secondId)),
+                      const SizedBox(height: gap),
+                      Expanded(child: buildChildPane(thirdId)),
+                    ],
+                  ),
+                ),
+              ],
+            );
+          }
+
+          return Padding(
+            padding: const EdgeInsets.all(gap),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                strip,
+                const SizedBox(height: gap),
+                Expanded(child: panes),
+              ],
+            ),
+          );
+        });
+      },
+    );
+  }
+
+  Widget _pharmacyNarrowTabBar(List<String> paneOrder) {
+    final c = context.comfort;
+    final tabs = paneOrder.map((id) {
+      switch (id) {
+        case 'dispense':
+          return const Tab(text: 'Dispense');
+        case 'reception':
+          return const Tab(text: 'Reception');
+        case 'tokens':
+        default:
+          return const Tab(text: "Today's Tokens");
+      }
+    }).toList();
+
+    return TabBar(
+      labelColor: c.brand,
+      unselectedLabelColor: c.textSecondary,
+      indicatorColor: c.brand,
+      dividerColor: c.border,
+      labelStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700),
+      unselectedLabelStyle: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600),
+      tabs: tabs,
+    );
+  }
+
+  Widget _pharmacyReceptionPane() {
+    return PharmacyPane(
+      icon: Icons.support_agent_rounded,
+      title: 'Reception',
+      actions: [
+        PaneSegment(
+          icon: Icons.person_add_alt_1_rounded,
+          label: 'Register',
+          selected: _activeSection == 'register',
+          onTap: () => setState(() => _activeSection = 'register'),
+        ),
+        const SizedBox(width: 6),
+        PaneSegment(
+          icon: Icons.confirmation_number_outlined,
+          label: 'Token & Vitals',
+          selected: _activeSection != 'register',
+          // Same as the desktop toggle: switching to Token clears a pending hand-off.
+          onTap: () => setState(() {
+            _activeSection = 'token';
+            _pendingCnic = '';
+            _pendingPatientId = null;
+          }),
+        ),
+        const SizedBox(width: 4),
+      ],
+      child: Padding(
+        padding: const EdgeInsets.all(kPharmacyPad),
+        child: _buildReceptionForm(),
+      ),
+    );
+  }
+
+  Widget _pharmacyTokensPane() {
+    final c = context.comfort;
+    return PharmacyPane(
+      icon: Icons.format_list_bulleted_rounded,
+      title: "Today's Tokens",
+      actions: [
+        PaneAction(
+          icon: _sortNewestFirst ? Icons.arrow_downward_rounded : Icons.arrow_upward_rounded,
+          tooltip: _sortNewestFirst ? 'Sort: Oldest First' : 'Sort: Newest First',
+          onPressed: () => setState(() => _sortNewestFirst = !_sortNewestFirst),
+        ),
+        PaneAction(
+          icon: Icons.refresh_rounded,
+          tooltip: 'Refresh token list',
+          busy: _isSyncing,
+          onPressed: _refreshTokenLog,
+        ),
+      ],
+      child: ValueListenableBuilder<int>(
+        valueListenable: _refreshNotifier,
+        builder: (context, _, _) => _buildWithEntriesListenable((context, _, _) {
+          final todayEntries = _getFilteredTodayTokens();
+          return Padding(
+            padding: const EdgeInsets.fromLTRB(kPharmacyPad, 8, kPharmacyPad, 6),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _buildShiftSelector(false),
+                const SizedBox(height: 6),
+                Text(
+                  '${todayEntries.length} total · Auto-serving smallest token',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: c.textSecondary),
+                ),
+                Divider(height: 12, color: c.border),
+                Expanded(child: _buildTokenLog(false, todayEntries)),
+              ],
+            ),
+          );
+        }),
+      ),
+    );
+  }
+
   Widget _buildDesktopBody() {
     return Center(
       child: ConstrainedBox(
@@ -2311,7 +2548,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                     Expanded(
                       child: Card(
                         elevation: 10,
-                        color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+                        color: _isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                         shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(28)),
                         clipBehavior: Clip.antiAlias,
@@ -2326,12 +2563,12 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                             Positioned.fill(
                               child: RepaintBoundary(
                                 child: IgnorePointer(
-                                  child: Image.asset(
+                                  child: GDecorativeImage.asset(
                                     'assets/images/islamic_pattern.webp',
                                     fit: BoxFit.cover,
                                     cacheWidth: 1400,
                                     filterQuality: FilterQuality.low,
-                                    color: (_isDark ? const Color(0xFFF6C358) : const Color(0xFFD4AF37))
+                                    color: (_isDark ? SoftPalette.amber200 : SoftPalette.yellow300)
                                         .withValues(alpha: _isDark ? 0.18 : 0.28),
                                     colorBlendMode: BlendMode.srcIn,
                                   ),
@@ -2342,29 +2579,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                             // ── Form Content ──
                             Padding(
                               padding: const EdgeInsets.all(28),
-                              child: AnimatedSwitcher(
-                                duration: const Duration(milliseconds: 120),
-                                child: _activeSection == 'register'
-                                    ? PatientRegisterPage(
-                                        key: _registerKey,
-                                        branchId: widget.branchId,
-                                        receptionistId: widget.receptionistId,
-                                        initialCnic: _pendingCnic,
-                                        onPatientRegistered:
-                                            _onPatientRegistered,
-                                      )
-                                    : TokenScreen(
-                                        key: _tokenKey,
-                                        branchId: widget.branchId,
-                                        receptionistId: widget.receptionistId,
-                                        receptionistName:
-                                            widget.receptionistName,
-                                        initialCnic: _pendingCnic,
-                                        targetPatientId: _pendingPatientId,
-                                        onPatientNotFound:
-                                            _handlePatientNotFound,
-                                      ),
-                              ),
+                              child: _buildReceptionForm(),
                             ),
                           ],
                         ),
@@ -2391,7 +2606,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                           Expanded(
                             child: Card(
                                 elevation: 8,
-                                color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+                                color: _isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                                 shape: RoundedRectangleBorder(
                                     borderRadius:
                                         BorderRadius.circular(24)),
@@ -2409,10 +2624,10 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                                           angle: -0.16, // ~9.2 degrees graceful tilt
                                           child: Opacity(
                                             opacity: _isDark ? 0.22 : 0.32,
-                                            child: Image.asset(
+                                            child: GDecorativeImage.asset(
                                               'assets/images/1.webp',
                                               fit: BoxFit.contain,
-                                              color: _isDark ? const Color(0xFFF6C358) : const Color(0xFFD4AF37),
+                                              color: _isDark ? SoftPalette.amber200 : SoftPalette.yellow300,
                                               colorBlendMode: BlendMode.srcIn,
                                             ),
                                           ),
@@ -2429,14 +2644,14 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                                         children: [
                                           Row(children: [
                                             Icon(Icons.list_alt_rounded,
-                                                color: _isDark ? const Color(0xFF38BDF8) : _teal, size: 26),
+                                                color: _isDark ? SoftPalette.sky350 : _teal, size: 26),
                                             const SizedBox(width: 10),
                                             Text("Today's Tokens",
                                                 style: TextStyle(
                                                     fontSize: 19,
                                                     fontWeight:
                                                         FontWeight.bold,
-                                                    color: _isDark ? Colors.white : _teal)),
+                                                    color: _isDark ? SoftPalette.gray50 : _teal)),
                                             const Spacer(),
                                             IconButton(
                                               icon: Icon(
@@ -2445,7 +2660,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                                                           .arrow_downward_rounded
                                                       : Icons
                                                           .arrow_upward_rounded,
-                                                  color: _isDark ? const Color(0xFF38BDF8) : _teal,
+                                                  color: _isDark ? SoftPalette.sky350 : _teal,
                                                   size: 20),
                                               onPressed: () => setState(() =>
                                                   _sortNewestFirst =
@@ -2456,9 +2671,12 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                                             ),
                                             IconButton(
                                               icon: Icon(Icons.refresh_rounded,
-                                                  color: _isDark ? const Color(0xFF38BDF8) : _teal, size: 22),
+                                                  color: _isDark ? SoftPalette.sky350 : _teal, size: 22),
                                               onPressed: _refreshTokenLog,
                                               tooltip: 'Refresh token list',
+                                            ),
+                                            WhatsAppShareButton(
+                                              onPressed: () => _shareCollectionToWhatsApp(todayEntries),
                                             ),
                                           ]),
                                           const SizedBox(height: 10),
@@ -2468,7 +2686,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                                             children: [
                                               Text('$todayCount total',
                                                   style: TextStyle(
-                                                      color: _isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700,
+                                                      color: _isDark ? SoftPalette.slate350 : SoftPalette.gray550,
                                                       fontSize: 13,
                                                       fontWeight: FontWeight.w600)),
                                             ],
@@ -2506,15 +2724,15 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
           margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
           padding: const EdgeInsets.all(3),
           decoration: BoxDecoration(
-            color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+            color: _isDark ? SoftPalette.slate800 : SoftPalette.gray50,
             borderRadius: BorderRadius.circular(24),
             border: Border.all(
-              color: _isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+              color: _isDark ? SoftPalette.slate700 : SoftPalette.slate150,
               width: 1.2,
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: _isDark ? 0.20 : 0.04),
+                color: SoftPalette.gray900.withValues(alpha: _isDark ? 0.20 : 0.04),
                 blurRadius: 6,
                 offset: const Offset(0, 2),
               )
@@ -2571,7 +2789,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
             decoration: BoxDecoration(
               gradient: isSelected
                   ? const LinearGradient(
-                      colors: [Color(0xFF00A86B), Color(0xFF00875A)],
+                      colors: [SoftPalette.emerald400, SoftPalette.emerald550],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                     )
@@ -2580,7 +2798,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
               boxShadow: isSelected
                   ? [
                       BoxShadow(
-                        color: const Color(0xFF00A86B).withValues(alpha: _isDark ? 0.4 : 0.25),
+                        color: SoftPalette.emerald400.withValues(alpha: _isDark ? 0.4 : 0.25),
                         blurRadius: 8,
                         offset: const Offset(0, 2),
                       )
@@ -2595,8 +2813,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                   icon,
                   size: 14,
                   color: isSelected
-                      ? Colors.white
-                      : (_isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                      ? SoftPalette.gray50
+                      : (_isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                 ),
                 const SizedBox(width: 4),
                 Flexible(
@@ -2608,8 +2826,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                       fontSize: 11,
                       fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
                       color: isSelected
-                          ? Colors.white
-                          : (_isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                          ? SoftPalette.gray50
+                          : (_isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                     ),
                   ),
                 ),
@@ -2628,15 +2846,15 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
       height: 54,
       padding: const EdgeInsets.all(4),
       decoration: BoxDecoration(
-        color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+        color: _isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(32),
         border: Border.all(
-          color: _isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+          color: _isDark ? SoftPalette.slate700 : SoftPalette.slate150,
           width: 1.5,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: _isDark ? 0.20 : 0.04),
+            color: SoftPalette.gray900.withValues(alpha: _isDark ? 0.20 : 0.04),
             blurRadius: 8,
             offset: const Offset(0, 2),
           )
@@ -2659,7 +2877,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                   decoration: BoxDecoration(
                     gradient: !isToken
                         ? const LinearGradient(
-                            colors: [Color(0xFF00A86B), Color(0xFF00875A)],
+                            colors: [SoftPalette.emerald400, SoftPalette.emerald550],
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
                           )
@@ -2668,7 +2886,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                     boxShadow: !isToken
                         ? [
                             BoxShadow(
-                              color: const Color(0xFF00A86B).withValues(alpha: _isDark ? 0.45 : 0.35),
+                              color: SoftPalette.emerald400.withValues(alpha: _isDark ? 0.45 : 0.35),
                               blurRadius: 14,
                               spreadRadius: 1,
                               offset: const Offset(0, 3),
@@ -2683,8 +2901,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                         Icons.person_add_alt_1_rounded,
                         size: 19,
                         color: !isToken
-                            ? Colors.white
-                            : (_isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                            ? SoftPalette.gray50
+                            : (_isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                       ),
                       const SizedBox(width: 8),
                       Text(
@@ -2693,8 +2911,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                           fontWeight: !isToken ? FontWeight.bold : FontWeight.w600,
                           fontSize: 14.5,
                           color: !isToken
-                              ? Colors.white
-                              : (_isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                              ? SoftPalette.gray50
+                              : (_isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                         ),
                       ),
                     ],
@@ -2723,7 +2941,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                   decoration: BoxDecoration(
                     gradient: isToken
                         ? const LinearGradient(
-                            colors: [Color(0xFF00A86B), Color(0xFF00875A)],
+                            colors: [SoftPalette.emerald400, SoftPalette.emerald550],
                             begin: Alignment.topLeft,
                             end: Alignment.bottomRight,
                           )
@@ -2732,7 +2950,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                     boxShadow: isToken
                         ? [
                             BoxShadow(
-                              color: const Color(0xFF00A86B).withValues(alpha: _isDark ? 0.45 : 0.35),
+                              color: SoftPalette.emerald400.withValues(alpha: _isDark ? 0.45 : 0.35),
                               blurRadius: 14,
                               spreadRadius: 1,
                               offset: const Offset(0, 3),
@@ -2747,8 +2965,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                         Icons.inventory_2_rounded,
                         size: 19,
                         color: isToken
-                            ? Colors.white
-                            : (_isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                            ? SoftPalette.gray50
+                            : (_isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                       ),
                       const SizedBox(width: 8),
                       Text(
@@ -2757,8 +2975,8 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
                           fontWeight: isToken ? FontWeight.bold : FontWeight.w600,
                           fontSize: 14.5,
                           color: isToken
-                              ? Colors.white
-                              : (_isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                              ? SoftPalette.gray50
+                              : (_isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                         ),
                       ),
                     ],

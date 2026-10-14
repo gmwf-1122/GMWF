@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -118,10 +120,10 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
           if (parsed.name.isNotEmpty) _nameCtrl.text = parsed.name;
         });
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          AppToast.showSnackBar(context, 
             SnackBar(
               content: Text('CNIC & Name auto-extracted from barcode data!'),
-              backgroundColor: Colors.green.shade700,
+              backgroundColor: SoftPalette.green500,
             ),
           );
         }
@@ -138,7 +140,7 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
       builder: (ctx) => AlertDialog(
         title: const Row(
           children: [
-            Icon(Icons.qr_code_scanner_rounded, color: Colors.blueAccent),
+            Icon(Icons.qr_code_scanner_rounded, color: SoftPalette.blue400),
             SizedBox(width: 10),
             Text('Scan CNIC 2D Barcode', style: TextStyle(fontSize: 16)),
           ],
@@ -149,7 +151,7 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
           children: [
             const Text(
               'Point hardware USB 2D barcode scanner at card back or paste PDF417 payload:',
-              style: TextStyle(fontSize: 13, color: Colors.black87),
+              style: TextStyle(fontSize: 13, color: SoftPalette.gray900A87),
             ),
             const SizedBox(height: 12),
             TextField(
@@ -178,17 +180,17 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
                 });
                 _onFieldChanged();
                 Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
+                AppToast.showSnackBar(context, 
                   SnackBar(
                     content: Text('✅ Auto-Filled CNIC: ${parsed.cnic} | Name: ${parsed.name}'),
-                    backgroundColor: Colors.green.shade700,
+                    backgroundColor: SoftPalette.green500,
                   ),
                 );
               } else {
-                ScaffoldMessenger.of(context).showSnackBar(
+                AppToast.showSnackBar(context, 
                   const SnackBar(
                     content: Text('No valid CNIC 2D barcode payload recognized.'),
-                    backgroundColor: Colors.orange,
+                    backgroundColor: SoftPalette.amber300,
                   ),
                 );
               }
@@ -259,10 +261,10 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
           _duplicateData = null;
         });
 
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('✅ Beneficiary registered! Serial: ${res['serialNo']}'),
-            backgroundColor: Colors.green.shade700,
+            backgroundColor: SoftPalette.green500,
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -276,10 +278,10 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
   }
 
   void _showError(String msg) {
-    ScaffoldMessenger.of(context).showSnackBar(
+    AppToast.showSnackBar(context, 
       SnackBar(
         content: Text(msg),
-        backgroundColor: Colors.red.shade800,
+        backgroundColor: SoftPalette.red550,
         behavior: SnackBarBehavior.floating,
       ),
     );
@@ -309,7 +311,7 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
       builder: (ctx) => AlertDialog(
         title: Row(
           children: [
-            Icon(Icons.casino_rounded, color: Colors.purpleAccent.shade200),
+            Icon(Icons.casino_rounded, color: SoftPalette.purple400),
             const SizedBox(width: 10),
             const Text('Confirm Lucky Draw'),
           ],
@@ -323,9 +325,9 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.purpleAccent),
+            style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.purple400),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Start Lucky Draw', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            child: const Text('Start Lucky Draw', style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -348,10 +350,10 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
         _drawWinners = winners;
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: Text('🎉 Lucky Draw Complete! Picked ${winners.length} Winners!'),
-          backgroundColor: Colors.purple.shade700,
+          backgroundColor: SoftPalette.purple600,
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -404,13 +406,13 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
-                        color: Colors.amber.withValues(alpha: 0.15),
+                        color: SoftPalette.amber200.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.amber.withValues(alpha: 0.4)),
+                        border: Border.all(color: SoftPalette.amber200.withValues(alpha: 0.4)),
                       ),
                       child: Text(
                         'HYBRID OFFICE',
-                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.amber.shade400),
+                        style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: SoftPalette.yellow200),
                       ),
                     ),
                   ],
@@ -472,9 +474,9 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
                     const SizedBox(height: 12),
                     Row(
                       children: [
-                        Expanded(child: _campaignChip('rations', '🍚 GMWF Rations', Colors.green, t)),
+                        Expanded(child: _campaignChip('rations', '🍚 GMWF Rations', SoftPalette.green400, t)),
                         const SizedBox(width: 12),
-                        Expanded(child: _campaignChip('libaas', '👗 GMWF Free Libaas', Colors.purpleAccent, t)),
+                        Expanded(child: _campaignChip('libaas', '👗 GMWF Free Libaas', SoftPalette.purple400, t)),
                       ],
                     ),
                   ],
@@ -489,26 +491,26 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
                   margin: const EdgeInsets.only(bottom: 16),
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.red.shade900.withValues(alpha: 0.25),
+                    color: SoftPalette.red550.withValues(alpha: 0.25),
                     borderRadius: BorderRadius.circular(16),
-                    border: Border.all(color: Colors.redAccent, width: 1.5),
+                    border: Border.all(color: SoftPalette.red400, width: 1.5),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.warning_amber_rounded, color: Colors.redAccent, size: 36),
+                      const Icon(Icons.warning_amber_rounded, color: SoftPalette.red400, size: 36),
                       const SizedBox(width: 14),
                       Expanded(
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text('⚠️ DUPLICATE ENTRY DETECTED', style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.w900, fontSize: 14)),
+                            const Text('⚠️ DUPLICATE ENTRY DETECTED', style: TextStyle(color: SoftPalette.red400, fontWeight: FontWeight.w900, fontSize: 14)),
                             const SizedBox(height: 4),
                             Text(
                               'CNIC ${_duplicateData!['cnic']} was ALREADY registered for '
                               '[${(_duplicateData!['campaign'] ?? '').toString().toUpperCase()}] '
                               'on ${_duplicateData!['registeredAt']?.toString().split('T').first ?? 'N/A'} '
                               'by Staff: ${_duplicateData!['operatorName'] ?? 'Unknown'}.',
-                              style: const TextStyle(color: Colors.white70, fontSize: 12.5),
+                              style: const TextStyle(color: SoftPalette.gray50A70, fontSize: 12.5),
                             ),
                           ],
                         ),
@@ -532,8 +534,8 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
                           Text('Beneficiary Identity & Contact', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: t.textPrimary)),
                           ElevatedButton.icon(
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blueAccent.withValues(alpha: 0.15),
-                              foregroundColor: Colors.blueAccent,
+                              backgroundColor: SoftPalette.blue400.withValues(alpha: 0.15),
+                              foregroundColor: SoftPalette.blue400,
                               elevation: 0,
                             ),
                             onPressed: _handleBarcodePasteOrScan,
@@ -597,16 +599,16 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
                         height: 52,
                         child: ElevatedButton.icon(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: _duplicateData != null ? Colors.grey : t.accent,
+                            backgroundColor: _duplicateData != null ? SoftPalette.gray350 : t.accent,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                           ),
                           onPressed: (_isSaving || _duplicateData != null) ? null : _submitRegistration,
                           icon: _isSaving
-                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                              : const Icon(Icons.how_to_reg_rounded, color: Colors.white),
+                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: SoftPalette.gray50, strokeWidth: 2))
+                              : const Icon(Icons.how_to_reg_rounded, color: SoftPalette.gray50),
                           label: Text(
                             _isSaving ? 'REGISTERING BENEFICIARY...' : 'SUBMIT BENEFICIARY ENTRY',
-                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white, letterSpacing: 0.5),
+                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: SoftPalette.gray50, letterSpacing: 0.5),
                           ),
                         ),
                       ),
@@ -641,7 +643,7 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
           child: Text(
             label,
             style: TextStyle(
-              color: isSelected ? Colors.white : color,
+              color: isSelected ? SoftPalette.gray50 : color,
               fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
               fontSize: 13,
             ),
@@ -726,14 +728,14 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
                       margin: const EdgeInsets.only(bottom: 10),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
-                        side: BorderSide(color: isWinner ? Colors.amber : t.bgRule),
+                        side: BorderSide(color: isWinner ? SoftPalette.amber200 : t.bgRule),
                       ),
                       child: ListTile(
                         leading: CircleAvatar(
-                          backgroundColor: isWinner ? Colors.amber : t.accent.withValues(alpha: 0.15),
+                          backgroundColor: isWinner ? SoftPalette.amber200 : t.accent.withValues(alpha: 0.15),
                           child: Icon(
                             isWinner ? Icons.emoji_events_rounded : Icons.person_rounded,
-                            color: isWinner ? Colors.black : t.accent,
+                            color: isWinner ? SoftPalette.gray900 : t.accent,
                           ),
                         ),
                         title: Row(
@@ -746,7 +748,7 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                color: (campaign == 'RATIONS' ? Colors.green : Colors.purple).withValues(alpha: 0.15),
+                                color: (campaign == 'RATIONS' ? SoftPalette.green400 : SoftPalette.purple550).withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
@@ -754,7 +756,7 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
                                 style: TextStyle(
                                   fontSize: 10,
                                   fontWeight: FontWeight.bold,
-                                  color: campaign == 'RATIONS' ? Colors.green : Colors.purpleAccent,
+                                  color: campaign == 'RATIONS' ? SoftPalette.green400 : SoftPalette.purple400,
                                 ),
                               ),
                             ),
@@ -768,13 +770,13 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
                             ? Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                 decoration: BoxDecoration(
-                                  color: Colors.amber.withValues(alpha: 0.2),
+                                  color: SoftPalette.amber200.withValues(alpha: 0.2),
                                   borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.amber),
+                                  border: Border.all(color: SoftPalette.amber200),
                                 ),
                                 child: Text(
                                   item['winPassNo'] ?? 'WINNER',
-                                  style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.amber, fontSize: 11),
+                                  style: const TextStyle(fontWeight: FontWeight.bold, color: SoftPalette.amber200, fontSize: 11),
                                 ),
                               )
                             : Text(
@@ -794,7 +796,7 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
     final isSelected = _vaultCampaignFilter == id;
     return ChoiceChip(
       selected: isSelected,
-      label: Text(label, style: TextStyle(color: isSelected ? Colors.white : t.textPrimary, fontSize: 12)),
+      label: Text(label, style: TextStyle(color: isSelected ? SoftPalette.gray50 : t.textPrimary, fontSize: 12)),
       selectedColor: t.accent,
       onSelected: (_) => setState(() => _vaultCampaignFilter = id),
     );
@@ -819,20 +821,20 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
               Container(
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(colors: [Colors.purple.shade900, Colors.indigo.shade900]),
+                  gradient: LinearGradient(colors: [SoftPalette.violet700, SoftPalette.indigo750]),
                   borderRadius: BorderRadius.circular(20),
-                  boxShadow: [BoxShadow(color: Colors.purple.withValues(alpha: 0.3), blurRadius: 16, offset: const Offset(0, 6))],
+                  boxShadow: [BoxShadow(color: SoftPalette.purple550.withValues(alpha: 0.3), blurRadius: 16, offset: const Offset(0, 6))],
                 ),
                 child: Column(
                   children: [
-                    const Icon(Icons.casino_rounded, size: 56, color: Colors.amberAccent),
+                    const Icon(Icons.casino_rounded, size: 56, color: SoftPalette.yellow200),
                     const SizedBox(height: 12),
-                    const Text('🎲 RAMADAN 1,000 WINNER LUCKY DRAW', style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: 1)),
+                    const Text('🎲 RAMADAN 1,000 WINNER LUCKY DRAW', style: TextStyle(color: SoftPalette.gray50, fontSize: 20, fontWeight: FontWeight.w900, letterSpacing: 1)),
                     const SizedBox(height: 6),
                     Text(
                       'Provably fair automated random winner selection algorithm for GMWF Ramadan welfare campaigns.',
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 13),
+                      style: TextStyle(color: SoftPalette.gray50.withValues(alpha: 0.8), fontSize: 13),
                     ),
                     const SizedBox(height: 20),
                     Row(
@@ -937,12 +939,12 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
                         const SizedBox(height: 12),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                          decoration: BoxDecoration(color: Colors.purpleAccent.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(10)),
+                          decoration: BoxDecoration(color: SoftPalette.purple400.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(10)),
                           child: Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              const Text('TOTAL LIBASS LUCKY DRAW WINNERS:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Colors.purpleAccent)),
-                              Text('$_libaasTotalSuits WINNERS', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14, color: Colors.purpleAccent)),
+                              const Text('TOTAL LIBASS LUCKY DRAW WINNERS:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: SoftPalette.purple400)),
+                              Text('$_libaasTotalSuits WINNERS', style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 14, color: SoftPalette.purple400)),
                             ],
                           ),
                         ),
@@ -954,18 +956,18 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
                         height: 52,
                         child: ElevatedButton.icon(
                           style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.purpleAccent,
+                            backgroundColor: SoftPalette.purple400,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                           ),
                           onPressed: _isDrawing ? null : _runLuckyDraw,
                           icon: _isDrawing
-                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                              : const Icon(Icons.casino_rounded, color: Colors.white),
+                              ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: SoftPalette.gray50, strokeWidth: 2))
+                              : const Icon(Icons.casino_rounded, color: SoftPalette.gray50),
                           label: Text(
                             _isDrawing
                                 ? 'RUNNING RANDOM WINNER SELECTION...'
                                 : 'EXECUTE ${_drawCampaign == 'libaas' ? _libaasTotalSuits : (int.tryParse(_winnerCountCtrl.text.trim()) ?? 1000)} WINNER LUCKY DRAW',
-                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: SoftPalette.gray50),
                           ),
                         ),
                       ),
@@ -1025,19 +1027,19 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
                             final globalIdx = startIndex + idx;
                             final w = displayItems[idx];
                             return Card(
-                              color: Colors.purple.shade900.withValues(alpha: 0.15),
+                              color: SoftPalette.violet700.withValues(alpha: 0.15),
                               margin: const EdgeInsets.only(bottom: 8),
                               child: ListTile(
                                 leading: CircleAvatar(
-                                  backgroundColor: Colors.amber,
-                                  child: Text('#${globalIdx + 1}', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black, fontSize: 11)),
+                                  backgroundColor: SoftPalette.amber200,
+                                  child: Text('#${globalIdx + 1}', style: const TextStyle(fontWeight: FontWeight.bold, color: SoftPalette.gray900, fontSize: 11)),
                                 ),
                                 title: Text(w['name'] ?? 'N/A', style: TextStyle(fontWeight: FontWeight.bold, color: t.textPrimary)),
                                 subtitle: Text('CNIC: ${w['cnic']}  ·  Phone: ${w['phone']}'),
                                 trailing: Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                  decoration: BoxDecoration(color: Colors.purpleAccent.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
-                                  child: Text(w['winPassNo'] ?? 'PASS-2026', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.purpleAccent)),
+                                  decoration: BoxDecoration(color: SoftPalette.purple400.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(8)),
+                                  child: Text(w['winPassNo'] ?? 'PASS-2026', style: const TextStyle(fontWeight: FontWeight.bold, color: SoftPalette.purple400)),
                                 ),
                               ),
                             );
@@ -1082,16 +1084,16 @@ class _RamadanWelfareScreenState extends State<RamadanWelfareScreen>
   Widget _drawMetricChip(String label, String value, IconData icon) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-      decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
+      decoration: BoxDecoration(color: SoftPalette.gray50.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
       child: Row(
         children: [
-          Icon(icon, color: Colors.amberAccent, size: 20),
+          Icon(icon, color: SoftPalette.yellow200, size: 20),
           const SizedBox(width: 8),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(label, style: const TextStyle(fontSize: 10, color: Colors.white60, fontWeight: FontWeight.bold)),
-              Text(value, style: const TextStyle(fontSize: 15, color: Colors.white, fontWeight: FontWeight.bold)),
+              Text(label, style: const TextStyle(fontSize: 10, color: SoftPalette.gray50A60, fontWeight: FontWeight.bold)),
+              Text(value, style: const TextStyle(fontSize: 15, color: SoftPalette.gray50, fontWeight: FontWeight.bold)),
             ],
           ),
         ],

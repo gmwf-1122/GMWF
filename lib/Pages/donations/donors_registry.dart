@@ -4,6 +4,8 @@
 // and quick-action buttons.
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
@@ -63,7 +65,7 @@ class DonorRegistryDialog extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.12),
+                      color: SoftPalette.gray50.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(DS.rMd),
                     ),
                     child: const Icon(Icons.group_rounded, color: DonDS.tealLight, size: 22),
@@ -182,7 +184,7 @@ class _DonorRegistryWidgetState extends ConsumerState<DonorRegistryWidget> {
                 label: const Text('Add'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: DonDS.teal,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(DS.rLg)),
                 ),
@@ -302,7 +304,7 @@ class _DonorRegistryWidgetState extends ConsumerState<DonorRegistryWidget> {
               if (name.isEmpty) return;
 
               if (phone.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                AppToast.showSnackBar(context, 
                   const SnackBar(content: Text('Phone number is required to register a donor in the registry.'))
                 );
                 return;
@@ -316,7 +318,7 @@ class _DonorRegistryWidgetState extends ConsumerState<DonorRegistryWidget> {
               
               if (existingList.isNotEmpty) {
                 final d = existingList.first;
-                ScaffoldMessenger.of(context).showSnackBar(
+                AppToast.showSnackBar(context, 
                   SnackBar(content: Text('A donor with this name and phone already exists in ${d.branchId.toUpperCase()}.'))
                 );
                 return;
@@ -342,7 +344,7 @@ class _DonorRegistryWidgetState extends ConsumerState<DonorRegistryWidget> {
               
               DonationsLocalStorage.saveDonor(newDonor);
               Navigator.pop(ctx);
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('New donor registered successfully')));
+              AppToast.showSnackBar(context, const SnackBar(content: Text('New donor registered successfully')));
             }, 
             child: const Text('Register Donor')
           ),
@@ -561,8 +563,8 @@ class _HouseholdCardState extends State<_HouseholdCard> {
                   if (isHousehold)
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(color: Colors.indigo.shade50, borderRadius: BorderRadius.circular(6), border: Border.all(color: Colors.indigo.shade100)),
-                      child: Text('${widget.members.length} MEMBERS', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: Colors.indigo.shade700, letterSpacing: 0.5)),
+                      decoration: BoxDecoration(color: SoftPalette.slate150, borderRadius: BorderRadius.circular(6), border: Border.all(color: SoftPalette.slate200)),
+                      child: Text('${widget.members.length} MEMBERS', style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: SoftPalette.indigo600, letterSpacing: 0.5)),
                     ),
                   const SizedBox(width: 12),
                   Icon(_expanded ? Icons.expand_less_rounded : Icons.expand_more_rounded, size: 18, color: t.textTertiary),
@@ -583,9 +585,9 @@ class _HouseholdCardState extends State<_HouseholdCard> {
                   children: [
                     Row(
                       children: [
-                        _StatPill(label: 'Cash Contrib.', value: 'PKR ${NumberFormat('#,###').format(_cashAmount)}', color: Colors.green),
+                        _StatPill(label: 'Cash Contrib.', value: 'PKR ${NumberFormat('#,###').format(_cashAmount)}', color: SoftPalette.green400),
                         const SizedBox(width: 8),
-                        _StatPill(label: 'Goods Contrib.', value: 'PKR ${NumberFormat('#,###').format(_goodsAmount)}', color: Colors.purple),
+                        _StatPill(label: 'Goods Contrib.', value: 'PKR ${NumberFormat('#,###').format(_goodsAmount)}', color: SoftPalette.purple550),
                         const SizedBox(width: 8),
                         _StatPill(label: 'Total Household', value: 'PKR ${NumberFormat('#,###').format(_totalAmount)}', color: DonDS.teal),
                       ],
@@ -685,7 +687,7 @@ class _HouseholdCardState extends State<_HouseholdCard> {
                       children: [
                         Expanded(child: _QuickBtn(label: 'Edit Household', icon: Icons.edit_rounded, color: DonDS.teal, onTap: () => showEditDonorDialog(context, head))),
                         const SizedBox(width: 12),
-                        Expanded(child: _QuickBtn(label: 'Download Report', icon: Icons.picture_as_pdf_rounded, color: Colors.redAccent, onTap: _downloadHouseholdReport)),
+                        Expanded(child: _QuickBtn(label: 'Download Report', icon: Icons.picture_as_pdf_rounded, color: SoftPalette.red400, onTap: _downloadHouseholdReport)),
                       ],
                     ),
                   ],
@@ -699,7 +701,7 @@ class _HouseholdCardState extends State<_HouseholdCard> {
   }
 
   Color _avatarColor(String name) {
-    final colors = [DonDS.teal, DonDS.amber, const Color(0xFF7C3AED), const Color(0xFF059669), const Color(0xFFDC2626), const Color(0xFF2563EB)];
+    final colors = [DonDS.teal, DonDS.amber, SoftPalette.violet550, SoftPalette.emerald500, SoftPalette.red500, SoftPalette.blue550];
     return colors[name.length % colors.length];
   }
 
@@ -831,7 +833,7 @@ class _HouseholdCardState extends State<_HouseholdCard> {
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: DonDS.teal, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: DonDS.teal, foregroundColor: SoftPalette.gray50),
               onPressed: () {
                 if (createNew) {
                   final name = nameCtrl.text.trim();
@@ -891,7 +893,7 @@ class _HouseholdCardState extends State<_HouseholdCard> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: DS.crimson500, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: DS.crimson500, foregroundColor: SoftPalette.gray50),
             onPressed: () {
               // Clear householdId to detach
               final detached = DonorRecord(
@@ -921,7 +923,7 @@ class _HouseholdCardState extends State<_HouseholdCard> {
   }
 
   void _snack(String msg, BuildContext ctx) {
-    ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+    AppToast.showSnackBar(ctx, SnackBar(
       content: Text(msg),
       behavior: SnackBarBehavior.floating,
       margin: const EdgeInsets.all(16),
@@ -993,7 +995,7 @@ class _HouseholdCardState extends State<_HouseholdCard> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: DS.crimson500, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: DS.crimson500, foregroundColor: SoftPalette.gray50),
             onPressed: () async {
               await DonationsLocalStorage.deleteDonor(donor.id, donor.branchId);
               Navigator.pop(ctx);
@@ -1342,7 +1344,7 @@ void showEditDonorDialog(BuildContext context, DonorRecord d) {
 
             Navigator.pop(ctx);
             if (context.mounted) {
-              ScaffoldMessenger.of(context).showSnackBar(
+              AppToast.showSnackBar(context, 
                 const SnackBar(content: Text('Donor updated successfully'))
               );
             }

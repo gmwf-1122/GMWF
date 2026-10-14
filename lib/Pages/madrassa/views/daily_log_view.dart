@@ -206,14 +206,14 @@ class _DailyLogViewState extends ConsumerState<DailyLogView> {
       final bool hasSabkiRatio = sabkiRatio != null && sabkiRatio.isNotEmpty && sabkiRatio != '-';
       
       if (hasSabkiRatio && sabkiRatio != 'nahi_sunaya' && sabkiPara == 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(content: Text('Sabki: Para must be selected for ratio $sabkiRatio.')),
         );
         setState(() => _isSaving = false);
         return;
       }
       if (sabkiPara > 0 && !hasSabkiRatio) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(content: Text('Sabki: Ratio must be selected for Para $sabkiPara.')),
         );
         setState(() => _isSaving = false);
@@ -226,14 +226,14 @@ class _DailyLogViewState extends ConsumerState<DailyLogView> {
       final bool hasManzilRatio = manzilRatio != null && manzilRatio.isNotEmpty && manzilRatio != '-';
       
       if (hasManzilRatio && manzilRatio != 'nahi_sunaya' && manzilPara == 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(content: Text('Manzil: Para must be selected for ratio $manzilRatio.')),
         );
         setState(() => _isSaving = false);
         return;
       }
       if (manzilPara > 0 && !hasManzilRatio) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(content: Text('Manzil: Ratio must be selected for Para $manzilPara.')),
         );
         setState(() => _isSaving = false);
@@ -245,14 +245,14 @@ class _DailyLogViewState extends ConsumerState<DailyLogView> {
       final String? rukuVal = data['ruku']?.toString();
       final bool hasRuku = rukuVal != null && rukuVal.isNotEmpty && rukuVal != '-';
       if (hasRuku && rukuVal != 'nahi_sunaya' && rukuPara == 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(content: Text('Ruku: Para must be selected for $rukuVal Ruku.')),
         );
         setState(() => _isSaving = false);
         return;
       }
       if (rukuPara > 0 && !hasRuku) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(content: Text('Ruku: Please select Ruku count for Para $rukuPara.')),
         );
         setState(() => _isSaving = false);
@@ -327,14 +327,14 @@ class _DailyLogViewState extends ConsumerState<DailyLogView> {
 });
 _changeNotifier.value++;
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(content: Text(context.l.savedSuccess)),
         );
       }
     } catch (e) {
       setState(() => _isSaving = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(content: Text('Error: $e')),
         );
       }
@@ -416,7 +416,7 @@ _changeNotifier.value++;
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
               title: Row(
                 children: [
-                  const Icon(Icons.people_rounded, color: Colors.blue),
+                  Icon(Icons.people_rounded, color: context.adapt(SoftPalette.blue400)),
                   const SizedBox(width: 8),
                   Text(
                     context.isUrdu ? 'پی ٹی ایم حاضری کے دعوے' : 'PTM Attendance Claims',
@@ -430,7 +430,7 @@ _changeNotifier.value++;
                     ? Center(
                         child: Text(
                           context.isUrdu ? 'کوئی دعوے زیر التوا نہیں ہیں' : 'No claims pending',
-                          style: const TextStyle(color: Colors.grey),
+                          style: TextStyle(color: context.adapt(SoftPalette.gray350)),
                         ),
                       )
                     : ListView.separated(
@@ -451,7 +451,7 @@ _changeNotifier.value++;
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
                                       Text(name, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                                      Text('Roll: $roll', style: const TextStyle(color: Colors.grey, fontSize: 12)),
+                                      Text('Roll: $roll', style: TextStyle(color: context.adapt(SoftPalette.gray350), fontSize: 12)),
                                     ],
                                   ),
                                 ),
@@ -467,8 +467,8 @@ _changeNotifier.value++;
                                     }
                                   },
                                   style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.green,
-                                    foregroundColor: Colors.white,
+                                    backgroundColor: SoftPalette.green400,
+                                    foregroundColor: SoftPalette.gray50,
                                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                     minimumSize: Size.zero,
                                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -488,8 +488,8 @@ _changeNotifier.value++;
                                     }
                                   },
                                   style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.red,
-                                    foregroundColor: Colors.white,
+                                    backgroundColor: SoftPalette.red400,
+                                    foregroundColor: SoftPalette.gray50,
                                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                     minimumSize: Size.zero,
                                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -560,7 +560,7 @@ _changeNotifier.value++;
         final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.editorName);
 
         return Scaffold(
-          backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8F9FD),
+          backgroundColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
           floatingActionButton: ValueListenableBuilder<int>(
             valueListenable: _changeNotifier,
             builder: (context, _, __) {
@@ -574,11 +574,11 @@ _changeNotifier.value++;
                 child: IgnorePointer(
                   child: Opacity(
                     opacity: isDark ? 0.085 : 0.11,
-                    child: Image.asset(
+                    child: GDecorativeImage.asset(
                       'assets/images/islamic_pattern.webp',
                       fit: BoxFit.cover,
                       repeat: ImageRepeat.repeat,
-                      color: const Color(0xFFD4AF37),
+                      color: SoftPalette.yellow300,
                       colorBlendMode: BlendMode.srcIn,
                     ),
                   ),
@@ -591,7 +591,7 @@ _changeNotifier.value++;
                   await MadrassaLocalStorage.downloadStudents(_effectiveBranch, force: false);
                   ref.invalidate(madrassaDailyLogProvider((branchId: _effectiveBranch, dateKey: dateStr)));
                   ref.invalidate(madrassaFilteredStudentsProvider((branchId: _effectiveBranch, selectedDate: _selectedDate)));
-                  if (mounted) setState(() {});
+                  if (mounted) setState(() => _studentNotifiers.clear());
                 },
                 child: CustomScrollView(
                   physics: const AlwaysScrollableScrollPhysics(),
@@ -634,13 +634,13 @@ _changeNotifier.value++;
                       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                       padding: const EdgeInsets.all(16),
                       decoration: BoxDecoration(
-                        color: Colors.blue.shade50,
+                        color: context.adapt(SoftPalette.slate100),
                         borderRadius: BorderRadius.circular(16),
-                        border: Border.all(color: Colors.blue.shade200),
+                        border: Border.all(color: context.adapt(SoftPalette.sky300)),
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.people_rounded, color: Colors.blue.shade900),
+                          Icon(Icons.people_rounded, color: context.adapt(SoftPalette.blue600)),
                           const SizedBox(width: 16),
                           Expanded(
                             child: Column(
@@ -650,14 +650,14 @@ _changeNotifier.value++;
                                   context.isUrdu 
                                       ? 'پی ٹی ایم کی حاضری کے دعوے زیر التوا ہیں'
                                       : 'Pending PTM Attendance Claims',
-                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.blue.shade900),
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: context.adapt(SoftPalette.blue600)),
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
                                   context.isUrdu
                                       ? '${pendingPtmClaims.length} طلباء نے پی ٹی ایم میں شرکت کا دعویٰ کیا ہے۔ جائزہ لینے کے لیے کلک کریں۔'
                                       : '${pendingPtmClaims.length} student(s) claimed PTM attendance. Tap to review.',
-                                  style: TextStyle(fontSize: 12, color: Colors.blue.shade800),
+                                  style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.blue550)),
                                 ),
                               ],
                             ),
@@ -668,8 +668,8 @@ _changeNotifier.value++;
                               _showPtmClaimsPopup(context, pendingPtmClaims);
                             },
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.blue.shade700,
-                              foregroundColor: Colors.white,
+                              backgroundColor: SoftPalette.blue500,
+                              foregroundColor: SoftPalette.gray50,
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                             ),
                             child: Text(context.isUrdu ? 'جائزہ لیں' : 'Review'),
@@ -686,13 +686,13 @@ _changeNotifier.value++;
                     margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     decoration: BoxDecoration(
-                      color: Colors.amber.shade50,
+                      color: context.adapt(SoftPalette.yellow50),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.amber.shade200),
+                      border: Border.all(color: context.adapt(SoftPalette.yellow150)),
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.warning_amber_rounded, color: Colors.amber.shade900),
+                        Icon(Icons.warning_amber_rounded, color: context.adapt(SoftPalette.orange350)),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
@@ -703,7 +703,7 @@ _changeNotifier.value++;
                               style: TextStyle(
                                 fontSize: 13,
                                 fontWeight: FontWeight.bold,
-                                color: Colors.amber.shade900,
+                                color: context.adapt(SoftPalette.orange350),
                               ),
                             ),
                           ),
@@ -725,19 +725,19 @@ _changeNotifier.value++;
                             padding: const EdgeInsets.all(24),
                             decoration: BoxDecoration(
                               color: islamicEvent != null
-                                  ? const Color(0xFFD4AF37).withValues(alpha: 0.15)
-                                  : Colors.green.shade50,
+                                  ? context.adapt(SoftPalette.yellow300).withValues(alpha: 0.15)
+                                  : context.adapt(SoftPalette.green100m),
                               shape: BoxShape.circle,
                               border: Border.all(
                                 color: islamicEvent != null
-                                    ? const Color(0xFFD4AF37).withValues(alpha: 0.4)
-                                    : Colors.green.shade200,
+                                    ? context.adapt(SoftPalette.yellow300).withValues(alpha: 0.4)
+                                    : context.adapt(SoftPalette.green300),
                                 width: 2,
                               ),
                             ),
                             child: islamicEvent != null
                                 ? Text(islamicEvent.emoji, style: const TextStyle(fontSize: 52))
-                                : Icon(Icons.flag_rounded, size: 64, color: Colors.green.shade700),
+                                : Icon(Icons.flag_rounded, size: 64, color: context.adapt(SoftPalette.green500)),
                           ),
                           const SizedBox(height: 24),
                           Text(
@@ -748,8 +748,8 @@ _changeNotifier.value++;
                                 fontSize: 24,
                                 fontWeight: FontWeight.bold,
                                 color: islamicEvent != null
-                                    ? (isDark ? const Color(0xFFFDE047) : const Color(0xFF92400E))
-                                    : const Color(0xFF1B5E20),
+                                    ? (isDark ? SoftPalette.yellow150 : SoftPalette.orange600)
+                                    : SoftPalette.green600,
                               ),
                             ),
                           ),
@@ -765,15 +765,15 @@ _changeNotifier.value++;
                               fontSize: 15,
                               fontWeight: FontWeight.w600,
                               color: islamicEvent != null
-                                  ? (isDark ? const Color(0xFFFBBF24) : const Color(0xFFB45309))
-                                  : Colors.grey,
+                                  ? (isDark ? SoftPalette.amber200 : SoftPalette.orange500)
+                                  : SoftPalette.gray350,
                             ),
                           ),
                           const SizedBox(height: 12),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                             decoration: BoxDecoration(
-                              color: Colors.green.shade100.withValues(alpha: 0.5),
+                              color: context.adapt(SoftPalette.green200).withValues(alpha: 0.5),
                               borderRadius: BorderRadius.circular(20),
                             ),
                             child: Text(
@@ -796,7 +796,7 @@ _changeNotifier.value++;
                                 style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.bold,
-                                  color: Colors.green.shade900,
+                                  color: context.adapt(SoftPalette.green600),
                                 ),
                               ),
                             ),
@@ -818,30 +818,30 @@ _changeNotifier.value++;
                           Container(
                             padding: const EdgeInsets.all(24),
                             decoration: BoxDecoration(
-                              color: Colors.blue.shade50,
+                              color: context.adapt(SoftPalette.slate100),
                               shape: BoxShape.circle,
-                              border: Border.all(color: Colors.blue.shade200, width: 2),
+                              border: Border.all(color: context.adapt(SoftPalette.sky300), width: 2),
                             ),
-                            child: Icon(Icons.weekend_rounded, size: 64, color: Colors.blue.shade700),
+                            child: Icon(Icons.weekend_rounded, size: 64, color: context.adapt(SoftPalette.blue500)),
                           ),
                           const SizedBox(height: 24),
                           Text(
                             context.isUrdu ? 'اتوار کی چھٹی' : 'Weekly Holiday (Sunday)',
                             style: context.urduStyle(
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 24,
                                 fontWeight: FontWeight.bold,
-                                color: Color(0xFF0D47A1),
+                                color: context.adapt(SoftPalette.blue600),
                               ),
                             ),
                           ),
                           const SizedBox(height: 8),
                           Text(
                             DateFormat('EEEE, MMMM d, yyyy').format(_selectedDate),
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 16,
                               fontWeight: FontWeight.w500,
-                              color: Colors.grey,
+                              color: context.adapt(SoftPalette.gray350),
                             ),
                           ),
                         ],
@@ -861,7 +861,7 @@ _changeNotifier.value++;
                           Icon(
                             isPtmDay ? Icons.people_outline : Icons.calendar_today_outlined,
                             size: 64,
-                            color: isPtmDay ? Colors.orange : Colors.grey.shade400,
+                            color: isPtmDay ? context.adapt(SoftPalette.amber300) : context.adapt(SoftPalette.gray300),
                           ),
                           const SizedBox(height: 16),
                           Text(
@@ -872,7 +872,7 @@ _changeNotifier.value++;
                               style: TextStyle(
                                 fontSize: 18,
                                 fontWeight: FontWeight.bold,
-                                color: isPtmDay ? Colors.orange.shade800 : Colors.grey,
+                                color: isPtmDay ? context.adapt(SoftPalette.orange400) : context.adapt(SoftPalette.gray350),
                               ),
                             ),
                           ),
@@ -887,9 +887,9 @@ _changeNotifier.value++;
                                   : context.l.futureDateSubtitle,
                               textAlign: TextAlign.center,
                               style: context.urduStyle(
-                                style: const TextStyle(
+                                style: TextStyle(
                                   fontSize: 14,
-                                  color: Colors.grey,
+                                  color: context.adapt(SoftPalette.gray350),
                                 ),
                               ),
                             ),
@@ -957,13 +957,13 @@ _changeNotifier.value++;
                                           margin: const EdgeInsets.only(bottom: 8),
                                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                                           decoration: BoxDecoration(
-                                            color: const Color(0xFF0D9488).withValues(alpha: 0.12),
+                                            color: context.adapt(SoftPalette.teal500).withValues(alpha: 0.12),
                                             borderRadius: BorderRadius.circular(10),
-                                            border: Border.all(color: const Color(0xFF0D9488).withValues(alpha: 0.3)),
+                                            border: Border.all(color: context.adapt(SoftPalette.teal500).withValues(alpha: 0.3)),
                                           ),
                                           child: Row(
                                             children: [
-                                              const Icon(Icons.menu_book_rounded, color: Color(0xFF0D9488), size: 18),
+                                              Icon(Icons.menu_book_rounded, color: context.adapt(SoftPalette.teal500), size: 18),
                                               const SizedBox(width: 8),
                                               Expanded(
                                                 child: Text(
@@ -971,7 +971,7 @@ _changeNotifier.value++;
                                                       ? 'صرف ناظرہ سسٹم: حاضری، یونیفارم اور سبق لاگ فعال ہے۔ سبقی/منزل سسٹم بند ہے۔'
                                                       : 'Only Nazra System Active: Tracking Attendance, Uniform & Sabak. Sabqi/Manzil disabled.',
                                                   style: context.urduStyle(
-                                                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0D9488)),
+                                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.teal500)),
                                                   ),
                                                 ),
                                               ),
@@ -984,20 +984,20 @@ _changeNotifier.value++;
                                           margin: const EdgeInsets.only(bottom: 8),
                                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                           decoration: BoxDecoration(
-                                            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                                            color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                                             borderRadius: BorderRadius.circular(12),
-                                            border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                                            border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
                                           ),
                                           child: Row(
                                             children: [
-                                              Icon(Icons.category_rounded, size: 16, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                                              Icon(Icons.category_rounded, size: 16, color: isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                                               const SizedBox(width: 8),
                                               Text(
                                                 context.isUrdu ? 'پروگرام / کلاس:' : 'Program:',
                                                 style: TextStyle(
                                                   fontSize: 12,
                                                   fontWeight: FontWeight.bold,
-                                                  color: isDark ? Colors.white70 : const Color(0xFF475569),
+                                                  color: isDark ? SoftPalette.gray50A70 : SoftPalette.slate600,
                                                 ),
                                               ),
                                               const SizedBox(width: 8),
@@ -1012,11 +1012,11 @@ _changeNotifier.value++;
                                                         onSelected: (val) {
                                                           if (val) setState(() => _selectedProgramFilter = 'all');
                                                         },
-                                                        selectedColor: const Color(0xFF0F766E),
+                                                        selectedColor: SoftPalette.teal550,
                                                         labelStyle: TextStyle(
                                                           fontSize: 11,
                                                           fontWeight: FontWeight.bold,
-                                                          color: _selectedProgramFilter == 'all' ? Colors.white : null,
+                                                          color: _selectedProgramFilter == 'all' ? SoftPalette.gray50 : null,
                                                         ),
                                                       ),
                                                       const SizedBox(width: 6),
@@ -1026,11 +1026,11 @@ _changeNotifier.value++;
                                                         onSelected: (val) {
                                                           if (val) setState(() => _selectedProgramFilter = 'hifz');
                                                         },
-                                                        selectedColor: const Color(0xFF7C3AED),
+                                                        selectedColor: SoftPalette.violet550,
                                                         labelStyle: TextStyle(
                                                           fontSize: 11,
                                                           fontWeight: FontWeight.bold,
-                                                          color: _selectedProgramFilter == 'hifz' ? Colors.white : null,
+                                                          color: _selectedProgramFilter == 'hifz' ? SoftPalette.gray50 : null,
                                                         ),
                                                       ),
                                                       const SizedBox(width: 6),
@@ -1040,11 +1040,11 @@ _changeNotifier.value++;
                                                         onSelected: (val) {
                                                           if (val) setState(() => _selectedProgramFilter = 'nazra');
                                                         },
-                                                        selectedColor: const Color(0xFF0D9488),
+                                                        selectedColor: SoftPalette.teal500,
                                                         labelStyle: TextStyle(
                                                           fontSize: 11,
                                                           fontWeight: FontWeight.bold,
-                                                          color: _selectedProgramFilter == 'nazra' ? Colors.white : null,
+                                                          color: _selectedProgramFilter == 'nazra' ? SoftPalette.gray50 : null,
                                                         ),
                                                       ),
                                                     ],
@@ -1060,20 +1060,20 @@ _changeNotifier.value++;
                                           margin: const EdgeInsets.only(bottom: 10),
                                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                           decoration: BoxDecoration(
-                                            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                                            color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                                             borderRadius: BorderRadius.circular(12),
-                                            border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                                            border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
                                           ),
                                           child: Row(
                                             children: [
-                                              Icon(Icons.filter_list_rounded, size: 16, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                                              Icon(Icons.filter_list_rounded, size: 16, color: isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                                               const SizedBox(width: 8),
                                               Text(
                                                 context.isUrdu ? 'شفٹ / سیشن:' : 'Session:',
                                                 style: TextStyle(
                                                   fontSize: 12,
                                                   fontWeight: FontWeight.bold,
-                                                  color: isDark ? Colors.white70 : const Color(0xFF475569),
+                                                  color: isDark ? SoftPalette.gray50A70 : SoftPalette.slate600,
                                                 ),
                                               ),
                                               const SizedBox(width: 8),
@@ -1088,11 +1088,11 @@ _changeNotifier.value++;
                                                         onSelected: (val) {
                                                           if (val) setState(() => _selectedSessionFilter = 'all');
                                                         },
-                                                        selectedColor: const Color(0xFF0F766E),
+                                                        selectedColor: SoftPalette.teal550,
                                                         labelStyle: TextStyle(
                                                           fontSize: 11,
                                                           fontWeight: FontWeight.bold,
-                                                          color: _selectedSessionFilter == 'all' ? Colors.white : null,
+                                                          color: _selectedSessionFilter == 'all' ? SoftPalette.gray50 : null,
                                                         ),
                                                       ),
                                                       const SizedBox(width: 6),
@@ -1110,11 +1110,11 @@ _changeNotifier.value++;
                                                             onSelected: (val) {
                                                               if (val) setState(() => _selectedSessionFilter = s);
                                                             },
-                                                            selectedColor: const Color(0xFF0F766E),
+                                                            selectedColor: SoftPalette.teal550,
                                                             labelStyle: TextStyle(
                                                               fontSize: 11,
                                                               fontWeight: FontWeight.bold,
-                                                              color: isSelected ? Colors.white : null,
+                                                              color: isSelected ? SoftPalette.gray50 : null,
                                                             ),
                                                           ),
                                                         );
@@ -1133,13 +1133,13 @@ _changeNotifier.value++;
                                           width: double.infinity,
                                           alignment: Alignment.center,
                                           decoration: BoxDecoration(
-                                            color: Colors.amber.shade50,
+                                            color: context.adapt(SoftPalette.yellow50),
                                             borderRadius: BorderRadius.circular(8),
-                                            border: Border.all(color: Colors.amber.shade200),
+                                            border: Border.all(color: context.adapt(SoftPalette.yellow150)),
                                           ),
                                           child: Text(
                                             context.isUrdu ? 'صرف پڑھنے کی اجازت ہے (پرانی تاریخ)' : 'Read Only Mode (Past Date)',
-                                            style: TextStyle(color: Colors.amber.shade900, fontSize: 12, fontWeight: FontWeight.bold),
+                                            style: TextStyle(color: context.adapt(SoftPalette.orange350), fontSize: 12, fontWeight: FontWeight.bold),
                                           ),
                                         ),
                                       ValueListenableBuilder<int>(
@@ -1153,8 +1153,16 @@ _changeNotifier.value++;
                                 final s = displayedStudents[index - 1];
                                 final sId = s['id'] ?? '';
                                 final sLog = _localChanges[sId] ?? _safeMap(logData[sId]);
-                                final notifier = _studentNotifiers.putIfAbsent(
-                                    sId, () => ValueNotifier(sLog));
+                                // Marks saved on another device arrive in logData after this
+                                // screen was built. Refresh the card with them unless this user
+                                // has unsaved edits for the student (those are never overwritten).
+                                var notifier = _studentNotifiers[sId];
+                                if (notifier == null ||
+                                    (!_localChanges.containsKey(sId) &&
+                                        !const DeepCollectionEquality().equals(notifier.value, sLog))) {
+                                  notifier = ValueNotifier(sLog);
+                                  _studentNotifiers[sId] = notifier;
+                                }
                                 return _StudentLogCard(
                                   key: ValueKey('${sId}_${_selectedDate.toIso8601String()}'),
                                   student: s,
@@ -1211,11 +1219,11 @@ _changeNotifier.value++;
       mainAxisSize: MainAxisSize.min,
       children: [
         TextButton.icon(
-          icon: const Icon(Icons.today, size: 16, color: Color(0xFF008080)),
+          icon: Icon(Icons.today, size: 16, color: context.adapt(SoftPalette.teal550)),
           label: Text(
             context.isUrdu ? 'آج' : 'Today',
-            style: const TextStyle(
-              color: Color(0xFF008080),
+            style: TextStyle(
+              color: context.adapt(SoftPalette.teal550),
               fontSize: 12,
               fontWeight: FontWeight.bold,
             ),
@@ -1240,7 +1248,7 @@ _changeNotifier.value++;
         ),
         const SizedBox(width: 4),
         IconButton(
-          icon: const Icon(Icons.arrow_back_ios, size: 16, color: Color(0xFF008080)),
+          icon: Icon(Icons.arrow_back_ios, size: 16, color: context.adapt(SoftPalette.teal550)),
           tooltip: 'Previous Month',
           padding: const EdgeInsets.all(6),
           constraints: const BoxConstraints(),
@@ -1262,7 +1270,7 @@ _changeNotifier.value++;
         ),
         const SizedBox(width: 4),
         IconButton(
-          icon: const Icon(Icons.arrow_forward_ios, size: 16, color: Color(0xFF008080)),
+          icon: Icon(Icons.arrow_forward_ios, size: 16, color: context.adapt(SoftPalette.teal550)),
           tooltip: 'Next Month',
           padding: const EdgeInsets.all(6),
           constraints: const BoxConstraints(),
@@ -1303,7 +1311,7 @@ _changeNotifier.value++;
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: isMobile ? 18 : 22,
-                        color: isDark ? Colors.white : const Color(0xFF1A1C1E),
+                        color: isDark ? SoftPalette.gray50 : SoftPalette.gray900,
                       ),
                     ),
                     Text(
@@ -1312,7 +1320,7 @@ _changeNotifier.value++;
                         style: TextStyle(
                           fontSize: isMobile ? 12 : 13,
                           fontWeight: FontWeight.w600,
-                          color: isDark ? const Color(0xFF818CF8) : const Color(0xFF4C4DDC),
+                          color: isDark ? SoftPalette.indigo400 : SoftPalette.indigo550,
                         ),
                       ),
                     ),
@@ -1327,7 +1335,7 @@ _changeNotifier.value++;
             '$workingDays working days • Sundays excluded • PTM: ${DateFormat('EEE, MMM d').format(ptmDate)}',
             style: TextStyle(
               fontSize: isMobile ? 12 : 13,
-              color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
+              color: isDark ? SoftPalette.slate350 : SoftPalette.gray500,
             ),
           ),
           if (_isGlobalLevelUser(widget.editorRole)) ...[
@@ -1335,10 +1343,10 @@ _changeNotifier.value++;
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
               decoration: BoxDecoration(
-                color: effectiveAllowLeave ? const Color(0xFFFFF8E1) : const Color(0xFFE0F2F1),
+                color: effectiveAllowLeave ? context.adapt(SoftPalette.yellow50) : context.adapt(SoftPalette.teal100m),
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
-                  color: effectiveAllowLeave ? Colors.amber.shade400 : const Color(0xFF008080),
+                  color: effectiveAllowLeave ? context.adapt(SoftPalette.yellow200) : context.adapt(SoftPalette.teal550),
                   width: 1.5,
                 ),
               ),
@@ -1346,7 +1354,7 @@ _changeNotifier.value++;
                 children: [
                   Icon(
                     effectiveAllowLeave ? Icons.event_available_rounded : Icons.event_busy_rounded,
-                    color: effectiveAllowLeave ? Colors.amber.shade900 : const Color(0xFF008080),
+                    color: effectiveAllowLeave ? context.adapt(SoftPalette.orange350) : context.adapt(SoftPalette.teal550),
                     size: 26,
                   ),
                   const SizedBox(width: 12),
@@ -1359,12 +1367,12 @@ _changeNotifier.value++;
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF1E293B),
+                                color: SoftPalette.slate800,
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
                                 context.isUrdu ? '👑 صرف گلوبل لیول یوزرز' : '👑 Global Users Only (Chairman, CEO, HQ Manager, Admin)',
-                                style: const TextStyle(color: Colors.amber, fontSize: 10, fontWeight: FontWeight.bold),
+                                style: const TextStyle(color: SoftPalette.amber200, fontSize: 10, fontWeight: FontWeight.bold),
                               ),
                             ),
                           ],
@@ -1378,7 +1386,7 @@ _changeNotifier.value++;
                             style: TextStyle(
                               fontWeight: FontWeight.bold,
                               fontSize: 14,
-                              color: effectiveAllowLeave ? Colors.amber.shade900 : const Color(0xFF004D40),
+                              color: effectiveAllowLeave ? context.adapt(SoftPalette.orange350) : context.adapt(SoftPalette.teal700),
                             ),
                           ),
                         ),
@@ -1394,7 +1402,7 @@ _changeNotifier.value++;
                           style: context.urduStyle(
                             style: TextStyle(
                               fontSize: 12,
-                              color: effectiveAllowLeave ? Colors.amber.shade900 : Colors.grey.shade700,
+                              color: effectiveAllowLeave ? context.adapt(SoftPalette.orange350) : context.adapt(SoftPalette.gray550),
                             ),
                           ),
                         ),
@@ -1404,8 +1412,8 @@ _changeNotifier.value++;
                   const SizedBox(width: 12),
                   ElevatedButton.icon(
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: effectiveAllowLeave ? const Color(0xFFD32F2F) : const Color(0xFF008080),
-                      foregroundColor: Colors.white,
+                      backgroundColor: effectiveAllowLeave ? SoftPalette.red500 : SoftPalette.teal550,
+                      foregroundColor: SoftPalette.gray50,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                     ),
@@ -1440,10 +1448,10 @@ _changeNotifier.value++;
                       );
 
                       if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
+                        AppToast.showSnackBar(context, 
                           SnackBar(
                             duration: const Duration(seconds: 2),
-                            backgroundColor: newAllowState ? const Color(0xFF2E7D32) : const Color(0xFFC62828),
+                            backgroundColor: newAllowState ? SoftPalette.green550 : SoftPalette.red550,
                             content: Text(
                               newAllowState
                                   ? (context.isUrdu
@@ -1484,8 +1492,8 @@ _changeNotifier.value++;
     final showRightGrey = !_calendarScrollController.hasClients || 
         (_calendarScrollController.position.hasContentDimensions &&
          _calendarScrollController.offset >= _calendarScrollController.position.maxScrollExtent);
-    final leftColor = showLeftGrey ? Colors.grey : const Color(0xFF008080);
-    final rightColor = showRightGrey ? Colors.grey : const Color(0xFF008080);
+    final leftColor = showLeftGrey ? context.adapt(SoftPalette.gray350) : context.adapt(SoftPalette.teal550);
+    final rightColor = showRightGrey ? context.adapt(SoftPalette.gray350) : context.adapt(SoftPalette.teal550);
 
     return Row(
       children: [
@@ -1556,45 +1564,45 @@ _changeNotifier.value++;
                   final isHoliday = holidayName != null;
 
                   final isDarkCalendar = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.editorName);
-                  Color cardColor = isDarkCalendar ? const Color(0xFF1E293B) : Colors.white;
+                  Color cardColor = isDarkCalendar ? SoftPalette.slate800 : SoftPalette.gray50;
                   if (isSelected) {
                     cardColor = isHoliday
-                        ? (cellIslamicEvent != null ? const Color(0xFFD4AF37) : const Color(0xFF2E7D32))
-                        : const Color(0xFF4C4DDC);
+                        ? (cellIslamicEvent != null ? SoftPalette.yellow300 : SoftPalette.green550)
+                        : SoftPalette.indigo550;
                   } else if (isHoliday) {
                     cardColor = cellIslamicEvent != null
-                        ? (isDarkCalendar ? const Color(0xFF3B2E10) : const Color(0xFFFEF3C7))
-                        : (isDarkCalendar ? const Color(0xFF1B3D2F) : const Color(0xFFE8F5E9));
+                        ? (isDarkCalendar ? SoftPalette.amber750m : SoftPalette.yellow100)
+                        : (isDarkCalendar ? SoftPalette.emerald750 : SoftPalette.green100m);
                   }
 
                   Border border;
                   if (isSelected) {
                     border = Border.all(color: cardColor, width: 1.0);
                   } else if (isToday) {
-                    border = Border.all(color: const Color(0xFF008080), width: 2.0);
+                    border = Border.all(color: context.adapt(SoftPalette.teal550), width: 2.0);
                   } else if (isHoliday) {
                     border = Border.all(
-                      color: cellIslamicEvent != null ? const Color(0xFFD4AF37) : const Color(0xFF81C784),
+                      color: cellIslamicEvent != null ? context.adapt(SoftPalette.yellow300) : context.adapt(SoftPalette.green300),
                       width: 1.0,
                     );
                   } else {
-                    border = Border.all(color: isDarkCalendar ? const Color(0xFF334155) : const Color(0xFFE0E2E7), width: 1.0);
+                    border = Border.all(color: isDarkCalendar ? SoftPalette.slate700 : SoftPalette.slate150, width: 1.0);
                   }
 
                   Color dayAbbrevColor = isSelected
-                      ? Colors.white70
+                      ? SoftPalette.gray50A70
                       : (isHoliday
                           ? (cellIslamicEvent != null
-                              ? (isDarkCalendar ? const Color(0xFFFBBF24) : const Color(0xFFB45309))
-                              : (isDarkCalendar ? const Color(0xFF81C784) : const Color(0xFF2E7D32)))
-                          : (isDarkCalendar ? const Color(0xFF94A3B8) : Colors.grey));
+                              ? (isDarkCalendar ? SoftPalette.amber200 : SoftPalette.orange500)
+                              : (isDarkCalendar ? SoftPalette.green300 : SoftPalette.green550))
+                          : (isDarkCalendar ? SoftPalette.slate350 : SoftPalette.gray350));
                   Color dayNumColor = isSelected
-                      ? Colors.white
+                      ? SoftPalette.gray50
                       : (isHoliday
                           ? (cellIslamicEvent != null
-                              ? (isDarkCalendar ? const Color(0xFFFDE047) : const Color(0xFF92400E))
-                              : (isDarkCalendar ? const Color(0xFFA7F3D0) : const Color(0xFF1B5E20)))
-                          : (isDarkCalendar ? Colors.white : const Color(0xFF1A1C1E)));
+                              ? (isDarkCalendar ? SoftPalette.yellow150 : SoftPalette.orange600)
+                              : (isDarkCalendar ? SoftPalette.emerald150 : SoftPalette.green600))
+                          : (isDarkCalendar ? SoftPalette.gray50 : SoftPalette.gray900));
 
                   return GestureDetector(
                     onTap: isSunday ? null : () {
@@ -1646,10 +1654,10 @@ _changeNotifier.value++;
                                     fontSize: 8,
                                     fontWeight: FontWeight.w900,
                                     color: isSelected
-                                        ? Colors.white
+                                        ? SoftPalette.gray50
                                         : (cellIslamicEvent != null
-                                            ? (isDarkCalendar ? const Color(0xFFFBBF24) : const Color(0xFFB45309))
-                                            : const Color(0xFF2E7D32)),
+                                            ? (isDarkCalendar ? SoftPalette.amber200 : SoftPalette.orange500)
+                                            : SoftPalette.green550),
                                   ),
                                 ),
                               )
@@ -1658,7 +1666,7 @@ _changeNotifier.value++;
                                 padding: const EdgeInsets.only(top: 2),
                                 child: Text(
                                   'PTM',
-                                  style: TextStyle(fontSize: 8, fontWeight: FontWeight.w900, color: isSelected ? Colors.white : const Color(0xFFD32F2F)),
+                                  style: TextStyle(fontSize: 8, fontWeight: FontWeight.w900, color: isSelected ? SoftPalette.gray50 : context.adapt(SoftPalette.red500)),
                                 ),
                               ),
                             if (isToday)
@@ -1668,7 +1676,7 @@ _changeNotifier.value++;
                                   width: 5,
                                   height: 5,
                                   decoration: BoxDecoration(
-                                    color: isSelected ? Colors.white : (isHoliday ? const Color(0xFF2E7D32) : const Color(0xFF008080)),
+                                    color: isSelected ? SoftPalette.gray50 : (isHoliday ? context.adapt(SoftPalette.green550) : context.adapt(SoftPalette.teal550)),
                                     shape: BoxShape.circle,
                                   ),
                                 ),
@@ -1727,7 +1735,7 @@ _changeNotifier.value++;
     final fullDateHeading = '$dateText  •  🌙 $hijriText';
 
     final isDarkStats = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.editorName);
-    final dateTextColor = isDarkStats ? Colors.white : const Color(0xFF1A1C1E);
+    final dateTextColor = isDarkStats ? SoftPalette.gray50 : SoftPalette.gray900;
 
     // Date & stats section
     Widget dateAndStatsWidget;
@@ -1744,10 +1752,10 @@ _changeNotifier.value++;
             spacing: 12,
             runSpacing: 6,
             children: [
-              _statText('${context.l.present}: $present', const Color(0xFF4CAF50)),
-              _statText('${context.l.leave}: $leave', const Color(0xFFF5A623)),
-              _statText('${context.l.absent}: $absent', const Color(0xFFE53935)),
-              _statText(context.isUrdu ? 'جوابات: $replied' : 'Replied: $replied', const Color(0xFFFFA726)),
+              _statText('${context.l.present}: $present', context.adapt(SoftPalette.green400)),
+              _statText('${context.l.leave}: $leave', context.adapt(SoftPalette.amber300)),
+              _statText('${context.l.absent}: $absent', context.adapt(SoftPalette.red500)),
+              _statText(context.isUrdu ? 'جوابات: $replied' : 'Replied: $replied', context.adapt(SoftPalette.amber300)),
             ],
           ),
         ],
@@ -1761,13 +1769,13 @@ _changeNotifier.value++;
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: dateTextColor),
             ),
           ),
-          _statText('${context.l.present}: $present', const Color(0xFF4CAF50)),
+          _statText('${context.l.present}: $present', context.adapt(SoftPalette.green400)),
           const SizedBox(width: 12),
-          _statText('${context.l.leave}: $leave', const Color(0xFFF5A623)),
+          _statText('${context.l.leave}: $leave', context.adapt(SoftPalette.amber300)),
           const SizedBox(width: 12),
-          _statText('${context.l.absent}: $absent', const Color(0xFFE53935)),
+          _statText('${context.l.absent}: $absent', context.adapt(SoftPalette.red500)),
           const SizedBox(width: 12),
-          _statText(context.isUrdu ? 'جوابات: $replied' : 'Replied: $replied', const Color(0xFFFFA726)),
+          _statText(context.isUrdu ? 'جوابات: $replied' : 'Replied: $replied', context.adapt(SoftPalette.amber300)),
         ],
       );
     }
@@ -1780,7 +1788,7 @@ _changeNotifier.value++;
           _efficiencyButton(
             label: context.l.allPresent,
             icon: Icons.done_all,
-            color: const Color(0xFF4CAF50),
+            color: SoftPalette.green400,
             isSelected: _allPresentToggled,
             onTap: isReadOnly ? null : () {
               setState(() {
@@ -1800,7 +1808,7 @@ _changeNotifier.value++;
           _efficiencyButton(
             label: context.l.allUniform,
             icon: Icons.check_circle_outline,
-            color: const Color(0xFF5B9BD5),
+            color: SoftPalette.sky400,
             isSelected: _allUniformToggled,
             onTap: isReadOnly ? null : () {
               setState(() {
@@ -1820,7 +1828,7 @@ _changeNotifier.value++;
           _efficiencyButton(
             label: context.isUrdu ? 'سب نے جواب دیا' : 'All Replied',
             icon: Icons.message_outlined,
-            color: const Color(0xFFFFA726),
+            color: SoftPalette.amber300,
             isSelected: _allRepliedToggled,
             onTap: isReadOnly ? null : () {
               setState(() {
@@ -1839,13 +1847,13 @@ _changeNotifier.value++;
                 ? const SizedBox(
                     width: 14,
                     height: 14,
-                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 1.5),
+                    child: CircularProgressIndicator(color: SoftPalette.gray50, strokeWidth: 1.5),
                   )
                 : const Icon(Icons.save, size: 16),
             label: Text(context.l.saveChanges, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF008080), // Teal
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.teal550, // Teal
+              foregroundColor: SoftPalette.gray50,
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
@@ -1853,13 +1861,13 @@ _changeNotifier.value++;
           const SizedBox(width: 8),
           OutlinedButton.icon(
             onPressed: () => _showDailyReportDialog(config, students, logData),
-            icon: const FaIcon(FontAwesomeIcons.whatsapp, color: Color(0xFF25D366), size: 16),
+            icon: FaIcon(FontAwesomeIcons.whatsapp, color: context.adapt(SoftPalette.green350), size: 16),
             label: Text(
               context.isUrdu ? 'روزانہ گروپ رپورٹ' : 'Daily Group Report',
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF008080)),
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.teal550)),
             ),
             style: OutlinedButton.styleFrom(
-              side: const BorderSide(color: Color(0xFF008080)),
+              side: BorderSide(color: context.adapt(SoftPalette.teal550)),
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
@@ -1877,7 +1885,7 @@ _changeNotifier.value++;
               _efficiencyButton(
                 label: context.l.allPresent,
                 icon: Icons.done_all,
-                color: const Color(0xFF4CAF50),
+                color: SoftPalette.green400,
                 isSelected: _allPresentToggled,
                 onTap: isReadOnly ? null : () {
                   setState(() {
@@ -1896,7 +1904,7 @@ _changeNotifier.value++;
               _efficiencyButton(
                 label: context.l.allUniform,
                 icon: Icons.check_circle_outline,
-                color: const Color(0xFF5B9BD5),
+                color: SoftPalette.sky400,
                 isSelected: _allUniformToggled,
                 onTap: isReadOnly ? null : () {
                   setState(() {
@@ -1915,7 +1923,7 @@ _changeNotifier.value++;
               _efficiencyButton(
                 label: context.isUrdu ? 'سب نے جواب دیا' : 'All Replied',
                 icon: Icons.message_outlined,
-                color: const Color(0xFFFFA726),
+                color: SoftPalette.amber300,
                 isSelected: _allRepliedToggled,
                 onTap: isReadOnly ? null : () {
                   setState(() {
@@ -1930,7 +1938,7 @@ _changeNotifier.value++;
               _efficiencyButton(
                 label: context.isUrdu ? 'روزانہ گروپ رپورٹ' : 'Daily Group Report',
                 icon: Icons.share_outlined,
-                color: const Color(0xFF008080),
+                color: SoftPalette.teal550,
                 isSelected: false,
                 onTap: () => _showDailyReportDialog(config, students, logData),
               ),
@@ -1971,19 +1979,19 @@ _changeNotifier.value++;
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
           color: isDisabled 
-              ? Colors.grey.shade200 
+              ? context.adapt(SoftPalette.gray100) 
               : (isSelected ? color : color.withValues(alpha: 0.05)),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: isDisabled 
-                ? Colors.grey.shade300 
+                ? context.adapt(SoftPalette.gray150) 
                 : (isSelected ? color : color.withValues(alpha: 0.2)),
           ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 16, color: isDisabled ? Colors.grey : (isSelected ? Colors.white : color)),
+            Icon(icon, size: 16, color: isDisabled ? context.adapt(SoftPalette.gray350) : (isSelected ? SoftPalette.gray50 : color)),
             const SizedBox(width: 8),
             Text(
               label,
@@ -1991,7 +1999,7 @@ _changeNotifier.value++;
                 style: TextStyle(
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
-                  color: isDisabled ? Colors.grey : (isSelected ? Colors.white : color),
+                  color: isDisabled ? context.adapt(SoftPalette.gray350) : (isSelected ? SoftPalette.gray50 : color),
                 ),
               ),
             ),
@@ -2013,24 +2021,24 @@ _changeNotifier.value++;
       padding: const EdgeInsets.symmetric(horizontal: 6),
       height: 36,
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A) : Colors.white,
-        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7)),
+        color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
+        border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
         borderRadius: BorderRadius.circular(8),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<int>(
           value: (selectedValue == null || selectedValue == 0) ? null : selectedValue,
-          hint: Text('-', style: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey.shade400, fontSize: 12)),
-          icon: const Icon(Icons.arrow_drop_down, size: 16, color: Color(0xFF008080)),
+          hint: Text('-', style: TextStyle(color: isDark ? SoftPalette.slate550 : SoftPalette.gray300, fontSize: 12)),
+          icon: Icon(Icons.arrow_drop_down, size: 16, color: context.adapt(SoftPalette.teal550)),
           isDense: true,
           isExpanded: true,
-          dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
-          style: TextStyle(fontSize: 12, color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.bold),
+          dropdownColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+          style: TextStyle(fontSize: 12, color: isDark ? SoftPalette.gray50 : SoftPalette.gray900, fontWeight: FontWeight.bold),
           items: [
             for (int i = 1; i <= 30; i++)
               DropdownMenuItem(
                 value: i,
-                child: Text('$i', style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black)),
+                child: Text('$i', style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50 : SoftPalette.gray900)),
               ),
           ],
           onChanged: isEnabled ? onChanged : null,
@@ -2045,25 +2053,25 @@ _changeNotifier.value++;
       padding: const EdgeInsets.symmetric(horizontal: 6),
       height: 36,
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A) : Colors.white,
-        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7)),
+        color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
+        border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
         borderRadius: BorderRadius.circular(8),
       ),
       child: DropdownButtonHideUnderline(
         child: DropdownButton<String>(
           value: (selectedValue == null || selectedValue.isEmpty || selectedValue == '-') ? null : selectedValue,
-          hint: Text('-', style: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey.shade400, fontSize: 12)),
-          icon: const Icon(Icons.arrow_drop_down, size: 16, color: Color(0xFF008080)),
+          hint: Text('-', style: TextStyle(color: isDark ? SoftPalette.slate550 : SoftPalette.gray300, fontSize: 12)),
+          icon: Icon(Icons.arrow_drop_down, size: 16, color: context.adapt(SoftPalette.teal550)),
           isDense: true,
           isExpanded: true,
-          dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
-          style: TextStyle(fontSize: 12, color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.bold),
+          dropdownColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+          style: TextStyle(fontSize: 12, color: isDark ? SoftPalette.gray50 : SoftPalette.gray900, fontWeight: FontWeight.bold),
           items: [
-            DropdownMenuItem(value: '1/4', child: Text(context.isUrdu ? 'پاؤ' : 'Pao', style: TextStyle(color: isDark ? Colors.white : Colors.black))),
-            DropdownMenuItem(value: '1/2', child: Text(context.isUrdu ? 'نصف' : 'Nisf', style: TextStyle(color: isDark ? Colors.white : Colors.black))),
-            DropdownMenuItem(value: '3/4', child: Text(context.isUrdu ? 'ثلاثہ' : 'Salasa', style: TextStyle(color: isDark ? Colors.white : Colors.black))),
-            DropdownMenuItem(value: '1', child: Text(context.isUrdu ? 'پارہ' : 'Para', style: TextStyle(color: isDark ? Colors.white : Colors.black))),
-            DropdownMenuItem(value: 'nahi_sunaya', child: Text(context.isUrdu ? 'نہیں سنایا' : 'Nahi Sunaya', style: TextStyle(color: isDark ? Colors.white : Colors.black))),
+            DropdownMenuItem(value: '1/4', child: Text(context.isUrdu ? 'پاؤ' : 'Pao', style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900))),
+            DropdownMenuItem(value: '1/2', child: Text(context.isUrdu ? 'نصف' : 'Nisf', style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900))),
+            DropdownMenuItem(value: '3/4', child: Text(context.isUrdu ? 'ثلاثہ' : 'Salasa', style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900))),
+            DropdownMenuItem(value: '1', child: Text(context.isUrdu ? 'پارہ' : 'Para', style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900))),
+            DropdownMenuItem(value: 'nahi_sunaya', child: Text(context.isUrdu ? 'نہیں سنایا' : 'Nahi Sunaya', style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900))),
           ],
           onChanged: isEnabled ? onChanged : null,
         ),
@@ -2089,7 +2097,7 @@ _changeNotifier.value++;
               ),
             ),
             ListTile(
-              leading: const Icon(Icons.camera_alt_outlined, color: Color(0xFF008080)),
+              leading: Icon(Icons.camera_alt_outlined, color: ctx.adapt(SoftPalette.teal550)),
               title: Text(
                 context.isUrdu ? 'کیمرہ سے تصویر لیں' : 'Take Photo with Camera',
                 style: context.urduStyle(),
@@ -2097,7 +2105,7 @@ _changeNotifier.value++;
               onTap: () => Navigator.pop(ctx, ImageSource.camera),
             ),
             ListTile(
-              leading: const Icon(Icons.photo_library_outlined, color: Color(0xFF008080)),
+              leading: Icon(Icons.photo_library_outlined, color: ctx.adapt(SoftPalette.teal550)),
               title: Text(
                 context.isUrdu ? 'گیلری سے منتخب کریں' : 'Choose from Gallery',
                 style: context.urduStyle(),
@@ -2150,21 +2158,21 @@ _changeNotifier.value++;
         setState(() {
           _uploadStates[studentId] = PhotoUploadStatus.success;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text(
               context.isUrdu ? 'تصویر کامیابی کے ساتھ اپ ڈیٹ ہو گئی' : 'Student photo updated successfully!',
               style: context.urduStyle(),
             ),
-            backgroundColor: const Color(0xFF008080),
+            backgroundColor: SoftPalette.teal550,
           ),
         );
       }
     } catch (e) {
       if (!mounted) return;
       setState(() => _uploadStates[studentId] = PhotoUploadStatus.error);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Failed to update photo: $e'), backgroundColor: Colors.red),
+      AppToast.showSnackBar(context, 
+        SnackBar(content: Text('Failed to update photo: $e'), backgroundColor: SoftPalette.red400),
       );
     }
   }
@@ -2192,7 +2200,7 @@ _changeNotifier.value++;
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
               focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(8),
-                borderSide: const BorderSide(color: Color(0xFF008080), width: 2),
+                borderSide: BorderSide(color: dContext.adapt(SoftPalette.teal550), width: 2),
               ),
             ),
             onSubmitted: (val) {
@@ -2200,8 +2208,8 @@ _changeNotifier.value++;
               if (newLines != null && newLines >= 0) {
                 final clamped = newLines.clamp(0, 8640);
                 if (newLines > 8640) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text(context.isUrdu ? 'زیادہ سے زیادہ 8640 لائنیں (حفظ مکمل)' : 'Maximum 8640 lines (Hifz complete)'), backgroundColor: Colors.orange),
+                  AppToast.showSnackBar(context, 
+                    SnackBar(content: Text(context.isUrdu ? 'زیادہ سے زیادہ 8640 لائنیں (حفظ مکمل)' : 'Maximum 8640 lines (Hifz complete)'), backgroundColor: SoftPalette.amber300),
                   );
                 }
                 _updateSabakLines(studentId, clamped);
@@ -2214,13 +2222,13 @@ _changeNotifier.value++;
               onPressed: () => Navigator.of(dContext).pop(),
               child: Text(
                 context.l.cancel,
-                style: context.urduStyle(style: const TextStyle(color: Colors.grey)),
+                style: context.urduStyle(style: TextStyle(color: dContext.adapt(SoftPalette.gray350))),
               ),
             ),
             ElevatedButton(
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF008080),
-                foregroundColor: Colors.white,
+                backgroundColor: SoftPalette.teal550,
+                foregroundColor: SoftPalette.gray50,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
               onPressed: () {
@@ -2228,8 +2236,8 @@ _changeNotifier.value++;
                 if (newLines != null && newLines >= 0) {
                   final clamped = newLines.clamp(0, 8640);
                   if (newLines > 8640) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text(context.isUrdu ? 'زیادہ سے زیادہ 8640 لائنیں (حفظ مکمل)' : 'Maximum 8640 lines (Hifz complete)'), backgroundColor: Colors.orange),
+                    AppToast.showSnackBar(context, 
+                      SnackBar(content: Text(context.isUrdu ? 'زیادہ سے زیادہ 8640 لائنیں (حفظ مکمل)' : 'Maximum 8640 lines (Hifz complete)'), backgroundColor: SoftPalette.amber300),
                     );
                   }
                   _updateSabakLines(studentId, clamped);
@@ -2254,7 +2262,7 @@ _changeNotifier.value++;
     // Get parent phone
     final String rawPhone = studentData['contactPhone']?.toString() ?? studentData['phone']?.toString() ?? '';
     if (rawPhone.trim().isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         const SnackBar(content: Text('Error: Parent contact phone number not provided.')),
       );
       return;
@@ -2384,7 +2392,7 @@ _changeNotifier.value++;
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           const SnackBar(content: Text('Could not launch WhatsApp.')),
         );
       }
@@ -2521,7 +2529,7 @@ _changeNotifier.value++;
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
           title: Row(
             children: [
-              const Icon(Icons.share, color: Color(0xFF008080)),
+              Icon(Icons.share, color: ctx.adapt(SoftPalette.teal550)),
               const SizedBox(width: 10),
               Text(
                 context.isUrdu ? 'روزانہ رپورٹ شیئر کریں' : 'Share Daily Report',
@@ -2539,16 +2547,16 @@ _changeNotifier.value++;
                   context.isUrdu 
                       ? 'رپورٹ کا ٹیکسٹ نیچے پیش نظارہ میں دیکھیں۔ آپ اسے کاپی کر سکتے ہیں یا واٹس ایپ پر براہ راست بھیج سکتے ہیں، یا پی ڈی ایف ڈاؤن لوڈ کر سکتے ہیں۔'
                       : 'Preview the report text below. You can copy it, send it directly to WhatsApp, or download/share the PDF.',
-                  style: context.urduStyle(style: const TextStyle(fontSize: 13, color: Colors.grey)),
+                  style: context.urduStyle(style: TextStyle(fontSize: 13, color: ctx.adapt(SoftPalette.gray350))),
                 ),
                 const SizedBox(height: 12),
                 Container(
                   height: 200,
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
+                    color: ctx.adapt(SoftPalette.gray100),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.grey.shade300),
+                    border: Border.all(color: ctx.adapt(SoftPalette.gray150)),
                   ),
                   child: SingleChildScrollView(
                     child: SelectableText(
@@ -2580,19 +2588,19 @@ _changeNotifier.value++;
                   );
                 } catch (e) {
                   if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    AppToast.showSnackBar(context, 
                       SnackBar(content: Text('Error generating PDF: $e')),
                     );
                   }
                 }
               },
-              icon: const Icon(Icons.picture_as_pdf, color: Colors.red),
+              icon: Icon(Icons.picture_as_pdf, color: ctx.adapt(SoftPalette.red400)),
               label: Text(
                 context.isUrdu ? 'پی ڈی ایف رپورٹ' : 'PDF Report',
-                style: context.urduStyle(style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold)),
+                style: context.urduStyle(style: TextStyle(color: ctx.adapt(SoftPalette.red400), fontWeight: FontWeight.bold)),
               ),
               style: OutlinedButton.styleFrom(
-                side: const BorderSide(color: Colors.red),
+                side: BorderSide(color: ctx.adapt(SoftPalette.red400)),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
             ),
@@ -2601,10 +2609,10 @@ _changeNotifier.value++;
               children: [
                 IconButton(
                   tooltip: context.isUrdu ? 'ٹیکسٹ کاپی کریں' : 'Copy Text',
-                  icon: const Icon(Icons.copy, color: Color(0xFF008080)),
+                  icon: Icon(Icons.copy, color: ctx.adapt(SoftPalette.teal550)),
                   onPressed: () {
                     Clipboard.setData(ClipboardData(text: reportText));
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    AppToast.showSnackBar(context, 
                       SnackBar(content: Text(context.isUrdu ? 'ٹیکسٹ کاپی ہو گیا!' : 'Copied to clipboard!')),
                     );
                   },
@@ -2621,20 +2629,20 @@ _changeNotifier.value++;
                       }
                     } catch (e) {
                       if (mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
+                        AppToast.showSnackBar(context, 
                           const SnackBar(content: Text('Could not launch WhatsApp.')),
                         );
                       }
                     }
                   },
-                  icon: const FaIcon(FontAwesomeIcons.whatsapp, color: Colors.white, size: 16),
+                  icon: const FaIcon(FontAwesomeIcons.whatsapp, color: SoftPalette.gray50, size: 16),
                   label: Text(
                     context.isUrdu ? 'واٹس ایپ پر بھیجیں' : 'Send WhatsApp',
                     style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)),
                   ),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF25D366),
-                    foregroundColor: Colors.white,
+                    backgroundColor: SoftPalette.green350,
+                    foregroundColor: SoftPalette.gray50,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
                 ),
@@ -2664,8 +2672,8 @@ _changeNotifier.value++;
             FloatingActionButton(
               heroTag: 'btn_back_to_top',
               mini: true,
-              backgroundColor: const Color(0xFF008080).withValues(alpha: 0.8),
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.teal550.withValues(alpha: 0.8),
+              foregroundColor: SoftPalette.gray50,
               onPressed: () {
                 _verticalScrollController.animateTo(
                   0,
@@ -2684,13 +2692,13 @@ _changeNotifier.value++;
                   ? const SizedBox(
                       width: 16,
                       height: 16,
-                      child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                      child: CircularProgressIndicator(color: SoftPalette.gray50, strokeWidth: 2),
                     )
                   : const Icon(Icons.save),
               label: Text(context.l.saveChanges),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF008080), // Teal
-                foregroundColor: Colors.white,
+                backgroundColor: SoftPalette.teal550, // Teal
+                foregroundColor: SoftPalette.gray50,
                 padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
               ),
@@ -2726,7 +2734,7 @@ class SegmentedAttendanceToggle extends StatelessWidget {
     Widget toggle = Container(
       height: 36,
       decoration: BoxDecoration(
-        color: const Color(0xFFEDF0F5),
+        color: context.adapt(SoftPalette.slate100),
         borderRadius: BorderRadius.circular(18),
       ),
       padding: const EdgeInsets.all(3),
@@ -2737,7 +2745,7 @@ class SegmentedAttendanceToggle extends StatelessWidget {
             context: context,
             label: 'P',
             isSelected: value == 'present',
-            activeColor: const Color(0xFF10B981), // Emerald green
+            activeColor: SoftPalette.emerald350, // Emerald green
             onTap: onChanged == null ? null : () => onChanged!('present'),
           ),
           if (showLeaveSegment) ...[
@@ -2746,7 +2754,7 @@ class SegmentedAttendanceToggle extends StatelessWidget {
               context: context,
               label: 'L',
               isSelected: value == 'leave' || value == 'leave_requested',
-              activeColor: const Color(0xFFF59E0B), // Orange/yellow
+              activeColor: SoftPalette.amber300, // Orange/yellow
               onTap: (onChanged == null || !canUseLeave) ? null : () => onChanged!('leave'),
             ),
           ],
@@ -2755,7 +2763,7 @@ class SegmentedAttendanceToggle extends StatelessWidget {
             context: context,
             label: 'A',
             isSelected: value == 'absent',
-            activeColor: const Color(0xFFEF4444), // Red
+            activeColor: SoftPalette.red400, // Red
             onTap: onChanged == null ? null : () => onChanged!('absent'),
           ),
         ],
@@ -2770,9 +2778,9 @@ class SegmentedAttendanceToggle extends StatelessWidget {
           Text(
             context.l.attendance,
             style: context.urduStyle(
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 10,
-                color: Color(0xFF78909C),
+                color: context.adapt(SoftPalette.slate400),
                 fontWeight: FontWeight.w600,
               ),
             ),
@@ -2807,7 +2815,7 @@ class SegmentedAttendanceToggle extends StatelessWidget {
         child: Text(
           label,
           style: TextStyle(
-            color: isSelected ? Colors.white : const Color(0xFF64748B),
+            color: isSelected ? SoftPalette.gray50 : context.adapt(SoftPalette.slate550),
             fontWeight: FontWeight.bold,
             fontSize: 13,
           ),
@@ -2858,7 +2866,7 @@ class _StudentLogCard extends StatelessWidget {
       onPressed: onTap,
       style: ElevatedButton.styleFrom(
         backgroundColor: color,
-        foregroundColor: Colors.white,
+        foregroundColor: SoftPalette.gray50,
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         minimumSize: Size.zero,
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
@@ -2877,14 +2885,14 @@ class _StudentLogCard extends StatelessWidget {
         width: 32,
         height: 32,
         decoration: BoxDecoration(
-          color: active ? color : (isDark ? const Color(0xFF334155) : const Color(0xFFE8EAED)),
+          color: active ? color : (isDark ? SoftPalette.slate700 : SoftPalette.gray150),
           borderRadius: BorderRadius.circular(8),
         ),
         alignment: Alignment.center,
         child: Text(
           label,
           style: TextStyle(
-            color: active ? Colors.white : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF9E9E9E)),
+            color: active ? SoftPalette.gray50 : (isDark ? SoftPalette.slate350 : SoftPalette.gray350),
             fontWeight: FontWeight.bold,
             fontSize: 13,
           ),
@@ -2895,20 +2903,24 @@ class _StudentLogCard extends StatelessWidget {
 
   Widget _switchCol(BuildContext context, String label, bool val, ValueChanged<bool>? onChanged, {Color? activeColor, Color? trackColor, bool isDark = false}) {
     return Column(
+      mainAxisSize: MainAxisSize.min,
       children: [
         Text(
           label,
-          style: context.urduStyle(style: TextStyle(fontSize: 10, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF78909C), fontWeight: FontWeight.w600)),
+          style: context.urduStyle(style: TextStyle(fontSize: 10, color: isDark ? SoftPalette.slate350 : SoftPalette.slate400, fontWeight: FontWeight.w600)),
         ),
         const SizedBox(height: 2),
-        Switch(
-          value: val,
-          onChanged: onChanged,
-          activeColor: activeColor ?? const Color(0xFF5B9BD5),
-          activeTrackColor: trackColor ?? (activeColor ?? const Color(0xFF5B9BD5)).withValues(alpha: 0.4),
-          inactiveThumbColor: isDark ? const Color(0xFF64748B) : const Color(0xFFBDBDBD),
-          inactiveTrackColor: isDark ? const Color(0xFF334155) : const Color(0xFFE0E0E0),
-          materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        Transform.scale(
+          scale: 0.88,
+          child: Switch(
+            value: val,
+            onChanged: onChanged,
+            activeThumbColor: activeColor ?? SoftPalette.sky400,
+            activeTrackColor: trackColor ?? (activeColor ?? SoftPalette.sky400).withValues(alpha: 0.4),
+            inactiveThumbColor: isDark ? SoftPalette.slate550 : SoftPalette.gray300,
+            inactiveTrackColor: isDark ? SoftPalette.slate700 : SoftPalette.gray150,
+            materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
         ),
       ],
     );
@@ -2920,13 +2932,13 @@ class _StudentLogCard extends StatelessWidget {
       children: [
         Text(
           context.isUrdu ? 'سبق (لائنیں)' : 'Sabak (Lines)',
-          style: context.urduStyle(style: TextStyle(fontSize: 11, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF495057), fontWeight: FontWeight.bold)),
+          style: context.urduStyle(style: TextStyle(fontSize: 11, color: isDark ? SoftPalette.slate350 : SoftPalette.slate600, fontWeight: FontWeight.bold)),
         ),
         const SizedBox(height: 4),
         Row(
           children: [
             IconButton(
-              icon: const Icon(Icons.remove_circle_outline, color: Color(0xFFE53935), size: 20),
+              icon: Icon(Icons.remove_circle_outline, color: context.adapt(SoftPalette.red500), size: 20),
               onPressed: (isReadOnly || lines == 0)
                   ? null
                   : () {
@@ -2946,21 +2958,21 @@ class _StudentLogCard extends StatelessWidget {
                 child: Container(
                   height: 36,
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF0F172A) : Colors.white,
-                    border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7)),
+                    color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
+                    border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   alignment: Alignment.center,
                   child: Text(
                     '$lines',
-                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black),
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50 : SoftPalette.gray900),
                   ),
                 ),
               ),
             ),
             const SizedBox(width: 8),
             IconButton(
-              icon: Icon(Icons.add_circle_outline, color: (isReadOnly || lines >= 8640) ? Colors.grey : const Color(0xFF2E7D32), size: 20),
+              icon: Icon(Icons.add_circle_outline, color: (isReadOnly || lines >= 8640) ? context.adapt(SoftPalette.gray350) : context.adapt(SoftPalette.green550), size: 20),
               onPressed: (isReadOnly || lines >= 8640)
                   ? null
                   : () {
@@ -2985,7 +2997,7 @@ class _StudentLogCard extends StatelessWidget {
       children: [
         Text(
           context.isUrdu ? 'سبکی (پارہ / تناسب)' : 'Sabki (Para / Ratio)',
-          style: context.urduStyle(style: TextStyle(fontSize: 11, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF495057), fontWeight: FontWeight.bold)),
+          style: context.urduStyle(style: TextStyle(fontSize: 11, color: isDark ? SoftPalette.slate350 : SoftPalette.slate600, fontWeight: FontWeight.bold)),
         ),
         const SizedBox(height: 4),
         Row(
@@ -3015,7 +3027,7 @@ class _StudentLogCard extends StatelessWidget {
       children: [
         Text(
           context.isUrdu ? 'منزل (پارہ / تناسب)' : 'Manzil (Para / Ratio)',
-          style: context.urduStyle(style: TextStyle(fontSize: 11, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF495057), fontWeight: FontWeight.bold)),
+          style: context.urduStyle(style: TextStyle(fontSize: 11, color: isDark ? SoftPalette.slate350 : SoftPalette.slate600, fontWeight: FontWeight.bold)),
         ),
         const SizedBox(height: 4),
         Row(
@@ -3051,7 +3063,7 @@ class _StudentLogCard extends StatelessWidget {
           style: context.urduStyle(
             style: TextStyle(
               fontSize: 11,
-              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF495057),
+              color: isDark ? SoftPalette.slate350 : SoftPalette.slate600,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -3072,8 +3084,8 @@ class _StudentLogCard extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 6),
                 height: 36,
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF0F172A) : Colors.white,
-                  border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7)),
+                  color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
+                  border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: DropdownButtonHideUnderline(
@@ -3081,26 +3093,26 @@ class _StudentLogCard extends StatelessWidget {
                     value: rukuStr,
                     hint: Text(
                       '-',
-                      style: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey.shade400, fontSize: 12),
+                      style: TextStyle(color: isDark ? SoftPalette.slate550 : SoftPalette.gray300, fontSize: 12),
                     ),
-                    icon: const Icon(Icons.arrow_drop_down, size: 16, color: Color(0xFF008080)),
+                    icon: Icon(Icons.arrow_drop_down, size: 16, color: context.adapt(SoftPalette.teal550)),
                     isDense: true,
                     isExpanded: true,
-                    dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
-                    style: TextStyle(fontSize: 12, color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.bold),
+                    dropdownColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+                    style: TextStyle(fontSize: 12, color: isDark ? SoftPalette.gray50 : SoftPalette.gray900, fontWeight: FontWeight.bold),
                     items: [
                       DropdownMenuItem<String>(
                         value: null,
                         child: Text(
                           '-',
-                          style: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey),
+                          style: TextStyle(color: isDark ? SoftPalette.slate550 : SoftPalette.gray350),
                         ),
                       ),
                       DropdownMenuItem<String>(
                         value: 'nahi_sunaya',
                         child: Text(
                           context.isUrdu ? 'نہیں سنایا' : 'Nahi Sunaya',
-                          style: const TextStyle(color: Color(0xFFE53935)),
+                          style: TextStyle(color: context.adapt(SoftPalette.red500)),
                         ),
                       ),
                       for (int i = 1; i <= 40; i++)
@@ -3108,7 +3120,7 @@ class _StudentLogCard extends StatelessWidget {
                           value: '$i',
                           child: Text(
                             context.isUrdu ? '$i رُكوع' : '$i Ruku',
-                            style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : const Color(0xFF0F172A)),
+                            style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50 : SoftPalette.slate900),
                           ),
                         ),
                     ],
@@ -3144,10 +3156,10 @@ class _StudentLogCard extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: Colors.amber.withValues(alpha: 0.15),
+                      color: dialogCtx.adapt(SoftPalette.amber200).withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Icon(Icons.undo_rounded, color: Colors.amber.shade800, size: 22),
+                    child: Icon(Icons.undo_rounded, color: dialogCtx.adapt(SoftPalette.orange350), size: 22),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -3166,18 +3178,18 @@ class _StudentLogCard extends StatelessWidget {
                     isUrdu
                         ? 'کیا آپ $studentName کے لیے قاعدہ کی تکمیل منسوخ کرنا چاہتے ہیں؟ موجودہ تختی / سبق منتخب کریں:'
                         : 'Revert Qaida completion for $studentName back to active learning. Select the current lesson:',
-                    style: ctx.urduStyle(style: const TextStyle(fontSize: 13, color: Colors.black87)),
+                    style: ctx.urduStyle(style: TextStyle(fontSize: 13, color: dialogCtx.adapt(SoftPalette.gray900A87))),
                   ),
                   const SizedBox(height: 16),
                   Text(
                     isUrdu ? 'سبق / تختی:' : 'Qaida Lesson (1–21):',
-                    style: ctx.urduStyle(style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+                    style: ctx.urduStyle(style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: dialogCtx.adapt(SoftPalette.gray350))),
                   ),
                   const SizedBox(height: 6),
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     decoration: BoxDecoration(
-                      border: Border.all(color: Colors.grey.shade300),
+                      border: Border.all(color: dialogCtx.adapt(SoftPalette.gray150)),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: DropdownButtonHideUnderline(
@@ -3213,8 +3225,8 @@ class _StudentLogCard extends StatelessWidget {
                 ),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.amber.shade800,
-                    foregroundColor: Colors.white,
+                    backgroundColor: SoftPalette.orange350,
+                    foregroundColor: SoftPalette.gray50,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
                   onPressed: () => Navigator.pop(ctx, true),
@@ -3258,14 +3270,14 @@ class _StudentLogCard extends StatelessWidget {
       ));
 
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text(
               context.isUrdu
                   ? '$studentName کے لیے قاعدہ تکمیل منسوخ ہو گئی (سبق $selectedLesson)'
                   : 'Qaida completed reverted for $studentName (Lesson $selectedLesson)',
             ),
-            backgroundColor: Colors.amber.shade800,
+            backgroundColor: SoftPalette.orange350,
           ),
         );
       }
@@ -3285,7 +3297,7 @@ class _StudentLogCard extends StatelessWidget {
                 style: context.urduStyle(
                   style: TextStyle(
                     fontSize: 11,
-                    color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF495057),
+                    color: isDark ? SoftPalette.slate350 : SoftPalette.slate600,
                     fontWeight: FontWeight.bold,
                   ),
                 ),
@@ -3299,14 +3311,14 @@ class _StudentLogCard extends StatelessWidget {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.undo_rounded, size: 11, color: Colors.amber.shade800),
+                        Icon(Icons.undo_rounded, size: 11, color: context.adapt(SoftPalette.orange350)),
                         const SizedBox(width: 2),
                         Text(
                           context.isUrdu ? 'واپس کریں' : 'Revert',
                           style: TextStyle(
                             fontSize: 10,
                             fontWeight: FontWeight.bold,
-                            color: Colors.amber.shade900,
+                            color: context.adapt(SoftPalette.orange350),
                           ),
                         ),
                       ],
@@ -3320,21 +3332,21 @@ class _StudentLogCard extends StatelessWidget {
             height: 36,
             padding: const EdgeInsets.symmetric(horizontal: 8),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF064E3B).withValues(alpha: 0.3) : const Color(0xFFECFDF5),
+              color: isDark ? SoftPalette.emerald700.withValues(alpha: 0.3) : SoftPalette.emerald50,
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.5)),
+              border: Border.all(color: context.adapt(SoftPalette.emerald350).withValues(alpha: 0.5)),
             ),
             child: Row(
               children: [
-                const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 16),
+                Icon(Icons.check_circle_rounded, color: context.adapt(SoftPalette.emerald350), size: 16),
                 const SizedBox(width: 6),
                 Expanded(
                   child: Text(
                     context.isUrdu ? 'قاعدہ مکمل ✅' : 'Qaida Completed ✅',
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontWeight: FontWeight.bold,
                       fontSize: 12,
-                      color: Color(0xFF059669),
+                      color: context.adapt(SoftPalette.emerald500),
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -3348,21 +3360,21 @@ class _StudentLogCard extends StatelessWidget {
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
                         decoration: BoxDecoration(
-                          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                          color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                           borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: Colors.amber.shade700.withValues(alpha: 0.5)),
+                          border: Border.all(color: context.adapt(SoftPalette.amber300).withValues(alpha: 0.5)),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.undo_rounded, size: 12, color: Colors.amber.shade800),
+                            Icon(Icons.undo_rounded, size: 12, color: context.adapt(SoftPalette.orange350)),
                             const SizedBox(width: 3),
                             Text(
                               context.isUrdu ? 'منسوخ' : 'Revert',
                               style: TextStyle(
                                 fontSize: 10.5,
                                 fontWeight: FontWeight.bold,
-                                color: Colors.amber.shade900,
+                                color: context.adapt(SoftPalette.orange350),
                               ),
                             ),
                           ],
@@ -3389,7 +3401,7 @@ class _StudentLogCard extends StatelessWidget {
           style: context.urduStyle(
             style: TextStyle(
               fontSize: 11,
-              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF495057),
+              color: isDark ? SoftPalette.slate350 : SoftPalette.slate600,
               fontWeight: FontWeight.bold,
             ),
           ),
@@ -3399,8 +3411,8 @@ class _StudentLogCard extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 8),
           height: 36,
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF0F172A) : Colors.white,
-            border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7)),
+            color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
+            border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
             borderRadius: BorderRadius.circular(8),
           ),
           child: DropdownButtonHideUnderline(
@@ -3408,19 +3420,19 @@ class _StudentLogCard extends StatelessWidget {
               value: (currentVal == 'completed') ? null : currentVal,
               hint: Text(
                 context.isUrdu ? 'سبق منتخب کریں' : 'Select Lesson',
-                style: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey.shade400, fontSize: 12),
+                style: TextStyle(color: isDark ? SoftPalette.slate550 : SoftPalette.gray300, fontSize: 12),
               ),
-              icon: const Icon(Icons.arrow_drop_down, size: 16, color: Color(0xFF008080)),
+              icon: Icon(Icons.arrow_drop_down, size: 16, color: context.adapt(SoftPalette.teal550)),
               isDense: true,
               isExpanded: true,
-              dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
-              style: TextStyle(fontSize: 12, color: isDark ? Colors.white : Colors.black, fontWeight: FontWeight.bold),
+              dropdownColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+              style: TextStyle(fontSize: 12, color: isDark ? SoftPalette.gray50 : SoftPalette.gray900, fontWeight: FontWeight.bold),
               items: [
                 DropdownMenuItem<String>(
                   value: null,
                   child: Text(
                     context.isUrdu ? '— کوئی سبق نہیں —' : '— No Lesson —',
-                    style: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey),
+                    style: TextStyle(color: isDark ? SoftPalette.slate550 : SoftPalette.gray350),
                   ),
                 ),
                 for (int i = 1; i <= 21; i++)
@@ -3428,18 +3440,18 @@ class _StudentLogCard extends StatelessWidget {
                     value: '$i',
                     child: Text(
                       context.isUrdu ? 'سبق $i (تختی $i)' : 'Lesson $i',
-                      style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : const Color(0xFF0F172A)),
+                      style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50 : SoftPalette.slate900),
                     ),
                   ),
                 DropdownMenuItem<String>(
                   value: 'completed',
                   child: Row(
                     children: [
-                      const Icon(Icons.verified_rounded, color: Color(0xFF10B981), size: 16),
+                      Icon(Icons.verified_rounded, color: context.adapt(SoftPalette.emerald350), size: 16),
                       const SizedBox(width: 6),
                       Text(
                         context.isUrdu ? '🏆 مکمل (Completed)' : '🏆 Completed',
-                        style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF059669)),
+                        style: TextStyle(fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.emerald500)),
                       ),
                     ],
                   ),
@@ -3491,18 +3503,18 @@ class _StudentLogCard extends StatelessWidget {
     );
   }
 
-  Widget _buildLogAvatarFallback(String name) {
+  Widget _buildLogAvatarFallback(BuildContext context, String name) {
     return Container(
       width: 32,
       height: 32,
-      decoration: const BoxDecoration(
-        color: Color(0xFFE0F2F1),
+      decoration: BoxDecoration(
+        color: context.adapt(SoftPalette.teal100m),
         shape: BoxShape.circle,
       ),
       alignment: Alignment.center,
       child: Text(
         name.isNotEmpty ? name[0].toUpperCase() : '?',
-        style: const TextStyle(color: Color(0xFF008080), fontWeight: FontWeight.bold, fontSize: 13),
+        style: TextStyle(color: context.adapt(SoftPalette.teal550), fontWeight: FontWeight.bold, fontSize: 13),
       ),
     );
   }
@@ -3516,10 +3528,10 @@ class _StudentLogCard extends StatelessWidget {
       builder: (context, log, child) {
         final theme = Theme.of(context);
         final isDark = theme.brightness == Brightness.dark || UserThemeService.isDarkMode(editorRole);
-        final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-        final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7);
-        final textPrimary = isDark ? Colors.white : const Color(0xFF1A1C1E);
-        final textMuted = isDark ? const Color(0xFF94A3B8) : Colors.grey;
+        final cardBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+        final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.slate150;
+        final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.gray900;
+        final textMuted = isDark ? SoftPalette.slate350 : SoftPalette.gray350;
 
         final studentData = student;
         final sId = student['id'] ?? '';
@@ -3569,10 +3581,10 @@ class _StudentLogCard extends StatelessWidget {
 
         Widget avatarWidget;
         if (uploadStatus == PhotoUploadStatus.uploading) {
-          avatarWidget = const SizedBox(
+          avatarWidget = SizedBox(
             width: 32,
             height: 32,
-            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF008080)),
+            child: CircularProgressIndicator(strokeWidth: 2, color: context.adapt(SoftPalette.teal550)),
           );
         } else {
           final str = photoUrl?.toString().trim();
@@ -3585,7 +3597,7 @@ class _StudentLogCard extends StatelessWidget {
                 width: 32,
                 height: 32,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => _buildLogAvatarFallback(name),
+                errorBuilder: (_, __, ___) => _buildLogAvatarFallback(context, name),
               ),
             );
           } else if (str != null && str.startsWith('http')) {
@@ -3596,11 +3608,11 @@ class _StudentLogCard extends StatelessWidget {
                 width: 32,
                 height: 32,
                 fit: BoxFit.cover,
-                errorBuilder: (_, __, ___) => _buildLogAvatarFallback(name),
+                errorBuilder: (_, __, ___) => _buildLogAvatarFallback(context, name),
               ),
             );
           } else {
-            avatarWidget = _buildLogAvatarFallback(name);
+            avatarWidget = _buildLogAvatarFallback(context, name);
           }
         }
 
@@ -3620,7 +3632,7 @@ class _StudentLogCard extends StatelessWidget {
                       Align(
                         alignment: Alignment.topRight,
                         child: IconButton(
-                          icon: const Icon(Icons.close, color: Colors.white, size: 28),
+                          icon: const Icon(Icons.close, color: SoftPalette.gray50, size: 28),
                           onPressed: () => Navigator.of(context).pop(),
                         ),
                       ),
@@ -3636,8 +3648,8 @@ class _StudentLogCard extends StatelessWidget {
                       const SizedBox(height: 16),
                       TextButton.icon(
                         style: TextButton.styleFrom(
-                          foregroundColor: Colors.white,
-                          backgroundColor: Colors.black.withValues(alpha: 0.5),
+                          foregroundColor: SoftPalette.gray50,
+                          backgroundColor: SoftPalette.gray900.withValues(alpha: 0.5),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                         ),
@@ -3665,18 +3677,18 @@ class _StudentLogCard extends StatelessWidget {
             margin: const EdgeInsets.only(left: 6, right: 6),
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: const Color(0xFFE8F5E9),
+              color: context.adapt(SoftPalette.green100m),
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: const Color(0xFF2E7D32), width: 1),
+              border: Border.all(color: context.adapt(SoftPalette.green550), width: 1),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.stars_rounded, color: Colors.amber, size: 12),
+                Icon(Icons.stars_rounded, color: context.adapt(SoftPalette.amber200), size: 12),
                 const SizedBox(width: 3),
                 Text(
                   context.isUrdu ? 'حفظ مکمل! 🎉' : 'Hifz Complete! 🎉',
-                  style: const TextStyle(color: Color(0xFF2E7D32), fontSize: 10, fontWeight: FontWeight.bold),
+                  style: TextStyle(color: context.adapt(SoftPalette.green550), fontSize: 10, fontWeight: FontWeight.bold),
                 ),
               ],
             ),
@@ -3686,18 +3698,18 @@ class _StudentLogCard extends StatelessWidget {
             margin: const EdgeInsets.only(left: 6, right: 6),
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: const Color(0xFFFFF3E0),
+              color: context.adapt(SoftPalette.amber100m),
               borderRadius: BorderRadius.circular(6),
-              border: Border.all(color: Colors.orange, width: 1),
+              border: Border.all(color: context.adapt(SoftPalette.amber300), width: 1),
             ),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                const Icon(Icons.auto_awesome, color: Colors.orange, size: 12),
+                Icon(Icons.auto_awesome, color: context.adapt(SoftPalette.amber300), size: 12),
                 const SizedBox(width: 3),
                 Text(
                   context.isUrdu ? 'حفظ مکمل ہونے والا ہے! 🌟' : 'Nearing Hifz! 🌟',
-                  style: const TextStyle(color: Colors.orange, fontSize: 10, fontWeight: FontWeight.bold),
+                  style: TextStyle(color: context.adapt(SoftPalette.amber300), fontSize: 10, fontWeight: FontWeight.bold),
                 ),
               ],
             ),
@@ -3713,123 +3725,139 @@ class _StudentLogCard extends StatelessWidget {
         final isFemale = genderStr == 'female' || genderStr == 'girl';
         final sessionStr = (student['session'] ?? 'morning').toString().toLowerCase().trim();
 
-        Widget genderSessionBadges = Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
+        final List<Widget> badgeWidgets = [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1.5),
+            decoration: BoxDecoration(
+              color: isFemale ? context.adapt(SoftPalette.red500).withValues(alpha: 0.12) : context.adapt(SoftPalette.blue400).withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              isFemale ? '👧 Girl' : '👦 Boy',
+              style: TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.bold,
+                color: isFemale ? context.adapt(SoftPalette.pink550) : context.adapt(SoftPalette.blue500),
+              ),
+            ),
+          ),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1.5),
+            decoration: BoxDecoration(
+              color: context.adapt(SoftPalette.teal550).withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(4),
+            ),
+            child: Text(
+              sessionStr == 'morning'
+                  ? '☀️ M'
+                  : (sessionStr == 'evening' ? '🌅 E' : '🌙 N'),
+              style: TextStyle(
+                fontSize: 9,
+                fontWeight: FontWeight.bold,
+                color: context.adapt(SoftPalette.teal550),
+              ),
+            ),
+          ),
+          if (!isNazraOnly)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1.5),
               decoration: BoxDecoration(
-                color: isFemale ? Colors.pink.withValues(alpha: 0.12) : Colors.blue.withValues(alpha: 0.12),
+                color: isStudentNazra
+                    ? context.adapt(SoftPalette.teal500).withValues(alpha: 0.12)
+                    : context.adapt(SoftPalette.violet550).withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
-                isFemale ? '👧 Girl' : '👦 Boy',
+                isStudentNazra ? '📖 Nazra' : '🕋 Hifz',
                 style: TextStyle(
                   fontSize: 9,
                   fontWeight: FontWeight.bold,
-                  color: isFemale ? Colors.pink.shade700 : Colors.blue.shade700,
+                  color: isStudentNazra ? context.adapt(SoftPalette.teal550) : context.adapt(SoftPalette.violet550),
                 ),
               ),
             ),
-            const SizedBox(width: 4),
+          if (isStudentNazra && isQaidaCompleted)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1.5),
               decoration: BoxDecoration(
-                color: const Color(0xFF0F766E).withValues(alpha: 0.1),
+                color: context.adapt(SoftPalette.emerald350).withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
-                sessionStr == 'morning'
-                    ? '☀️ M'
-                    : (sessionStr == 'evening' ? '🌅 E' : '🌙 N'),
-                style: const TextStyle(
+                '✅ قاعدہ مکمل',
+                style: TextStyle(
                   fontSize: 9,
                   fontWeight: FontWeight.bold,
-                  color: Color(0xFF0F766E),
+                  color: context.adapt(SoftPalette.emerald500),
                 ),
               ),
             ),
-            if (!isNazraOnly) ...[
-              const SizedBox(width: 4),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1.5),
-                decoration: BoxDecoration(
-                  color: isStudentNazra
-                      ? const Color(0xFF0D9488).withValues(alpha: 0.12)
-                      : const Color(0xFF7C3AED).withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: Text(
-                  isStudentNazra ? '📖 Nazra' : '🕋 Hifz',
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.bold,
-                    color: isStudentNazra ? const Color(0xFF0D9488) : const Color(0xFF7C3AED),
-                  ),
-                ),
-              ),
-            ],
-            if (isStudentNazra && isQaidaCompleted) ...[
-              const SizedBox(width: 4),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1.5),
-                decoration: BoxDecoration(
-                  color: const Color(0xFF10B981).withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(4),
-                ),
-                child: const Text(
-                  '✅ قاعدہ مکمل',
-                  style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.bold,
-                    color: Color(0xFF059669),
-                  ),
-                ),
-              ),
-            ],
-          ],
+          if (hifzBadge != null && !isStudentNazra) hifzBadge,
+        ];
+
+        Widget genderSessionBadges = Wrap(
+          spacing: 4,
+          runSpacing: 3,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: badgeWidgets,
         );
 
         Widget topRow = Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             SizedBox(
-              width: 32,
-              child: Text(
-                rollNumber,
-                style: TextStyle(color: textMuted, fontWeight: FontWeight.bold, fontSize: 13),
+              width: 30,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 2),
+                child: Text(
+                  rollNumber,
+                  style: TextStyle(color: textMuted, fontWeight: FontWeight.bold, fontSize: 13),
+                ),
               ),
             ),
             avatarWidget,
             const SizedBox(width: 8),
             Expanded(
-              child: Row(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
                 children: [
-                  Flexible(
-                    child: Text(
-                      name,
-                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: textPrimary),
-                      overflow: TextOverflow.ellipsis,
+                  Text(
+                    name,
+                    style: context.urduStyle(
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        color: textPrimary,
+                      ),
                     ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  const SizedBox(width: 4),
+                  const SizedBox(height: 3),
                   genderSessionBadges,
-                  if (hifzBadge != null && !isStudentNazra) hifzBadge,
                 ],
               ),
             ),
-            IconButton(
-              icon: const FaIcon(FontAwesomeIcons.whatsapp, color: Color(0xFF25D366), size: 20),
-              onPressed: () => onSendWhatsApp(student, log),
-              tooltip: 'Send WhatsApp report',
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(),
+            const SizedBox(width: 6),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: FaIcon(FontAwesomeIcons.whatsapp, color: context.adapt(SoftPalette.green350), size: 19),
+                  onPressed: () => onSendWhatsApp(student, log),
+                  tooltip: 'Send WhatsApp report',
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
+                ),
+                if (isPtmDay) ...[
+                  const SizedBox(width: 6),
+                  _attButton('J', log['ptm'] == true, SoftPalette.green550, isReadOnly ? () {} : () => onUpdateLocal(sId, 'ptm', true), isDark: isDark),
+                  const SizedBox(width: 4),
+                  _attButton('M', log['ptm'] == false, SoftPalette.red500, isReadOnly ? () {} : () => onUpdateLocal(sId, 'ptm', false), isDark: isDark),
+                ],
+              ],
             ),
-            if (isPtmDay) ...[
-              const SizedBox(width: 8),
-              _attButton('J', log['ptm'] == true, const Color(0xFF2E7D32), isReadOnly ? () {} : () => onUpdateLocal(sId, 'ptm', true), isDark: isDark),
-              const SizedBox(width: 4),
-              _attButton('M', log['ptm'] == false, const Color(0xFFD32F2F), isReadOnly ? () {} : () => onUpdateLocal(sId, 'ptm', false), isDark: isDark),
-            ],
           ],
         );
 
@@ -3841,9 +3869,9 @@ class _StudentLogCard extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                   decoration: BoxDecoration(
-                    color: const Color(0xFFFFF8E1),
+                    color: context.adapt(SoftPalette.yellow50),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.amber.shade300),
+                    border: Border.all(color: context.adapt(SoftPalette.yellow200)),
                   ),
                   child: Row(
                     children: [
@@ -3853,12 +3881,12 @@ class _StudentLogCard extends StatelessWidget {
                           children: [
                             Text(
                               context.isUrdu ? 'رخصت کی درخواست' : 'Leave Request',
-                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.amber.shade900, fontFamily: context.isUrdu ? 'Noori' : null),
+                              style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.orange350), fontFamily: context.isUrdu ? 'Noori' : null),
                             ),
                             if (log['leaveReason'] != null && log['leaveReason'].toString().isNotEmpty)
                               Text(
                                 log['leaveReason'].toString(),
-                                style: const TextStyle(fontSize: 11, color: Colors.black87),
+                                style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.gray900A87)),
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -3866,13 +3894,13 @@ class _StudentLogCard extends StatelessWidget {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      _actionButton(context.isUrdu ? 'منظور' : 'Approve', Colors.green, () {
+                      _actionButton(context.isUrdu ? 'منظور' : 'Approve', SoftPalette.green400, () {
                         onUpdateLocal(sId, 'attendance', 'leave');
                         onUpdateLocal(sId, 'leaveStatus', 'approved');
                         onUpdateLocal(sId, 'uniform', 'leave');
                       }),
                       const SizedBox(width: 6),
-                      _actionButton(context.isUrdu ? 'مسترد' : 'Deny', Colors.red, () {
+                      _actionButton(context.isUrdu ? 'مسترد' : 'Deny', SoftPalette.red400, () {
                         onUpdateLocal(sId, 'attendance', 'absent');
                         onUpdateLocal(sId, 'leaveStatus', 'denied');
                       }),
@@ -3907,8 +3935,8 @@ class _StudentLogCard extends StatelessWidget {
                 context.l.parentReplied,
                 msg,
                 isReadOnly ? null : (v) => onUpdateLocal(sId, 'parentReplied', v),
-                activeColor: const Color(0xFFFFA726),
-                trackColor: const Color(0xFFFFCC80),
+                activeColor: SoftPalette.amber300,
+                trackColor: SoftPalette.amber200,
                 isDark: isDark,
               ),
             ]
@@ -3930,18 +3958,18 @@ class _StudentLogCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
+                  Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 6,
+                    runSpacing: 4,
                     children: [
-                      Flexible(
-                        child: Text(
-                          name,
+                      Text(
+                        name,
+                        style: context.urduStyle(
                           style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: textPrimary),
-                          overflow: TextOverflow.ellipsis,
                         ),
                       ),
-                      const SizedBox(width: 6),
-                      genderSessionBadges,
-                      if (hifzBadge != null && !isStudentNazra) hifzBadge,
+                      ...badgeWidgets,
                     ],
                   ),
                   if ((isParentRequested || att == 'leave_requested') && leaveStatus == 'pending')
@@ -3949,9 +3977,9 @@ class _StudentLogCard extends StatelessWidget {
                       margin: const EdgeInsets.only(top: 4),
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: Colors.amber.shade50,
+                        color: context.adapt(SoftPalette.yellow50),
                         borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: Colors.amber.shade300),
+                        border: Border.all(color: context.adapt(SoftPalette.yellow200)),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3959,12 +3987,12 @@ class _StudentLogCard extends StatelessWidget {
                         children: [
                           Row(
                             children: [
-                              Icon(Icons.event_note_rounded, size: 14, color: Colors.amber.shade900),
+                              Icon(Icons.event_note_rounded, size: 14, color: context.adapt(SoftPalette.orange350)),
                               const SizedBox(width: 4),
                               Expanded(
                                 child: Text(
                                   'Parent Requested Leave: "${log['leaveReason'] ?? "No reason"}"',
-                                  style: TextStyle(fontSize: 11.5, color: Colors.amber.shade900, fontWeight: FontWeight.bold),
+                                  style: TextStyle(fontSize: 11.5, color: context.adapt(SoftPalette.orange350), fontWeight: FontWeight.bold),
                                 ),
                               ),
                             ],
@@ -3972,13 +4000,13 @@ class _StudentLogCard extends StatelessWidget {
                           const SizedBox(height: 4),
                           Row(
                             children: [
-                              _actionButton('Allow Leave', Colors.green, isReadOnly ? () {} : () {
+                              _actionButton('Allow Leave', SoftPalette.green400, isReadOnly ? () {} : () {
                                 onUpdateLocal(sId, 'attendance', 'leave');
                                 onUpdateLocal(sId, 'leaveStatus', 'approved');
                                 onUpdateLocal(sId, 'isParentRequested', false);
                               }),
                               const SizedBox(width: 8),
-                              _actionButton('Decline', Colors.red, isReadOnly ? () {} : () {
+                              _actionButton('Decline', SoftPalette.red400, isReadOnly ? () {} : () {
                                 onUpdateLocal(sId, 'leaveStatus', 'declined');
                                 onUpdateLocal(sId, 'isParentRequested', false);
                               }),
@@ -3992,19 +4020,19 @@ class _StudentLogCard extends StatelessWidget {
                       margin: const EdgeInsets.only(top: 4),
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
-                        color: Colors.green.shade50,
+                        color: context.adapt(SoftPalette.green100m),
                         borderRadius: BorderRadius.circular(4),
-                        border: Border.all(color: Colors.green.shade200),
+                        border: Border.all(color: context.adapt(SoftPalette.green300)),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.check_circle_rounded, size: 14, color: Colors.green.shade800),
+                          Icon(Icons.check_circle_rounded, size: 14, color: context.adapt(SoftPalette.green550)),
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
                               'Leave Approved: "${log['leaveReason'] ?? "Granted"}"',
-                              style: TextStyle(fontSize: 11, color: Colors.green.shade900, fontWeight: FontWeight.bold),
+                              style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.green600), fontWeight: FontWeight.bold),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -4016,19 +4044,19 @@ class _StudentLogCard extends StatelessWidget {
                       margin: const EdgeInsets.only(top: 4),
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
-                        color: Colors.red.shade50,
+                        color: context.adapt(SoftPalette.pink100m),
                         borderRadius: BorderRadius.circular(4),
-                        border: Border.all(color: Colors.red.shade200),
+                        border: Border.all(color: context.adapt(SoftPalette.red300)),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.cancel_rounded, size: 14, color: Colors.red.shade800),
+                          Icon(Icons.cancel_rounded, size: 14, color: context.adapt(SoftPalette.red550)),
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
                               'Leave Request Declined',
-                              style: TextStyle(fontSize: 11, color: Colors.red.shade900, fontWeight: FontWeight.bold),
+                              style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.red550), fontWeight: FontWeight.bold),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -4040,9 +4068,9 @@ class _StudentLogCard extends StatelessWidget {
                       margin: const EdgeInsets.only(top: 4),
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                       decoration: BoxDecoration(
-                        color: Colors.purple.shade50,
+                        color: context.adapt(SoftPalette.purple150m),
                         borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: Colors.purple.shade200),
+                        border: Border.all(color: context.adapt(SoftPalette.purple350)),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -4050,14 +4078,14 @@ class _StudentLogCard extends StatelessWidget {
                         children: [
                           Row(
                             children: [
-                              Icon(Icons.reply_rounded, size: 14, color: Colors.purple.shade900),
+                              Icon(Icons.reply_rounded, size: 14, color: context.adapt(SoftPalette.violet700)),
                               const SizedBox(width: 4),
                               Expanded(
                                 child: Text(
                                   parentMsgText != null && parentMsgText.trim().isNotEmpty
                                       ? 'Parent Reply: "$parentMsgText"'
                                       : 'Parent requested reply verification',
-                                  style: TextStyle(fontSize: 11.5, color: Colors.purple.shade900, fontWeight: FontWeight.bold),
+                                  style: TextStyle(fontSize: 11.5, color: context.adapt(SoftPalette.violet700), fontWeight: FontWeight.bold),
                                 ),
                               ),
                             ],
@@ -4065,12 +4093,12 @@ class _StudentLogCard extends StatelessWidget {
                           const SizedBox(height: 4),
                           Row(
                             children: [
-                              _actionButton('Approve Reply', Colors.purple, isReadOnly ? () {} : () {
+                              _actionButton('Approve Reply', SoftPalette.purple550, isReadOnly ? () {} : () {
                                 onUpdateLocal(sId, 'parentReplied', true);
                                 onUpdateLocal(sId, 'parentRepliedRequested', false);
                               }),
                               const SizedBox(width: 8),
-                              _actionButton('Deny', Colors.red, isReadOnly ? () {} : () {
+                              _actionButton('Deny', SoftPalette.red400, isReadOnly ? () {} : () {
                                 onUpdateLocal(sId, 'parentRepliedRequested', false);
                               }),
                             ],
@@ -4083,21 +4111,21 @@ class _StudentLogCard extends StatelessWidget {
                       margin: const EdgeInsets.only(top: 4),
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
-                        color: Colors.green.shade50,
+                        color: context.adapt(SoftPalette.green100m),
                         borderRadius: BorderRadius.circular(4),
-                        border: Border.all(color: Colors.green.shade200),
+                        border: Border.all(color: context.adapt(SoftPalette.green300)),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.check_circle_outline_rounded, size: 14, color: Colors.green.shade800),
+                          Icon(Icons.check_circle_outline_rounded, size: 14, color: context.adapt(SoftPalette.green550)),
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
                               parentMsgText != null && parentMsgText.trim().isNotEmpty
                                   ? 'Parent Reply: "$parentMsgText"'
                                   : 'Parent Reply: Approved',
-                              style: TextStyle(fontSize: 11, color: Colors.green.shade900, fontWeight: FontWeight.bold),
+                              style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.green600), fontWeight: FontWeight.bold),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
@@ -4109,26 +4137,26 @@ class _StudentLogCard extends StatelessWidget {
                       margin: const EdgeInsets.only(top: 4),
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
-                        color: Colors.blue.shade50,
+                        color: context.adapt(SoftPalette.slate100),
                         borderRadius: BorderRadius.circular(4),
-                        border: Border.all(color: Colors.blue.shade100),
+                        border: Border.all(color: context.adapt(SoftPalette.slate200)),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.people_rounded, size: 14, color: Colors.blue.shade900),
+                          Icon(Icons.people_rounded, size: 14, color: context.adapt(SoftPalette.blue600)),
                           const SizedBox(width: 6),
                           Text(
                             'Parent claimed PTM attendance',
-                            style: TextStyle(fontSize: 11, color: Colors.blue.shade900, fontWeight: FontWeight.bold),
+                            style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.blue600), fontWeight: FontWeight.bold),
                           ),
                           const SizedBox(width: 8),
-                          _actionButton('Approve', Colors.green, isReadOnly ? () {} : () {
+                          _actionButton('Approve', SoftPalette.green400, isReadOnly ? () {} : () {
                             onUpdateLocal(sId, 'ptm', true);
                             onUpdateLocal(sId, 'ptmRequestStatus', 'approved');
                           }),
                           const SizedBox(width: 6),
-                          _actionButton('Decline', Colors.red, isReadOnly ? () {} : () {
+                          _actionButton('Decline', SoftPalette.red400, isReadOnly ? () {} : () {
                             onUpdateLocal(sId, 'ptm', false);
                             onUpdateLocal(sId, 'ptmRequestStatus', 'rejected');
                           }),
@@ -4142,13 +4170,13 @@ class _StudentLogCard extends StatelessWidget {
             if (isParentRequested && leaveStatus == 'pending')
               Row(
                 children: [
-                  _actionButton('Approve', Colors.green, isReadOnly ? () {} : () {
+                  _actionButton('Approve', SoftPalette.green400, isReadOnly ? () {} : () {
                     onUpdateLocal(sId, 'attendance', 'leave');
                     onUpdateLocal(sId, 'leaveStatus', 'approved');
                     onUpdateLocal(sId, 'uniform', 'leave');
                   }),
                   const SizedBox(width: 8),
-                  _actionButton('Deny', Colors.red, isReadOnly ? () {} : () {
+                  _actionButton('Deny', SoftPalette.red400, isReadOnly ? () {} : () {
                     onUpdateLocal(sId, 'attendance', 'absent');
                     onUpdateLocal(sId, 'leaveStatus', 'denied');
                   }),
@@ -4182,12 +4210,12 @@ class _StudentLogCard extends StatelessWidget {
               context.l.parentReplied,
               msg,
               isReadOnly ? null : (v) => onUpdateLocal(sId, 'parentReplied', v),
-              activeColor: const Color(0xFFFFA726),
-              trackColor: const Color(0xFFFFCC80),
+              activeColor: SoftPalette.amber300,
+              trackColor: SoftPalette.amber200,
             ),
             const SizedBox(width: 24),
             IconButton(
-              icon: const FaIcon(FontAwesomeIcons.whatsapp, color: Color(0xFF25D366), size: 20),
+              icon: FaIcon(FontAwesomeIcons.whatsapp, color: context.adapt(SoftPalette.green350), size: 20),
               onPressed: () => onSendWhatsApp(student, log),
               tooltip: 'Send WhatsApp report',
               padding: EdgeInsets.zero,
@@ -4199,14 +4227,14 @@ class _StudentLogCard extends StatelessWidget {
                 children: [
                   Text(
                     context.l.ptm,
-                    style: context.urduStyle(style: const TextStyle(fontSize: 10, color: Color(0xFF78909C), fontWeight: FontWeight.w600)),
+                    style: context.urduStyle(style: TextStyle(fontSize: 10, color: context.adapt(SoftPalette.slate400), fontWeight: FontWeight.w600)),
                   ),
                   const SizedBox(height: 2),
                   Row(
                     children: [
-                      _attButton('J', log['ptm'] == true, const Color(0xFF2E7D32), isReadOnly ? () {} : () => onUpdateLocal(sId, 'ptm', true)),
+                      _attButton('J', log['ptm'] == true, SoftPalette.green550, isReadOnly ? () {} : () => onUpdateLocal(sId, 'ptm', true)),
                       const SizedBox(width: 4),
-                      _attButton('M', log['ptm'] == false, const Color(0xFFD32F2F), isReadOnly ? () {} : () => onUpdateLocal(sId, 'ptm', false)),
+                      _attButton('M', log['ptm'] == false, SoftPalette.red500, isReadOnly ? () {} : () => onUpdateLocal(sId, 'ptm', false)),
                     ],
                   ),
                 ],
@@ -4221,9 +4249,9 @@ class _StudentLogCard extends StatelessWidget {
             margin: const EdgeInsets.only(top: 12),
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8F9FA),
+              color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
               borderRadius: BorderRadius.circular(12),
-              border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE9ECEF)),
+              border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.gray150),
             ),
             child: isMobile
                 ? Column(
@@ -4274,7 +4302,7 @@ class _StudentLogCard extends StatelessWidget {
             border: Border.all(color: borderColor),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.02),
+                color: SoftPalette.gray900.withValues(alpha: isDark ? 0.25 : 0.02),
                 blurRadius: 6,
                 offset: const Offset(0, 2),
               ),
@@ -4291,11 +4319,11 @@ class _StudentLogCard extends StatelessWidget {
                           Container(
                             margin: const EdgeInsets.only(bottom: 8),
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            decoration: BoxDecoration(color: Colors.amber.shade50, borderRadius: BorderRadius.circular(4)),
+                            decoration: BoxDecoration(color: context.adapt(SoftPalette.yellow50), borderRadius: BorderRadius.circular(4)),
                             width: double.infinity,
                             child: Text(
                               'Parent requested a leave: ${log['leaveReason'] ?? "No reason"}',
-                              style: TextStyle(fontSize: 11, color: Colors.amber.shade900, fontWeight: FontWeight.bold),
+                              style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.orange350), fontWeight: FontWeight.bold),
                             ),
                           ),
                         ],
@@ -4304,9 +4332,9 @@ class _StudentLogCard extends StatelessWidget {
                             margin: const EdgeInsets.only(bottom: 8),
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              color: Colors.purple.shade50,
+                              color: context.adapt(SoftPalette.purple150m),
                               borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.purple.shade200),
+                              border: Border.all(color: context.adapt(SoftPalette.purple350)),
                             ),
                             width: double.infinity,
                             child: Row(
@@ -4314,15 +4342,15 @@ class _StudentLogCard extends StatelessWidget {
                                 Expanded(
                                   child: Text(
                                     'Parent requested reply verification',
-                                    style: TextStyle(fontSize: 11, color: Colors.purple.shade900, fontWeight: FontWeight.bold),
+                                    style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.violet700), fontWeight: FontWeight.bold),
                                   ),
                                 ),
-                                _actionButton('Approve Reply', Colors.purple, isReadOnly ? () {} : () {
+                                _actionButton('Approve Reply', SoftPalette.purple550, isReadOnly ? () {} : () {
                                   onUpdateLocal(sId, 'parentReplied', true);
                                   onUpdateLocal(sId, 'parentRepliedRequested', false);
                                 }),
                                 const SizedBox(width: 8),
-                                _actionButton('Deny', Colors.red, isReadOnly ? () {} : () {
+                                _actionButton('Deny', SoftPalette.red400, isReadOnly ? () {} : () {
                                   onUpdateLocal(sId, 'parentRepliedRequested', false);
                                 }),
                               ],
@@ -4334,9 +4362,9 @@ class _StudentLogCard extends StatelessWidget {
                             margin: const EdgeInsets.only(bottom: 8),
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              color: Colors.blue.shade50,
+                              color: context.adapt(SoftPalette.slate100),
                               borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.blue.shade200),
+                              border: Border.all(color: context.adapt(SoftPalette.sky300)),
                             ),
                             width: double.infinity,
                             child: Row(
@@ -4344,15 +4372,15 @@ class _StudentLogCard extends StatelessWidget {
                                 Expanded(
                                   child: Text(
                                     context.isUrdu ? 'والدین نے پی ٹی ایم میں شرکت کا دعویٰ کیا ہے' : 'Parent claimed PTM attendance',
-                                    style: TextStyle(fontSize: 11, color: Colors.blue.shade900, fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
+                                    style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.blue600), fontWeight: FontWeight.bold, fontFamily: context.isUrdu ? 'Noori' : null),
                                   ),
                                 ),
-                                _actionButton('Approve', Colors.green, isReadOnly ? () {} : () {
+                                _actionButton('Approve', SoftPalette.green400, isReadOnly ? () {} : () {
                                   onUpdateLocal(sId, 'ptm', true);
                                   onUpdateLocal(sId, 'ptmRequestStatus', 'approved');
                                 }),
                                 const SizedBox(width: 8),
-                                _actionButton('Decline', Colors.red, isReadOnly ? () {} : () {
+                                _actionButton('Decline', SoftPalette.red400, isReadOnly ? () {} : () {
                                   onUpdateLocal(sId, 'ptm', false);
                                   onUpdateLocal(sId, 'ptmRequestStatus', 'rejected');
                                 }),

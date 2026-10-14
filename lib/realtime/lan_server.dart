@@ -237,7 +237,8 @@ class LanServer {
         final payload = utf8.encode('${AppNetwork.udpMessagePrefix}$ipShown:$port');
         final broadcastAddr = InternetAddress('255.255.255.255');
         
-        _udpTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+        // 5 s is plenty for discovery (was 2 s, plus a duplicate beacon from the server page).
+        _udpTimer = Timer.periodic(const Duration(seconds: 5), (_) async {
           try {
             _udpSocket?.send(payload, broadcastAddr, AppNetwork.udpBroadcastPort);
             final localSubnets = await getAllLanSubnets();

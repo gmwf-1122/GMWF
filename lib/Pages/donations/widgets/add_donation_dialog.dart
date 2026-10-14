@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'dart:async';
@@ -163,7 +164,7 @@ class _AddDonationDialogState extends State<AddDonationDialog> {
     final t = RoleThemeScope.dataOf(context);
     
     return Dialog(
-      backgroundColor: Colors.white,
+      backgroundColor: SoftPalette.gray50,
       insetPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 40),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
       child: SizedBox(
@@ -206,14 +207,14 @@ class _AddDonationDialogState extends State<AddDonationDialog> {
                           padding: const EdgeInsets.all(12),
                           margin: const EdgeInsets.only(bottom: 20),
                           decoration: BoxDecoration(
-                            color: Colors.red.shade50,
+                            color: SoftPalette.pink100m,
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.red.shade100),
+                            border: Border.all(color: SoftPalette.red200),
                           ),
                           child: Row(children: [
-                            const Icon(Icons.error_outline, color: Colors.red, size: 16),
+                            const Icon(Icons.error_outline, color: SoftPalette.red400, size: 16),
                             const SizedBox(width: 10),
-                            Expanded(child: Text(_error!, style: const TextStyle(color: Colors.red, fontSize: 13))),
+                            Expanded(child: Text(_error!, style: const TextStyle(color: SoftPalette.red400, fontSize: 13))),
                           ]),
                         ),
 
@@ -264,10 +265,10 @@ class _AddDonationDialogState extends State<AddDonationDialog> {
                           Padding(
                             padding: const EdgeInsets.only(top: 8, left: 4),
                             child: Row(children: [
-                              const Icon(Icons.verified_rounded, color: Colors.green, size: 14),
+                              const Icon(Icons.verified_rounded, color: SoftPalette.green400, size: 14),
                               const SizedBox(width: 6),
                               Text('Found existing donor: ${_selectedDonor!.id}', 
-                                style: const TextStyle(color: Colors.green, fontSize: 11, fontWeight: FontWeight.w700)),
+                                style: const TextStyle(color: SoftPalette.green400, fontSize: 11, fontWeight: FontWeight.w700)),
                             ]),
                           ),
                       ],
@@ -467,7 +468,7 @@ class _AddDonationDialogState extends State<AddDonationDialog> {
                         elevation: 0,
                       ),
                       child: _saving
-                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2.5))
+                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(color: SoftPalette.gray50, strokeWidth: 2.5))
                         : const Text('Save Record', style: TextStyle(fontWeight: FontWeight.w800)),
                     ),
                   ),
@@ -535,7 +536,7 @@ class _AddDonationDialogState extends State<AddDonationDialog> {
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: sel ? cat.color.withValues(alpha: 0.1) : Colors.white,
+            color: sel ? cat.color.withValues(alpha: 0.1) : SoftPalette.gray50,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: sel ? cat.color : AppColors.gray200, width: 1.5),
           ),
@@ -560,7 +561,7 @@ class _AddDonationDialogState extends State<AddDonationDialog> {
           duration: const Duration(milliseconds: 200),
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
-            color: sel ? AppColors.primary.withValues(alpha: 0.08) : Colors.white,
+            color: sel ? AppColors.primary.withValues(alpha: 0.08) : SoftPalette.gray50,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(color: sel ? AppColors.primary : AppColors.gray200, width: 1.5),
           ),
@@ -593,7 +594,7 @@ class _AddDonationDialogState extends State<AddDonationDialog> {
           selectedColor: s.color.withValues(alpha: 0.2),
           checkmarkColor: s.color,
           labelStyle: TextStyle(fontSize: 12, fontWeight: sel ? FontWeight.w800 : FontWeight.w500, color: sel ? s.color : AppColors.gray600),
-          backgroundColor: Colors.white,
+          backgroundColor: SoftPalette.gray50,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: BorderSide(color: sel ? s.color : AppColors.gray200)),
         );
       }).toList(),
@@ -616,7 +617,7 @@ class _AddDonationDialogState extends State<AddDonationDialog> {
           selectedColor: s.color.withValues(alpha: 0.2),
           checkmarkColor: s.color,
           labelStyle: TextStyle(fontSize: 12, fontWeight: sel ? FontWeight.w800 : FontWeight.w500, color: sel ? s.color : AppColors.gray600),
-          backgroundColor: Colors.white,
+          backgroundColor: SoftPalette.gray50,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: BorderSide(color: sel ? s.color : AppColors.gray200)),
         );
       }).toList(),
@@ -636,7 +637,7 @@ class _AddDonationDialogState extends State<AddDonationDialog> {
               selected: sel,
               onSelected: (v) { if (v) setState(() => _paymentMethod = m); },
               selectedColor: AppColors.primary,
-              labelStyle: TextStyle(color: sel ? Colors.white : AppColors.gray700, fontSize: 12, fontWeight: FontWeight.w700),
+              labelStyle: TextStyle(color: sel ? SoftPalette.gray50 : AppColors.gray700, fontSize: 12, fontWeight: FontWeight.w700),
               backgroundColor: AppColors.gray100,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10), side: BorderSide.none),
               showCheckmark: false,

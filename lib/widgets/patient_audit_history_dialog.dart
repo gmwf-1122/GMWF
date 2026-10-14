@@ -1,6 +1,7 @@
 // lib/widgets/patient_audit_history_dialog.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:intl/intl.dart';
 import '../services/local_storage_service.dart';
 
@@ -45,11 +46,11 @@ class PatientAuditHistoryDialog extends StatelessWidget {
       serial: serial,
     );
 
-    final bgCard = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final bgHeader = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC);
-    final borderCol = isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
-    final textPrimary = isDark ? Colors.white : const Color(0xFF0F172A);
-    final textSecondary = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+    final bgCard = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final bgHeader = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+    final borderCol = isDark ? SoftPalette.slate700 : SoftPalette.slate150;
+    final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.slate900;
+    final textSecondary = isDark ? SoftPalette.slate350 : SoftPalette.slate550;
 
     final displayName = patientName ??
         (logs.isNotEmpty ? logs.first['patientName']?.toString() : null) ??
@@ -80,10 +81,10 @@ class PatientAuditHistoryDialog extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0D9488).withValues(alpha: 0.12),
+                      color: SoftPalette.teal500.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Icon(Icons.history_rounded, color: Color(0xFF0D9488), size: 22),
+                    child: const Icon(Icons.history_rounded, color: SoftPalette.teal500, size: 22),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -108,13 +109,13 @@ class PatientAuditHistoryDialog extends StatelessWidget {
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF6366F1).withValues(alpha: 0.15),
+                                  color: SoftPalette.indigo500.withValues(alpha: 0.15),
                                   borderRadius: BorderRadius.circular(6),
                                 ),
                                 child: Text(
                                   displaySerial,
                                   style: const TextStyle(
-                                    color: Color(0xFF6366F1),
+                                    color: SoftPalette.indigo500,
                                     fontSize: 11,
                                     fontWeight: FontWeight.bold,
                                   ),
@@ -193,7 +194,7 @@ class PatientAuditHistoryDialog extends StatelessWidget {
                   TextButton(
                     onPressed: () => Navigator.of(context).pop(),
                     style: TextButton.styleFrom(
-                      foregroundColor: const Color(0xFF0D9488),
+                      foregroundColor: SoftPalette.teal500,
                       textStyle: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                     child: const Text('Close'),
@@ -229,32 +230,32 @@ class PatientAuditHistoryDialog extends StatelessWidget {
     }
     final timeFormatted = dt != null ? DateFormat('dd MMM yyyy, hh:mm a').format(dt) : 'Recent';
 
-    Color actColor = const Color(0xFF3B82F6);
+    Color actColor = SoftPalette.blue500;
     IconData actIcon = Icons.edit_rounded;
     String actLabel = 'EDITED';
 
     if (act == 'CREATE') {
-      actColor = const Color(0xFF10B981);
+      actColor = SoftPalette.emerald350;
       actIcon = Icons.person_add_alt_1_rounded;
       actLabel = 'REGISTERED';
     } else if (act == 'DELETE' || act == 'DELETE_TOKEN') {
-      actColor = const Color(0xFFEF4444);
+      actColor = SoftPalette.red400;
       actIcon = Icons.delete_forever_rounded;
       actLabel = 'DELETED';
     } else if (act == 'REQUEST_EDIT') {
-      actColor = const Color(0xFFF59E0B);
+      actColor = SoftPalette.amber300;
       actIcon = Icons.pending_actions_rounded;
       actLabel = 'EDIT REQUESTED';
     } else if (act == 'APPROVE_EDIT') {
-      actColor = const Color(0xFF10B981);
+      actColor = SoftPalette.emerald350;
       actIcon = Icons.check_circle_outline_rounded;
       actLabel = 'EDIT APPROVED';
     } else if (act == 'REJECT_EDIT') {
-      actColor = const Color(0xFFEF4444);
+      actColor = SoftPalette.red400;
       actIcon = Icons.cancel_outlined;
       actLabel = 'EDIT REJECTED';
     } else if (act == 'TOKEN_EXCEPTION_APPROVED') {
-      actColor = const Color(0xFF8B5CF6);
+      actColor = SoftPalette.violet500;
       actIcon = Icons.verified_user_rounded;
       actLabel = 'RESTRICTION OVERRIDDEN';
     }
@@ -282,7 +283,7 @@ class PatientAuditHistoryDialog extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A) : Colors.white,
+        color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: borderCol),
       ),
@@ -336,12 +337,12 @@ class PatientAuditHistoryDialog extends StatelessWidget {
               if (approvedBy != null && approvedBy.isNotEmpty)
                 Text(
                   '✅ Approved by: $approvedBy',
-                  style: const TextStyle(color: Color(0xFF10B981), fontSize: 12, fontWeight: FontWeight.bold),
+                  style: const TextStyle(color: SoftPalette.emerald350, fontSize: 12, fontWeight: FontWeight.bold),
                 ),
               if (rejectedBy != null && rejectedBy.isNotEmpty)
                 Text(
                   '❌ Rejected by: $rejectedBy',
-                  style: const TextStyle(color: Color(0xFFEF4444), fontSize: 12, fontWeight: FontWeight.bold),
+                  style: const TextStyle(color: SoftPalette.red400, fontSize: 12, fontWeight: FontWeight.bold),
                 ),
               if (requestedBy != null && requestedBy.isNotEmpty)
                 Text(
@@ -365,7 +366,7 @@ class PatientAuditHistoryDialog extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(10),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                color: isDark ? SoftPalette.slate800 : SoftPalette.slate100,
                 borderRadius: BorderRadius.circular(8),
               ),
               child: Column(
@@ -390,12 +391,12 @@ class PatientAuditHistoryDialog extends StatelessWidget {
                               children: [
                                 TextSpan(
                                   text: oldVal,
-                                  style: const TextStyle(color: Color(0xFFEF4444), decoration: TextDecoration.lineThrough),
+                                  style: const TextStyle(color: SoftPalette.red400, decoration: TextDecoration.lineThrough),
                                 ),
-                                const TextSpan(text: '  ➔  ', style: TextStyle(color: Colors.grey)),
+                                TextSpan(text: '  ➔  ', style: TextStyle(color: SoftPalette.adaptive(SoftPalette.gray350, isDark))),
                                 TextSpan(
                                   text: newVal,
-                                  style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold),
+                                  style: const TextStyle(color: SoftPalette.emerald350, fontWeight: FontWeight.bold),
                                 ),
                               ],
                             ),

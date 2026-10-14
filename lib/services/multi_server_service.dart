@@ -122,10 +122,16 @@ class MultiServerService {
         final branchKey = 'branch:$branchId';
         final existing = branchesBox.get(branchKey);
         final map = existing is Map ? Map<String, dynamic>.from(existing) : <String, dynamic>{'id': branchId};
-        map['activeServerIp'] = ip;
-        map['activeServerPort'] = AppNetwork.websocketPort;
-        map['serverBranchId'] = branchId;
-        await branchesBox.put(branchKey, map);
+        // Write only when the address changed: this put ran every heartbeat and woke every
+        // screen listening to the branches box.
+        if (map['activeServerIp'] != ip ||
+            map['activeServerPort'] != AppNetwork.websocketPort ||
+            map['serverBranchId'] != branchId) {
+          map['activeServerIp'] = ip;
+          map['activeServerPort'] = AppNetwork.websocketPort;
+          map['serverBranchId'] = branchId;
+          await branchesBox.put(branchKey, map);
+        }
       }
 
       debugPrint('[MultiServerService] Local node heartbeat recorded for $serverId ($ip:$serverRole)');
@@ -142,7 +148,8 @@ class MultiServerService {
     required int Function() queueSupplier,
   }) {
     _heartbeatTimer?.cancel();
-    _heartbeatTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+    // 60 s: a local record only (no Firestore); every 15 s it reopened and rewrote Hive boxes.
+    _heartbeatTimer = Timer.periodic(const Duration(seconds: 60), (_) {
       registerAndHeartbeat(
         branchId: branchId,
         serverRole: roleSupplier(),

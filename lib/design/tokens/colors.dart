@@ -1,56 +1,57 @@
-// lib/design/tokens/colors.dart
+﻿// lib/design/tokens/colors.dart
 //
-// ── GColor — Global Semantic Colors ──────────────────────────────────────────
+// â”€â”€ GColor â€” Global Semantic Colors â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // Role-theme accent colors live in RoleThemeData (app_theme.dart).
 // GColor covers semantic status colors that are global and theme-independent.
 //
 // Replaces:
-//   Colors.green.shade700   → GColor.success / GColor.successOf(isDark)
-//   Colors.red.shade700     → GColor.danger  / GColor.dangerOf(isDark)
-//   Colors.orange.shade800  → GColor.warning / GColor.warningOf(isDark)
-//   Colors.blueAccent       → GColor.info    / GColor.infoOf(isDark)
-//   Colors.purpleAccent     → use t.accent from role theme instead
-//   Colors.amber.shade400   → GColor.warningOf(isDark)
-//   Colors.grey.shade600    → t.textTertiary from role theme instead
-//   Color(0xFF10B981)       → GColor.success (teal-emerald green)
-// ─────────────────────────────────────────────────────────────────────────────
+//   SoftPalette.green500   â†’ GColor.success / GColor.successOf(isDark)
+//   SoftPalette.red500     â†’ GColor.danger  / GColor.dangerOf(isDark)
+//   SoftPalette.orange400  â†’ GColor.warning / GColor.warningOf(isDark)
+//   SoftPalette.blue400       â†’ GColor.info    / GColor.infoOf(isDark)
+//   SoftPalette.purple400     â†’ use t.accent from role theme instead
+//   SoftPalette.yellow200   â†’ GColor.warningOf(isDark)
+//   SoftPalette.gray500    â†’ t.textTertiary from role theme instead
+//   SoftPalette.emerald350       â†’ GColor.success (teal-emerald green)
+// â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 
 class GColor {
   GColor._(); // prevent instantiation
 
-  // ── Success — green ───────────────────────────────────────────────────────
-  static const Color success    = Color(0xFF16A34A);
-  static const Color successDark = Color(0xFF22C55E);
-  static const Color successBg   = Color(0xFFDCFCE7);
-  static const Color successBgDark = Color(0xFF14532D);
+  // â”€â”€ Success â€” green â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  static const Color success    = SoftPalette.vividGreen;
+  static const Color successDark = SoftPalette.green350;
+  static const Color successBg   = SoftPalette.vividGreenBg;
+  static const Color successBgDark = SoftPalette.green700;
 
-  // ── Info — blue ───────────────────────────────────────────────────────────
-  static const Color info       = Color(0xFF2563EB);
-  static const Color infoDark   = Color(0xFF3B82F6);
-  static const Color infoBg     = Color(0xFFEFF6FF);
-  static const Color infoBgDark = Color(0xFF1E3A5F);
+  // â”€â”€ Info â€” blue â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  static const Color info       = SoftPalette.vividBlue;
+  static const Color infoDark   = SoftPalette.blue500;
+  static const Color infoBg     = SoftPalette.vividBlueBg;
+  static const Color infoBgDark = SoftPalette.blue750;
 
-  // ── Warning — amber ───────────────────────────────────────────────────────
-  static const Color warning      = Color(0xFFD97706);
-  static const Color warningDark  = Color(0xFFFBBF24);
-  static const Color warningBg    = Color(0xFFFFF7ED);
-  static const Color warningBgDark = Color(0xFF4A2800);
+  // â”€â”€ Warning â€” amber â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  static const Color warning      = SoftPalette.vividAmber;
+  static const Color warningDark  = SoftPalette.amber200;
+  static const Color warningBg    = SoftPalette.vividAmberBg;
+  static const Color warningBgDark = SoftPalette.amber750;
 
-  // ── Danger — red ──────────────────────────────────────────────────────────
-  static const Color danger     = Color(0xFFDC2626);
-  static const Color dangerDark = Color(0xFFEF4444);
-  static const Color dangerBg   = Color(0xFFFEF2F2);
-  static const Color dangerBgDark = Color(0xFF4C0519);
+  // â”€â”€ Danger â€” red â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  static const Color danger     = SoftPalette.vividRed;
+  static const Color dangerDark = SoftPalette.red400;
+  static const Color dangerBg   = SoftPalette.vividRedBg;
+  static const Color dangerBgDark = SoftPalette.red800;
 
-  // ── Neutral — grey ────────────────────────────────────────────────────────
-  static const Color neutral     = Color(0xFF6B7280);
-  static const Color neutralDark = Color(0xFF9CA3AF);
-  static const Color neutralBg   = Color(0xFFF9FAFB);
-  static const Color neutralBgDark = Color(0xFF374151);
+  // â”€â”€ Neutral â€” grey â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+  static const Color neutral     = SoftPalette.slate550;
+  static const Color neutralDark = SoftPalette.slate350;
+  static const Color neutralBg   = SoftPalette.gray50;
+  static const Color neutralBgDark = SoftPalette.slate700;
 
-  // ── Theme-aware helpers ───────────────────────────────────────────────────
+  // â”€â”€ Theme-aware helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   /// Returns the correct success color based on the current canvas darkness.
   static Color successOf(bool isDark) => isDark ? successDark : success;
   static Color successBgOf(bool isDark) => isDark ? successBgDark : successBg;
@@ -67,7 +68,7 @@ class GColor {
   static Color neutralOf(bool isDark) => isDark ? neutralDark : neutral;
   static Color neutralBgOf(bool isDark) => isDark ? neutralBgDark : neutralBg;
 
-  // ── Icon size constants (standardised) ───────────────────────────────────
+  // â”€â”€ Icon size constants (standardised) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // These aren't colors but live here as a convenience reference.
   // Actual usage: Icon(icon, size: GColor.iconSm)
   static const double iconXs  = 12; // badge / chip icon

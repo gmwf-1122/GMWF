@@ -1,7 +1,10 @@
 import 'dart:async';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
@@ -91,17 +94,17 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: const Color(0xFFFEE2E2),
+                color: ctx.adapt(SoftPalette.red150m),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.delete_forever_rounded, color: Color(0xFFDC2626), size: 24),
+              child: const Icon(Icons.delete_forever_rounded, color: SoftPalette.red500, size: 24),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -110,7 +113,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                 style: GoogleFonts.outfit(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                 ),
               ),
             ),
@@ -125,7 +128,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
               style: GoogleFonts.inter(
                 fontSize: 13.5,
                 fontWeight: FontWeight.w600,
-                color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF1E293B),
+                color: isDark ? SoftPalette.slate150 : SoftPalette.slate800,
               ),
             ),
             const SizedBox(height: 12),
@@ -133,16 +136,16 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
               width: double.infinity,
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.fingerprint_rounded, size: 16, color: Color(0xFF10B981)),
+                      const Icon(Icons.fingerprint_rounded, size: 16, color: SoftPalette.emerald350),
                       const SizedBox(width: 6),
                       Expanded(
                         child: Text(
@@ -150,7 +153,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                           style: GoogleFonts.outfit(
                             fontWeight: FontWeight.bold,
                             fontSize: 14,
-                            color: isDark ? Colors.white : const Color(0xFF0F172A),
+                            color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                           ),
                         ),
                       ),
@@ -159,12 +162,12 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                   const SizedBox(height: 6),
                   Text(
                     'Location: ${dev.buildingLocation} (${dev.branchId.toUpperCase()})',
-                    style: GoogleFonts.inter(fontSize: 12, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                    style: GoogleFonts.inter(fontSize: 12, color: isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                   ),
                   const SizedBox(height: 2),
                   Text(
                     'Network: ${dev.ipAddress}:${dev.port} • SN: ${dev.serialNumber.isEmpty ? "N/A" : dev.serialNumber}',
-                    style: GoogleFonts.inter(fontSize: 12, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                    style: GoogleFonts.inter(fontSize: 12, color: isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                   ),
                 ],
               ),
@@ -174,7 +177,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
               '⚠️ Clearance: HQ Manager & Admins. This permanently removes the device from local hardware storage and Cloud Firestore.',
               style: GoogleFonts.inter(
                 fontSize: 11.5,
-                color: isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C),
+                color: isDark ? SoftPalette.red300 : SoftPalette.red550,
                 fontWeight: FontWeight.w500,
               ),
             ),
@@ -183,15 +186,15 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Cancel', style: TextStyle(color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B))),
+            child: Text('Cancel', style: TextStyle(color: isDark ? SoftPalette.slate350 : SoftPalette.slate550)),
           ),
           ElevatedButton.icon(
             onPressed: () => Navigator.pop(ctx, true),
             icon: const Icon(Icons.delete_forever_rounded, size: 16),
             label: const Text('Delete Device'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.red500,
+              foregroundColor: SoftPalette.gray50,
               elevation: 0,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
@@ -210,27 +213,27 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
         );
         if (mounted) {
           setState(() {});
-          ScaffoldMessenger.of(context).showSnackBar(
+          AppToast.showSnackBar(context, 
             SnackBar(
               content: Row(
                 children: [
-                  const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+                  const Icon(Icons.check_circle_rounded, color: SoftPalette.gray50, size: 18),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text("🗑️ Biometric device '${dev.deviceName}' deleted permanently."),
                   ),
                 ],
               ),
-              backgroundColor: const Color(0xFF10B981),
+              backgroundColor: SoftPalette.emerald350,
             ),
           );
         }
       } catch (e) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          AppToast.showSnackBar(context, 
             SnackBar(
               content: Text('Failed to delete biometric device: $e'),
-              backgroundColor: const Color(0xFFDC2626),
+              backgroundColor: SoftPalette.red500,
             ),
           );
         }
@@ -243,17 +246,17 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: const Color(0xFFFEE2E2),
+                color: ctx.adapt(SoftPalette.red150m),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.link_off_rounded, color: Color(0xFFDC2626), size: 24),
+              child: const Icon(Icons.link_off_rounded, color: SoftPalette.red500, size: 24),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -262,7 +265,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                 style: GoogleFonts.outfit(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                 ),
               ),
             ),
@@ -277,28 +280,28 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
               style: GoogleFonts.inter(
                 fontSize: 13.5,
                 fontWeight: FontWeight.w600,
-                color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF1E293B),
+                color: isDark ? SoftPalette.slate150 : SoftPalette.slate800,
               ),
             ),
             const SizedBox(height: 10),
             Text(
               'This will free PIN ${c.biometricPin} so it can be manually reassigned, and set ${c.entityName} to Not Enrolled.',
-              style: GoogleFonts.inter(fontSize: 12, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+              style: GoogleFonts.inter(fontSize: 12, color: isDark ? SoftPalette.slate350 : SoftPalette.slate550),
             ),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Cancel', style: TextStyle(color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B))),
+            child: Text('Cancel', style: TextStyle(color: isDark ? SoftPalette.slate350 : SoftPalette.slate550)),
           ),
           ElevatedButton.icon(
             onPressed: () => Navigator.pop(ctx, true),
             icon: const Icon(Icons.delete_outline_rounded, size: 16),
             label: const Text('Unlink PIN'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.red500,
+              foregroundColor: SoftPalette.gray50,
               elevation: 0,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
@@ -310,10 +313,10 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
     if (confirmed == true) {
       await ZkTecoNetworkService.deleteBiometricCredential(c.entityId, branchId: c.branchId);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text("Unlinked PIN ${c.biometricPin} from ${c.entityName}"),
-            backgroundColor: const Color(0xFF10B981),
+            backgroundColor: SoftPalette.emerald350,
           ),
         );
         setState(() {});
@@ -326,17 +329,17 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: const Color(0xFFEFF6FF),
+                color: ctx.adapt(SoftPalette.slate100),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.school_rounded, color: Color(0xFF2563EB), size: 24),
+              child: Icon(Icons.school_rounded, color: ctx.adapt(SoftPalette.blue550), size: 24),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -345,7 +348,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                 style: GoogleFonts.outfit(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                 ),
               ),
             ),
@@ -360,20 +363,20 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
               style: GoogleFonts.inter(
                 fontSize: 13.5,
                 fontWeight: FontWeight.w600,
-                color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF1E293B),
+                color: isDark ? SoftPalette.slate150 : SoftPalette.slate800,
               ),
             ),
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF0B2A21) : const Color(0xFFECFDF5),
+                color: isDark ? SoftPalette.emerald800 : SoftPalette.emerald50,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFA7F3D0)),
+                border: Border.all(color: ctx.adapt(SoftPalette.emerald150)),
               ),
               child: Text(
                 '✅ All Madrassa student biometric credentials will be fully preserved. Only staff profiles will be unlinked so you can manually assign staff PINs.',
-                style: GoogleFonts.inter(fontSize: 12, color: const Color(0xFF065F46)),
+                style: GoogleFonts.inter(fontSize: 12, color: ctx.adapt(SoftPalette.emerald600)),
               ),
             ),
           ],
@@ -381,15 +384,15 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Cancel', style: TextStyle(color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B))),
+            child: Text('Cancel', style: TextStyle(color: isDark ? SoftPalette.slate350 : SoftPalette.slate550)),
           ),
           ElevatedButton.icon(
             onPressed: () => Navigator.pop(ctx, true),
             icon: const Icon(Icons.cleaning_services_rounded, size: 16),
             label: const Text('Clear Staff PINs Only'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF2563EB),
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.blue550,
+              foregroundColor: SoftPalette.gray50,
               elevation: 0,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
@@ -406,18 +409,18 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
         _entityCategory = 'madrassa_student';
       });
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Row(
               children: [
-                const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+                const Icon(Icons.check_circle_rounded, color: SoftPalette.gray50, size: 18),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text('🎓 Cleared $count staff PINs! Displaying Madrassa students only.'),
                 ),
               ],
             ),
-            backgroundColor: const Color(0xFF10B981),
+            backgroundColor: SoftPalette.emerald350,
           ),
         );
       }
@@ -429,17 +432,17 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: const Color(0xFFFEE2E2),
+                color: ctx.adapt(SoftPalette.red150m),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.delete_sweep_rounded, color: Color(0xFFDC2626), size: 24),
+              child: const Icon(Icons.delete_sweep_rounded, color: SoftPalette.red500, size: 24),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -448,7 +451,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                 style: GoogleFonts.outfit(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
-                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                 ),
               ),
             ),
@@ -463,28 +466,28 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
               style: GoogleFonts.inter(
                 fontSize: 13.5,
                 fontWeight: FontWeight.w600,
-                color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF1E293B),
+                color: isDark ? SoftPalette.slate150 : SoftPalette.slate800,
               ),
             ),
             const SizedBox(height: 12),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF2A1212) : const Color(0xFFFFF1F2),
+                color: isDark ? SoftPalette.red900 : SoftPalette.red100m,
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFFECDD3)),
+                border: Border.all(color: ctx.adapt(SoftPalette.red200)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
                     '⚠️ All bulk and auto-assigned PINs will be cleared from employee profiles.',
-                    style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold, color: const Color(0xFFBE123C)),
+                    style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold, color: ctx.adapt(SoftPalette.red550)),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     'You will be able to manually link and assign each employee their custom PIN one-by-one.',
-                    style: GoogleFonts.inter(fontSize: 11.5, color: isDark ? const Color(0xFFFDA4AF) : const Color(0xFF9F1239)),
+                    style: GoogleFonts.inter(fontSize: 11.5, color: isDark ? SoftPalette.red300 : SoftPalette.red600),
                   ),
                 ],
               ),
@@ -494,15 +497,15 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx, false),
-            child: Text('Cancel', style: TextStyle(color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B))),
+            child: Text('Cancel', style: TextStyle(color: isDark ? SoftPalette.slate350 : SoftPalette.slate550)),
           ),
           ElevatedButton.icon(
             onPressed: () => Navigator.pop(ctx, true),
             icon: const Icon(Icons.delete_sweep_rounded, size: 16),
             label: const Text('Clear All PINs'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFFDC2626),
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.red500,
+              foregroundColor: SoftPalette.gray50,
               elevation: 0,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
@@ -516,18 +519,18 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
       final count = await ZkTecoNetworkService.clearAllBiometricCredentials(branchId: widget.branchId);
       setState(() => _isClearingPins = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Row(
               children: [
-                const Icon(Icons.check_circle_rounded, color: Colors.white, size: 18),
+                const Icon(Icons.check_circle_rounded, color: SoftPalette.gray50, size: 18),
                 const SizedBox(width: 8),
                 Expanded(
                   child: Text('🧹 Removed $count biometric PINs! You can now manually assign custom PINs to each employee.'),
                 ),
               ],
             ),
-            backgroundColor: const Color(0xFF10B981),
+            backgroundColor: SoftPalette.emerald350,
           ),
         );
       }
@@ -540,10 +543,10 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
         entityName.toLowerCase().contains('unknown') ||
         entityName.toLowerCase().contains('test') ||
         entityType == 'unmapped') {
-      return const CircleAvatar(
+      return CircleAvatar(
         radius: 20,
-        backgroundColor: Color(0xFFF1F5F9),
-        child: Icon(Icons.fingerprint_rounded, size: 20, color: Color(0xFF64748B)),
+        backgroundColor: context.adapt(SoftPalette.slate100),
+        child: Icon(Icons.fingerprint_rounded, size: 20, color: context.adapt(SoftPalette.slate550)),
       );
     }
 
@@ -599,37 +602,37 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
     if (bytes != null && bytes.isNotEmpty) {
       return CircleAvatar(
         radius: 20,
-        backgroundColor: isFemale ? const Color(0xFFFCE7F3) : (isMale ? const Color(0xFFE0F2FE) : const Color(0xFF6366F1).withValues(alpha: 0.1)),
+        backgroundColor: isFemale ? context.adapt(SoftPalette.pink100) : (isMale ? context.adapt(SoftPalette.slate100) : SoftPalette.indigo500.withValues(alpha: 0.1)),
         backgroundImage: MemoryImage(bytes),
       );
     } else if (photoUrl.startsWith('http')) {
       return CircleAvatar(
         radius: 20,
-        backgroundColor: isFemale ? const Color(0xFFFCE7F3) : (isMale ? const Color(0xFFE0F2FE) : const Color(0xFF6366F1).withValues(alpha: 0.1)),
+        backgroundColor: isFemale ? context.adapt(SoftPalette.pink100) : (isMale ? context.adapt(SoftPalette.slate100) : SoftPalette.indigo500.withValues(alpha: 0.1)),
         backgroundImage: NetworkImage(photoUrl),
       );
     }
 
     if (isFemale) {
-      return const CircleAvatar(
+      return CircleAvatar(
         radius: 20,
-        backgroundColor: Color(0xFFFCE7F3),
-        child: Icon(Icons.face_3_rounded, size: 22, color: Color(0xFFDB2777)),
+        backgroundColor: context.adapt(SoftPalette.pink100),
+        child: Icon(Icons.face_3_rounded, size: 22, color: SoftPalette.pink500),
       );
     } else if (isMale) {
-      return const CircleAvatar(
+      return CircleAvatar(
         radius: 20,
-        backgroundColor: Color(0xFFE0F2FE),
-        child: Icon(Icons.face_6_rounded, size: 22, color: Color(0xFF0284C7)),
+        backgroundColor: context.adapt(SoftPalette.slate100),
+        child: Icon(Icons.face_6_rounded, size: 22, color: SoftPalette.sky500),
       );
     }
 
     return CircleAvatar(
       radius: 20,
-      backgroundColor: const Color(0xFF6366F1).withValues(alpha: 0.15),
+      backgroundColor: SoftPalette.indigo500.withValues(alpha: 0.15),
       child: Text(
         entityName.isNotEmpty ? entityName[0].toUpperCase() : '?',
-        style: const TextStyle(fontWeight: FontWeight.bold, color: Color(0xFF4338CA), fontSize: 13),
+        style: TextStyle(fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.indigo600), fontSize: 13),
       ),
     );
   }
@@ -720,7 +723,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
       valueListenable: UserThemeService.listenable(),
       builder: (context, _, __) {
         final isDark = UserThemeService.isDarkMode();
-        final bgCanvas = isDark ? const Color(0xFF0B0F19) : const Color(0xFFF1F5F9);
+        final bgCanvas = isDark ? SoftPalette.slate900 : SoftPalette.slate100;
 
         return PopScope(
           canPop: !widget.isEmbedded && widget.onBack == null && Navigator.canPop(context),
@@ -737,15 +740,15 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
               automaticallyImplyLeading: false,
               title: Text(
                 'Biometric Attendance Settings & Devices',
-                style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 19),
+                style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: SoftPalette.gray50, fontSize: 19),
               ),
-              backgroundColor: const Color(0xFF0F172A), // Rich dark slate header
+              backgroundColor: SoftPalette.slate900, // Rich dark slate header
               elevation: 2,
-              shadowColor: Colors.black26,
+              shadowColor: SoftPalette.gray900A26,
               leading: widget.isEmbedded
                   ? null
                   : IconButton(
-                      icon: const Icon(Icons.arrow_back_rounded, color: Colors.white),
+                      icon: const Icon(Icons.arrow_back_rounded, color: SoftPalette.gray50),
                       onPressed: () {
                         if (widget.onBack != null) {
                           widget.onBack!();
@@ -756,23 +759,23 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                     ),
             actions: [
               IconButton(
-                icon: const Icon(Icons.delete_sweep_rounded, color: Color(0xFFF87171), size: 22),
+                icon: const Icon(Icons.delete_sweep_rounded, color: SoftPalette.red350, size: 22),
                 tooltip: 'Wipe Local Punches & Cache (Start Fresh)',
                 onPressed: () async {
                   final confirmed = await showDialog<bool>(
                     context: context,
                     builder: (ctx) => AlertDialog(
-                      backgroundColor: const Color(0xFF0F172A),
-                      title: const Text('Reset All Local Punches?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      backgroundColor: SoftPalette.slate900,
+                      title: const Text('Reset All Local Punches?', style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold)),
                       content: const Text(
                         'This will clear all historical local biometric punches and attendance records from local memory so you can start 100% anew.',
-                        style: TextStyle(color: Color(0xFF94A3B8), fontSize: 13),
+                        style: TextStyle(color: SoftPalette.slate350, fontSize: 13),
                       ),
                       actions: [
                         TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
                         ElevatedButton(
                           onPressed: () => Navigator.pop(ctx, true),
-                          style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFDC2626), foregroundColor: Colors.white),
+                          style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.red500, foregroundColor: SoftPalette.gray50),
                           child: const Text('Wipe & Reset'),
                         ),
                       ],
@@ -783,10 +786,10 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                     await ZkTecoNetworkService.clearAllLocalAttendanceAndPunches();
                     if (mounted) {
                       setState(() {});
-                      ScaffoldMessenger.of(context).showSnackBar(
+                      AppToast.showSnackBar(context, 
                         const SnackBar(
                           content: Text('🧹 All local punches and attendance cleared! Started fresh.'),
-                          backgroundColor: Color(0xFF0F766E),
+                          backgroundColor: SoftPalette.teal550,
                         ),
                       );
                     }
@@ -794,7 +797,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                 },
               ),
               IconButton(
-                icon: const Icon(Icons.terminal_rounded, color: Color(0xFF38BDF8), size: 22),
+                icon: const Icon(Icons.terminal_rounded, color: SoftPalette.sky350, size: 22),
                 tooltip: 'Open Python Sync Terminal',
                 onPressed: () => Navigator.push(
                   context,
@@ -802,7 +805,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.help_outline_rounded, color: Color(0xFF38BDF8), size: 22),
+                icon: const Icon(Icons.help_outline_rounded, color: SoftPalette.sky350, size: 22),
                 tooltip: 'How to Setup Biometric Device',
                 onPressed: _showSetupGuideDialog,
               ),
@@ -811,13 +814,13 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
             bottom: PreferredSize(
               preferredSize: const Size.fromHeight(48),
               child: Container(
-                color: const Color(0xFF1E293B),
+                color: SoftPalette.slate800,
                 child: TabBar(
                   controller: _tabController,
-                  indicatorColor: const Color(0xFF10B981),
+                  indicatorColor: SoftPalette.emerald350,
                   indicatorWeight: 4,
-                  labelColor: Colors.white,
-                  unselectedLabelColor: const Color(0xFF94A3B8), // High contrast unselected text
+                  labelColor: SoftPalette.gray50,
+                  unselectedLabelColor: SoftPalette.slate350, // High contrast unselected text
                   labelStyle: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 13),
                   unselectedLabelStyle: GoogleFonts.inter(fontWeight: FontWeight.w600, fontSize: 13),
                   tabs: const [
@@ -859,11 +862,11 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
         margin: const EdgeInsets.fromLTRB(16, 16, 16, 8),
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF12213A) : const Color(0xFFEFF6FF),
+          color: isDark ? SoftPalette.slate800 : SoftPalette.slate100,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: isDark ? const Color(0xFF1E3A8A) : const Color(0xFFBFDBFE), width: 1.5),
+          border: Border.all(color: isDark ? SoftPalette.blue700 : SoftPalette.slate200, width: 1.5),
           boxShadow: const [
-            BoxShadow(color: Colors.black12, blurRadius: 6, offset: Offset(0, 2)),
+            BoxShadow(color: SoftPalette.gray900A12, blurRadius: 6, offset: Offset(0, 2)),
           ],
         ),
         child: Row(
@@ -871,10 +874,10 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
             Container(
               padding: const EdgeInsets.all(10),
               decoration: const BoxDecoration(
-                color: Color(0xFF2563EB),
+                color: SoftPalette.blue550,
                 shape: BoxShape.circle,
               ),
-              child: const Icon(Icons.cloud_sync_rounded, color: Colors.white, size: 22),
+              child: const Icon(Icons.cloud_sync_rounded, color: SoftPalette.gray50, size: 22),
             ),
             const SizedBox(width: 14),
             Expanded(
@@ -887,7 +890,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                         'Cloud Sync Active (Web View)',
                         style: GoogleFonts.outfit(
                           fontWeight: FontWeight.bold,
-                          color: isDark ? const Color(0xFF93C5FD) : const Color(0xFF1E40AF),
+                          color: isDark ? SoftPalette.blue300 : SoftPalette.blue600,
                           fontSize: 16,
                         ),
                       ),
@@ -895,13 +898,13 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF1D4ED8),
+                          color: SoftPalette.blue550,
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
                           'Web Browser Mode',
                           style: GoogleFonts.inter(
-                            color: Colors.white,
+                            color: SoftPalette.gray50,
                             fontWeight: FontWeight.bold,
                             fontSize: 11.5,
                           ),
@@ -915,7 +918,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                     style: GoogleFonts.inter(
                       fontSize: 12.5,
                       fontWeight: FontWeight.w500,
-                      color: isDark ? const Color(0xFFBFDBFE) : const Color(0xFF1E3A8A),
+                      color: isDark ? SoftPalette.slate200 : SoftPalette.blue700,
                     ),
                   ),
                 ],
@@ -927,14 +930,14 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF1E3A8A) : const Color(0xFFDBEAFE),
+                  color: isDark ? SoftPalette.blue700 : SoftPalette.slate150,
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFF93C5FD)),
+                  border: Border.all(color: SoftPalette.blue300),
                 ),
                 child: Text(
                   'Port Listener: Server PC',
                   style: GoogleFonts.inter(
-                    color: isDark ? Colors.white : const Color(0xFF1E40AF),
+                    color: isDark ? SoftPalette.gray50 : SoftPalette.blue600,
                     fontWeight: FontWeight.bold,
                     fontSize: 11.5,
                   ),
@@ -954,18 +957,18 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
             color: isRunning
-                ? (isDark ? const Color(0xFF0B2A21) : const Color(0xFFECFDF5))
-                : (isDark ? const Color(0xFF2A1212) : const Color(0xFFFEF2F2)),
+                ? (isDark ? SoftPalette.emerald800 : SoftPalette.emerald50)
+                : (isDark ? SoftPalette.red900 : SoftPalette.red100t),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color: isRunning
-                  ? (isDark ? const Color(0xFF10B981) : const Color(0xFFA7F3D0))
-                  : (isDark ? const Color(0xFFEF4444) : const Color(0xFFFECACA)),
+                  ? (isDark ? SoftPalette.emerald350 : SoftPalette.emerald150)
+                  : (isDark ? SoftPalette.red400 : SoftPalette.red200),
               width: 1.5,
             ),
             boxShadow: [
               BoxShadow(
-                color: (isRunning ? const Color(0xFF10B981) : Colors.red).withOpacity(0.06),
+                color: (isRunning ? SoftPalette.emerald350 : SoftPalette.red400).withOpacity(0.06),
                 blurRadius: 10,
                 offset: const Offset(0, 4),
               ),
@@ -976,12 +979,12 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: isRunning ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                  color: isRunning ? SoftPalette.emerald350 : SoftPalette.red400,
                   shape: BoxShape.circle,
                 ),
                 child: Icon(
                   isRunning ? Icons.wifi_tethering_rounded : Icons.wifi_tethering_off_rounded,
-                  color: Colors.white,
+                  color: SoftPalette.gray50,
                   size: 22,
                 ),
               ),
@@ -997,8 +1000,8 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                           style: GoogleFonts.outfit(
                             fontWeight: FontWeight.bold,
                             color: isRunning
-                                ? (isDark ? const Color(0xFF6EE7B7) : const Color(0xFF065F46))
-                                : (isDark ? const Color(0xFFFCA5A5) : const Color(0xFF991B1B)),
+                                ? (isDark ? SoftPalette.emerald200 : SoftPalette.emerald600)
+                                : (isDark ? SoftPalette.red300 : SoftPalette.red600),
                             fontSize: 16,
                           ),
                         ),
@@ -1006,13 +1009,13 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),
                           decoration: BoxDecoration(
-                            color: isRunning ? const Color(0xFF047857) : const Color(0xFF991B1B),
+                            color: isRunning ? SoftPalette.emerald550 : SoftPalette.red600,
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Text(
                             'PC IP: $_pcIpAddress',
                             style: GoogleFonts.inter(
-                              color: Colors.white,
+                              color: SoftPalette.gray50,
                               fontWeight: FontWeight.bold,
                               fontSize: 12,
                             ),
@@ -1029,8 +1032,8 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                         fontSize: 12.5,
                         fontWeight: FontWeight.w500,
                         color: isRunning
-                            ? (isDark ? const Color(0xFF6EE7B7) : const Color(0xFF047857))
-                            : (isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C)),
+                            ? (isDark ? SoftPalette.emerald200 : SoftPalette.emerald550)
+                            : (isDark ? SoftPalette.red300 : SoftPalette.red550),
                       ),
                     ),
                   ],
@@ -1042,17 +1045,17 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                   return Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      color: isRunning ? const Color(0xFF059669) : Colors.grey[600],
+                      color: isRunning ? SoftPalette.emerald500 : SoftPalette.gray500,
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.touch_app_rounded, color: Colors.white, size: 16),
+                        const Icon(Icons.touch_app_rounded, color: SoftPalette.gray50, size: 16),
                         const SizedBox(width: 6),
                         Text(
                           '$count Scans',
                           style: GoogleFonts.inter(
-                            color: Colors.white,
+                            color: SoftPalette.gray50,
                             fontWeight: FontWeight.bold,
                             fontSize: 12,
                           ),
@@ -1074,8 +1077,8 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                 icon: Icon(isRunning ? Icons.stop_rounded : Icons.play_arrow_rounded, size: 18),
                 label: Text(isRunning ? 'Stop' : 'Start'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: isRunning ? const Color(0xFFDC2626) : const Color(0xFF10B981),
-                  foregroundColor: Colors.white,
+                  backgroundColor: isRunning ? SoftPalette.red500 : SoftPalette.emerald350,
+                  foregroundColor: SoftPalette.gray50,
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   elevation: 0,
@@ -1095,8 +1098,8 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
     final int unmapped = diag['unmapped'] ?? 0;
     final int crossBranch = diag['crossBranch'] ?? 0;
 
-    final cardBg = isDark ? const Color(0xFF161F30) : Colors.white;
-    final borderColor = isDark ? const Color(0xFF2A3547) : const Color(0xFFE2E8F0);
+    final cardBg = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+    final borderColor = isDark ? SoftPalette.slate750 : SoftPalette.slate150;
 
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
@@ -1106,7 +1109,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: borderColor),
         boxShadow: const [
-          BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 1)),
+          BoxShadow(color: SoftPalette.gray900A12, blurRadius: 4, offset: Offset(0, 1)),
         ],
       ),
       child: Row(
@@ -1116,14 +1119,14 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: [
-                  _buildKpiMini('Total Punches Today', '$total', Icons.touch_app_rounded, const Color(0xFF2563EB), isDark),
+                  _buildKpiMini('Total Punches Today', '$total', Icons.touch_app_rounded, SoftPalette.blue550, isDark),
                   const SizedBox(width: 18),
-                  _buildKpiMini('Saved to Attendance', '$mapped', Icons.check_circle_rounded, const Color(0xFF059669), isDark),
+                  _buildKpiMini('Saved to Attendance', '$mapped', Icons.check_circle_rounded, SoftPalette.emerald500, isDark),
                   const SizedBox(width: 18),
-                  _buildKpiMini('Unmapped Scans', '$unmapped', Icons.warning_amber_rounded, unmapped > 0 ? const Color(0xFFDC2626) : const Color(0xFF64748B), isDark),
+                  _buildKpiMini('Unmapped Scans', '$unmapped', Icons.warning_amber_rounded, unmapped > 0 ? SoftPalette.red500 : SoftPalette.slate550, isDark),
                   if (crossBranch > 0) ...[
                     const SizedBox(width: 18),
-                    _buildKpiMini('Cross-Branch Pending', '$crossBranch', Icons.shuffle_rounded, const Color(0xFFD97706), isDark),
+                    _buildKpiMini('Cross-Branch Pending', '$crossBranch', Icons.shuffle_rounded, SoftPalette.orange400, isDark),
                   ],
                 ],
               ),
@@ -1138,10 +1141,10 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                   _livePunches.clear();
                   _livePunches.addAll(ZkTecoNetworkService.getRecentPunchesToday());
                 });
-                ScaffoldMessenger.of(context).showSnackBar(
+                AppToast.showSnackBar(context, 
                   const SnackBar(
                     content: Text('✅ Synced today\'s biometric scans from server & cloud!'),
-                    backgroundColor: Color(0xFF0F766E),
+                    backgroundColor: SoftPalette.teal550,
                     duration: Duration(seconds: 2),
                   ),
                 );
@@ -1150,7 +1153,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
             icon: const Icon(Icons.refresh_rounded, size: 15),
             label: const Text('Refresh Counts'),
             style: TextButton.styleFrom(
-              foregroundColor: const Color(0xFF0F766E),
+              foregroundColor: context.adapt(SoftPalette.teal550),
               textStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
             ),
           ),
@@ -1178,11 +1181,11 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
           children: [
             Text(
               value,
-              style: GoogleFonts.inter(fontWeight: FontWeight.w900, fontSize: 15, color: isDark ? Colors.white : const Color(0xFF0F172A)),
+              style: GoogleFonts.inter(fontWeight: FontWeight.w900, fontSize: 15, color: isDark ? SoftPalette.gray50 : SoftPalette.slate900),
             ),
             Text(
               label,
-              style: GoogleFonts.inter(fontSize: 10.5, fontWeight: FontWeight.w600, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+              style: GoogleFonts.inter(fontSize: 10.5, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.slate350 : SoftPalette.slate550),
             ),
           ],
         ),
@@ -1193,10 +1196,10 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
   // ── Tab 1: ZKTeco Network Devices ──────────────────────────────────────────
 
   Widget _buildDevicesTab(bool isDark) {
-    final cardBg = isDark ? const Color(0xFF161F30) : Colors.white;
-    final borderColor = isDark ? const Color(0xFF2A3547) : const Color(0xFFE2E8F0);
-    final textPrimary = isDark ? Colors.white : const Color(0xFF0F172A);
-    final textSecondary = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+    final cardBg = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+    final borderColor = isDark ? SoftPalette.slate750 : SoftPalette.slate150;
+    final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.slate900;
+    final textSecondary = isDark ? SoftPalette.slate350 : SoftPalette.slate550;
 
     return ValueListenableBuilder<Box>(
       valueListenable: Hive.box(LocalStorageService.biometricDevicesBox).listenable(),
@@ -1229,10 +1232,10 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                     children: [
                       OutlinedButton.icon(
                         onPressed: _showSetupGuideDialog,
-                        icon: const Icon(Icons.menu_book_rounded, size: 16, color: Color(0xFF0F766E)),
-                        label: const Text('Setup Guide', style: TextStyle(color: Color(0xFF0F766E), fontWeight: FontWeight.bold)),
+                        icon: Icon(Icons.menu_book_rounded, size: 16, color: context.adapt(SoftPalette.teal550)),
+                        label: Text('Setup Guide', style: TextStyle(color: context.adapt(SoftPalette.teal550), fontWeight: FontWeight.bold)),
                         style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: Color(0xFF0F766E)),
+                          side: BorderSide(color: context.adapt(SoftPalette.teal550)),
                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         ),
@@ -1243,8 +1246,8 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                         icon: const Icon(Icons.add_rounded, size: 18),
                         label: const Text('Add Device'),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF2563EB),
-                          foregroundColor: Colors.white,
+                          backgroundColor: SoftPalette.blue550,
+                          foregroundColor: SoftPalette.gray50,
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           elevation: 0,
@@ -1273,10 +1276,10 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                             Container(
                               padding: const EdgeInsets.all(16),
                               decoration: BoxDecoration(
-                                color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                                color: isDark ? SoftPalette.slate800 : SoftPalette.slate100,
                                 shape: BoxShape.circle,
                               ),
-                              child: const Icon(Icons.router_rounded, size: 48, color: Color(0xFF64748B)),
+                              child: Icon(Icons.router_rounded, size: 48, color: context.adapt(SoftPalette.slate550)),
                             ),
                             const SizedBox(height: 16),
                             Text(
@@ -1308,14 +1311,14 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                           : 'Never';
 
                       // Location pill colors
-                      Color locBg = isDark ? const Color(0xFF12213A) : const Color(0xFFEFF6FF);
-                      Color locText = isDark ? const Color(0xFF93C5FD) : const Color(0xFF1D4ED8);
+                      Color locBg = isDark ? SoftPalette.slate800 : SoftPalette.slate100;
+                      Color locText = isDark ? SoftPalette.blue300 : SoftPalette.blue550;
                       if (dev.buildingLocation.toLowerCase().contains('dispensary')) {
-                        locBg = isDark ? const Color(0xFF0B2A21) : const Color(0xFFF0FDF4);
-                        locText = isDark ? const Color(0xFF6EE7B7) : const Color(0xFF15803D);
+                        locBg = isDark ? SoftPalette.emerald800 : SoftPalette.emerald50m;
+                        locText = isDark ? SoftPalette.emerald200 : SoftPalette.green550;
                       } else if (dev.buildingLocation.toLowerCase().contains('madrassa')) {
-                        locBg = isDark ? const Color(0xFF241A33) : const Color(0xFFF3E8FF);
-                        locText = isDark ? const Color(0xFFD8B4FE) : const Color(0xFF6B21A8);
+                        locBg = isDark ? SoftPalette.violet900 : SoftPalette.purple150;
+                        locText = isDark ? SoftPalette.purple300 : SoftPalette.violet600;
                       }
 
                       return Container(
@@ -1326,7 +1329,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                           border: Border.all(color: borderColor),
                           boxShadow: const [
                             BoxShadow(
-                              color: Colors.black12,
+                              color: SoftPalette.gray900A12,
                               blurRadius: 6,
                               offset: Offset(0, 2),
                             ),
@@ -1340,13 +1343,13 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                 padding: const EdgeInsets.all(12),
                                 decoration: BoxDecoration(
                                   color: isOnline
-                                      ? (isDark ? const Color(0xFF0B2A21) : const Color(0xFFECFDF5))
-                                      : (isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
+                                      ? (isDark ? SoftPalette.emerald800 : SoftPalette.emerald50)
+                                      : (isDark ? SoftPalette.slate800 : SoftPalette.slate100),
                                   borderRadius: BorderRadius.circular(12),
                                 ),
                                 child: Icon(
                                   Icons.fingerprint_rounded,
-                                  color: isOnline ? const Color(0xFF10B981) : const Color(0xFF94A3B8),
+                                  color: isOnline ? SoftPalette.emerald350 : SoftPalette.slate350,
                                   size: 28,
                                 ),
                               ),
@@ -1388,10 +1391,10 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                       spacing: 8,
                                       runSpacing: 4,
                                       children: [
-                                        _buildDetailBadge('IP', dev.ipAddress, isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155), isDark),
-                                        _buildDetailBadge('Port', '${dev.port}', isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155), isDark),
-                                        _buildDetailBadge('SN', dev.serialNumber.isEmpty ? 'N/A' : dev.serialNumber, isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155), isDark),
-                                        _buildDetailBadge('Last Seen', lastHb, isOnline ? const Color(0xFF059669) : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)), isDark),
+                                        _buildDetailBadge('IP', dev.ipAddress, isDark ? SoftPalette.slate200 : SoftPalette.slate700, isDark),
+                                        _buildDetailBadge('Port', '${dev.port}', isDark ? SoftPalette.slate200 : SoftPalette.slate700, isDark),
+                                        _buildDetailBadge('SN', dev.serialNumber.isEmpty ? 'N/A' : dev.serialNumber, isDark ? SoftPalette.slate200 : SoftPalette.slate700, isDark),
+                                        _buildDetailBadge('Last Seen', lastHb, isOnline ? SoftPalette.emerald500 : (isDark ? SoftPalette.slate350 : SoftPalette.slate550), isDark),
                                       ],
                                     ),
                                   ],
@@ -1402,21 +1405,21 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                                   decoration: BoxDecoration(
-                                    color: isDark ? const Color(0xFF2E2306) : const Color(0xFFFFFBEB),
+                                    color: isDark ? SoftPalette.yellow800 : SoftPalette.yellow50m,
                                     borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(color: const Color(0xFFFDE68A)),
+                                    border: Border.all(color: context.adapt(SoftPalette.yellow150)),
                                   ),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      const Icon(Icons.warning_amber_rounded, size: 14, color: Color(0xFFD97706)),
+                                      const Icon(Icons.warning_amber_rounded, size: 14, color: SoftPalette.orange400),
                                       const SizedBox(width: 4),
                                       Text(
                                         'No punches received recently',
                                         style: GoogleFonts.inter(
                                           fontSize: 11,
                                           fontWeight: FontWeight.w600,
-                                          color: isDark ? const Color(0xFFFCD34D) : const Color(0xFFB45309),
+                                          color: isDark ? SoftPalette.yellow200 : SoftPalette.orange500,
                                         ),
                                       ),
                                     ],
@@ -1428,8 +1431,8 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                                 decoration: BoxDecoration(
                                   color: isOnline
-                                      ? (isDark ? const Color(0xFF0B2A21) : const Color(0xFFD1FAE5))
-                                      : (isDark ? const Color(0xFF2A1212) : const Color(0xFFFEE2E2)),
+                                      ? (isDark ? SoftPalette.emerald800 : SoftPalette.emerald100)
+                                      : (isDark ? SoftPalette.red900 : SoftPalette.red150m),
                                   borderRadius: BorderRadius.circular(20),
                                 ),
                                 child: Row(
@@ -1440,7 +1443,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                       height: 8,
                                       decoration: BoxDecoration(
                                         shape: BoxShape.circle,
-                                        color: isOnline ? const Color(0xFF059669) : const Color(0xFFDC2626),
+                                        color: isOnline ? SoftPalette.emerald500 : SoftPalette.red500,
                                       ),
                                     ),
                                     const SizedBox(width: 6),
@@ -1450,8 +1453,8 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                         fontSize: 11,
                                         fontWeight: FontWeight.bold,
                                         color: isOnline
-                                            ? (isDark ? const Color(0xFF6EE7B7) : const Color(0xFF047857))
-                                            : (isDark ? const Color(0xFFFCA5A5) : const Color(0xFFB91C1C)),
+                                            ? (isDark ? SoftPalette.emerald200 : SoftPalette.emerald550)
+                                            : (isDark ? SoftPalette.red300 : SoftPalette.red550),
                                       ),
                                     ),
                                   ],
@@ -1461,24 +1464,24 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                               ElevatedButton.icon(
                                 onPressed: () async {
                                   if (kIsWeb) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
+                                    AppToast.showSnackBar(context, 
                                       const SnackBar(
                                         content: Text('Raw IP ping is performed by the Windows Server PC app.'),
-                                        backgroundColor: Color(0xFF2563EB),
+                                        backgroundColor: SoftPalette.blue550,
                                       ),
                                     );
                                     return;
                                   }
                                   final success = await ZkTecoNetworkService.pingDevice(dev.ipAddress, port: dev.port);
                                   if (context.mounted) {
-                                    ScaffoldMessenger.of(context).showSnackBar(
+                                    AppToast.showSnackBar(context, 
                                       SnackBar(
                                         content: Text(
                                           success
                                               ? '🟢 Successfully reached ZKTeco device at ${dev.ipAddress}:${dev.port}!'
                                               : '🔴 Could not reach ${dev.ipAddress}:${dev.port}. Please check router connection.',
                                         ),
-                                        backgroundColor: success ? const Color(0xFF10B981) : const Color(0xFFDC2626),
+                                        backgroundColor: success ? SoftPalette.emerald350 : SoftPalette.red500,
                                       ),
                                     );
                                   }
@@ -1486,24 +1489,24 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                 icon: const Icon(Icons.bolt_rounded, size: 16),
                                 label: const Text('Test Ping'),
                                 style: ElevatedButton.styleFrom(
-                                  backgroundColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
-                                  foregroundColor: isDark ? Colors.white : const Color(0xFF334155),
+                                  backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.slate100,
+                                  foregroundColor: isDark ? SoftPalette.gray50 : SoftPalette.slate700,
                                   elevation: 0,
-                                  side: BorderSide(color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
+                                  side: BorderSide(color: isDark ? SoftPalette.slate700 : SoftPalette.slate200),
                                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                 ),
                               ),
                               const SizedBox(width: 4),
                               IconButton(
-                                icon: const Icon(Icons.edit_rounded, color: Color(0xFF2563EB)),
+                                icon: Icon(Icons.edit_rounded, color: context.adapt(SoftPalette.blue550)),
                                 tooltip: 'Edit Device Settings',
                                 onPressed: () => _showAddEditDeviceDialog(device: dev),
                               ),
                               if (_canDeleteDevices) ...[
                                 const SizedBox(width: 2),
                                 IconButton(
-                                  icon: const Icon(Icons.delete_outline_rounded, color: Color(0xFFDC2626)),
+                                  icon: const Icon(Icons.delete_outline_rounded, color: SoftPalette.red500),
                                   tooltip: 'Delete Device (HQ Manager / Admin)',
                                   onPressed: () => _confirmDeleteDevice(dev),
                                 ),
@@ -1526,9 +1529,9 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+        color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+        border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
       ),
       child: Text(
         '$label: $value',
@@ -1544,10 +1547,10 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
   // ── Tab 2: User Biometric PINs ─────────────────────────────────────────────
 
   Widget _buildUserPinsTab(bool isDark) {
-    final cardBg = isDark ? const Color(0xFF161F30) : Colors.white;
-    final borderColor = isDark ? const Color(0xFF2A3547) : const Color(0xFFE2E8F0);
-    final textPrimary = isDark ? Colors.white : const Color(0xFF0F172A);
-    final textSecondary = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+    final cardBg = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+    final borderColor = isDark ? SoftPalette.slate750 : SoftPalette.slate150;
+    final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.slate900;
+    final textSecondary = isDark ? SoftPalette.slate350 : SoftPalette.slate550;
 
     return ValueListenableBuilder<Box>(
       valueListenable: Hive.box(LocalStorageService.biometricCredentialsBox).listenable(),
@@ -1650,7 +1653,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                 margin: const EdgeInsets.only(bottom: 12),
                 padding: const EdgeInsets.all(4),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                  color: isDark ? SoftPalette.slate900 : SoftPalette.slate100,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(color: borderColor),
                 ),
@@ -1661,7 +1664,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                       count: totalMadrassa,
                       category: 'madrassa_student',
                       isDark: isDark,
-                      activeColor: const Color(0xFF0F766E),
+                      activeColor: SoftPalette.teal550,
                     ),
                     const SizedBox(width: 6),
                     _buildCategorySegment(
@@ -1669,7 +1672,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                       count: totalEmployees,
                       category: 'employee',
                       isDark: isDark,
-                      activeColor: const Color(0xFF2563EB),
+                      activeColor: SoftPalette.blue550,
                     ),
                     const SizedBox(width: 6),
                     _buildCategorySegment(
@@ -1677,7 +1680,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                       count: totalMadrassa + totalEmployees,
                       category: 'all',
                       isDark: isDark,
-                      activeColor: const Color(0xFF7C3AED),
+                      activeColor: SoftPalette.violet550,
                     ),
                   ],
                 ),
@@ -1692,7 +1695,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                         color: cardBg,
                         borderRadius: BorderRadius.circular(12),
                         border: Border.all(color: borderColor),
-                        boxShadow: const [BoxShadow(color: Colors.black12, blurRadius: 4)],
+                        boxShadow: const [BoxShadow(color: SoftPalette.gray900A12, blurRadius: 4)],
                       ),
                       child: TextField(
                         onChanged: (val) => setState(() => _searchQuery = val.trim()),
@@ -1701,8 +1704,8 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                           hintText: _entityCategory == 'madrassa_student'
                               ? 'Search Madrassa Student Name, PIN, Roll #...'
                               : 'Search Name, Biometric PIN, or Role...',
-                          hintStyle: GoogleFonts.inter(color: const Color(0xFF94A3B8), fontSize: 13),
-                          prefixIcon: const Icon(Icons.search_rounded, color: Color(0xFF64748B)),
+                          hintStyle: GoogleFonts.inter(color: SoftPalette.slate350, fontSize: 13),
+                          prefixIcon: Icon(Icons.search_rounded, color: context.adapt(SoftPalette.slate550)),
                           border: InputBorder.none,
                           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                         ),
@@ -1713,14 +1716,14 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                   // Keep Madrassa Only Button (Quick action for user request)
                   OutlinedButton.icon(
                     onPressed: _isClearingPins ? null : _confirmClearStaffPinsOnly,
-                    icon: const Icon(Icons.school_rounded, size: 16, color: Color(0xFF0F766E)),
-                    label: const Text(
+                    icon: Icon(Icons.school_rounded, size: 16, color: context.adapt(SoftPalette.teal550)),
+                    label: Text(
                       'Keep Madrassa Only',
-                      style: TextStyle(color: Color(0xFF0F766E), fontWeight: FontWeight.bold),
+                      style: TextStyle(color: context.adapt(SoftPalette.teal550), fontWeight: FontWeight.bold),
                     ),
                     style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Color(0xFF99F6E4), width: 1.2),
-                      backgroundColor: isDark ? const Color(0xFF062B28) : const Color(0xFFF0FDFA),
+                      side: BorderSide(color: context.adapt(SoftPalette.teal150), width: 1.2),
+                      backgroundColor: isDark ? SoftPalette.teal800 : SoftPalette.teal50t,
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
@@ -1734,10 +1737,10 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                             final count = await ZkTecoNetworkService.bulkAutoAssignBiometricPins(branchId: widget.branchId);
                             setState(() => _isAutoAssigning = false);
                             if (mounted) {
-                              ScaffoldMessenger.of(context).showSnackBar(
+                              AppToast.showSnackBar(context, 
                                 SnackBar(
                                   content: Text('Auto-assigned Biometric PINs to $count profiles!'),
-                                  backgroundColor: const Color(0xFF10B981),
+                                  backgroundColor: SoftPalette.emerald350,
                                 ),
                               );
                             }
@@ -1746,13 +1749,13 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                         ? const SizedBox(
                             width: 16,
                             height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50),
                           )
                         : const Icon(Icons.auto_fix_high_rounded, size: 18),
                     label: const Text('Bulk Auto-Assign PINs'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF10B981),
-                      foregroundColor: Colors.white,
+                      backgroundColor: SoftPalette.emerald350,
+                      foregroundColor: SoftPalette.gray50,
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       elevation: 0,
@@ -1766,8 +1769,8 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                     icon: const Icon(Icons.person_add_rounded, size: 18),
                     label: const Text('Link PIN'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF4F46E5),
-                      foregroundColor: Colors.white,
+                      backgroundColor: SoftPalette.indigo550,
+                      foregroundColor: SoftPalette.gray50,
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       elevation: 0,
@@ -1780,13 +1783,13 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                         ? const SizedBox(
                             width: 16,
                             height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFFDC2626)),
+                            child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.red500),
                           )
-                        : const Icon(Icons.delete_sweep_rounded, size: 18, color: Color(0xFFDC2626)),
-                    label: const Text('Clear All PINs', style: TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.bold)),
+                        : const Icon(Icons.delete_sweep_rounded, size: 18, color: SoftPalette.red500),
+                    label: const Text('Clear All PINs', style: TextStyle(color: SoftPalette.red500, fontWeight: FontWeight.bold)),
                     style: OutlinedButton.styleFrom(
-                      side: const BorderSide(color: Color(0xFFFECDD3)),
-                      backgroundColor: isDark ? const Color(0xFF2A1212) : const Color(0xFFFFF1F2),
+                      side: BorderSide(color: context.adapt(SoftPalette.red200)),
+                      backgroundColor: isDark ? SoftPalette.red900 : SoftPalette.red100m,
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
@@ -1800,9 +1803,9 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                 children: [
                   _buildPinsFilterChip('All', totalAll, isDark),
                   const SizedBox(width: 8),
-                  _buildPinsFilterChip('Enrolled', totalEnrolled, isDark, badgeColor: const Color(0xFF059669)),
+                  _buildPinsFilterChip('Enrolled', totalEnrolled, isDark, badgeColor: SoftPalette.emerald500),
                   const SizedBox(width: 8),
-                  _buildPinsFilterChip('Not Enrolled', totalUnenrolled, isDark, badgeColor: const Color(0xFFD97706)),
+                  _buildPinsFilterChip('Not Enrolled', totalUnenrolled, isDark, badgeColor: SoftPalette.orange400),
                 ],
               ),
               const SizedBox(height: 12),
@@ -1844,7 +1847,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                 Icon(
                                   _entityCategory == 'madrassa_student' ? Icons.school_outlined : Icons.badge_outlined,
                                   size: 48,
-                                  color: const Color(0xFF94A3B8),
+                                  color: SoftPalette.slate350,
                                 ),
                                 const SizedBox(height: 12),
                                 Text(
@@ -1868,7 +1871,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
 
                       return ListView.separated(
                         itemCount: displayList.length,
-                        separatorBuilder: (ctx, i) => Divider(height: 1, color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
+                        separatorBuilder: (ctx, i) => Divider(height: 1, color: isDark ? SoftPalette.slate800 : SoftPalette.slate100),
                         itemBuilder: (ctx, i) {
                           final item = displayList[i];
                           if (item['type'] == 'enrolled') {
@@ -1889,14 +1892,14 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                     decoration: BoxDecoration(
                                       gradient: LinearGradient(
                                         colors: isMadrassa
-                                            ? const [Color(0xFF0F766E), Color(0xFF042F2E)]
-                                            : const [Color(0xFF4F46E5), Color(0xFF3730A3)],
+                                            ? const [SoftPalette.teal550, SoftPalette.teal800]
+                                            : const [SoftPalette.indigo550, SoftPalette.indigo700],
                                         begin: Alignment.topLeft,
                                         end: Alignment.bottomRight,
                                       ),
                                       borderRadius: BorderRadius.circular(10),
                                       boxShadow: const [
-                                        BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 2)),
+                                        BoxShadow(color: SoftPalette.gray900A12, blurRadius: 4, offset: Offset(0, 2)),
                                       ],
                                     ),
                                     child: Column(
@@ -1907,7 +1910,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                           style: GoogleFonts.inter(
                                             fontWeight: FontWeight.w600,
                                             fontSize: 8.5,
-                                            color: isMadrassa ? const Color(0xFF99F6E4) : const Color(0xFFC7D2FE),
+                                            color: isMadrassa ? SoftPalette.teal150 : SoftPalette.indigo200,
                                             letterSpacing: 1,
                                           ),
                                         ),
@@ -1916,7 +1919,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                           style: GoogleFonts.outfit(
                                             fontWeight: FontWeight.bold,
                                             fontSize: 15,
-                                            color: Colors.white,
+                                            color: SoftPalette.gray50,
                                           ),
                                         ),
                                       ],
@@ -1939,13 +1942,13 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                     decoration: BoxDecoration(
                                       color: isMadrassa
-                                          ? (isDark ? const Color(0xFF062B28) : const Color(0xFFF0FDFA))
-                                          : (isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
+                                          ? (isDark ? SoftPalette.teal800 : SoftPalette.teal50t)
+                                          : (isDark ? SoftPalette.slate800 : SoftPalette.slate100),
                                       borderRadius: BorderRadius.circular(6),
                                       border: Border.all(
                                         color: isMadrassa
-                                            ? (isDark ? const Color(0xFF0F766E) : const Color(0xFF99F6E4))
-                                            : (isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
+                                            ? (isDark ? SoftPalette.teal550 : SoftPalette.teal150)
+                                            : (isDark ? SoftPalette.slate700 : SoftPalette.slate200),
                                       ),
                                     ),
                                     child: Text(
@@ -1953,7 +1956,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                       style: GoogleFonts.inter(
                                         fontSize: 10,
                                         fontWeight: FontWeight.bold,
-                                        color: isMadrassa ? const Color(0xFF0F766E) : (isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569)),
+                                        color: isMadrassa ? SoftPalette.teal550 : (isDark ? SoftPalette.slate200 : SoftPalette.slate600),
                                       ),
                                     ),
                                   ),
@@ -1961,13 +1964,13 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                     decoration: BoxDecoration(
-                                      color: isDark ? const Color(0xFF0B2A21) : const Color(0xFFECFDF5),
+                                      color: isDark ? SoftPalette.emerald800 : SoftPalette.emerald50,
                                       borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(color: const Color(0xFFA7F3D0)),
+                                      border: Border.all(color: ctx.adapt(SoftPalette.emerald150)),
                                     ),
                                     child: const Text(
                                       'ENROLLED',
-                                      style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: Color(0xFF059669)),
+                                      style: TextStyle(fontSize: 9, fontWeight: FontWeight.w800, color: SoftPalette.emerald500),
                                     ),
                                   ),
                                 ],
@@ -1984,17 +1987,17 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                     icon: const Icon(Icons.fingerprint_rounded, size: 16),
                                     label: const Text('Enroll Fingerprint'),
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: isDark ? const Color(0xFF0B2A21) : const Color(0xFFECFDF5),
-                                      foregroundColor: isDark ? const Color(0xFF6EE7B7) : const Color(0xFF047857),
+                                      backgroundColor: isDark ? SoftPalette.emerald800 : SoftPalette.emerald50,
+                                      foregroundColor: isDark ? SoftPalette.emerald200 : SoftPalette.emerald550,
                                       elevation: 0,
-                                      side: const BorderSide(color: Color(0xFFA7F3D0)),
+                                      side: BorderSide(color: ctx.adapt(SoftPalette.emerald150)),
                                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                     ),
                                   ),
                                   const SizedBox(width: 6),
                                   IconButton(
-                                    icon: const Icon(Icons.link_off_rounded, color: Color(0xFFDC2626), size: 20),
+                                    icon: const Icon(Icons.link_off_rounded, color: SoftPalette.red500, size: 20),
                                     tooltip: 'Remove / Unlink PIN',
                                     onPressed: () => _confirmDeleteCredential(c),
                                   ),
@@ -2022,18 +2025,18 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                     width: 65,
                                     height: 48,
                                     decoration: BoxDecoration(
-                                      color: isDark ? const Color(0xFF2E2306) : const Color(0xFFFFFBEB),
+                                      color: isDark ? SoftPalette.yellow800 : SoftPalette.yellow50m,
                                       borderRadius: BorderRadius.circular(10),
-                                      border: Border.all(color: const Color(0xFFFDE68A)),
+                                      border: Border.all(color: ctx.adapt(SoftPalette.yellow150)),
                                     ),
-                                    child: const Column(
+                                    child: Column(
                                       mainAxisAlignment: MainAxisAlignment.center,
                                       children: [
-                                        Icon(Icons.fingerprint_rounded, size: 18, color: Color(0xFFD97706)),
+                                        Icon(Icons.fingerprint_rounded, size: 18, color: SoftPalette.orange400),
                                         SizedBox(height: 2),
                                         Text(
                                           'NO PIN',
-                                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 9.5, color: Color(0xFF92400E)),
+                                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 9.5, color: ctx.adapt(SoftPalette.orange600)),
                                         ),
                                       ],
                                     ),
@@ -2054,16 +2057,16 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                     decoration: BoxDecoration(
-                                      color: isDark ? const Color(0xFF2E2306) : const Color(0xFFFFFBEB),
+                                      color: isDark ? SoftPalette.yellow800 : SoftPalette.yellow50m,
                                       borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(color: const Color(0xFFFDE68A)),
+                                      border: Border.all(color: ctx.adapt(SoftPalette.yellow150)),
                                     ),
                                     child: Text(
                                       isMadrassa ? 'STUDENT' : 'NOT ENROLLED',
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontSize: 9,
                                         fontWeight: FontWeight.bold,
-                                        color: Color(0xFF92400E),
+                                        color: ctx.adapt(SoftPalette.orange600),
                                       ),
                                     ),
                                   ),
@@ -2083,11 +2086,11 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                       prefillType: isMadrassa ? 'madrassa_student' : 'employee',
                                       prefillBranch: itemData['branchId']?.toString() ?? widget.branchId,
                                     ),
-                                    icon: const Icon(Icons.edit_note_rounded, size: 16, color: Color(0xFF2563EB)),
-                                    label: const Text('Custom PIN', style: TextStyle(color: Color(0xFF2563EB), fontWeight: FontWeight.bold)),
+                                    icon: Icon(Icons.edit_note_rounded, size: 16, color: ctx.adapt(SoftPalette.blue550)),
+                                    label: Text('Custom PIN', style: TextStyle(color: ctx.adapt(SoftPalette.blue550), fontWeight: FontWeight.bold)),
                                     style: OutlinedButton.styleFrom(
-                                      side: const BorderSide(color: Color(0xFF93C5FD)),
-                                      backgroundColor: isDark ? const Color(0xFF172554) : const Color(0xFFEFF6FF),
+                                      side: const BorderSide(color: SoftPalette.blue300),
+                                      backgroundColor: isDark ? SoftPalette.blue800 : SoftPalette.slate100,
                                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                     ),
@@ -2102,10 +2105,10 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                         branchId: itemData['branchId']?.toString() ?? widget.branchId,
                                       );
                                       if (mounted) {
-                                        ScaffoldMessenger.of(context).showSnackBar(
+                                        AppToast.showSnackBar(context, 
                                           SnackBar(
                                             content: Text('✅ Enrolled $name with PIN: $assignedPin'),
-                                            backgroundColor: const Color(0xFF10B981),
+                                            backgroundColor: SoftPalette.emerald350,
                                           ),
                                         );
                                         setState(() {});
@@ -2114,8 +2117,8 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                     icon: const Icon(Icons.add_rounded, size: 16),
                                     label: const Text('Auto PIN'),
                                     style: ElevatedButton.styleFrom(
-                                      backgroundColor: const Color(0xFF10B981),
-                                      foregroundColor: Colors.white,
+                                      backgroundColor: SoftPalette.emerald350,
+                                      foregroundColor: SoftPalette.gray50,
                                       elevation: 0,
                                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -2172,15 +2175,15 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                   fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
                   fontSize: 13,
                   color: isSelected
-                      ? (isDark ? Colors.white : activeColor)
-                      : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                      ? (isDark ? SoftPalette.gray50 : activeColor)
+                      : (isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                 ),
               ),
               const SizedBox(width: 6),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: isSelected ? activeColor : (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                  color: isSelected ? activeColor : (isDark ? SoftPalette.slate700 : SoftPalette.slate150),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
@@ -2188,7 +2191,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
-                    color: isSelected ? Colors.white : (isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569)),
+                    color: isSelected ? SoftPalette.gray50 : (isDark ? SoftPalette.slate200 : SoftPalette.slate600),
                   ),
                 ),
               ),
@@ -2201,16 +2204,16 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
 
   Widget _buildPinsFilterChip(String label, int count, bool isDark, {Color? badgeColor}) {
     final isSelected = _userPinsFilter == label;
-    final color = badgeColor ?? const Color(0xFF2563EB);
+    final color = badgeColor ?? SoftPalette.blue550;
 
     return GestureDetector(
       onTap: () => setState(() => _userPinsFilter = label),
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: isSelected ? color : (isDark ? const Color(0xFF161F30) : Colors.white),
+          color: isSelected ? color : (isDark ? SoftPalette.slate900 : SoftPalette.gray50),
           borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: isSelected ? color : (isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1))),
+          border: Border.all(color: isSelected ? color : (isDark ? SoftPalette.slate700 : SoftPalette.slate200)),
           boxShadow: isSelected ? [BoxShadow(color: color.withOpacity(0.2), blurRadius: 4, offset: const Offset(0, 2))] : [],
         ),
         child: Row(
@@ -2221,14 +2224,14 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
               style: TextStyle(
                 fontSize: 12,
                 fontWeight: FontWeight.bold,
-                color: isSelected ? Colors.white : (isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569)),
+                color: isSelected ? SoftPalette.gray50 : (isDark ? SoftPalette.slate200 : SoftPalette.slate600),
               ),
             ),
             const SizedBox(width: 6),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
               decoration: BoxDecoration(
-                color: isSelected ? Colors.white.withOpacity(0.25) : (isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
+                color: isSelected ? SoftPalette.gray50.withOpacity(0.25) : (isDark ? SoftPalette.slate800 : SoftPalette.slate100),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
@@ -2236,7 +2239,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                 style: TextStyle(
                   fontSize: 10,
                   fontWeight: FontWeight.w900,
-                  color: isSelected ? Colors.white : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                  color: isSelected ? SoftPalette.gray50 : (isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                 ),
               ),
             ),
@@ -2249,10 +2252,10 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
   // ── Tab 3: Live Scans & Logs ───────────────────────────────────────────────
 
   Widget _buildLiveLogsTab(bool isDark) {
-    final cardBg = isDark ? const Color(0xFF161F30) : Colors.white;
-    final borderColor = isDark ? const Color(0xFF2A3547) : const Color(0xFFE2E8F0);
-    final textPrimary = isDark ? Colors.white : const Color(0xFF0F172A);
-    final textSecondary = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+    final cardBg = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+    final borderColor = isDark ? SoftPalette.slate750 : SoftPalette.slate150;
+    final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.slate900;
+    final textSecondary = isDark ? SoftPalette.slate350 : SoftPalette.slate550;
 
     return Padding(
       padding: const EdgeInsets.all(16),
@@ -2281,22 +2284,22 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                 icon: const Icon(Icons.fingerprint_rounded, size: 16),
                 label: const Text('Simulate Test Scan'),
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF0F766E),
-                  foregroundColor: Colors.white,
+                  backgroundColor: SoftPalette.teal550,
+                  foregroundColor: SoftPalette.gray50,
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
               ),
               const SizedBox(width: 8),
               IconButton(
-                icon: const Icon(Icons.refresh_rounded, color: Color(0xFF64748B)),
+                icon: Icon(Icons.refresh_rounded, color: context.adapt(SoftPalette.slate550)),
                 tooltip: 'Reload punches from storage',
                 onPressed: () {
                   setState(() {
                     _livePunches.clear();
                     _livePunches.addAll(ZkTecoNetworkService.getRecentPunchesToday());
                   });
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  AppToast.showSnackBar(context, 
                     const SnackBar(content: Text('Reloaded recent punches from storage')),
                   );
                 },
@@ -2320,10 +2323,10 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                           Container(
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
-                              color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                              color: isDark ? SoftPalette.slate800 : SoftPalette.slate100,
                               shape: BoxShape.circle,
                             ),
-                            child: const Icon(Icons.stream_rounded, size: 40, color: Color(0xFF64748B)),
+                            child: Icon(Icons.stream_rounded, size: 40, color: context.adapt(SoftPalette.slate550)),
                           ),
                           const SizedBox(height: 12),
                           Text(
@@ -2347,10 +2350,10 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                             mainAxisSize: MainAxisSize.min,
                             children: [
                               if (!isMapped || (p['entityId']?.toString() ?? '').isEmpty)
-                                const CircleAvatar(
+                                CircleAvatar(
                                   radius: 20,
-                                  backgroundColor: Color(0xFFF1F5F9),
-                                  child: Icon(Icons.fingerprint_rounded, size: 20, color: Color(0xFF64748B)),
+                                  backgroundColor: ctx.adapt(SoftPalette.slate100),
+                                  child: Icon(Icons.fingerprint_rounded, size: 20, color: ctx.adapt(SoftPalette.slate550)),
                                 )
                               else
                                 _buildEntityAvatar(p['entityId']?.toString() ?? '', p['entityName']?.toString() ?? '', p['entityType']?.toString() ?? 'employee'),
@@ -2358,15 +2361,15 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                               CircleAvatar(
                                 radius: 14,
                                 backgroundColor: isCrossBranchPending
-                                    ? const Color(0xFFFEF3C7)
-                                    : (isMapped ? const Color(0xFFECFDF5) : const Color(0xFFFEF2F2)),
+                                    ? ctx.adapt(SoftPalette.yellow100)
+                                    : (isMapped ? ctx.adapt(SoftPalette.emerald50) : ctx.adapt(SoftPalette.red100t)),
                                 child: Icon(
                                   isCrossBranchPending
                                       ? Icons.warning_amber_rounded
                                       : (isMapped ? Icons.check_circle_rounded : Icons.help_outline_rounded),
                                   color: isCrossBranchPending
-                                      ? const Color(0xFFD97706)
-                                      : (isMapped ? const Color(0xFF10B981) : const Color(0xFFEF4444)),
+                                      ? SoftPalette.orange400
+                                      : (isMapped ? SoftPalette.emerald350 : SoftPalette.red400),
                                   size: 16,
                                 ),
                               ),
@@ -2388,7 +2391,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                   padding: const EdgeInsets.only(top: 4.0),
                                   child: Text(
                                     '⚠️ Assigned to ${p['entityBranchName']} • Punched at ${p['deviceBranchName']} (${p['deviceName']})',
-                                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFFB45309)),
+                                    style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: SoftPalette.orange500),
                                   ),
                                 ),
                             ],
@@ -2408,18 +2411,18 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                             setState(() {
                                               p['isCrossBranchPending'] = false;
                                             });
-                                            ScaffoldMessenger.of(context).showSnackBar(
+                                            AppToast.showSnackBar(context, 
                                               SnackBar(
                                                 content: Text('✅ Approved ${p['entityName']} (Marked Present)'),
-                                                backgroundColor: const Color(0xFF10B981),
+                                                backgroundColor: SoftPalette.emerald350,
                                               ),
                                             );
                                           }
                                         }
                                       },
                                       style: ElevatedButton.styleFrom(
-                                        backgroundColor: const Color(0xFF10B981),
-                                        foregroundColor: Colors.white,
+                                        backgroundColor: SoftPalette.emerald350,
+                                        foregroundColor: SoftPalette.gray50,
                                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                         textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                                       ),
@@ -2437,18 +2440,18 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                             setState(() {
                                               p['isCrossBranchPending'] = false;
                                             });
-                                            ScaffoldMessenger.of(context).showSnackBar(
+                                            AppToast.showSnackBar(context, 
                                               SnackBar(
                                                 content: Text('❌ Rejected ${p['entityName']}'),
-                                                backgroundColor: const Color(0xFFEF4444),
+                                                backgroundColor: SoftPalette.red400,
                                               ),
                                             );
                                           }
                                         }
                                       },
                                       style: OutlinedButton.styleFrom(
-                                        foregroundColor: const Color(0xFFEF4444),
-                                        side: const BorderSide(color: Color(0xFFEF4444)),
+                                        foregroundColor: SoftPalette.red400,
+                                        side: const BorderSide(color: SoftPalette.red400),
                                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                         textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                                       ),
@@ -2462,8 +2465,8 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                       icon: const Icon(Icons.person_add_alt_1_rounded, size: 14),
                                       label: const Text('Assign Staff'),
                                       style: ElevatedButton.styleFrom(
-                                        backgroundColor: const Color(0xFFDC2626),
-                                        foregroundColor: Colors.white,
+                                        backgroundColor: SoftPalette.red500,
+                                        foregroundColor: SoftPalette.gray50,
                                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                         textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
                                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -2472,7 +2475,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                   : Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFFD1FAE5),
+                                        color: ctx.adapt(SoftPalette.emerald100),
                                         borderRadius: BorderRadius.circular(12),
                                       ),
                                       child: Text(
@@ -2480,7 +2483,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                         style: GoogleFonts.inter(
                                           fontSize: 11,
                                           fontWeight: FontWeight.bold,
-                                          color: const Color(0xFF065F46),
+                                          color: ctx.adapt(SoftPalette.emerald600),
                                         ),
                                       ),
                                     )),
@@ -2507,7 +2510,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Row(
             children: [
-              const Icon(Icons.fingerprint_rounded, color: Color(0xFF0F766E), size: 24),
+              Icon(Icons.fingerprint_rounded, color: ctx.adapt(SoftPalette.teal550), size: 24),
               const SizedBox(width: 10),
               Text('Assign PIN $pin to Staff Member', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             ],
@@ -2520,7 +2523,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
               children: [
                 Text(
                   'This punch was received from your ZKTeco device with PIN $pin. Choose which employee this PIN belongs to. Their attendance for today will be immediately updated!',
-                  style: TextStyle(fontSize: 12.5, color: Colors.grey[700]),
+                  style: TextStyle(fontSize: 12.5, color: ctx.adapt(SoftPalette.gray550)),
                 ),
                 const SizedBox(height: 16),
                 DropdownButtonFormField<String>(
@@ -2572,10 +2575,10 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                     _livePunches.clear();
                     _livePunches.addAll(ZkTecoNetworkService.getRecentPunchesToday());
                   });
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  AppToast.showSnackBar(context, 
                     SnackBar(
                       content: Text('✅ PIN $assignedPin assigned to $empName! Recorded $remapped attendance punch(es).'),
-                      backgroundColor: const Color(0xFF059669),
+                      backgroundColor: SoftPalette.emerald500,
                     ),
                   );
                 }
@@ -2583,8 +2586,8 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
               icon: const Icon(Icons.check_circle_rounded, size: 16),
               label: const Text('Assign & Update Attendance'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF0F766E),
-                foregroundColor: Colors.white,
+                backgroundColor: SoftPalette.teal550,
+                foregroundColor: SoftPalette.gray50,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
             ),
@@ -2683,10 +2686,10 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                       Navigator.pop(ctx);
                       _confirmDeleteDevice(device);
                     },
-                    icon: const Icon(Icons.delete_forever_rounded, color: Color(0xFFDC2626), size: 18),
+                    icon: const Icon(Icons.delete_forever_rounded, color: SoftPalette.red500, size: 18),
                     label: const Text(
                       'Delete Device',
-                      style: TextStyle(color: Color(0xFFDC2626), fontWeight: FontWeight.bold),
+                      style: TextStyle(color: SoftPalette.red500, fontWeight: FontWeight.bold),
                     ),
                   ),
                 TextButton(
@@ -2788,10 +2791,10 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
           ElevatedButton(
             onPressed: () async {
               if (pinCtrl.text.trim().isEmpty || nameCtrl.text.trim().isEmpty || idCtrl.text.trim().isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                AppToast.showSnackBar(context, 
                   const SnackBar(
                     content: Text('⚠️ PIN, Name, and Entity ID are all required to link a credential.'),
-                    backgroundColor: Color(0xFFDC2626),
+                    backgroundColor: SoftPalette.red500,
                   ),
                 );
                 return;
@@ -2825,7 +2828,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
-            const Icon(Icons.fingerprint_rounded, color: Color(0xFF10B981), size: 28),
+            const Icon(Icons.fingerprint_rounded, color: SoftPalette.emerald350, size: 28),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -2842,16 +2845,16 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: const Color(0xFFECFDF5),
+                color: ctx.adapt(SoftPalette.emerald50),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.badge_rounded, color: Color(0xFF059669)),
+                  const Icon(Icons.badge_rounded, color: SoftPalette.emerald500),
                   const SizedBox(width: 10),
                   Text(
                     'Assigned Biometric PIN: ${c.biometricPin}',
-                    style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: const Color(0xFF065F46)),
+                    style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: ctx.adapt(SoftPalette.emerald600)),
                   ),
                 ],
               ),
@@ -2866,19 +2869,19 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
             const SizedBox(height: 4),
             Text('2. Press "M/OK" key -> Select "User Mgt" -> "New User" (or Edit User).', style: GoogleFonts.inter(fontSize: 12)),
             const SizedBox(height: 4),
-            Text('3. Set User ID = "${c.biometricPin}".', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.blue[800])),
+            Text('3. Set User ID = "${c.biometricPin}".', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold, color: ctx.adapt(SoftPalette.blue550))),
             const SizedBox(height: 4),
             Text('4. Select "Enroll FP" and scan finger 3 times until device beeps green.', style: GoogleFonts.inter(fontSize: 12)),
             const SizedBox(height: 12),
-            Text('That\'s it! Once scanned, any future finger scan on that device will instantly auto-log attendance for ${c.entityName}.', style: GoogleFonts.inter(fontSize: 11, color: Colors.grey[700], fontStyle: FontStyle.italic)),
+            Text('That\'s it! Once scanned, any future finger scan on that device will instantly auto-log attendance for ${c.entityName}.', style: GoogleFonts.inter(fontSize: 11, color: ctx.adapt(SoftPalette.gray550), fontStyle: FontStyle.italic)),
           ],
         ),
         actions: [
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF10B981),
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.emerald350,
+              foregroundColor: SoftPalette.gray50,
             ),
             child: const Text('Got It!'),
           ),
@@ -2899,7 +2902,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Row(
             children: [
-              const Icon(Icons.fingerprint_rounded, color: Color(0xFF0F766E), size: 28),
+              Icon(Icons.fingerprint_rounded, color: ctx.adapt(SoftPalette.teal550), size: 28),
               const SizedBox(width: 10),
               Text(
                 'Simulate Biometric Scan',
@@ -2914,7 +2917,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
               children: [
                 Text(
                   'Select an enrolled staff member or enter a PIN to simulate a real-time finger punch from the ZKTeco hardware:',
-                  style: GoogleFonts.inter(fontSize: 12.5, color: const Color(0xFF64748B)),
+                  style: GoogleFonts.inter(fontSize: 12.5, color: ctx.adapt(SoftPalette.slate550)),
                 ),
                 const SizedBox(height: 14),
                 if (credentials.isNotEmpty) ...[
@@ -2926,7 +2929,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     decoration: BoxDecoration(
-                      border: Border.all(color: const Color(0xFFCBD5E1)),
+                      border: Border.all(color: ctx.adapt(SoftPalette.slate200)),
                       borderRadius: BorderRadius.circular(8),
                     ),
                     child: DropdownButtonHideUnderline(
@@ -2991,10 +2994,10 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                 );
 
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  AppToast.showSnackBar(context, 
                     SnackBar(
                       content: Text('✅ Simulated scan for PIN $pin! Check Live stream and Attendance tab.'),
-                      backgroundColor: const Color(0xFF0F766E),
+                      backgroundColor: SoftPalette.teal550,
                     ),
                   );
                 }
@@ -3002,8 +3005,8 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
               icon: const Icon(Icons.touch_app_rounded, size: 16),
               label: const Text('Punch Now'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF0F766E),
-                foregroundColor: Colors.white,
+                backgroundColor: SoftPalette.teal550,
+                foregroundColor: SoftPalette.gray50,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
             ),
@@ -3018,22 +3021,22 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF0F172A),
+        backgroundColor: SoftPalette.slate900,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: const BorderSide(color: Color(0xFF10B981), width: 1.2),
+          side: const BorderSide(color: SoftPalette.emerald350, width: 1.2),
         ),
         title: Row(
           children: [
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: const Color(0xFF10B981).withOpacity(0.15),
+                color: SoftPalette.emerald350.withOpacity(0.15),
                 shape: BoxShape.circle,
               ),
               child: const Icon(
                 Icons.menu_book_rounded,
-                color: Color(0xFF34D399),
+                color: SoftPalette.emerald300,
                 size: 22,
               ),
             ),
@@ -3044,11 +3047,11 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                 children: [
                   Text(
                     'Biometric Scanner Setup Guide',
-                    style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
+                    style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16, color: SoftPalette.gray50),
                   ),
                   Text(
                     'Hardware & Network Configuration Steps',
-                    style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF94A3B8)),
+                    style: GoogleFonts.inter(fontSize: 11, color: SoftPalette.slate350),
                   ),
                 ],
               ),
@@ -3065,18 +3068,18 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF070D18),
+                    color: SoftPalette.slate900,
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: const Color(0xFF1E293B)),
+                    border: Border.all(color: SoftPalette.slate800),
                   ),
                   child: Row(
                     children: [
-                      const Icon(Icons.info_outline_rounded, color: Color(0xFF38BDF8), size: 18),
+                      const Icon(Icons.info_outline_rounded, color: SoftPalette.sky350, size: 18),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
                           'Follow these steps to connect your physical ZKTeco fingerprint / facial device to this server system.',
-                          style: GoogleFonts.inter(fontSize: 12, color: const Color(0xFFCBD5E1)),
+                          style: GoogleFonts.inter(fontSize: 12, color: SoftPalette.slate200),
                         ),
                       ),
                     ],
@@ -3085,7 +3088,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                 const SizedBox(height: 16),
                 Text(
                   'SETUP INSTRUCTIONS:',
-                  style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: const Color(0xFFF59E0B), letterSpacing: 0.5),
+                  style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: SoftPalette.amber300, letterSpacing: 0.5),
                 ),
                 const SizedBox(height: 10),
                 _buildGuideStepRow(
@@ -3119,8 +3122,8 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF0284C7),
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.sky500,
+              foregroundColor: SoftPalette.gray50,
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
@@ -3135,9 +3138,9 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF070D18),
+        color: SoftPalette.slate900,
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: const Color(0xFF1E293B)),
+        border: Border.all(color: SoftPalette.slate800),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -3147,13 +3150,13 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
             height: 24,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: const Color(0xFF0284C7).withOpacity(0.2),
+              color: SoftPalette.sky500.withOpacity(0.2),
               shape: BoxShape.circle,
-              border: Border.all(color: const Color(0xFF38BDF8), width: 1.2),
+              border: Border.all(color: SoftPalette.sky350, width: 1.2),
             ),
             child: Text(
               stepNumber,
-              style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold, color: const Color(0xFF38BDF8)),
+              style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold, color: SoftPalette.sky350),
             ),
           ),
           const SizedBox(width: 12),
@@ -3163,12 +3166,12 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
               children: [
                 Text(
                   title,
-                  style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white),
+                  style: GoogleFonts.inter(fontSize: 13, fontWeight: FontWeight.bold, color: SoftPalette.gray50),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   description,
-                  style: GoogleFonts.inter(fontSize: 11.5, color: const Color(0xFF94A3B8), height: 1.4),
+                  style: GoogleFonts.inter(fontSize: 11.5, color: SoftPalette.slate350, height: 1.4),
                 ),
               ],
             ),

@@ -8,7 +8,11 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'dart:math' as math;
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/components/decorative_image.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:provider/provider.dart';
@@ -21,6 +25,7 @@ import '../../services/local_storage_service.dart';
 import '../../services/offline_auth_service.dart';
 import '../../services/image_upload_service.dart';
 import '../../services/user_theme_service.dart';
+import '../../services/user_language_service.dart';
 import '../../services/sync_service.dart';
 import '../../theme/role_theme_provider.dart';
 import '../login_page.dart';
@@ -76,19 +81,15 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
   Future<void> _loadLanguage() async {
     try {
       await MadrassaLocalStorage.ensureBoxesOpen();
-      final prefs = await SharedPreferences.getInstance();
-      final saved = prefs.getString('madrassa_locale');
-      if (mounted) setState(() => _langCode = saved ?? '');
+      final saved = UserLanguageService.getLanguage();
+      if (mounted) setState(() => _langCode = saved);
     } catch (_) {
       if (mounted) setState(() => _langCode = 'en');
     }
   }
 
   Future<void> _selectLanguage(String code) async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('madrassa_locale', code);
-    } catch (_) {}
+    await UserLanguageService.setLanguage(code);
     if (mounted) {
       setState(() {
         _langCode = code;
@@ -215,7 +216,7 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
     final now = DateTime.now();
     if (_lastGuardianRefreshTime != null && now.difference(_lastGuardianRefreshTime!) < _guardianRefreshCooldown) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text(context.t('Showing up-to-date data from local storage')),
             behavior: SnackBarBehavior.floating,
@@ -258,16 +259,16 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
       setState(() {
         _studentsFuture = _fetchStudents(branchId, studentIds);
       });
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: Row(
             children: [
-              const Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+              const Icon(Icons.check_circle_rounded, color: SoftPalette.gray50, size: 20),
               const SizedBox(width: 8),
               Text(context.t('Data updated successfully')),
             ],
           ),
-          backgroundColor: const Color(0xFF0F766E),
+          backgroundColor: SoftPalette.teal550,
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 2),
         ),
@@ -310,7 +311,7 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
 
     if (!mounted) return;
     if (branches.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(content: Text(context.t('No branches available.'))),
       );
       return;
@@ -404,7 +405,7 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
 
     if (allStudents.isEmpty) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(context.t('No active students found.'))));
+      AppToast.showSnackBar(context, SnackBar(content: Text(context.t('No active students found.'))));
       return;
     }
 
@@ -427,23 +428,23 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
               child: Container(
                 padding: const EdgeInsets.all(24),
-                decoration: BoxDecoration(borderRadius: BorderRadius.circular(24), color: Colors.white),
+                decoration: BoxDecoration(borderRadius: BorderRadius.circular(24), color: ctx.adapt(SoftPalette.gray50)),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       context.t('Select Student'),
-                      style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Color(0xFF0F6C5A)),
+                      style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: ctx.adapt(SoftPalette.teal600)),
                     ),
                     const SizedBox(height: 16),
                     TextField(
                       controller: searchCtrl,
                       decoration: InputDecoration(
                         hintText: context.t('Search by name or roll number...'),
-                        prefixIcon: const Icon(Icons.search, color: Color(0xFF0F6C5A)),
+                        prefixIcon: Icon(Icons.search, color: ctx.adapt(SoftPalette.teal600)),
                         filled: true,
-                        fillColor: const Color(0xFFF8F9FD),
+                        fillColor: ctx.adapt(SoftPalette.gray50),
                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(16), borderSide: BorderSide.none),
                       ),
                       onChanged: (_) => setStateDialog(() {}),
@@ -485,15 +486,15 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
                                     child: Container(
                                       padding: const EdgeInsets.all(16),
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFFF8F9FD),
+                                        color: ctx.adapt(SoftPalette.gray50),
                                         borderRadius: BorderRadius.circular(16),
-                                        border: Border.all(color: const Color(0xFFE0E2E7)),
+                                        border: Border.all(color: ctx.adapt(SoftPalette.slate150)),
                                       ),
                                       child: Row(
                                         children: [
                                           CircleAvatar(
                                             radius: 22,
-                                            backgroundColor: const Color(0xFF0F6C5A),
+                                            backgroundColor: SoftPalette.teal600,
                                             child: ClipOval(
                                               child: () {
                                                 if (bytes != null) {
@@ -506,13 +507,13 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
                                                     height: 44,
                                                     errorBuilder: (_, __, ___) => Text(
                                                       d['name']?[0] ?? '?',
-                                                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                                                      style: const TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 16),
                                                     ),
                                                   );
                                                 }
                                                 return Text(
                                                   d['name']?[0] ?? '?',
-                                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                                                  style: const TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 16),
                                                 );
                                               }(),
                                             ),
@@ -523,11 +524,11 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
                                               crossAxisAlignment: CrossAxisAlignment.start,
                                               children: [
                                                 Text(d['name'] ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
-                                                Text('Roll: ${d['rollNumber'] ?? "?"} • Guardian: ${d['guardianName'] ?? "?"}', style: const TextStyle(fontSize: 11, color: Colors.grey)),
+                                                Text('Roll: ${d['rollNumber'] ?? "?"} • Guardian: ${d['guardianName'] ?? "?"}', style: TextStyle(fontSize: 11, color: ctx.adapt(SoftPalette.gray350))),
                                               ],
                                             ),
                                           ),
-                                          const Icon(Icons.chevron_right, color: Color(0xFF0F6C5A)),
+                                          Icon(Icons.chevron_right, color: ctx.adapt(SoftPalette.teal600)),
                                         ],
                                       ),
                                     ),
@@ -544,8 +545,8 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
                           Navigator.pop(ctx);
                           _logout();
                         },
-                        icon: const Icon(Icons.logout, color: Colors.red),
-                        label: Text(context.t('Logout'), style: TextStyle(color: Colors.red, fontFamily: context.isUrdu ? 'Noori' : null)),
+                        icon: Icon(Icons.logout, color: ctx.adapt(SoftPalette.red400)),
+                        label: Text(context.t('Logout'), style: TextStyle(color: ctx.adapt(SoftPalette.red400), fontFamily: context.isUrdu ? 'Noori' : null)),
                       ),
                     ),
                   ],
@@ -562,9 +563,9 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
   Widget build(BuildContext context) {
     // ── 1. Still loading pref from SharedPreferences ──
     if (_langCode == null) {
-      return const Scaffold(
-        backgroundColor: Colors.white,
-        body: Center(child: CircularProgressIndicator(color: Color(0xFF0F6C5A))),
+      return Scaffold(
+        backgroundColor: context.adapt(SoftPalette.gray50),
+        body: Center(child: CircularProgressIndicator(color: context.adapt(SoftPalette.teal600))),
       );
     }
 
@@ -762,8 +763,8 @@ class _LanguagePickerScreen extends StatelessWidget {
         future: LocalStorageService.ensureBoxOpen('app_settings'),
         builder: (context, snapshot) {
           if (!snapshot.hasData) {
-            return const Scaffold(
-              body: Center(child: CircularProgressIndicator(color: Color(0xFF0F6C5A))),
+            return Scaffold(
+              body: Center(child: CircularProgressIndicator(color: context.adapt(SoftPalette.teal600))),
             );
           }
           return _buildPickerContent(context, snapshot.data!);
@@ -778,11 +779,11 @@ class _LanguagePickerScreen extends StatelessWidget {
       valueListenable: appSettingsBox.listenable(keys: ['is_dark_mode']),
       builder: (context, Box box, _) {
         final isDark = box.get('is_dark_mode', defaultValue: false) == true;
-        final bg = isDark ? const Color(0xFF0F172A) : Colors.white;
-        final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-        final textPrimary = isDark ? Colors.white : const Color(0xFF1E293B);
-        final textMuted = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
-        final border = isDark ? const Color(0xFF334155) : const Color(0xFFE8EAF0);
+        final bg = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+        final cardBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+        final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.slate800;
+        final textMuted = isDark ? SoftPalette.slate350 : SoftPalette.slate550;
+        final border = isDark ? SoftPalette.slate700 : SoftPalette.slate150;
 
         return Scaffold(
           backgroundColor: bg,
@@ -795,7 +796,7 @@ class _LanguagePickerScreen extends StatelessWidget {
                 color: cardBg,
                 borderRadius: BorderRadius.circular(24),
                 boxShadow: [
-                  BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.08), blurRadius: 32, offset: const Offset(0, 8)),
+                  BoxShadow(color: SoftPalette.gray900.withValues(alpha: isDark ? 0.3 : 0.08), blurRadius: 32, offset: const Offset(0, 8)),
                 ],
                 border: Border.all(color: border),
               ),
@@ -807,10 +808,10 @@ class _LanguagePickerScreen extends StatelessWidget {
                     width: 72,
                     height: 72,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0F6C5A).withValues(alpha: 0.15),
+                      color: context.adapt(SoftPalette.teal600).withValues(alpha: 0.15),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.language_rounded, size: 38, color: Color(0xFF0F6C5A)),
+                    child: Icon(Icons.language_rounded, size: 38, color: context.adapt(SoftPalette.teal600)),
                   ),
                   const SizedBox(height: 24),
                   // App Title
@@ -840,8 +841,8 @@ class _LanguagePickerScreen extends StatelessWidget {
                     child: ElevatedButton(
                       onPressed: () => onSelect('en'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0F6C5A),
-                        foregroundColor: Colors.white,
+                        backgroundColor: SoftPalette.teal600,
+                        foregroundColor: SoftPalette.gray50,
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                         elevation: 0,
@@ -856,7 +857,7 @@ class _LanguagePickerScreen extends StatelessWidget {
                     child: ElevatedButton(
                       onPressed: () => onSelect('ur'),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9),
+                        backgroundColor: isDark ? SoftPalette.slate700 : SoftPalette.slate100,
                         foregroundColor: textPrimary,
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -886,18 +887,18 @@ class _AdminStudentSwitchButton extends StatelessWidget {
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
-        color: const Color(0xFF0F6C5A).withValues(alpha: 0.1),
+        color: context.adapt(SoftPalette.teal600).withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF0F6C5A).withValues(alpha: 0.3)),
+        border: Border.all(color: context.adapt(SoftPalette.teal600).withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.school, size: 20, color: Color(0xFF0F6C5A)),
+          Icon(Icons.school, size: 20, color: context.adapt(SoftPalette.teal600)),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               'Viewing: $studentName',
-              style: const TextStyle(fontWeight: FontWeight.w600, color: Color(0xFF0F6C5A)),
+              style: TextStyle(fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.teal600)),
               overflow: TextOverflow.ellipsis,
             ),
           ),
@@ -906,7 +907,7 @@ class _AdminStudentSwitchButton extends StatelessWidget {
             icon: const Icon(Icons.swap_horiz, size: 18),
             label: const Text('Switch'),
             style: TextButton.styleFrom(
-              foregroundColor: const Color(0xFF0F6C5A),
+              foregroundColor: context.adapt(SoftPalette.teal600),
               padding: const EdgeInsets.symmetric(horizontal: 8),
             ),
           ),
@@ -920,9 +921,9 @@ class _LoadingScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (!Hive.isBoxOpen('app_settings')) {
-      return const Scaffold(
-        backgroundColor: Colors.white,
-        body: Center(child: CircularProgressIndicator(color: Color(0xFF0F6C5A))),
+      return Scaffold(
+        backgroundColor: context.adapt(SoftPalette.gray50),
+        body: Center(child: CircularProgressIndicator(color: context.adapt(SoftPalette.teal600))),
       );
     }
     return ValueListenableBuilder(
@@ -930,8 +931,8 @@ class _LoadingScreen extends StatelessWidget {
       builder: (context, Box box, _) {
         final isDark = box.get('is_dark_mode', defaultValue: false) == true;
         return Scaffold(
-          backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
-          body: const Center(child: CircularProgressIndicator(color: Color(0xFF0F6C5A))),
+          backgroundColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
+          body: Center(child: CircularProgressIndicator(color: context.adapt(SoftPalette.teal600))),
         );
       },
     );
@@ -999,14 +1000,14 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
       valueListenable: UserThemeService.listenable(),
       builder: (context, Box box, _) {
         final isDark = UserThemeService.isDarkMode();
-        final scaffoldBg = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8F9FD);
-        final appBarBg = isDark ? const Color(0xFF1E293B) : const Color(0xFF0F6C5A);
-        final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-        final textPrimary = isDark ? Colors.white : const Color(0xFF1E293B);
-        final textMuted = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
-        final dividerColor = isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9);
-        final progressTrack = isDark ? const Color(0xFF334155) : const Color(0xFFF1F5F9);
-        const accentColor = Color(0xFF0F6C5A);
+        final scaffoldBg = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+        final appBarBg = isDark ? SoftPalette.slate800 : SoftPalette.teal600;
+        final cardBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+        final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.slate800;
+        final textMuted = isDark ? SoftPalette.slate350 : SoftPalette.slate550;
+        final dividerColor = isDark ? SoftPalette.slate700 : SoftPalette.slate100;
+        final progressTrack = isDark ? SoftPalette.slate700 : SoftPalette.slate100;
+        const accentColor = SoftPalette.teal600;
 
         return Scaffold(
           backgroundColor: scaffoldBg,
@@ -1032,7 +1033,7 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 15,
-                            color: Colors.white,
+                            color: SoftPalette.gray50,
                             fontFamily: context.isUrdu ? 'Noori' : null,
                           ),
                         ),
@@ -1057,7 +1058,7 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
                         }(),
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          color: Colors.white70,
+                          color: SoftPalette.gray50A70,
                           fontWeight: FontWeight.w500,
                           fontSize: 11,
                         ),
@@ -1070,7 +1071,7 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
             actions: [
               // Refresh / Sync button
               IconButton(
-                icon: const Icon(Icons.sync_rounded, color: Colors.white, size: 20),
+                icon: const Icon(Icons.sync_rounded, color: SoftPalette.gray50, size: 20),
                 tooltip: context.isUrdu ? 'تازہ ترین معلومات حاصل کریں' : 'Download Latest Updates',
                 onPressed: () async {
                   final sIds = allDocs.map((d) => d.id).toList();
@@ -1084,7 +1085,7 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
               IconButton(
                 icon: Icon(
                   isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-                  color: isDark ? const Color(0xFFFDE047) : Colors.white,
+                  color: isDark ? SoftPalette.yellow150 : SoftPalette.gray50,
                   size: 20,
                 ),
                 tooltip: isDark ? (context.isUrdu ? 'لائٹ موڈ' : 'Light Mode') : (context.isUrdu ? 'ڈارک موڈ' : 'Dark Mode'),
@@ -1098,7 +1099,7 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
                 child: Text(
                   langCode == 'ur' ? 'English' : 'اردو',
                   style: TextStyle(
-                    color: Colors.white,
+                    color: SoftPalette.gray50,
                     fontWeight: FontWeight.bold,
                     fontFamily: langCode != 'ur' ? 'Noori' : null,
                   ),
@@ -1113,11 +1114,11 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
               Positioned.fill(
                 child: Opacity(
                   opacity: isDark ? 0.085 : 0.11,
-                  child: Image.asset(
+                  child: GDecorativeImage.asset(
                     'assets/images/islamic_pattern.webp',
                     fit: BoxFit.cover,
                     repeat: ImageRepeat.repeat,
-                    color: const Color(0xFFD4AF37),
+                    color: SoftPalette.yellow300,
                     colorBlendMode: BlendMode.srcIn,
                   ),
                 ),
@@ -1147,9 +1148,9 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
                           decoration: BoxDecoration(
                             color: cardBg,
                             borderRadius: BorderRadius.circular(14),
-                            border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                            border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
                             boxShadow: [
-                              BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.03), blurRadius: 8, offset: const Offset(0, 2)),
+                              BoxShadow(color: SoftPalette.gray900.withValues(alpha: isDark ? 0.2 : 0.03), blurRadius: 8, offset: const Offset(0, 2)),
                             ],
                           ),
                           child: TextField(
@@ -1309,7 +1310,7 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
                                         style: TextStyle(
                                           fontSize: 11,
                                           fontWeight: FontWeight.bold,
-                                          color: isDark ? Colors.white : textColor,
+                                          color: isDark ? SoftPalette.gray50 : textColor,
                                           fontFamily: context.isUrdu ? 'Noori' : null,
                                         ),
                                       ),
@@ -1323,9 +1324,9 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
                                 decoration: BoxDecoration(
                                   color: cardBg,
                                   borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                                  border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
                                   boxShadow: [
-                                    BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04), blurRadius: 8, offset: const Offset(0, 2)),
+                                    BoxShadow(color: SoftPalette.gray900.withValues(alpha: isDark ? 0.2 : 0.04), blurRadius: 8, offset: const Offset(0, 2)),
                                   ],
                                 ),
                                 child: Column(
@@ -1404,7 +1405,7 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
                                           },
                                           style: ElevatedButton.styleFrom(
                                             backgroundColor: accentColor,
-                                            foregroundColor: Colors.white,
+                                            foregroundColor: SoftPalette.gray50,
                                             elevation: 0,
                                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1420,7 +1421,7 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
                                     style: TextStyle(
                                       fontWeight: FontWeight.bold,
                                       fontSize: 13,
-                                      color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+                                      color: isDark ? SoftPalette.slate200 : SoftPalette.slate600,
                                       fontFamily: context.isUrdu ? 'Noori' : null,
                                     ),
                                   ),
@@ -1430,9 +1431,9 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
                                       width: double.infinity,
                                       padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 12),
                                       decoration: BoxDecoration(
-                                        color: isDark ? const Color(0xFF334155).withValues(alpha: 0.5) : Colors.grey.shade50,
+                                        color: isDark ? SoftPalette.slate700.withValues(alpha: 0.5) : SoftPalette.gray50,
                                         borderRadius: BorderRadius.circular(10),
-                                        border: Border.all(color: isDark ? const Color(0xFF475569) : Colors.grey.shade200),
+                                        border: Border.all(color: isDark ? SoftPalette.slate600 : SoftPalette.gray100),
                                       ),
                                       child: Text(
                                         context.isUrdu 
@@ -1455,29 +1456,29 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
                                           buildStatusChip(
                                             icon: Icons.check_circle_outline,
                                             label: context.t('Present'),
-                                            color: const Color(0xFF10B981),
-                                            textColor: const Color(0xFF065F46),
+                                            color: ctx.adapt(SoftPalette.emerald350),
+                                            textColor: ctx.adapt(SoftPalette.emerald600),
                                           )
                                         else if (attendance == 'leave')
                                           buildStatusChip(
                                             icon: Icons.mail_outline,
                                             label: context.t('On Leave'),
-                                            color: Colors.orange,
-                                            textColor: Colors.orange.shade900,
+                                            color: ctx.adapt(SoftPalette.amber300),
+                                            textColor: ctx.adapt(SoftPalette.orange400),
                                           )
                                         else if (attendance == 'leave_requested')
                                           buildStatusChip(
                                             icon: Icons.mail_outline,
                                             label: context.t('Leave Requested'),
-                                            color: Colors.amber.shade700,
-                                            textColor: Colors.amber.shade900,
+                                            color: ctx.adapt(SoftPalette.amber300),
+                                            textColor: ctx.adapt(SoftPalette.orange350),
                                           )
                                         else
                                           buildStatusChip(
                                             icon: Icons.cancel_outlined,
                                             label: context.t('Absent'),
-                                            color: const Color(0xFFEF4444),
-                                            textColor: const Color(0xFF991B1B),
+                                            color: ctx.adapt(SoftPalette.red400),
+                                            textColor: ctx.adapt(SoftPalette.red600),
                                           ),
                                         
                                         if (attendance == 'present') ...[
@@ -1488,8 +1489,8 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
                                                     ? (isNazraStudent ? 'سبق (ناظرہ): +$sabakDelta لائنیں' : 'سبق: +$sabakDelta لائنیں')
                                                     : (isNazraStudent ? 'Sabak (Nazra): +$sabakDelta lines' : 'Sabak: +$sabakDelta lines'))
                                                 : context.t('No lines recorded'),
-                                            color: const Color(0xFF0F6C5A),
-                                            textColor: const Color(0xFF312E81),
+                                            color: ctx.adapt(SoftPalette.teal600),
+                                            textColor: ctx.adapt(SoftPalette.indigo700),
                                           ),
                                           
                                           if (!isNazraStudent) ...[
@@ -1500,8 +1501,8 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
                                                   : (sabkiRatio == 'nahi_sunaya'
                                                       ? (context.isUrdu ? 'سبقی: نہیں سنایا' : 'Sabki: Nahi Sunaya')
                                                       : (context.isUrdu ? 'سبقی: کوئی سبق نہیں' : 'Sabki: None')),
-                                              color: const Color(0xFFED6C02),
-                                              textColor: const Color(0xFF7E2D11),
+                                              color: ctx.adapt(SoftPalette.orange400),
+                                              textColor: ctx.adapt(SoftPalette.orange700),
                                             ),
                                             
                                             buildStatusChip(
@@ -1511,8 +1512,8 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
                                                   : (manzilRatio == 'nahi_sunaya'
                                                       ? (context.isUrdu ? 'منزل: نہیں سنایا' : 'Manzil: Nahi Sunaya')
                                                       : (context.isUrdu ? 'منزل: کوئی منزل نہیں' : 'Manzil: None')),
-                                              color: const Color(0xFF9C27B0),
-                                              textColor: const Color(0xFF4A0E4E),
+                                              color: ctx.adapt(SoftPalette.purple550),
+                                              textColor: ctx.adapt(SoftPalette.purple750),
                                             ),
                                             
                                             buildStatusChip(
@@ -1520,8 +1521,8 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
                                               label: uniformOk 
                                                   ? context.t('Uniform: Clean') 
                                                   : context.t('Uniform: Unclean'),
-                                              color: uniformOk ? Colors.blue : const Color(0xFFEF4444),
-                                              textColor: uniformOk ? Colors.blue.shade900 : const Color(0xFF991B1B),
+                                              color: uniformOk ? ctx.adapt(SoftPalette.blue400) : ctx.adapt(SoftPalette.red400),
+                                              textColor: uniformOk ? ctx.adapt(SoftPalette.blue600) : ctx.adapt(SoftPalette.red600),
                                             ),
                                           ],
                                           
@@ -1530,8 +1531,8 @@ class _FamilySummaryViewState extends State<_FamilySummaryView> {
                                             label: replied 
                                                 ? context.t('Reply: Sent') 
                                                 : context.t('Reply: Pending'),
-                                            color: replied ? Colors.green : Colors.amber.shade800,
-                                            textColor: replied ? Colors.green.shade900 : Colors.amber.shade900,
+                                            color: replied ? ctx.adapt(SoftPalette.green400) : ctx.adapt(SoftPalette.orange350),
+                                            textColor: replied ? ctx.adapt(SoftPalette.green600) : ctx.adapt(SoftPalette.orange350),
                                           ),
                                         ],
                                       ],
@@ -1567,24 +1568,24 @@ class _EmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!Hive.isBoxOpen('app_settings')) {
       return Scaffold(
-        backgroundColor: Colors.white,
+        backgroundColor: context.adapt(SoftPalette.gray50),
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(32),
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                const Icon(Icons.link_off_rounded, size: 64, color: Color(0xFF0F6C5A)),
+                Icon(Icons.link_off_rounded, size: 64, color: context.adapt(SoftPalette.teal600)),
                 const SizedBox(height: 24),
                 Text(
                   context.t('Account Not Linked'),
-                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: const Color(0xFF1E293B), fontFamily: context.isUrdu ? 'Noori' : null),
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate800), fontFamily: context.isUrdu ? 'Noori' : null),
                 ),
                 const SizedBox(height: 8),
                 Text(
                   context.t(message ?? 'Your account is not linked to any student.'),
                   textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey, fontFamily: context.isUrdu ? 'Noori' : null),
+                  style: TextStyle(color: context.adapt(SoftPalette.gray350), fontFamily: context.isUrdu ? 'Noori' : null),
                 ),
                 const SizedBox(height: 32),
                 SizedBox(
@@ -1592,8 +1593,8 @@ class _EmptyState extends StatelessWidget {
                   child: ElevatedButton(
                     onPressed: onLogout,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF0F6C5A),
-                      foregroundColor: Colors.white,
+                      backgroundColor: SoftPalette.teal600,
+                      foregroundColor: SoftPalette.gray50,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     ),
                     child: Text(context.t('Back to Login'), style: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null)),
@@ -1609,9 +1610,9 @@ class _EmptyState extends StatelessWidget {
       valueListenable: Hive.box('app_settings').listenable(keys: ['is_dark_mode']),
       builder: (context, Box box, _) {
         final isDark = box.get('is_dark_mode', defaultValue: false) == true;
-        final bg = isDark ? const Color(0xFF0F172A) : Colors.white;
-        final textPrimary = isDark ? Colors.white : const Color(0xFF1E293B);
-        final textMuted = isDark ? const Color(0xFF94A3B8) : Colors.grey;
+        final bg = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+        final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.slate800;
+        final textMuted = isDark ? SoftPalette.slate350 : SoftPalette.gray350;
 
         return Scaffold(
           backgroundColor: bg,
@@ -1621,7 +1622,7 @@ class _EmptyState extends StatelessWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.link_off_rounded, size: 64, color: Color(0xFF0F6C5A)),
+                  Icon(Icons.link_off_rounded, size: 64, color: context.adapt(SoftPalette.teal600)),
                   const SizedBox(height: 24),
                   Text(
                     context.t('Account Not Linked'),
@@ -1639,8 +1640,8 @@ class _EmptyState extends StatelessWidget {
                     child: ElevatedButton(
                       onPressed: onLogout,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0F6C5A),
-                        foregroundColor: Colors.white,
+                        backgroundColor: SoftPalette.teal600,
+                        foregroundColor: SoftPalette.gray50,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
                       child: Text(context.t('Back to Login'), style: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null)),
@@ -1681,7 +1682,7 @@ class _AdminSelectionPlaceholder extends StatelessWidget {
       return FutureBuilder<Box>(
         future: LocalStorageService.ensureBoxOpen('app_settings'),
         builder: (context, snapshot) {
-          if (!snapshot.hasData) return const Scaffold(body: Center(child: CircularProgressIndicator(color: Color(0xFF0F6C5A))));
+          if (!snapshot.hasData) return Scaffold(body: Center(child: CircularProgressIndicator(color: context.adapt(SoftPalette.teal600))));
           return _buildPlaceholderContent(context, snapshot.data!);
         },
       );
@@ -1694,11 +1695,11 @@ class _AdminSelectionPlaceholder extends StatelessWidget {
       valueListenable: appSettingsBox.listenable(keys: ['is_dark_mode']),
       builder: (context, Box box, _) {
         final isDark = box.get('is_dark_mode', defaultValue: false) == true;
-        final bg = isDark ? const Color(0xFF0F172A) : Colors.white;
-        final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-        final textPrimary = isDark ? Colors.white : const Color(0xFF1E293B);
-        final textMuted = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
-        final border = isDark ? const Color(0xFF334155) : const Color(0xFFE8EAF0);
+        final bg = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+        final cardBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+        final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.slate800;
+        final textMuted = isDark ? SoftPalette.slate350 : SoftPalette.slate550;
+        final border = isDark ? SoftPalette.slate700 : SoftPalette.slate150;
 
         return Scaffold(
           backgroundColor: bg,
@@ -1711,7 +1712,7 @@ class _AdminSelectionPlaceholder extends StatelessWidget {
                 color: cardBg,
                 borderRadius: BorderRadius.circular(24),
                 boxShadow: [
-                  BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.3 : 0.08), blurRadius: 32, offset: const Offset(0, 8)),
+                  BoxShadow(color: SoftPalette.gray900.withValues(alpha: isDark ? 0.3 : 0.08), blurRadius: 32, offset: const Offset(0, 8)),
                 ],
                 border: Border.all(color: border),
               ),
@@ -1722,10 +1723,10 @@ class _AdminSelectionPlaceholder extends StatelessWidget {
                     width: 72,
                     height: 72,
                     decoration: BoxDecoration(
-                      color: const Color(0xFF0F6C5A).withValues(alpha: 0.15),
+                      color: context.adapt(SoftPalette.teal600).withValues(alpha: 0.15),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.family_restroom_rounded, color: Color(0xFF0F6C5A), size: 36),
+                    child: Icon(Icons.family_restroom_rounded, color: context.adapt(SoftPalette.teal600), size: 36),
                   ),
                   const SizedBox(height: 24),
                   Text(
@@ -1745,8 +1746,8 @@ class _AdminSelectionPlaceholder extends StatelessWidget {
                     child: ElevatedButton(
                       onPressed: onButtonPressed,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0F6C5A),
-                        foregroundColor: Colors.white,
+                        backgroundColor: SoftPalette.teal600,
+                        foregroundColor: SoftPalette.gray50,
                         padding: const EdgeInsets.symmetric(vertical: 16),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                         elevation: 0,
@@ -1778,7 +1779,7 @@ class _AdminSelectionPlaceholder extends StatelessWidget {
                     child: TextButton(
                       onPressed: onLogout,
                       style: TextButton.styleFrom(
-                        foregroundColor: Colors.red,
+                        foregroundColor: context.adapt(SoftPalette.red400),
                         padding: const EdgeInsets.symmetric(vertical: 16),
                       ),
                       child: Text(context.t('Logout'), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700)),

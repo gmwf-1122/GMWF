@@ -1,6 +1,8 @@
 // lib/pages/school/dialogs/school_homeroom_dialog.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import '../models/school_teacher.dart';
 import '../theme/school_theme.dart';
 import '../utils/school_local_storage.dart';
@@ -75,29 +77,29 @@ class _SchoolHomeroomDialogState extends State<SchoolHomeroomDialog> {
                     Container(
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF1B4965).withValues(alpha: 0.1),
+                        color: context.adapt(SoftPalette.sky700).withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(12),
                       ),
-                      child: const Icon(Icons.supervisor_account_rounded, color: Color(0xFF1B4965), size: 24),
+                      child: Icon(Icons.supervisor_account_rounded, color: context.adapt(SoftPalette.sky700), size: 24),
                     ),
                     const SizedBox(width: 14),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
-                        children: const [
+                        children: [
                           Text(
                             'Assign / Transfer Homeroom Teacher',
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF1E293B)),
+                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate800)),
                           ),
                           Text(
                             'Manage Class Incharge responsibility & attendance permissions',
-                            style: TextStyle(fontSize: 12, color: Color(0xFF64748B)),
+                            style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.slate550)),
                           ),
                         ],
                       ),
                     ),
                     IconButton(
-                      icon: const Icon(Icons.close_rounded, color: Colors.grey),
+                      icon: Icon(Icons.close_rounded, color: context.adapt(SoftPalette.gray350)),
                       onPressed: () => Navigator.pop(context, false),
                     ),
                   ],
@@ -114,14 +116,14 @@ class _SchoolHomeroomDialogState extends State<SchoolHomeroomDialog> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('Target Grade / Class:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF475569))),
+                          Text('Target Grade / Class:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: context.adapt(SoftPalette.slate600))),
                           const SizedBox(height: 6),
                           DropdownButtonFormField<String>(
                             value: _selectedGrade,
                             decoration: InputDecoration(
                               filled: true,
-                              fillColor: const Color(0xFFF8FAFC),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+                              fillColor: context.adapt(SoftPalette.gray50),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: context.adapt(SoftPalette.slate150))),
                               contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                             ),
                             items: _grades.map((g) => DropdownMenuItem(value: g, child: Text('Grade $g'))).toList(),
@@ -137,14 +139,14 @@ class _SchoolHomeroomDialogState extends State<SchoolHomeroomDialog> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Text('Section:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF475569))),
+                          Text('Section:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: context.adapt(SoftPalette.slate600))),
                           const SizedBox(height: 6),
                           DropdownButtonFormField<String>(
                             value: _selectedSection,
                             decoration: InputDecoration(
                               filled: true,
-                              fillColor: const Color(0xFFF8FAFC),
-                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+                              fillColor: context.adapt(SoftPalette.gray50),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: context.adapt(SoftPalette.slate150))),
                               contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                             ),
                             items: _sections.map((s) => DropdownMenuItem(value: s, child: Text('Section $s'))).toList(),
@@ -164,17 +166,17 @@ class _SchoolHomeroomDialogState extends State<SchoolHomeroomDialog> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: currentTeacherId.isNotEmpty ? SchoolTheme.primaryLight : SchoolTheme.statusLeaveBg,
+                    color: currentTeacherId.isNotEmpty ? context.adapt(SchoolTheme.primaryLight) : context.adapt(SchoolTheme.statusLeaveBg),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                      color: currentTeacherId.isNotEmpty ? SchoolTheme.primary.withValues(alpha: 0.3) : SchoolTheme.statusLeave.withValues(alpha: 0.3),
+                      color: currentTeacherId.isNotEmpty ? context.adapt(SchoolTheme.primary).withValues(alpha: 0.3) : SchoolTheme.statusLeave.withValues(alpha: 0.3),
                     ),
                   ),
                   child: Row(
                     children: [
                       Icon(
                         currentTeacherId.isNotEmpty ? Icons.check_circle_rounded : Icons.info_outline_rounded,
-                        color: currentTeacherId.isNotEmpty ? SchoolTheme.primary : SchoolTheme.statusLeave,
+                        color: currentTeacherId.isNotEmpty ? context.adapt(SchoolTheme.primary) : SchoolTheme.statusLeave,
                         size: 20,
                       ),
                       const SizedBox(width: 10),
@@ -186,7 +188,7 @@ class _SchoolHomeroomDialogState extends State<SchoolHomeroomDialog> {
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 13,
-                            color: currentTeacherId.isNotEmpty ? SchoolTheme.primary : SchoolTheme.statusLeave,
+                            color: currentTeacherId.isNotEmpty ? context.adapt(SchoolTheme.primary) : SchoolTheme.statusLeave,
                           ),
                         ),
                       ),
@@ -197,15 +199,15 @@ class _SchoolHomeroomDialogState extends State<SchoolHomeroomDialog> {
                 const SizedBox(height: 16),
 
                 // Teacher Selector Dropdown
-                const Text('Assign / Transfer To Teacher:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF475569))),
+                Text('Assign / Transfer To Teacher:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: context.adapt(SoftPalette.slate600))),
                 const SizedBox(height: 6),
                 DropdownButtonFormField<SchoolTeacher>(
                   value: _selectedTeacher,
                   hint: const Text('Select a faculty member...'),
                   decoration: InputDecoration(
                     filled: true,
-                    fillColor: const Color(0xFFF8FAFC),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFFE2E8F0))),
+                    fillColor: context.adapt(SoftPalette.gray50),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: context.adapt(SoftPalette.slate150))),
                     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   ),
                   items: activeTeachers.map((t) {
@@ -228,8 +230,8 @@ class _SchoolHomeroomDialogState extends State<SchoolHomeroomDialog> {
                     if (currentTeacherId.isNotEmpty)
                       OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: const Color(0xFFDC4A4A),
-                          side: const BorderSide(color: Color(0xFFDC4A4A)),
+                          foregroundColor: SoftPalette.red500,
+                          side: const BorderSide(color: SoftPalette.red500),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         ),
                         icon: const Icon(Icons.person_remove_rounded, size: 18),
@@ -245,12 +247,12 @@ class _SchoolHomeroomDialogState extends State<SchoolHomeroomDialog> {
                     ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: SchoolTheme.accent,
-                        foregroundColor: Colors.white,
+                        foregroundColor: SoftPalette.gray50,
                         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
                       icon: _isSaving
-                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                          ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(color: SoftPalette.gray50, strokeWidth: 2))
                           : const Icon(Icons.check_rounded, size: 18),
                       label: Text(_isSaving ? 'Saving...' : 'Confirm Assignment'),
                       onPressed: (_isSaving || _selectedTeacher == null) ? null : () => _saveAssignment(remove: false),

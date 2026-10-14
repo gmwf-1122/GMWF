@@ -11,6 +11,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
+// SoftPalette provided by design_system.dart
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/module_registry.dart';
 import '../theme/role_theme_provider.dart';
@@ -23,6 +24,7 @@ import '../services/user_module_access_service.dart';
 import '../services/auto_update_service.dart';
 import '../services/camp_session_service.dart';
 import '../design/design_system.dart';
+import 'sync_status_indicator.dart';
 
 const String _kGlobalBranchId = 'all';
 
@@ -420,7 +422,7 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.lock_person_rounded, size: 64, color: Colors.redAccent),
+              const Icon(Icons.lock_person_rounded, size: 64, color: SoftPalette.red400),
               const SizedBox(height: 16),
               Text('Access Restricted', style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: t.textPrimary)),
               const SizedBox(height: 8),
@@ -442,7 +444,7 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
     }
 
     return Scaffold(
-      backgroundColor: _isGlobal ? const Color(0xFF0D1117) : t.bg,
+      backgroundColor: _isGlobal ? SoftPalette.slate900 : t.bg,
       appBar: _buildAppBar(t, isMobile),
       body: _needsBranch
           ? _BranchPickerBody(
@@ -455,9 +457,9 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
   }
 
   AppBar _buildAppBar(RoleThemeData t, bool isMobile) {
-    final bgColor = _isGlobal ? const Color(0xFF161B22) : t.bgCard;
+    final bgColor = _isGlobal ? SoftPalette.slate900 : t.bgCard;
     final dividerColor =
-        _isGlobal ? const Color(0xFF30363D) : t.bgRule;
+        _isGlobal ? SoftPalette.slate750 : t.bgRule;
     final screenWidth = MediaQuery.of(context).size.width;
     final isCompact = isMobile || screenWidth < 800;
 
@@ -466,8 +468,8 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
       elevation: 0,
       surfaceTintColor: Colors.transparent,
       leading: AppBackButton(
-        color: _isGlobal ? Colors.white : t.textPrimary,
-        bgColor: _isGlobal ? const Color(0xFF21262D) : t.accent.withValues(alpha: 0.08),
+        color: _isGlobal ? SoftPalette.gray50 : t.textPrimary,
+        bgColor: _isGlobal ? SoftPalette.slate800 : t.accent.withValues(alpha: 0.08),
         onPressed: () => Navigator.pop(context),
       ),
       leadingWidth: 50,
@@ -499,7 +501,7 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
                 Text(
                   widget.module.title,
                   style: TextStyle(
-                    color: _isGlobal ? const Color(0xFFE6EDF3) : t.textPrimary,
+                    color: _isGlobal ? SoftPalette.slate150 : t.textPrimary,
                     fontWeight: FontWeight.w800,
                     fontSize: isCompact ? 14 : 16,
                     letterSpacing: -0.3,
@@ -541,6 +543,10 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
         ],
       ),
       actions: [
+        Padding(
+          padding: const EdgeInsets.only(right: 6),
+          child: SyncStatusIndicator(isDark: _isGlobal),
+        ),
         // Version pill (hide on very narrow screens < 420px to save space)
         if (screenWidth >= 420)
           Container(
@@ -644,12 +650,12 @@ class _DesktopBranchDropdown extends StatelessWidget {
       constraints: const BoxConstraints(maxWidth: 200),
       decoration: BoxDecoration(
         color: state._isGlobal
-            ? const Color(0xFF21262D)
+            ? SoftPalette.slate800
             : t.accent.withValues(alpha: 0.06),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
             color: state._isGlobal
-                ? const Color(0xFF30363D)
+                ? SoftPalette.slate750
                 : t.accent.withValues(alpha: 0.2)),
       ),
       child: Builder(
@@ -684,18 +690,18 @@ class _DesktopBranchDropdown extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                       color: state._isGlobal
-                          ? const Color(0xFF8B949E)
+                          ? SoftPalette.slate400
                           : t.textTertiary,
                       fontSize: 12,
                       fontWeight: FontWeight.w600)),
               icon: Icon(Icons.keyboard_arrow_down_rounded,
                   color: t.accent, size: 16),
               dropdownColor: state._isGlobal
-                  ? const Color(0xFF161B22)
+                  ? SoftPalette.slate900
                   : t.bgCard,
               style: TextStyle(
                   color: state._isGlobal
-                      ? const Color(0xFFE6EDF3)
+                      ? SoftPalette.slate150
                       : t.textPrimary,
                   fontSize: 12,
                   fontWeight: FontWeight.w600),
@@ -770,12 +776,12 @@ class _DesktopCampDropdown extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
             color: state._isGlobal
-                ? const Color(0xFF21262D)
+                ? SoftPalette.slate800
                 : t.accent.withValues(alpha: 0.06),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
               color: state._isGlobal
-                  ? const Color(0xFF30363D)
+                  ? SoftPalette.slate750
                   : t.accent.withValues(alpha: 0.2),
             ),
           ),
@@ -783,9 +789,9 @@ class _DesktopCampDropdown extends StatelessWidget {
             child: DropdownButton<String>(
               value: safeValue,
               icon: Icon(Icons.keyboard_arrow_down_rounded, color: t.accent, size: 18),
-              dropdownColor: state._isGlobal ? const Color(0xFF161B22) : t.bgCard,
+              dropdownColor: state._isGlobal ? SoftPalette.slate900 : t.bgCard,
               style: TextStyle(
-                color: state._isGlobal ? const Color(0xFFE6EDF3) : t.textPrimary,
+                color: state._isGlobal ? SoftPalette.slate150 : t.textPrimary,
                 fontSize: 12.5,
                 fontWeight: FontWeight.w600,
               ),
@@ -865,7 +871,7 @@ class _BranchSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isGlobal = state._isGlobal;
-    final bgColor = isGlobal ? const Color(0xFF161B22) : t.bgCard;
+    final bgColor = isGlobal ? SoftPalette.slate900 : t.bgCard;
 
     return Container(
       margin: const EdgeInsets.only(top: 60),
@@ -875,7 +881,7 @@ class _BranchSheet extends StatelessWidget {
             const BorderRadius.vertical(top: Radius.circular(28)),
         border: Border.all(
             color: isGlobal
-                ? const Color(0xFF30363D)
+                ? SoftPalette.slate750
                 : t.bgRule),
       ),
       child: Column(
@@ -888,7 +894,7 @@ class _BranchSheet extends StatelessWidget {
               height: 4,
               decoration: BoxDecoration(
                 color: isGlobal
-                    ? const Color(0xFF30363D)
+                    ? SoftPalette.slate750
                     : t.bgRule,
                 borderRadius: BorderRadius.circular(2),
               ),
@@ -903,7 +909,7 @@ class _BranchSheet extends StatelessWidget {
               Text('Select Branch',
                   style: TextStyle(
                       color: isGlobal
-                          ? const Color(0xFFE6EDF3)
+                          ? SoftPalette.slate150
                           : t.textPrimary,
                       fontSize: 17,
                       fontWeight: FontWeight.w800)),
@@ -911,7 +917,7 @@ class _BranchSheet extends StatelessWidget {
           ),
           Divider(
               color: isGlobal
-                  ? const Color(0xFF30363D)
+                  ? SoftPalette.slate750
                   : t.bgRule,
               height: 1),
           Expanded(
@@ -942,14 +948,14 @@ class _BranchSheet extends StatelessWidget {
                                 ? t.accent.withOpacity(
                                     isGlobal ? 0.18 : 0.08)
                                 : (isGlobal
-                                    ? const Color(0xFF21262D)
+                                    ? SoftPalette.slate800
                                     : t.bgCardAlt),
                             borderRadius: BorderRadius.circular(14),
                             border: Border.all(
                                 color: sel
                                     ? t.accent.withValues(alpha: 0.5)
                                     : (isGlobal
-                                        ? const Color(0xFF30363D)
+                                        ? SoftPalette.slate750
                                         : t.bgRule)),
                           ),
                           child: Row(children: [
@@ -960,7 +966,7 @@ class _BranchSheet extends StatelessWidget {
                                 color: sel
                                     ? t.accent.withValues(alpha: 0.2)
                                     : (isGlobal
-                                        ? const Color(0xFF0D1117)
+                                        ? SoftPalette.slate900
                                         : t.accentMuted),
                                 borderRadius:
                                     BorderRadius.circular(10),
@@ -988,10 +994,10 @@ class _BranchSheet extends StatelessWidget {
                                 style: TextStyle(
                                     color: sel
                                         ? (isGlobal
-                                            ? Colors.white
+                                            ? SoftPalette.gray50
                                             : t.textPrimary)
                                         : (isGlobal
-                                            ? const Color(0xFFE6EDF3)
+                                            ? SoftPalette.slate150
                                             : t.textSecondary),
                                     fontWeight: sel
                                         ? FontWeight.w700
@@ -1066,8 +1072,8 @@ class _BranchPickerBody extends StatelessWidget {
                 gradient: _isGlobal
                     ? const LinearGradient(
                         colors: [
-                          Color(0xFF161B22),
-                          Color(0xFF0D1117)
+                          SoftPalette.slate900,
+                          SoftPalette.slate900
                         ],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
@@ -1083,7 +1089,7 @@ class _BranchPickerBody extends StatelessWidget {
                 borderRadius: BorderRadius.circular(24),
                 border: Border.all(
                     color: _isGlobal
-                        ? const Color(0xFF30363D)
+                        ? SoftPalette.slate750
                         : t.accent.withValues(alpha: 0.15)),
               ),
               child: Row(
@@ -1108,7 +1114,7 @@ class _BranchPickerBody extends StatelessWidget {
                           'Choose a Branch',
                           style: TextStyle(
                             color: _isGlobal
-                                ? const Color(0xFFE6EDF3)
+                                ? SoftPalette.slate150
                                 : t.textPrimary,
                             fontSize: isMobile ? 18 : 22,
                             fontWeight: FontWeight.w900,
@@ -1120,7 +1126,7 @@ class _BranchPickerBody extends StatelessWidget {
                           'Select a branch below to access ${state.widget.module.title}',
                           style: TextStyle(
                             color: _isGlobal
-                                ? const Color(0xFF8B949E)
+                                ? SoftPalette.slate400
                                 : t.textTertiary,
                             fontSize: 13,
                             height: 1.4,
@@ -1149,7 +1155,7 @@ class _BranchPickerBody extends StatelessWidget {
                 Text('ALL BRANCHES',
                     style: TextStyle(
                         color: _isGlobal
-                            ? const Color(0xFF8B949E)
+                            ? SoftPalette.slate400
                             : t.textTertiary,
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
@@ -1260,7 +1266,7 @@ class _BranchTileState extends State<_BranchTile> {
           decoration: BoxDecoration(
             color: sel || _hovered
                 ? t.accent.withOpacity(isGlobal ? 0.12 : 0.06)
-                : (isGlobal ? const Color(0xFF161B22) : t.bgCard),
+                : (isGlobal ? SoftPalette.slate900 : t.bgCard),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
                 color: sel
@@ -1268,7 +1274,7 @@ class _BranchTileState extends State<_BranchTile> {
                     : (_hovered
                         ? t.accent.withValues(alpha: 0.3)
                         : (isGlobal
-                            ? const Color(0xFF30363D)
+                            ? SoftPalette.slate750
                             : t.bgRule)),
                 width: sel ? 1.5 : 1),
             boxShadow: sel || _hovered
@@ -1289,7 +1295,7 @@ class _BranchTileState extends State<_BranchTile> {
                   color: sel
                       ? t.accent.withValues(alpha: 0.2)
                       : (isGlobal
-                          ? const Color(0xFF21262D)
+                          ? SoftPalette.slate800
                           : t.accentMuted),
                   borderRadius: BorderRadius.circular(10),
                 ),
@@ -1310,9 +1316,9 @@ class _BranchTileState extends State<_BranchTile> {
                   widget.b['name'],
                   style: TextStyle(
                     color: sel
-                        ? (isGlobal ? Colors.white : t.textPrimary)
+                        ? (isGlobal ? SoftPalette.gray50 : t.textPrimary)
                         : (isGlobal
-                            ? const Color(0xFFE6EDF3)
+                            ? SoftPalette.slate150
                             : t.textSecondary),
                     fontWeight:
                         sel ? FontWeight.w700 : FontWeight.w500,
@@ -1327,7 +1333,7 @@ class _BranchTileState extends State<_BranchTile> {
               else
                 Icon(Icons.arrow_forward_ios_rounded,
                     color: isGlobal
-                        ? const Color(0xFF8B949E)
+                        ? SoftPalette.slate400
                         : t.textTertiary,
                     size: 13),
             ],

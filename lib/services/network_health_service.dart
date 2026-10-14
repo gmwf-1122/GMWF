@@ -71,11 +71,11 @@ class NetworkHealthService {
         // Promote immediately after 1 stable ping on all platforms
         _updateState(NetworkQualityState.onlineStable);
       } else {
-        _updateState(NetworkQualityState.onlineUnstable);
+        _updateState(NetworkQualityState.offline);
       }
     } catch (e) {
       debugPrint('[NetworkHealthService] Health check exception: $e');
-      _updateState(NetworkQualityState.onlineUnstable);
+      _updateState(NetworkQualityState.offline);
     } finally {
       _isChecking = false;
     }

@@ -9,6 +9,7 @@
 // It only receives plain values and callbacks, so it can be reused and tested in isolation.
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:intl/intl.dart';
 
 class ServerClientRow {
@@ -90,15 +91,15 @@ class ServerOverviewPanel extends StatelessWidget {
   });
 
   // ── palette (one accent, flat surfaces) ──────────────────────────────────
-  Color get _surface => isDark ? const Color(0xFF111827) : Colors.white;
-  Color get _subtle => isDark ? const Color(0xFF1F2937) : const Color(0xFFF3F4F6);
-  Color get _line => isDark ? const Color(0xFF273244) : const Color(0xFFE5E7EB);
-  Color get _text => isDark ? const Color(0xFFF3F4F6) : const Color(0xFF111827);
-  Color get _muted => isDark ? const Color(0xFF9CA3AF) : const Color(0xFF6B7280);
-  static const Color _accent = Color(0xFF0F766E);
-  static const Color _ok = Color(0xFF15803D);
-  static const Color _warn = Color(0xFFB45309);
-  static const Color _bad = Color(0xFFB91C1C);
+  Color get _surface => isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+  Color get _subtle => isDark ? SoftPalette.slate800 : SoftPalette.gray100;
+  Color get _line => isDark ? SoftPalette.slate750 : SoftPalette.gray150;
+  Color get _text => isDark ? SoftPalette.gray100 : SoftPalette.slate900;
+  Color get _muted => isDark ? SoftPalette.slate350 : SoftPalette.slate550;
+  static const Color _accent = SoftPalette.teal550;
+  static const Color _ok = SoftPalette.green550;
+  static const Color _warn = SoftPalette.orange500;
+  static const Color _bad = SoftPalette.red550;
 
   static String _ago(DateTime t) {
     final d = DateTime.now().difference(t);

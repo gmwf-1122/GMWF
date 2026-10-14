@@ -2,6 +2,7 @@
 // Drop-in widget showing live LAN connection state with the modern pill aesthetic.
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../realtime/connection_manager.dart';
 import '../realtime/realtime_manager.dart';
@@ -29,21 +30,21 @@ class ConnectionStatusBadge extends StatelessWidget {
       builder: (context, box, _) {
         final isDark = box.get('is_dark_mode', defaultValue: false) == true;
 
-        Color badgeBg = const Color(0xFFD1FAE5);
-        Color dotColor = const Color(0xFF10B981);
+        Color badgeBg = SoftPalette.emerald100;
+        Color dotColor = SoftPalette.emerald350;
         String statusLabel = 'Connected';
 
         if (isConnected) {
-          badgeBg = isDark ? const Color(0xFF064E3B) : const Color(0xFFD1FAE5);
-          dotColor = const Color(0xFF10B981);
+          badgeBg = isDark ? SoftPalette.emerald700 : SoftPalette.emerald100;
+          dotColor = SoftPalette.emerald350;
           statusLabel = 'Connected';
         } else if (isSearching) {
-          badgeBg = isDark ? const Color(0xFF78350F) : const Color(0xFFFFEDD5);
-          dotColor = const Color(0xFFF97316);
+          badgeBg = isDark ? SoftPalette.orange700 : SoftPalette.amber100;
+          dotColor = SoftPalette.orange350;
           statusLabel = status.isConnecting ? 'Connecting…' : 'Searching…';
         } else {
-          badgeBg = isDark ? const Color(0xFF7F1D1D) : const Color(0xFFFEE2E2);
-          dotColor = const Color(0xFFEF4444);
+          badgeBg = isDark ? SoftPalette.red700 : SoftPalette.red150m;
+          dotColor = SoftPalette.red400;
           statusLabel = 'Disconnected';
         }
 
@@ -62,17 +63,17 @@ class ConnectionStatusBadge extends StatelessWidget {
             height: 44,
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF0F172A) : Colors.white,
+              color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(
                 color: isDark
-                    ? const Color(0xFF334155)
-                    : const Color(0xFFE2E8F0),
+                    ? SoftPalette.slate700
+                    : SoftPalette.slate150,
                 width: 1,
               ),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.03),
+                  color: SoftPalette.gray900.withValues(alpha: isDark ? 0.2 : 0.03),
                   blurRadius: 8,
                   offset: const Offset(0, 2),
                 ),
@@ -129,8 +130,8 @@ class ConnectionStatusBadge extends StatelessWidget {
                       style: TextStyle(
                         fontSize: 10,
                         color: isDark
-                            ? const Color(0xFF94A3B8)
-                            : const Color(0xFF64748B),
+                            ? SoftPalette.slate350
+                            : SoftPalette.slate550,
                       ),
                     ),
                   ],
@@ -139,7 +140,7 @@ class ConnectionStatusBadge extends StatelessWidget {
                 if (isConnected)
                   const Icon(
                     Icons.check_circle_rounded,
-                    color: Color(0xFF10B981),
+                    color: SoftPalette.emerald350,
                     size: 18,
                   )
                 else if (onRetry != null)

@@ -1,12 +1,19 @@
-import 'dart:async';
+import 'dart:io' show Platform, exit;
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/services.dart' show SystemNavigator;
+import 'package:bitsdojo_window/bitsdojo_window.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/material.dart';
 import '../constants/colors.dart';
+import '../constants/navigator_key.dart';
 import '../main.dart';
+import '../pages/login_page.dart';
+import '../services/auth_service.dart';
 import '../services/role_simulator_service.dart';
 
 /// Global Self-Healing error widget and handler.
 /// Replaces Flutter's default blank grey/white screen with an intelligent self-repair UI
-/// that automatically reloads the workspace within 2 seconds.
+/// offering clean recovery to Login or graceful exit.
 class SelfHealingErrorView extends StatefulWidget {
   final FlutterErrorDetails? details;
 
@@ -17,50 +24,78 @@ class SelfHealingErrorView extends StatefulWidget {
 }
 
 class _SelfHealingErrorViewState extends State<SelfHealingErrorView> {
-  static int _recentRecoveryCount = 0;
-  static DateTime? _recoveryWindowStart;
+  bool _isNavigating = false;
 
-  int _countdownSeconds = 2;
-  Timer? _countdownTimer;
-  bool _isSafeMode = false;
+  void _returnToLogin() {
+    if (_isNavigating) return;
+    _isNavigating = true;
+    debugPrint('[SelfHealingErrorView] 🔄 Returning safely to Login Screen');
 
-  @override
-  void initState() {
-    super.initState();
-    _checkRecoveryThreshold();
-  }
-
-  void _checkRecoveryThreshold() {
-    final now = DateTime.now();
-    if (_recoveryWindowStart == null || now.difference(_recoveryWindowStart!).inSeconds > 15) {
-      _recoveryWindowStart = now;
-      _recentRecoveryCount = 0;
-    }
-    _recentRecoveryCount++;
-
-    // Safe mode ensures stability and user stays on their active screen
-    _isSafeMode = true;
-  }
-
-  void _triggerRecovery() {
-    _countdownTimer?.cancel();
-    debugPrint('[SelfHealingErrorView] 🔄 Full workspace recovery triggered');
-    AppRestartController.refreshApp();
-  }
-
-  void _returnToDashboard() {
-    _countdownTimer?.cancel();
-    debugPrint('[SelfHealingErrorView] 🔄 Returning to clean dashboard');
     try {
       RoleSimulatorService.reset();
     } catch (_) {}
-    AppRestartController.refreshApp();
+
+    try {
+      AuthHomeWrapper.clearSession();
+    } catch (_) {}
+
+    try {
+      AuthService().signOut().catchError((e) {
+        debugPrint('[SelfHealingErrorView] signOut notice: $e');
+      });
+    } catch (_) {}
+
+    void performNav() {
+      try {
+        if (navigatorKey.currentState != null) {
+          navigatorKey.currentState!.pushNamedAndRemoveUntil('/login', (r) => false);
+          return;
+        }
+      } catch (e) {
+        debugPrint('[SelfHealingErrorView] navigatorKey push failed: $e');
+      }
+
+      try {
+        if (mounted) {
+          Navigator.of(context, rootNavigator: true).pushNamedAndRemoveUntil('/login', (r) => false);
+          return;
+        }
+      } catch (e) {
+        debugPrint('[SelfHealingErrorView] rootNavigator push failed: $e');
+      }
+
+      try {
+        if (mounted) {
+          Navigator.of(context, rootNavigator: true).pushAndRemoveUntil(
+            MaterialPageRoute(builder: (_) => const LoginPage()),
+            (r) => false,
+          );
+        }
+      } catch (e) {
+        debugPrint('[SelfHealingErrorView] MaterialPageRoute push failed: $e');
+      }
+    }
+
+    WidgetsBinding.instance.addPostFrameCallback((_) => performNav());
   }
 
-  @override
-  void dispose() {
-    _countdownTimer?.cancel();
-    super.dispose();
+  void _closeApp() {
+    debugPrint('[SelfHealingErrorView] ⏹️ Closing application');
+    try {
+      if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+        try {
+          appWindow.close();
+          return;
+        } catch (_) {}
+        exit(0);
+      } else {
+        SystemNavigator.pop();
+      }
+    } catch (_) {
+      try {
+        exit(0);
+      } catch (_) {}
+    }
   }
 
   @override
@@ -69,35 +104,38 @@ class _SelfHealingErrorViewState extends State<SelfHealingErrorView> {
       builder: (context, constraints) {
         // Compact fallback for tiny widget exceptions (e.g. list tile or small card)
         if (constraints.maxHeight < 160 || constraints.maxWidth < 280) {
-          return Container(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-            decoration: BoxDecoration(
-              color: Colors.red.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.red.withValues(alpha: 0.2)),
-            ),
-            child: Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.refresh_rounded, size: 16, color: Colors.redAccent),
-                const SizedBox(width: 6),
-                const Expanded(
-                  child: Text(
-                    'Render notice — recovering...',
-                    style: TextStyle(fontSize: 11, color: Colors.redAccent),
-                    overflow: TextOverflow.ellipsis,
+          return Directionality(
+            textDirection: TextDirection.ltr,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: SoftPalette.red400.withValues(alpha: 0.08),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: SoftPalette.red400.withValues(alpha: 0.2)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.refresh_rounded, size: 16, color: SoftPalette.red400),
+                  const SizedBox(width: 6),
+                  const Expanded(
+                    child: Text(
+                      'Render notice — recovering...',
+                      style: TextStyle(fontSize: 11, color: SoftPalette.red400),
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
-                ),
-                TextButton(
-                  onPressed: _triggerRecovery,
-                  style: TextButton.styleFrom(
-                    padding: const EdgeInsets.symmetric(horizontal: 8),
-                    minimumSize: Size.zero,
-                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  TextButton(
+                    onPressed: _returnToLogin,
+                    style: TextButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8),
+                      minimumSize: Size.zero,
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    ),
+                    child: const Text('Login', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
                   ),
-                  child: const Text('Reload', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
-                ),
-              ],
+                ],
+              ),
             ),
           );
         }
@@ -105,131 +143,85 @@ class _SelfHealingErrorViewState extends State<SelfHealingErrorView> {
         // Full Screen / Major Component Self-Healing View
         final isDark = Theme.of(context).brightness == Brightness.dark;
 
-        return Material(
-          color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(24),
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 480),
-                child: Container(
-                  padding: const EdgeInsets.all(32),
-                  decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF1E293B) : Colors.white,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08),
-                        blurRadius: 24,
-                        offset: const Offset(0, 10),
+        return Directionality(
+          textDirection: TextDirection.ltr,
+          child: Material(
+            color: isDark ? SoftPalette.slate900 : SoftPalette.slate100,
+            child: Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.all(24),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 480),
+                  child: Container(
+                    padding: const EdgeInsets.all(32),
+                    decoration: BoxDecoration(
+                      color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+                      borderRadius: BorderRadius.circular(20),
+                      boxShadow: [
+                        BoxShadow(
+                          color: SoftPalette.gray900.withValues(alpha: isDark ? 0.35 : 0.08),
+                          blurRadius: 24,
+                          offset: const Offset(0, 10),
+                        ),
+                      ],
+                      border: Border.all(
+                        color: isDark ? SoftPalette.slate700 : SoftPalette.slate150,
                       ),
-                    ],
-                    border: Border.all(
-                      color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
                     ),
-                  ),
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      // Healing Pulsing Badge
-                      Container(
-                        width: 68,
-                        height: 68,
-                        decoration: BoxDecoration(
-                          color: _isSafeMode
-                              ? Colors.amber.withValues(alpha: 0.15)
-                              : AppColors.primary.withValues(alpha: 0.15),
-                          shape: BoxShape.circle,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Healing Pulsing Badge
+                        Container(
+                          width: 68,
+                          height: 68,
+                          decoration: BoxDecoration(
+                            color: SoftPalette.amber200.withValues(alpha: 0.15),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(
+                            Icons.shield_rounded,
+                            size: 36,
+                            color: SoftPalette.amber300,
+                          ),
                         ),
-                        child: Icon(
-                          _isSafeMode ? Icons.shield_rounded : Icons.auto_mode_rounded,
-                          size: 36,
-                          color: _isSafeMode ? Colors.amber[700] : AppColors.primary,
-                        ),
-                      ),
-                      const SizedBox(height: 20),
+                        const SizedBox(height: 20),
 
-                      // Title
-                      Text(
-                        _isSafeMode ? 'Safe Mode Activated' : 'Self-Healing in Progress',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: isDark ? Colors.white : const Color(0xFF0F172A),
+                        // Title
+                        Text(
+                          'Safe Mode Activated',
+                          style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
+                          ),
+                          textAlign: TextAlign.center,
                         ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 10),
+                        const SizedBox(height: 10),
 
-                      // Description
-                      Text(
-                        _isSafeMode
-                            ? 'Repeated rendering errors detected in this view. Safe mode prevented an endless reload loop.'
-                            : 'An unexpected display error occurred in this module. GMWF Self-Healing is automatically restoring your workspace.',
-                        style: TextStyle(
-                          fontSize: 13,
-                          height: 1.5,
-                          color: isDark ? Colors.white70 : const Color(0xFF475569),
-                        ),
-                        textAlign: TextAlign.center,
-                      ),
-                      const SizedBox(height: 24),
-
-                      // Countdown or Action buttons
-                      if (!_isSafeMode) ...[
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2.5,
-                                color: AppColors.primary,
-                              ),
-                            ),
-                            const SizedBox(width: 12),
-                            Text(
-                              'Reloading workspace in ${_countdownSeconds}s...',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: isDark ? Colors.white : const Color(0xFF1E293B),
-                              ),
-                            ),
-                          ],
+                        // Description
+                        Text(
+                          'Repeated rendering errors detected in this view. Safe mode prevented an endless reload loop.',
+                          style: TextStyle(
+                            fontSize: 13,
+                            height: 1.5,
+                            color: isDark ? SoftPalette.gray50A70 : SoftPalette.slate600,
+                          ),
+                          textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 24),
+
+                        // Action buttons: Return to Login Screen and Close App only
                         Row(
                           children: [
                             Expanded(
                               child: ElevatedButton.icon(
-                                onPressed: _triggerRecovery,
-                                icon: const Icon(Icons.refresh_rounded, size: 18),
-                                label: const Text('Reload Immediately'),
+                                onPressed: _returnToLogin,
+                                icon: const Icon(Icons.login_rounded, size: 18),
+                                label: const Text('Return to Login Screen'),
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: AppColors.primary,
-                                  foregroundColor: Colors.white,
-                                  padding: const EdgeInsets.symmetric(vertical: 13),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ] else ...[
-                        Row(
-                          children: [
-                            Expanded(
-                              child: ElevatedButton.icon(
-                                onPressed: _returnToDashboard,
-                                icon: const Icon(Icons.dashboard_rounded, size: 18),
-                                label: const Text('Return to Dashboard'),
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: AppColors.primary,
-                                  foregroundColor: Colors.white,
+                                  foregroundColor: SoftPalette.gray50,
                                   padding: const EdgeInsets.symmetric(vertical: 13),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(10),
@@ -240,11 +232,17 @@ class _SelfHealingErrorViewState extends State<SelfHealingErrorView> {
                             const SizedBox(width: 10),
                             Expanded(
                               child: OutlinedButton.icon(
-                                onPressed: _triggerRecovery,
-                                icon: const Icon(Icons.restart_alt_rounded, size: 18),
-                                label: const Text('Retry Screen'),
+                                onPressed: _closeApp,
+                                icon: const Icon(Icons.power_settings_new_rounded, size: 18),
+                                label: const Text('Close App'),
                                 style: OutlinedButton.styleFrom(
                                   padding: const EdgeInsets.symmetric(vertical: 13),
+                                  foregroundColor: isDark ? SoftPalette.red350 : SoftPalette.red500,
+                                  side: BorderSide(
+                                    color: isDark
+                                        ? SoftPalette.red400.withValues(alpha: 0.4)
+                                        : SoftPalette.red400.withValues(alpha: 0.5),
+                                  ),
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(10),
                                   ),
@@ -254,7 +252,7 @@ class _SelfHealingErrorViewState extends State<SelfHealingErrorView> {
                           ],
                         ),
                       ],
-                    ],
+                    ),
                   ),
                 ),
               ),

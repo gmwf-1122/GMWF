@@ -161,3 +161,22 @@ String resolveUserDisplayName(Map<String, dynamic>? data, {String fallback = 'Us
 
   return !isPlaceholder(name) ? name : fallback;
 }
+/// Dose timing as the doctor types it: digits only, '+' inserted automatically.
+/// Three doses — Morning+Evening+Night: "101" → "1+0+1". Backspace over a '+' removes the dose before it.
+class DoseTimingInputFormatter extends TextInputFormatter {
+  final int maxDoses;
+  const DoseTimingInputFormatter({this.maxDoses = 3});
+
+  @override
+  TextEditingValue formatEditUpdate(TextEditingValue oldValue, TextEditingValue newValue) {
+    var digits = newValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+    final oldDigits = oldValue.text.replaceAll(RegExp(r'[^0-9]'), '');
+    // Only a '+' was deleted: treat it as deleting the dose before it.
+    if (newValue.text.length < oldValue.text.length && digits == oldDigits && digits.isNotEmpty) {
+      digits = digits.substring(0, digits.length - 1);
+    }
+    if (digits.length > maxDoses) digits = digits.substring(0, maxDoses);
+    final text = digits.split('').join('+');
+    return TextEditingValue(text: text, selection: TextSelection.collapsed(offset: text.length));
+  }
+}

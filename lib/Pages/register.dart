@@ -1,7 +1,10 @@
 // lib/pages/register.dart
 
 import 'dart:async';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:file_picker/file_picker.dart';
@@ -92,7 +95,7 @@ class _RegisterState extends State<Register>
     {
       'name': 'Administration',
       'icon': Icons.admin_panel_settings_rounded,
-      'color': Color(0xFF6366F1),
+      'color': SoftPalette.indigo500,
       'description': 'Executive leadership & central organization',
       'roles': [
         {'label': 'CEO',              'icon': Icons.workspace_premium_rounded,    'type': 'crown',    'value': 'CEO'},
@@ -104,7 +107,7 @@ class _RegisterState extends State<Register>
     {
       'name': 'Office',
       'icon': Icons.business_rounded,
-      'color': Color(0xFF0EA5E9),
+      'color': SoftPalette.sky400,
       'description': 'Branch management, logistics & operations',
       'roles': [
         {'label': 'Branch Manager',   'icon': Icons.manage_accounts_rounded,      'type': 'normal',   'value': 'Branch Manager'},
@@ -115,7 +118,7 @@ class _RegisterState extends State<Register>
     {
       'name': 'Dispensary',
       'icon': Icons.local_hospital_rounded,
-      'color': Color(0xFF10B981),
+      'color': SoftPalette.emerald350,
       'description': 'Healthcare, medical staff & clinic reception',
       'roles': [
         {'label': 'Supervisor',       'icon': Icons.manage_accounts_outlined,     'type': 'normal',   'value': 'Supervisor'},
@@ -131,7 +134,7 @@ class _RegisterState extends State<Register>
     {
       'name': 'Dasterkhwaan',
       'icon': Icons.restaurant_rounded,
-      'color': Color(0xFFF59E0B),
+      'color': SoftPalette.amber300,
       'description': 'Food distribution & kitchen operations',
       'roles': [
         {'label': 'Kitchen',          'icon': Icons.restaurant_outlined,          'type': 'normal',   'value': 'Kitchen'},
@@ -140,7 +143,7 @@ class _RegisterState extends State<Register>
     {
       'name': 'Madrassa',
       'icon': Icons.menu_book_rounded,
-      'color': Color(0xFF8B5CF6),
+      'color': SoftPalette.violet500,
       'description': 'Religious education, teachers & administration',
       'roles': [
         {'label': 'Madrassa Principal / Admin', 'icon': Icons.menu_book_rounded, 'type': 'madrassa', 'value': 'Madrassa Admin'},
@@ -151,7 +154,7 @@ class _RegisterState extends State<Register>
     {
       'name': 'School',
       'icon': Icons.school_rounded,
-      'color': Color(0xFFEC4899),
+      'color': SoftPalette.pink400,
       'description': 'Academic education, teachers & principals',
       'roles': [
         {'label': 'School Principal',           'icon': Icons.stars_rounded,      'type': 'school',   'value': 'School Principal'},
@@ -575,7 +578,7 @@ class _RegisterState extends State<Register>
     if (text.length < 6) {
       setState(() {
         _passwordStrengthText = 'Too short (${text.length}/6 characters minimum)';
-        _passwordStrengthColor = const Color(0xFFEF4444);
+        _passwordStrengthColor = SoftPalette.red400;
       });
     } else if (text.length < 8) {
       final hasNum = text.contains(RegExp(r'[0-9]'));
@@ -583,12 +586,12 @@ class _RegisterState extends State<Register>
       if (hasNum && hasAlpha) {
         setState(() {
           _passwordStrengthText = 'Fair / Acceptable';
-          _passwordStrengthColor = const Color(0xFFF59E0B);
+          _passwordStrengthColor = SoftPalette.amber300;
         });
       } else {
         setState(() {
           _passwordStrengthText = 'Basic (mix numbers & letters for better safety)';
-          _passwordStrengthColor = const Color(0xFFF97316);
+          _passwordStrengthColor = SoftPalette.orange350;
         });
       }
     } else {
@@ -597,17 +600,17 @@ class _RegisterState extends State<Register>
       if (hasNum && hasSpecial) {
         setState(() {
           _passwordStrengthText = 'Very Safe & Strong ✓';
-          _passwordStrengthColor = const Color(0xFF10B981);
+          _passwordStrengthColor = SoftPalette.emerald350;
         });
       } else if (hasNum) {
         setState(() {
           _passwordStrengthText = 'Safe password ✓';
-          _passwordStrengthColor = const Color(0xFF10B981);
+          _passwordStrengthColor = SoftPalette.emerald350;
         });
       } else {
         setState(() {
           _passwordStrengthText = 'Safe (add numbers or symbols to strengthen)';
-          _passwordStrengthColor = const Color(0xFF3B82F6);
+          _passwordStrengthColor = SoftPalette.blue500;
         });
       }
     }
@@ -986,15 +989,15 @@ class _RegisterState extends State<Register>
   void _snack(String msg, {bool error = false, bool success = false}) {
     if (!mounted) return;
     final t = RoleThemeScope.dataOf(context);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    AppToast.showSnackBar(context, SnackBar(
       content: Row(children: [
         Icon(
           error ? Icons.error_outline_rounded : success ? Icons.check_circle_outline_rounded : Icons.info_outline_rounded,
-          color: Colors.white, size: 20),
+          color: SoftPalette.gray50, size: 20),
         const SizedBox(width: 12),
         Expanded(child: Text(msg, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600))),
       ]),
-      backgroundColor: error ? t.danger : success ? const Color(0xFF10B981) : const Color(0xFF37474F),
+      backgroundColor: error ? t.danger : success ? SoftPalette.emerald350 : SoftPalette.slate700,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       margin: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
@@ -1129,14 +1132,14 @@ class _RegisterState extends State<Register>
           // Loading overlay
           if (_loading)
             Container(
-              color: Colors.black54,
+              color: SoftPalette.gray900A54,
               child: Center(
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 32),
                   decoration: BoxDecoration(
                     color: t.bgCard,
                     borderRadius: BorderRadius.circular(24),
-                    boxShadow: const [BoxShadow(color: Colors.black38, blurRadius: 30, offset: Offset(0, 10))],
+                    boxShadow: const [BoxShadow(color: SoftPalette.gray900A38, blurRadius: 30, offset: Offset(0, 10))],
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -1180,7 +1183,7 @@ class _RegisterState extends State<Register>
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: t.danger, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: t.danger, foregroundColor: SoftPalette.gray50),
             onPressed: () {
               Navigator.pop(ctx);
               _formKey.currentState?.reset();
@@ -1225,7 +1228,7 @@ class _RegisterState extends State<Register>
       child: Row(
         children: [
           if (!GlobalModuleWrapper.isWrapped(context)) ...[
-            const AppBackButton(color: Colors.white),
+            const AppBackButton(color: SoftPalette.gray50),
             const SizedBox(width: 8),
           ],
           Expanded(
@@ -1238,25 +1241,25 @@ class _RegisterState extends State<Register>
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.22),
+                        color: SoftPalette.gray50.withValues(alpha: 0.22),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
                         _isSinglePageMode ? 'SINGLE-PAGE FORM' : 'STEP-BY-STEP WIZARD',
-                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 0.8),
+                        style: const TextStyle(color: SoftPalette.gray50, fontSize: 10, fontWeight: FontWeight.w800, letterSpacing: 0.8),
                       ),
                     ),
                     const SizedBox(width: 8),
                     Text(
                       _isSinglePageMode ? 'All sections on one screen' : 'Step ${_currentStep + 1} of $_totalSteps',
-                      style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 12, fontWeight: FontWeight.w600),
+                      style: TextStyle(color: SoftPalette.gray50.withValues(alpha: 0.85), fontSize: 12, fontWeight: FontWeight.w600),
                     ),
                   ],
                 ),
                 const SizedBox(height: 2),
                 const Text(
                   'Register Staff User',
-                  style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: 0.2),
+                  style: TextStyle(color: SoftPalette.gray50, fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: 0.2),
                   overflow: TextOverflow.ellipsis,
                 ),
               ],
@@ -1275,22 +1278,22 @@ class _RegisterState extends State<Register>
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.18),
+                  color: SoftPalette.gray50.withValues(alpha: 0.18),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.white.withValues(alpha: 0.3)),
+                  border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.3)),
                 ),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Icon(
                       _isSinglePageMode ? Icons.view_agenda_rounded : Icons.splitscreen_rounded,
-                      color: Colors.white,
+                      color: SoftPalette.gray50,
                       size: 16,
                     ),
                     const SizedBox(width: 6),
                     Text(
                       _isSinglePageMode ? 'Single Screen' : 'Wizard Mode',
-                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                      style: const TextStyle(color: SoftPalette.gray50, fontSize: 12, fontWeight: FontWeight.w600),
                     ),
                   ],
                 ),
@@ -1300,7 +1303,7 @@ class _RegisterState extends State<Register>
           const SizedBox(width: 6),
           IconButton(
             tooltip: 'Clear / Reset Form',
-            icon: const Icon(Icons.refresh_rounded, color: Colors.white, size: 22),
+            icon: const Icon(Icons.refresh_rounded, color: SoftPalette.gray50, size: 22),
             onPressed: () => _confirmAndResetForm(t),
           ),
         ],
@@ -1324,7 +1327,7 @@ class _RegisterState extends State<Register>
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: t.bgRule),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 2)),
+          BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, 2)),
         ],
       ),
       child: Row(
@@ -1344,14 +1347,14 @@ class _RegisterState extends State<Register>
                   color: isActive
                       ? t.accent.withValues(alpha: 0.12)
                       : isCompleted
-                          ? const Color(0xFF10B981).withValues(alpha: 0.08)
+                          ? SoftPalette.emerald350.withValues(alpha: 0.08)
                           : Colors.transparent,
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(
                     color: isActive
                         ? t.accent
                         : isCompleted
-                            ? const Color(0xFF10B981).withValues(alpha: 0.4)
+                            ? SoftPalette.emerald350.withValues(alpha: 0.4)
                             : Colors.transparent,
                     width: 1.2,
                   ),
@@ -1363,7 +1366,7 @@ class _RegisterState extends State<Register>
                       width: 24, height: 24,
                       decoration: BoxDecoration(
                         color: isCompleted
-                            ? const Color(0xFF10B981)
+                            ? SoftPalette.emerald350
                             : isActive
                                 ? t.accent
                                 : t.bgRule,
@@ -1371,8 +1374,8 @@ class _RegisterState extends State<Register>
                       ),
                       child: Center(
                         child: isCompleted
-                            ? const Icon(Icons.check_rounded, color: Colors.white, size: 14)
-                            : Icon(step['icon'] as IconData, color: isActive ? Colors.white : t.textTertiary, size: 13),
+                            ? const Icon(Icons.check_rounded, color: SoftPalette.gray50, size: 14)
+                            : Icon(step['icon'] as IconData, color: isActive ? SoftPalette.gray50 : t.textTertiary, size: 13),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -1385,7 +1388,7 @@ class _RegisterState extends State<Register>
                           color: isActive
                               ? t.accent
                               : isCompleted
-                                  ? const Color(0xFF10B981)
+                                  ? SoftPalette.emerald350
                                   : t.textTertiary,
                         ),
                         overflow: TextOverflow.ellipsis,
@@ -1490,7 +1493,7 @@ class _RegisterState extends State<Register>
                       ),
                       boxShadow: [
                         BoxShadow(
-                          color: isSelected ? deptColor.withValues(alpha: 0.18) : Colors.black.withValues(alpha: 0.04),
+                          color: isSelected ? deptColor.withValues(alpha: 0.18) : SoftPalette.gray900.withValues(alpha: 0.04),
                           blurRadius: isSelected ? 12 : 6,
                           offset: const Offset(0, 3),
                         ),
@@ -1506,7 +1509,7 @@ class _RegisterState extends State<Register>
                           ),
                           child: Icon(
                             dept['icon'] as IconData,
-                            color: isSelected ? Colors.white : deptColor,
+                            color: isSelected ? SoftPalette.gray50 : deptColor,
                             size: 24,
                           ),
                         ),
@@ -1618,19 +1621,19 @@ class _RegisterState extends State<Register>
                   Color badgeColor = t.textSecondary;
                   String badgeLabel = 'Staff';
                   if (type == 'crown') {
-                    badgeColor = const Color(0xFFEAB308);
+                    badgeColor = SoftPalette.amber300;
                     badgeLabel = 'Executive';
                   } else if (type == 'shield') {
-                    badgeColor = const Color(0xFF0EA5E9);
+                    badgeColor = SoftPalette.sky400;
                     badgeLabel = 'System';
                   } else if (type == 'hybrid') {
-                    badgeColor = const Color(0xFF10B981);
+                    badgeColor = SoftPalette.emerald350;
                     badgeLabel = 'Hybrid Multi-Duty';
                   } else if (type == 'madrassa') {
-                    badgeColor = const Color(0xFF8B5CF6);
+                    badgeColor = SoftPalette.violet500;
                     badgeLabel = 'Faculty';
                   } else if (type == 'school') {
-                    badgeColor = const Color(0xFFEC4899);
+                    badgeColor = SoftPalette.pink400;
                     badgeLabel = 'Faculty';
                   }
 
@@ -1668,7 +1671,7 @@ class _RegisterState extends State<Register>
                             ),
                             child: Icon(
                               role['icon'] as IconData,
-                              color: isRoleSelected ? Colors.white : badgeColor,
+                              color: isRoleSelected ? SoftPalette.gray50 : badgeColor,
                               size: 18,
                             ),
                           ),
@@ -1756,9 +1759,9 @@ class _RegisterState extends State<Register>
                           ),
                         )
                       : _isUsernameAvailable == true
-                          ? const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 19)
+                          ? const Icon(Icons.check_circle_rounded, color: SoftPalette.emerald350, size: 19)
                           : _isUsernameAvailable == false
-                              ? const Icon(Icons.cancel_rounded, color: Color(0xFFEF4444), size: 19)
+                              ? const Icon(Icons.cancel_rounded, color: SoftPalette.red400, size: 19)
                               : null,
                   helperText: _isUsernameAvailable == true ? '✓ Username is available' : null,
                   customErrorText: _usernameError,
@@ -1786,9 +1789,9 @@ class _RegisterState extends State<Register>
                           ),
                         )
                       : _isEmailAvailable == true
-                          ? const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 19)
+                          ? const Icon(Icons.check_circle_rounded, color: SoftPalette.emerald350, size: 19)
                           : _isEmailAvailable == false
-                              ? const Icon(Icons.cancel_rounded, color: Color(0xFFEF4444), size: 19)
+                              ? const Icon(Icons.cancel_rounded, color: SoftPalette.red400, size: 19)
                               : null,
                   helperText: _isEmailAvailable == true ? '✓ Email address is available' : null,
                   customErrorText: _emailError,
@@ -1881,7 +1884,7 @@ class _RegisterState extends State<Register>
           t,
           title: 'Branch Station Assignment',
           icon: Icons.business_outlined,
-          accent: const Color(0xFF6366F1),
+          accent: SoftPalette.indigo500,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -1918,7 +1921,7 @@ class _RegisterState extends State<Register>
             t,
             title: 'Associated Student Profile',
             icon: Icons.child_care_rounded,
-            accent: const Color(0xFF8B5CF6),
+            accent: SoftPalette.violet500,
             child: _buildChildDropdown(t),
           ),
         ],
@@ -1930,7 +1933,7 @@ class _RegisterState extends State<Register>
             t,
             title: 'Medical Degree & Licensing',
             icon: Icons.medical_services_outlined,
-            accent: const Color(0xFF00897B),
+            accent: SoftPalette.teal500,
             child: Column(
               children: [
                 _buildSimpleDropdown(
@@ -2065,7 +2068,7 @@ class _RegisterState extends State<Register>
           color: t.bgCard,
           border: Border(top: BorderSide(color: t.bgRule)),
           boxShadow: [
-            BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, -3)),
+            BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, -3)),
           ],
         ),
         child: Center(
@@ -2090,8 +2093,8 @@ class _RegisterState extends State<Register>
                   icon: const Icon(Icons.person_add_alt_1_rounded, size: 20),
                   label: const Text('Create User Account'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF10B981),
-                    foregroundColor: Colors.white,
+                    backgroundColor: SoftPalette.emerald350,
+                    foregroundColor: SoftPalette.gray50,
                     elevation: 4,
                     padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 15),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -2112,7 +2115,7 @@ class _RegisterState extends State<Register>
         color: t.bgCard,
         border: Border(top: BorderSide(color: t.bgRule)),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, -3)),
+          BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.05), blurRadius: 10, offset: const Offset(0, -3)),
         ],
       ),
       child: Center(
@@ -2146,7 +2149,7 @@ class _RegisterState extends State<Register>
                   label: const Text('Next Step'),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: t.accent,
-                    foregroundColor: Colors.white,
+                    foregroundColor: SoftPalette.gray50,
                     elevation: 3,
                     padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 15),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -2158,8 +2161,8 @@ class _RegisterState extends State<Register>
                   icon: const Icon(Icons.person_add_alt_1_rounded, size: 20),
                   label: const Text('Create User Account'),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF10B981),
-                    foregroundColor: Colors.white,
+                    backgroundColor: SoftPalette.emerald350,
+                    foregroundColor: SoftPalette.gray50,
                     elevation: 4,
                     padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 15),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
@@ -2179,7 +2182,7 @@ class _RegisterState extends State<Register>
         color: t.bgCard,
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: t.bgRule),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 3))],
+        boxShadow: [BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 3))],
       ),
       padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 20),
       child: Row(
@@ -2223,7 +2226,7 @@ class _RegisterState extends State<Register>
                       ),
                       child: Icon(
                         _profileImageBytes != null ? Icons.close_rounded : Icons.camera_alt_rounded,
-                        color: Colors.white, size: 14,
+                        color: SoftPalette.gray50, size: 14,
                       ),
                     ),
                   ),
@@ -2333,7 +2336,7 @@ class _RegisterState extends State<Register>
         color: t.bgCard,
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: t.bgRule),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 3))],
+        boxShadow: [BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.04), blurRadius: 14, offset: const Offset(0, 3))],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2422,7 +2425,7 @@ class _RegisterState extends State<Register>
               )
             : null),
         helperText: helperText,
-        helperStyle: TextStyle(fontSize: 11.5, color: helperColor ?? const Color(0xFF10B981), fontWeight: FontWeight.w600),
+        helperStyle: TextStyle(fontSize: 11.5, color: helperColor ?? SoftPalette.emerald350, fontWeight: FontWeight.w600),
         errorText: customErrorText,
         filled: true,
         fillColor: t.bgCardAlt,
@@ -2562,7 +2565,7 @@ class _RegisterState extends State<Register>
       t,
       title: 'Dispensary Camps & Operating Shift Schedule',
       icon: Icons.local_hospital_rounded,
-      accent: const Color(0xFF10B981),
+      accent: SoftPalette.emerald350,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2628,7 +2631,7 @@ class _RegisterState extends State<Register>
             const SizedBox(height: 16),
             const Text(
               'Mandatory Shift per Facility:',
-              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF0D9488)),
+              style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: SoftPalette.teal500),
             ),
             const SizedBox(height: 8),
             ..._selectedDispensaries.map((campId) {
@@ -2640,18 +2643,18 @@ class _RegisterState extends State<Register>
                 margin: const EdgeInsets.only(bottom: 8),
                 padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF0FDFA),
+                  color: context.adapt(SoftPalette.teal50t),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFFCCFBF1)),
+                  border: Border.all(color: context.adapt(SoftPalette.teal100)),
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.location_on, size: 16, color: Color(0xFF0F766E)),
+                    Icon(Icons.location_on, size: 16, color: context.adapt(SoftPalette.teal550)),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
                         campLabel,
-                        style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFF134E4A)),
+                        style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.teal700)),
                       ),
                     ),
                     const Text('Shift: ', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w500)),
@@ -2692,7 +2695,7 @@ class _RegisterState extends State<Register>
         'sub': 'Quran Reading, Qaida & Recitation',
         'icon': Icons.menu_book_rounded,
         'badge': 'Reading & Recitation',
-        'color': Color(0xFF10B981),
+        'color': SoftPalette.emerald350,
       },
       {
         'value': 'hifz',
@@ -2701,7 +2704,7 @@ class _RegisterState extends State<Register>
         'sub': 'Quran Memorization & Revision',
         'icon': Icons.auto_stories_rounded,
         'badge': 'Memorization Focus',
-        'color': Color(0xFF7C3AED),
+        'color': SoftPalette.violet550,
       },
       {
         'value': 'both',
@@ -2710,7 +2713,7 @@ class _RegisterState extends State<Register>
         'sub': 'Combined Hifz & Nazra classes',
         'icon': Icons.import_contacts_rounded,
         'badge': 'Full Quranic Spectrum',
-        'color': Color(0xFF0284C7),
+        'color': SoftPalette.sky500,
       },
     ];
 
@@ -2718,7 +2721,7 @@ class _RegisterState extends State<Register>
       t,
       title: 'Teaching Specialization & Focus (تخصص / تدریسی شعبہ) *',
       icon: Icons.menu_book_rounded,
-      accent: const Color(0xFF7C3AED),
+      accent: SoftPalette.violet550,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -2838,7 +2841,7 @@ class _RegisterState extends State<Register>
                             ),
                           ),
                           child: isSelected
-                              ? const Icon(Icons.check_rounded, size: 14, color: Colors.white)
+                              ? const Icon(Icons.check_rounded, size: 14, color: SoftPalette.gray50)
                               : null,
                         ),
                       ],
@@ -2867,7 +2870,7 @@ class _RegisterState extends State<Register>
         'arabic': 'صبح کا سیشن',
         'time': '8:00 AM – 2:00 PM',
         'icon': Icons.wb_sunny_rounded,
-        'color': Color(0xFFF59E0B),
+        'color': SoftPalette.amber300,
       },
       {
         'value': 'evening',
@@ -2875,7 +2878,7 @@ class _RegisterState extends State<Register>
         'arabic': 'شام کا سیشن',
         'time': '2:00 PM – 8:00 PM',
         'icon': Icons.wb_twilight_rounded,
-        'color': Color(0xFF0284C7),
+        'color': SoftPalette.sky500,
       },
       {
         'value': 'night',
@@ -2883,7 +2886,7 @@ class _RegisterState extends State<Register>
         'arabic': 'رات کا سیشن',
         'time': '8:00 PM – 8:00 AM',
         'icon': Icons.nights_stay_rounded,
-        'color': Color(0xFF6366F1),
+        'color': SoftPalette.indigo500,
       },
       {
         'value': 'all',
@@ -2891,7 +2894,7 @@ class _RegisterState extends State<Register>
         'arabic': 'تمام سیشنز / مکمل دن',
         'time': 'Full-Day Coverage',
         'icon': Icons.all_inclusive_rounded,
-        'color': Color(0xFF8B5CF6),
+        'color': SoftPalette.violet500,
       },
     ];
 
@@ -2906,7 +2909,7 @@ class _RegisterState extends State<Register>
       t,
       title: 'Madrassa Teaching Shift / Session (تدریسی اوقات و سیشن) *',
       icon: Icons.schedule_rounded,
-      accent: const Color(0xFF8B5CF6),
+      accent: SoftPalette.violet500,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -3044,7 +3047,7 @@ class _RegisterState extends State<Register>
               contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
               enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
-              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: Color(0xFF8B5CF6), width: 2)),
+              focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: SoftPalette.violet500, width: 2)),
             ),
             items: filteredShifts.map((s) => DropdownMenuItem(
               value: s['value'] as String,

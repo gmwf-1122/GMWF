@@ -1,6 +1,6 @@
 import '../utils/ui_stall_monitor.dart';
+import 'busy_status.dart';
 import 'dart:async';
-import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:intl/intl.dart';
@@ -19,6 +19,8 @@ import 'package:gmwf/services/finance_loans_storage.dart';
 import 'package:gmwf/services/finance_expenses_storage.dart';
 import 'package:gmwf/services/permission_service.dart';
 import 'package:gmwf/services/quota_service.dart';
+import 'package:gmwf/services/cloud/cloud_db.dart';
+import 'package:gmwf/services/cloud/sync_log.dart';
 import 'package:collection/collection.dart';
 import 'package:uuid/uuid.dart';
 import 'package:gmwf/services/serials_service.dart';
@@ -26,6 +28,7 @@ import 'package:gmwf/services/camp_session_service.dart';
 import 'package:gmwf/services/queue_self_healing_service.dart';
 import 'package:gmwf/services/offline_auth_service.dart';
 import 'package:gmwf/services/auth_service.dart';
+import 'package:gmwf/services/hidden_force_uploader.dart';
 
 import 'package:gmwf/services/network_health_service.dart';
 import 'package:gmwf/services/auto_update_service.dart';
@@ -73,6 +76,7 @@ class SyncService {
   /// Universally broadcasts a force-upload command across BOTH LAN WebSockets AND Cloud Firestore.
   /// Every connected device and remote branch immediately executes an upload flush on its local queue.
   Future<void> broadcastUniversalForceUpload({String? branchId}) async {
+    QuotaService.clearDailyResetPause();
     final effectiveBranch = branchId ?? _currentBranchId ?? 'karachi';
     final user = LocalStorageService.getActiveUsername();
     
@@ -131,16 +135,41 @@ class SyncService {
       final triggerTime = DateTime.tryParse(ts);
       if (triggerTime != null && DateTime.now().toUtc().difference(triggerTime).inMinutes < 5) {
         _lastProcessedCloudTrigger = ts;
-        debugPrint('[SyncService] ⚡ Received remote Cloud Sync Trigger from Firestore (by $triggeredBy) -> forcing upload');
-        sweepAllPendingLocalData(force: true);
+        debugPrint('[SyncService] ⚡ Received remote Cloud Sync Trigger from Firestore (by $triggeredBy) -> sweeping and uploading');
+        // Not forced: a remote button press must not lift this PC's quota pause or backoffs
+        // (that made every PC in every branch hammer an exhausted quota at once).
+        sweepAllPendingLocalData();
       }
     }, onError: (e) {
       debugPrint('[SyncService] Cloud sync trigger listener error: $e');
     });
   }
 
+  String? _startedForBranch;
+  bool _dispBackfillDone = false, _fullBackfillDone = false;
+
   void start(String branchId, {List<String>? authorizedBranches, String? moduleScope}) {
-    _currentBranchId = _cleanBranch(branchId);
+    // About 25 screens call start() when they open. Each call used to restart every timer,
+    // the cloud listener and the network check, and re-run the full backfill (every box
+    // scanned, all users re-downloaded from Firestore). Once running for a branch, just
+    // refresh the authorised branches and nudge an upload.
+    final cleanBranch = _cleanBranch(branchId);
+    if (_startedForBranch == cleanBranch && _periodicSyncTimer?.isActive == true) {
+      if (authorizedBranches != null) {
+        _authorizedBranches = authorizedBranches
+            .map((b) => _cleanBranch(b))
+            .where((b) => LocalStorageService.isValidBranchId(b))
+            .toSet()
+            .toList();
+      }
+      // Runs only if this module's backfill hasn't run yet this session (e.g. the app
+      // opened on a dispensary screen and now a school/donations screen starts).
+      _scheduleBackgroundBackfill(cleanBranch, moduleScope: moduleScope);
+      triggerUpload();
+      return;
+    }
+    _startedForBranch = cleanBranch;
+    _currentBranchId = cleanBranch;
     _authorizedBranches = (authorizedBranches ?? [])
         .map((b) => _cleanBranch(b))
         .where((b) => LocalStorageService.isValidBranchId(b))
@@ -189,43 +218,159 @@ class SyncService {
     unawaited(_probeFirebaseHealth());
   }
 
-  /// Read-only diagnostic: explains WHY Firestore writes time out ("Future not completed")
-  /// while reads work. Logs the Firebase Auth user, whether an ID token can be obtained,
-  /// and whether earlier writes are stuck waiting for the server. Never writes to Firestore.
-  /// Same tiny write, but sent over Firestore's REST API with the signed-in user's token.
-  /// If this succeeds while the SDK write is stuck, the SDK's write stream is the problem
-  /// (not quota, rules or sign-in) and uploads can be sent over REST instead.
-  Future<void> _probeRestWrite(String branchId) async {
-    final sw = Stopwatch()..start();
-    HttpClient? client;
-    try {
-      final user = FirebaseAuth.instance.currentUser;
-      if (user == null) {
-        debugPrint('[FirebaseProbe] REST write skipped: not signed in');
-        return;
+  DateTime? _lastVersionCheckAt;
+  DateTime? _lastSyncPurgeAt;
+  /// Set when the cloud cannot be reached; non-forced passes wait until then.
+  DateTime? _stalledUntil;
+
+  /// Dual-Lane Classification:
+  /// Express Lane (false) = today's live clinic work, real-time punches, live donations, instant updates.
+  /// Freight Lane (true) = records re-queued by sweeps, items older than 24h, or past dateKey serials.
+  bool _isBacklogItem(Map item) {
+    if (item['backlog'] == true) return true;
+
+    // Check creation timestamp: older than 24 hours is backlog
+    final createdStr = (item['createdAt'] ?? item['enqueuedAt'])?.toString();
+    if (createdStr != null && createdStr.isNotEmpty) {
+      final created = DateTime.tryParse(createdStr);
+      if (created != null && DateTime.now().difference(created).inHours.abs() >= 24) {
+        return true;
       }
-      final token = await user.getIdToken().timeout(const Duration(seconds: 8));
-      final projectId = FirebaseFirestore.instance.app.options.projectId;
-      final uri = Uri.parse(
-          'https://firestore.googleapis.com/v1/projects/$projectId/databases/(default)/documents/'
-          'branches/$branchId/sync_probe/${user.uid}?updateMask.fieldPaths=restAt');
-      client = HttpClient()..connectionTimeout = const Duration(seconds: 8);
-      final req = await client.patchUrl(uri).timeout(const Duration(seconds: 10));
-      req.headers.set('authorization', 'Bearer $token');
-      req.headers.set('content-type', 'application/json');
-      req.write(jsonEncode({
-        'fields': {'restAt': {'timestampValue': DateTime.now().toUtc().toIso8601String()}}
-      }));
-      final resp = await req.close().timeout(const Duration(seconds: 12));
-      final body = await resp.transform(utf8.decoder).join().timeout(const Duration(seconds: 8));
-      final snippet = body.length > 240 ? body.substring(0, 240) : body;
-      debugPrint('[FirebaseProbe] REST write -> HTTP ${resp.statusCode} in ${sw.elapsedMilliseconds} ms '
-          '${resp.statusCode == 200 ? "(REST uploads WORK)" : snippet.replaceAll("\n", " ")}');
-    } catch (e) {
-      debugPrint('[FirebaseProbe] REST write FAILED after ${sw.elapsedMilliseconds} ms: $e');
-    } finally {
-      client?.close(force: true);
     }
+
+    // Check serial dateKey: if serial starts with dateKey not matching today, it's backlog
+    final serial = (item['serial'] ?? (item['data'] is Map ? item['data']['serial'] : null))?.toString().trim();
+    if (serial != null && serial.isNotEmpty) {
+      final dateKey = CampSessionService.getDateKeyFromSerial(serial);
+      if (dateKey.length == 6) {
+        final todayKey = DateFormat('ddMMyy').format(DateTime.now());
+        if (dateKey != todayKey) return true;
+      }
+    }
+
+    // Check explicit dateKey or date field in item or data
+    final dateKey = (item['dateKey'] ?? item['date'] ?? (item['data'] is Map ? (item['data']['dateKey'] ?? item['data']['date']) : null))?.toString().trim();
+    if (dateKey != null && dateKey.isNotEmpty) {
+      if (dateKey.length == 6 && RegExp(r'^\d{6}$').hasMatch(dateKey)) {
+        final todayKey = DateFormat('ddMMyy').format(DateTime.now());
+        if (dateKey != todayKey) return true;
+      } else if (dateKey.length >= 10 && RegExp(r'^\d{4}-\d{2}-\d{2}').hasMatch(dateKey)) {
+        final todayIso = DateFormat('yyyy-MM-dd').format(DateTime.now());
+        if (!dateKey.startsWith(todayIso)) return true;
+      }
+    }
+
+    return false;
+  }
+
+  /// Causal Entity Precedence (Ensures parent docs precede child docs):
+  /// 1: save_patient (Root entity)
+  /// 2: save_entry (Token entry)
+  /// 3: save_prescription (Prescription referencing entry)
+  /// 4: update_serial_status (Dispensing / lifecycle updates)
+  /// 5: update_inventory, add_inventory_stock
+  /// 6: save_donation
+  /// 7: save_attendance_record, save_attendance, save_employee_attendance
+  /// 8: school / madrassa
+  /// 10: default / background
+  int _actionPrecedence(Map action) {
+    final type = (action['type'] ?? '').toString();
+    switch (type) {
+      case 'save_patient':
+      case 'save_madrassa_student':
+      case 'save_school_student':
+      case 'save_user':
+        return 1;
+      case 'save_entry':
+        return 2;
+      case 'save_prescription':
+        return 3;
+      case 'update_serial_status':
+        return 4;
+      case 'update_inventory':
+      case 'add_inventory_stock':
+        return 5;
+      case 'save_donation':
+        return 6;
+      case 'save_attendance_record':
+      case 'save_attendance':
+      case 'save_employee_attendance':
+      case 'save_madrassa_teacher_attendance':
+      case 'save_school_teacher_attendance':
+        return 7;
+      case 'save_madrassa_log':
+      case 'save_madrassa_daily_log':
+      case 'save_madrassa_attendance':
+      case 'save_madrassa_fee_payment':
+      case 'save_school_attendance':
+      case 'save_school_fee':
+        return 8;
+      default:
+        return 10;
+    }
+  }
+
+  /// Compares two sync actions for deterministic, causal, FIFO upload order.
+  int _compareSyncActions(Map a, Map b) {
+    // 1. Causal precedence: parent before child
+    final precA = _actionPrecedence(a);
+    final precB = _actionPrecedence(b);
+    if (precA != precB) return precA.compareTo(precB);
+
+    // 2. FIFO: Earlier actions before later actions
+    final timeA = (a['createdAt'] ?? a['enqueuedAt'] ?? '') as String;
+    final timeB = (b['createdAt'] ?? b['enqueuedAt'] ?? '') as String;
+    if (timeA.isNotEmpty && timeB.isNotEmpty) {
+      final cmp = timeA.compareTo(timeB);
+      if (cmp != 0) return cmp;
+    }
+    return 0;
+  }
+
+  /// Errors worth retrying later without counting toward the dead-letter limit.
+  bool _isTransientError(Object e) {
+    if (e is TimeoutException || e is SocketException || e is HandshakeException || e is HttpException) return true;
+    if (QuotaService.isQuotaError(e)) return true;
+    final s = e.toString().toLowerCase();
+    return s.contains('unavailable') || s.contains('deadline') || s.contains('network') ||
+        s.contains('failed to connect') || s.contains('connection') || s.contains('aborted') ||
+        s.contains('[cloud_firestore/internal]') || s.contains('unauthenticated');
+  }
+
+  /// Records that are typically edited several times in a row (a day's attendance or log
+  /// sheet, school/madrassa records, staff details). They wait [_coalesceDelay] after
+  /// their last change before uploading, so a burst of edits becomes one write. Tokens,
+  /// prescriptions, dispensing, donations and requests are never delayed.
+  static const Set<String> _coalescedTypes = {
+    'save_madrassa_daily_log',
+    'save_madrassa_log',
+    'save_madrassa_attendance',
+    'save_madrassa_teacher_attendance',
+    'save_school_attendance',
+    'save_school_teacher_attendance',
+    'save_school_student',
+    'save_school_teacher',
+    'save_school_grade',
+    'save_school_fee',
+    'save_employee',
+    'save_attendance_record',
+    'save_employee_attendance',
+    'save_biometric_device',
+    'save_dasterkhwan_food_log',
+  };
+  static const Duration _coalesceDelay = Duration(seconds: 90);
+
+  /// When a coalesced record may upload, or null if it may upload now.
+  DateTime? _coalesceUntil(Map item) {
+    if (!_coalescedTypes.contains(item['type']?.toString() ?? '')) return null;
+    final changedAt = DateTime.tryParse((item['enqueuedAt'] ?? '').toString());
+    if (changedAt == null) return null;
+    final now = DateTime.now();
+    // Never hold a record more than 5 minutes, even if it keeps changing.
+    final createdAt = DateTime.tryParse((item['createdAt'] ?? '').toString());
+    if (createdAt != null && now.difference(createdAt) > const Duration(minutes: 5)) return null;
+    final until = changedAt.add(_coalesceDelay);
+    return now.isBefore(until) ? until : null;
   }
 
   int _failuresLoggedThisMinute = 0;
@@ -253,62 +398,33 @@ class SyncService {
   }
 
   bool _probedFirebaseHealth = false;
+
+  /// Once per session: records in gmwf_sync.log who is signed in, how much is queued and
+  /// whether Firestore answers reads. Read-only — it used to write a probe document on
+  /// every start, which was one more write that could get stuck in the SDK's queue.
   Future<void> _probeFirebaseHealth() async {
     if (_probedFirebaseHealth || kIsWeb) return;
     _probedFirebaseHealth = true;
     final sw = Stopwatch()..start();
     try {
       final user = FirebaseAuth.instance.currentUser;
-      debugPrint('[FirebaseProbe] auth user: ${user == null ? "NONE (writes will be unauthenticated)" : "${user.uid} (${user.email})"}');
-      if (user != null) {
-        try {
-          final token = await user.getIdToken().timeout(const Duration(seconds: 8));
-          debugPrint('[FirebaseProbe] ID token OK (${token?.length ?? 0} chars) in ${sw.elapsedMilliseconds} ms');
-        } catch (e) {
-          debugPrint('[FirebaseProbe] ID token FAILED after ${sw.elapsedMilliseconds} ms: $e');
-        }
-      }
+      final queued = Hive.isBoxOpen(LocalStorageService.syncBox) ? Hive.box(LocalStorageService.syncBox).length : -1;
+      SyncLog.write('Startup check: app ${AutoUpdateService.currentVersion}, '
+          '${user == null ? 'not signed in to Firebase (uploads go unauthenticated)' : 'signed in (${user.uid})'}, '
+          '$queued item(s) queued, ${QuotaService.dailyWriteCount} writes from this PC today'
+          '${QuotaService.isPausedForDailyReset ? ', quota pause until ${QuotaService.dailyResetPauseUntil?.toLocal()}' : ''}');
       try {
-        await FirebaseFirestore.instance.waitForPendingWrites().timeout(const Duration(seconds: 8));
-        debugPrint('[FirebaseProbe] no Firestore writes pending server ack');
-      } catch (e) {
-        debugPrint('[FirebaseProbe] Firestore writes are STUCK waiting for the server: $e');
-      }
-      try {
-        final snap = await FirebaseFirestore.instance
+        await FirebaseFirestore.instance
             .collection('branches')
             .limit(1)
             .get(const GetOptions(source: Source.server))
             .timeout(const Duration(seconds: 8));
-        debugPrint('[FirebaseProbe] server read OK (${snap.docs.length} doc) in ${sw.elapsedMilliseconds} ms');
+        SyncLog.write('Startup check: Firestore reads OK (${sw.elapsedMilliseconds} ms)');
       } catch (e) {
-        debugPrint('[FirebaseProbe] server read FAILED: $e');
-      }
-      // One tiny write (a single document per device, overwritten each run) so the log shows
-      // whether Firestore writes are accepted, rejected (with a code), or never answered.
-      final bId = _currentBranchId;
-      if (bId != null && bId.isNotEmpty) {
-        final ws = Stopwatch()..start();
-        try {
-          await FirebaseFirestore.instance
-              .collection('branches')
-              .doc(bId)
-              .collection('sync_probe')
-              .doc((FirebaseAuth.instance.currentUser?.uid ?? 'anonymous'))
-              .set({'at': FieldValue.serverTimestamp(), 'platform': Platform.operatingSystem}, SetOptions(merge: true))
-              .timeout(const Duration(seconds: 10));
-          debugPrint('[FirebaseProbe] write ACCEPTED by server in ${ws.elapsedMilliseconds} ms');
-        } on FirebaseException catch (e) {
-          debugPrint('[FirebaseProbe] write REJECTED: code=${e.code} message=${e.message}');
-        } on TimeoutException {
-          debugPrint('[FirebaseProbe] write NEVER ANSWERED after ${ws.elapsedMilliseconds} ms (write stream stuck)');
-          await _probeRestWrite(bId);
-        } catch (e) {
-          debugPrint('[FirebaseProbe] write FAILED: $e');
-        }
+        SyncLog.write('Startup check: Firestore read FAILED after ${sw.elapsedMilliseconds} ms: $e');
       }
     } catch (e) {
-      debugPrint('[FirebaseProbe] probe error: $e');
+      SyncLog.write('Startup check error: $e');
     }
   }
 
@@ -329,9 +445,17 @@ class SyncService {
   bool _isBackfillRunning = false;
 
   void _scheduleBackgroundBackfill(String branchId, {String? moduleScope}) {
-    if (_isBackfillRunning) return;
-    // Defer backfill by 4 seconds so the UI paints, animations complete, and user is seated
-    Timer(const Duration(seconds: 4), () async {
+    // Once per app session: the sweep and the 15 s upload timer keep the queue complete
+    // afterwards, and "Sync now" still runs the full sweep on demand.
+    final isDispScope = moduleScope == 'dispensary';
+    if (_isBackfillRunning || _fullBackfillDone || (isDispScope && _dispBackfillDone)) return;
+    if (isDispScope) {
+      _dispBackfillDone = true;
+    } else {
+      _fullBackfillDone = true;
+    }
+    // Defer backfill by 20 seconds so the UI paints, animations complete, and user is seated
+    Timer(const Duration(seconds: 20), () async {
       if (_isBackfillRunning) return;
       _isBackfillRunning = true;
       try {
@@ -367,28 +491,15 @@ class SyncService {
         }
         // ── END HEAL ────────────────────────────────────────────────────────
 
-        await _enqueueMissingEntries(branchId);
-        await Future.delayed(const Duration(milliseconds: 50));
-        await _enqueueMissingPatients(branchId);
-        await Future.delayed(const Duration(milliseconds: 50));
-
-        if (moduleScope != 'dispensary') {
-          await _enqueueMissingDonations(branchId);
+        if (moduleScope == 'dispensary') {
+          await _enqueueMissingEntries(branchId);
           await Future.delayed(const Duration(milliseconds: 50));
-          await _enqueueMissingFoodTokens(branchId);
+          await _enqueueMissingPatients(branchId);
           await Future.delayed(const Duration(milliseconds: 50));
-          await _enqueueMissingFoodLogs(branchId);
-          await Future.delayed(const Duration(milliseconds: 50));
-          await _enqueueMissingEmployees(branchId);
-          await Future.delayed(const Duration(milliseconds: 50));
-          await _enqueueMissingAttendance(branchId);
-          await Future.delayed(const Duration(milliseconds: 50));
-          await _enqueueMissingMadrassaStudents(branchId);
-          await Future.delayed(const Duration(milliseconds: 50));
-          await _enqueueMissingSchoolData(branchId);
-          await Future.delayed(const Duration(milliseconds: 50));
-          await LocalStorageService.pushLocalUsersToFirestore();
-          await Future.delayed(const Duration(milliseconds: 50));
+        } else {
+          // The full sweep queues every module (tokens, patients, donations, food, staff,
+          // attendance, madrassa, school, users). Each of those used to run here first and
+          // then a second time inside the sweep — every local record scanned twice per start.
           await sweepAllPendingLocalData(force: false);
           await Future.delayed(const Duration(milliseconds: 50));
           await LocalStorageService.downloadUsers(branchId);
@@ -417,7 +528,7 @@ class SyncService {
     });
   }
 
-  Future<void> _enqueueMissingEntries(String branchId) async {
+  Future<void> _enqueueMissingEntries(String branchId, {bool force = false}) async {
     UiStallMonitor.mark('sync: _enqueueMissingEntries');
     try {
       // Single-Writer Gateway Architecture:
@@ -453,8 +564,8 @@ class SyncService {
       int processed = 0;
       for (final key in entriesBox.keys) {
         processed++;
-        if (processed % 25 == 0) {
-          await Future.delayed(const Duration(milliseconds: 1));
+        if (processed % 10 == 0) {
+          await Future.delayed(const Duration(milliseconds: 2));
         }
 
         final raw = entriesBox.get(key);
@@ -463,6 +574,20 @@ class SyncService {
         final data = Map<String, dynamic>.from(raw);
         final isSynced = (data['synced'] == true || data['syncStatus'] == 'synced') && data['pendingSync'] != true;
         if (isSynced) continue;
+
+        // Auto-heal old or completed historical entries so they are permanently marked synced and never loop
+        final rawCreated = data['createdAt'] ?? data['time'] ?? data['timestamp'] ?? data['date'];
+        final dt = rawCreated != null ? DateTime.tryParse(rawCreated.toString()) : null;
+        final isOld = dt != null && DateTime.now().difference(dt).inHours > 48;
+        final isCompleted = (data['status'] ?? '').toString().toLowerCase() == 'completed' ||
+            (data['dispenseStatus'] ?? '').toString().toLowerCase() == 'dispensed';
+
+        if (data['pendingSync'] != true && (isOld || isCompleted)) {
+          data['syncStatus'] = 'synced';
+          data['synced'] = true;
+          await entriesBox.put(key, data);
+          continue;
+        }
 
         // Skip phantom entries fabricated by old migrations
         final pCnic = (data['patientCnic'] ?? data['cnic'] ?? '').toString().trim();
@@ -485,6 +610,7 @@ class SyncService {
         final queueType = resolveQueueType(data['queueType']?.toString(), branchId: effectiveBranch);
 
         await LocalStorageService.enqueueSync({
+          'backlog': true, // backfill: uses the backlog share of the daily quota
           'type':      'save_entry',
           'branchId':  effectiveBranch,
           'dateKey':   dateKey,
@@ -523,6 +649,18 @@ class SyncService {
         if (raw == null || raw is! Map) continue;
 
         final data = Map<String, dynamic>.from(raw);
+        final rawCreated = data['createdAt'] ?? data['time'] ?? data['timestamp'] ?? data['date'];
+        final dt = rawCreated != null ? DateTime.tryParse(rawCreated.toString()) : null;
+        final isOld = dt != null && DateTime.now().difference(dt).inHours > 48;
+        if (isOld && data['pendingSync'] != true) {
+          if (data['syncStatus'] != 'synced' || data['synced'] != true) {
+            data['syncStatus'] = 'synced';
+            data['synced'] = true;
+            await entriesBox.put(key, data);
+          }
+          continue;
+        }
+
         final bool entryUnsynced = (data['synced'] != true && data['syncStatus'] != 'synced') || data['pendingSync'] == true;
         final bool prescUnsynced = data['prescriptionSynced'] == false ||
             ((data['prescription'] != null || data['medicines'] != null) && data['prescriptionSynced'] != true);
@@ -576,7 +714,9 @@ class SyncService {
               'medicines': data['medicines'],
               'diagnosis': data['diagnosis'],
               'complaints': data['complaints'],
-              'dispenseStatus': data['dispenseStatus'] ?? 'pending',
+              // Only the real status: a default 'pending' here could overwrite a dispense
+              // the dispenser already recorded.
+              if (data['dispenseStatus'] != null) 'dispenseStatus': data['dispenseStatus'],
               'campId': data['campId'] ?? data['dispensaryId'],
               'dispensaryTag': data['dispensaryTag'],
             },
@@ -616,6 +756,7 @@ class SyncService {
   }
 
   Future<void> _enqueueMissingDonations(String branchId) async {
+    UiStallMonitor.mark('sync: _enqueueMissingDonations');
     try {
       if (!Hive.isBoxOpen(DonationsLocalStorage.donationsBox)) {
         await LocalStorageService.openBoxSafe(DonationsLocalStorage.donationsBox);
@@ -638,8 +779,8 @@ class SyncService {
       int processed = 0;
       for (final key in donationsBox.keys) {
         processed++;
-        if (processed % 25 == 0) {
-          await Future.delayed(const Duration(milliseconds: 1));
+        if (processed % 10 == 0) {
+          await Future.delayed(const Duration(milliseconds: 2));
         }
 
         final keyStr = key.toString();
@@ -647,7 +788,7 @@ class SyncService {
         if (raw == null || raw is! Map) continue;
 
         final data = Map<String, dynamic>.from(raw);
-        if (data['syncStatus'] == 'synced' && data['firestoreId'] != null) continue;
+        if ((data['syncStatus'] == 'synced' || data['synced'] == true || data['firestoreId'] != null) && data['pendingSync'] != true) continue;
 
         final localId = data['localId']?.toString();
         if (localId == null || localId.isEmpty) continue;
@@ -656,6 +797,7 @@ class SyncService {
         final targetBranch = _cleanBranch(data['branchId'] ?? branchId);
 
         await LocalStorageService.enqueueSync({
+          'backlog': true, // backfill: uses the backlog share of the daily quota
           'type': 'save_donation',
           'branchId': targetBranch,
           'localId': localId,
@@ -674,6 +816,7 @@ class SyncService {
   }
 
   Future<void> _enqueueMissingFoodTokens(String branchId) async {
+    UiStallMonitor.mark('sync: _enqueueMissingFoodTokens');
     try {
       if (!Hive.isBoxOpen('dasterkhwaan_tokens')) {
         await LocalStorageService.openBoxSafe('dasterkhwaan_tokens');
@@ -716,6 +859,7 @@ class SyncService {
           if (alreadyQueued.contains(batchId)) continue;
 
           await LocalStorageService.enqueueSync({
+            'backlog': true, // backfill: uses the backlog share of the daily quota
             'type': 'save_dasterkhwan_tokens',
             'entityId': batchId,
             'batchId': batchId,
@@ -739,6 +883,7 @@ class SyncService {
   }
 
   Future<void> _enqueueMissingFoodLogs(String branchId) async {
+    UiStallMonitor.mark('sync: _enqueueMissingFoodLogs');
     try {
       if (!Hive.isBoxOpen(LocalStorageService.dasterkhwaanFoodLogsBox)) {
         await LocalStorageService.openBoxSafe(LocalStorageService.dasterkhwaanFoodLogsBox);
@@ -767,6 +912,7 @@ class SyncService {
             final targetBranch = _cleanBranch(log['branchId']?.toString() ?? branchId);
             final dateKey = log['dateKey']?.toString() ?? DateTime.now().toIso8601String().substring(0, 10);
             await LocalStorageService.enqueueSync({
+              'backlog': true, // backfill: uses the backlog share of the daily quota
               'type': 'save_dasterkhwan_food_log',
               'entityId': id,
               'branchId': targetBranch,
@@ -783,6 +929,7 @@ class SyncService {
   }
 
   Future<void> _enqueueMissingEmployees(String branchId) async {
+    UiStallMonitor.mark('sync: _enqueueMissingEmployees');
     try {
       if (!Hive.isBoxOpen(LocalStorageService.employeesBox)) {
         await LocalStorageService.openBoxSafe(LocalStorageService.employeesBox);
@@ -802,7 +949,12 @@ class SyncService {
       }
 
       int queued = 0;
+      int processed = 0;
       for (final key in empBox.keys) {
+        processed++;
+        if (processed % 10 == 0) {
+          await Future.delayed(const Duration(milliseconds: 2));
+        }
         final raw = empBox.get(key);
         if (raw == null || raw is! Map) continue;
         final data = Map<String, dynamic>.from(raw);
@@ -817,6 +969,7 @@ class SyncService {
         final targetBranch = _cleanBranch(data['branchId'] ?? branchId);
 
         await LocalStorageService.enqueueSync({
+          'backlog': true, // backfill: uses the backlog share of the daily quota
           'type': 'save_employee',
           'branchId': targetBranch,
           'localId': localId,
@@ -834,7 +987,8 @@ class SyncService {
     }
   }
 
-  Future<void> _enqueueMissingAttendance(String branchId) async {
+  Future<void> _enqueueMissingAttendance(String branchId, {bool force = false}) async {
+    UiStallMonitor.mark('sync: _enqueueMissingAttendance');
     try {
       if (!Hive.isBoxOpen(LocalStorageService.attendanceBox)) {
         await LocalStorageService.openBoxSafe(LocalStorageService.attendanceBox);
@@ -854,8 +1008,14 @@ class SyncService {
         }
       }
 
+      final flagsBox = Hive.isBoxOpen('app_flags') ? Hive.box('app_flags') : null;
       int queued = 0;
+      int processed = 0;
       for (final key in attBox.keys) {
+        processed++;
+        if (processed % 10 == 0) {
+          await Future.delayed(const Duration(milliseconds: 2));
+        }
         final raw = attBox.get(key);
         if (raw == null || raw is! Map) continue;
         final data = Map<String, dynamic>.from(raw);
@@ -863,9 +1023,19 @@ class SyncService {
         final isSynced = (data['synced'] == true || data['syncStatus'] == 'synced') && data['pendingSync'] != true;
         if (isSynced) continue;
 
+        final flagSynced = flagsBox?.get('attendance_synced_$key') == true;
+        if (flagSynced && data['pendingSync'] != true) continue;
+
+        // Copies received over LAN ('att_…' keys) belong to the PC that recorded the punch;
+        // queueing them here made every PC upload every punch.
+        if (data['receivedViaLan'] == true || key.toString().startsWith('att_')) continue;
+
         final employeeId = (data['employeeId'] ?? data['empId'] ?? data['userId'])?.toString();
         final dateStr = (data['date'] ?? data['dateKey'] ?? DateFormat('yyyy-MM-dd').format(DateTime.now())).toString();
         if (employeeId == null || employeeId.isEmpty) continue;
+
+        final flagEmpSynced = flagsBox?.get('attendance_synced_${employeeId}_$dateStr') == true;
+        if (flagEmpSynced && data['pendingSync'] != true) continue;
 
         final queueKey = '${employeeId}_$dateStr';
         if (alreadyQueued.contains(queueKey)) continue;
@@ -873,10 +1043,12 @@ class SyncService {
         final targetBranch = _cleanBranch(data['branchId'] ?? branchId);
 
         await LocalStorageService.enqueueSync({
+          'backlog': true, // backfill: uses the backlog share of the daily quota
           'type': 'save_attendance_record',
           'branchId': targetBranch,
           'date': dateStr,
           'employeeId': employeeId,
+          'localKey': key,
           'data': data,
         });
         alreadyQueued.add(queueKey);
@@ -891,7 +1063,8 @@ class SyncService {
     }
   }
 
-  Future<void> _enqueueMissingPatients(String branchId) async {
+  Future<void> _enqueueMissingPatients(String branchId, {bool force = false}) async {
+    UiStallMonitor.mark('sync: _enqueueMissingPatients');
     try {
       if (!Hive.isBoxOpen(LocalStorageService.patientsBox)) {
         await LocalStorageService.openBoxSafe(LocalStorageService.patientsBox);
@@ -915,8 +1088,8 @@ class SyncService {
       int processedP = 0;
       for (final key in pBox.keys) {
         processedP++;
-        if (processedP % 25 == 0) {
-          await Future.delayed(const Duration(milliseconds: 1));
+        if (processedP % 10 == 0) {
+          await Future.delayed(const Duration(milliseconds: 2));
         }
 
         final raw = pBox.get(key);
@@ -932,6 +1105,9 @@ class SyncService {
         }
 
         final flagSynced = flagsBox?.get('patient_synced_$pid') == true;
+        final isExplicitlySynced = (data['syncStatus'] == 'synced' || data['synced'] == true || flagSynced) && data['pendingSync'] != true;
+        if (isExplicitlySynced) continue;
+
         final isPending = data['pendingSync'] == true ||
             (data['syncStatus'] != 'synced' && !flagSynced);
         if (!isPending) continue;
@@ -939,6 +1115,7 @@ class SyncService {
         final targetBranch = _cleanBranch(data['branchId'] ?? branchId);
 
         await LocalStorageService.enqueueSync({
+          'backlog': true, // backfill: uses the backlog share of the daily quota
           'type': 'save_patient',
           'branchId': targetBranch,
           'patientId': pid,
@@ -957,6 +1134,7 @@ class SyncService {
   }
 
   Future<void> _enqueueMissingMadrassaStudents(String branchId) async {
+    UiStallMonitor.mark('sync: _enqueueMissingMadrassaStudents');
     try {
       if (!Hive.isBoxOpen(LocalStorageService.madrassaStudentsBox)) {
         await LocalStorageService.openBoxSafe(LocalStorageService.madrassaStudentsBox);
@@ -995,6 +1173,7 @@ class SyncService {
         final targetBranch = _cleanBranch(data['branchId'] ?? branchId);
 
         await LocalStorageService.enqueueSync({
+          'backlog': true, // backfill: uses the backlog share of the daily quota
           'type': 'save_madrassa_student',
           'branchId': targetBranch,
           'studentId': sid,
@@ -1013,6 +1192,7 @@ class SyncService {
   }
 
   Future<void> _enqueueMissingSchoolData(String branchId) async {
+    UiStallMonitor.mark('sync: _enqueueMissingSchoolData');
     try {
       final syncBox = Hive.isBoxOpen(LocalStorageService.syncBox)
           ? Hive.box(LocalStorageService.syncBox)
@@ -1030,7 +1210,6 @@ class SyncService {
       }
 
       int queued = 0;
-      final targetBranch = _cleanBranch(branchId);
 
       // 1. School Students
       if (!Hive.isBoxOpen(LocalStorageService.schoolStudentsBox)) {
@@ -1041,17 +1220,19 @@ class SyncService {
         final raw = sBox.get(key);
         if (raw is! Map) continue;
         final data = Map<String, dynamic>.from(raw);
+        final rb = _cleanBranch(data['branchId'] ?? branchId); // the record's own branch
         final isSynced = (data['syncStatus'] == 'synced' || data['synced'] == true) && data['pendingSync'] != true;
         if (isSynced) continue;
 
         final sid = (data['id'] ?? data['studentId'] ?? key.toString().split('__std__').last).toString().trim();
-        final coll = 'branches/$targetBranch/school_students';
+        final coll = 'branches/$rb/school_students';
         if (sid.isEmpty || alreadyQueued.contains('$coll/$sid')) continue;
 
         await LocalStorageService.enqueueSync({
+          'backlog': true, // backfill: uses the backlog share of the daily quota
           'action': 'set',
           'type': 'save_school_student',
-          'branchId': targetBranch,
+          'branchId': rb,
           'collection': coll,
           'docId': sid,
           'data': data,
@@ -1069,17 +1250,19 @@ class SyncService {
         final raw = tBox.get(key);
         if (raw is! Map) continue;
         final data = Map<String, dynamic>.from(raw);
+        final rb = _cleanBranch(data['branchId'] ?? branchId); // the record's own branch
         final isSynced = (data['syncStatus'] == 'synced' || data['synced'] == true) && data['pendingSync'] != true;
         if (isSynced) continue;
 
         final tid = (data['id'] ?? data['teacherId'] ?? key.toString().split('__tch__').last).toString().trim();
-        final coll = 'branches/$targetBranch/school_teachers';
+        final coll = 'branches/$rb/school_teachers';
         if (tid.isEmpty || alreadyQueued.contains('$coll/$tid')) continue;
 
         await LocalStorageService.enqueueSync({
+          'backlog': true, // backfill: uses the backlog share of the daily quota
           'action': 'set',
           'type': 'save_school_teacher',
-          'branchId': targetBranch,
+          'branchId': rb,
           'collection': coll,
           'docId': tid,
           'data': data,
@@ -1097,6 +1280,7 @@ class SyncService {
         final raw = lBox.get(key);
         if (raw is! Map) continue;
         final data = Map<String, dynamic>.from(raw);
+        final rb = _cleanBranch(data['branchId'] ?? branchId); // the record's own branch
         final isSynced = (data['syncStatus'] == 'synced' || data['synced'] == true) && data['pendingSync'] != true;
         if (isSynced) continue;
 
@@ -1104,14 +1288,15 @@ class SyncService {
         final isTeacher = keyStr.contains('__tchlog__');
         final dateKey = (data['date'] ?? (isTeacher ? keyStr.split('__tchlog__').last : keyStr.split('__log__').last)).toString().trim();
         final coll = isTeacher
-            ? 'branches/$targetBranch/school_teacher_attendance'
-            : 'branches/$targetBranch/school_attendance';
+            ? 'branches/$rb/school_teacher_attendance'
+            : 'branches/$rb/school_attendance';
         if (dateKey.isEmpty || alreadyQueued.contains('$coll/$dateKey')) continue;
 
         await LocalStorageService.enqueueSync({
+          'backlog': true, // backfill: uses the backlog share of the daily quota
           'action': 'set',
           'type': isTeacher ? 'save_school_teacher_attendance' : 'save_school_attendance',
-          'branchId': targetBranch,
+          'branchId': rb,
           'collection': coll,
           'docId': dateKey,
           'data': data,
@@ -1129,17 +1314,19 @@ class SyncService {
         final raw = gBox.get(key);
         if (raw is! Map) continue;
         final data = Map<String, dynamic>.from(raw);
+        final rb = _cleanBranch(data['branchId'] ?? branchId); // the record's own branch
         final isSynced = (data['syncStatus'] == 'synced' || data['synced'] == true) && data['pendingSync'] != true;
         if (isSynced) continue;
 
         final gid = (data['id'] ?? key.toString().split('__').last).toString().trim();
-        final coll = 'branches/$targetBranch/school_grades';
+        final coll = 'branches/$rb/school_grades';
         if (gid.isEmpty || alreadyQueued.contains('$coll/$gid')) continue;
 
         await LocalStorageService.enqueueSync({
+          'backlog': true, // backfill: uses the backlog share of the daily quota
           'action': 'set',
           'type': 'save_school_grade',
-          'branchId': targetBranch,
+          'branchId': rb,
           'collection': coll,
           'docId': gid,
           'data': data,
@@ -1157,17 +1344,19 @@ class SyncService {
         final raw = fBox.get(key);
         if (raw is! Map) continue;
         final data = Map<String, dynamic>.from(raw);
+        final rb = _cleanBranch(data['branchId'] ?? branchId); // the record's own branch
         final isSynced = (data['syncStatus'] == 'synced' || data['synced'] == true) && data['pendingSync'] != true;
         if (isSynced) continue;
 
         final fid = (data['id'] ?? key.toString().split('__').last).toString().trim();
-        final coll = 'branches/$targetBranch/school_fees';
+        final coll = 'branches/$rb/school_fees';
         if (fid.isEmpty || alreadyQueued.contains('$coll/$fid')) continue;
 
         await LocalStorageService.enqueueSync({
+          'backlog': true, // backfill: uses the backlog share of the daily quota
           'action': 'set',
           'type': 'save_school_fee',
-          'branchId': targetBranch,
+          'branchId': rb,
           'collection': coll,
           'docId': fid,
           'data': data,
@@ -1238,23 +1427,27 @@ class SyncService {
         final connectivity = await Connectivity().checkConnectivity();
         isOnline = connectivity.any((r) => r != ConnectivityResult.none);
       } else if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
-        // On desktop, fail open when force is requested or when there are pending items waiting to upload
-        isOnline = force || hasPendingItems || !NetworkHealthService().isOffline;
+        isOnline = force || (!NetworkHealthService().isOffline && NetworkHealthService().isStableOnline);
       } else if (NetworkHealthService().isOffline) {
         isOnline = false;
       }
     } catch (_) {
-      isOnline = true; // Fail-open: attempt upload if connectivity check errors
+      isOnline = false;
     }
 
-    if (force) {
-      _isUploading = false;
-    } else if (_isUploading && _uploadStartedAt != null && DateTime.now().difference(_uploadStartedAt!).inSeconds > 25) {
-      debugPrint('[SyncService] ⚠️ Resetting hung _isUploading watchdog after 25s');
+    // Firestore stopped answering recently: give it a few minutes instead of re-trying every 15 s.
+    final stalled = _stalledUntil;
+    if (!force && stalled != null && DateTime.now().isBefore(stalled)) return;
+
+    // _uploadStartedAt is refreshed per item, so this only fires when a pass made no progress
+    // for 90 s. (It used to fire 25 s after a pass *started*, and forced syncs reset it outright,
+    // so two passes ran at once and uploaded the same items twice.)
+    if (_isUploading && _uploadStartedAt != null && DateTime.now().difference(_uploadStartedAt!).inSeconds > 90) {
+      debugPrint('[SyncService] ⚠️ Resetting hung _isUploading watchdog after 90s without progress');
       _isUploading = false;
     }
 
-    if ((isOnline || force) && (!_isUploading || force)) {
+    if (isOnline || force) {
       // Dual Sync Rule:
       // If local LAN server is running on this machine, ServerSyncManager handles the scheduled cloud sync passes.
       // If this is a client station connected to the LAN server, ServerSyncManager on the server handles the cloud sync passes.
@@ -1398,63 +1591,14 @@ class SyncService {
     }
   }
 
-  bool _isPriorityType(String type) {
-    if (type.startsWith('save_school_') || type.startsWith('delete_school_')) {
-      return true;
-    }
-    return type == 'save_entry' ||
-        type == 'save_patient' ||
-        type == 'delete_patient' ||
-        type == 'update_serial_status' ||
-        type == 'save_serial' ||
-        type == 'save_prescription' ||
-        type == 'delete_prescription' ||
-        type == 'save_user' ||
-        type == 'delete_user' ||
-        type == 'save_audit_log' ||
-        type == 'save_salary_history' ||
-        type == 'save_donor' ||
-        type == 'save_bank_slip' ||
-        type == 'save_donation' ||
-        type == 'delete_donation' ||
-        type == 'save_donation_receipt' ||
-        type == 'save_donation_box' ||
-        type == 'save_box_opening' ||
-        type == 'save_food_token' ||
-        type == 'save_dasterkhwan_tokens' ||
-        type == 'save_dasterkhwan_entry' ||
-        type == 'save_dasterkhwan_food_log' ||
-        type == 'save_dasterkhwan_stock' ||
-        type == 'save_school_student' ||
-        type == 'save_school_teacher' ||
-        type == 'save_school_attendance' ||
-        type == 'save_school_teacher_attendance' ||
-        type == 'save_school_book' ||
-        type == 'save_school_book_loan' ||
-        type == 'save_school_grade' ||
-        type == 'save_school_fee' ||
-        type == 'save_school_homeroom' ||
-        type == 'delete_inventory_item' ||
-        type == 'save_dispensary_charge' ||
-        type == 'delete_dispensary' ||
-        type == 'save_inventory_request' ||
-        type == 'update_inventory_stock' ||
-        type == 'save_inventory_item' ||
-        type == 'save_proforma' ||
-        type == 'save_madrassa_student' ||
-        type == 'save_madrassa_admission' ||
-        type == 'save_madrassa_daily_log' ||
-        type == 'save_madrassa_fee_payment' ||
-        type == 'save_madrassa_teacher_attendance' ||
-        type == 'save_employee' ||
-        type == 'save_employee_attendance' ||
-        type == 'save_attendance_record' ||
-        type == 'delete_employee';
-  }
-
-  Future<void> _reviveDeadLetterQueue() async {
+  /// Moves dead-lettered uploads back into the queue. Forced syncs revive everything; the
+  /// automatic revival (every 6 h) brings them back as backlog, so items that failed during
+  /// an outage or a quota-exhausted day are retried instead of sitting there forever.
+  DateTime? _lastDlqRevivalAt;
+  Future<void> _reviveDeadLetterQueue({bool asBacklog = false}) async {
     try {
       final dlBoxName = LocalStorageService.deadLetterQueueBox;
+      if (!Hive.isBoxOpen(dlBoxName)) await LocalStorageService.openBoxSafe(dlBoxName);
       if (Hive.isBoxOpen(dlBoxName)) {
         final dlBox = Hive.box(dlBoxName);
         if (dlBox.isNotEmpty && Hive.isBoxOpen(LocalStorageService.syncBox)) {
@@ -1462,14 +1606,21 @@ class SyncService {
           final keys = List.from(dlBox.keys);
           for (final k in keys) {
             final val = dlBox.get(k);
-            if (val is Map) {
+            // A newer copy is already queued: keep that one.
+            // Automatic revival gives each item 3 more rounds; after that only a forced sync
+            // retries it, so a truly broken record can't loop forever.
+            final revived = val is Map ? ((val['autoRevivals'] as int?) ?? 0) : 0;
+            if (asBacklog && revived >= 3) continue;
+            if (val is Map && !sBox.containsKey(k)) {
               final action = Map<String, dynamic>.from(val);
+              if (asBacklog) action['autoRevivals'] = revived + 1;
               action['attempts'] = 0;
               action.remove('nextRetryAt');
               action.remove('lastError');
+              if (asBacklog) action['backlog'] = true;
               await sBox.put(k, action);
-              await dlBox.delete(k);
             }
+            await dlBox.delete(k);
           }
           debugPrint('[SyncService] 🔄 Revived ${keys.length} items from DeadLetterQueue to syncBox');
         }
@@ -1486,24 +1637,27 @@ class SyncService {
       return;
     }
     if (_isUploading) {
-      if (_uploadStartedAt != null && DateTime.now().difference(_uploadStartedAt!).inSeconds > 25) {
-        debugPrint('[SyncService] ⚠️ Resetting hung _isUploading watchdog after 25s in _uploadPending');
+      if (_uploadStartedAt != null && DateTime.now().difference(_uploadStartedAt!).inSeconds > 90) {
+        debugPrint('[SyncService] ⚠️ Resetting hung _isUploading watchdog after 90s in _uploadPending');
         _isUploading = false;
-      } else if (!force) {
+      } else {
+        // Never run two passes at once (they upload the same items twice). A forced sync
+        // asked for mid-pass runs right after the current pass.
+        if (force) _forceRequested = true;
         return;
       }
     }
     _isUploading = true;
+    UiStallMonitor.mark('sync: upload pass');
     _uploadStartedAt = DateTime.now();
     ServerSyncCoordinator.markStarted(isServer: false);
+    BusyTask? uploadStatus;
 
     try {
-      if (force) {
-        try {
-          await _reviveDeadLetterQueue();
-        } catch (e) {
-          debugPrint('[SyncService] _reviveDeadLetterQueue warning: $e');
-        }
+      try {
+        await _reviveDeadLetterQueue();
+      } catch (e) {
+        debugPrint('[SyncService] _reviveDeadLetterQueue warning: $e');
       }
       if (force) {
         try {
@@ -1515,75 +1669,215 @@ class SyncService {
       final queueBox = Hive.box(LocalStorageService.syncBox);
       if (queueBox.isEmpty) return;
 
+      // Only clear quota pause if explicitly forced by user action
+      if (force) {
+        QuotaService.clearDailyResetPause();
+      }
+
+      // If cloud writes are paused due to daily quota exhaustion, stop here stably
+      if (QuotaService.isPausedForDailyReset && !force) return;
+
+      // If the queue has substantial items, trigger Python high-speed bulk uploader first
+      if (queueBox.length >= 15 && !kIsWeb && Platform.isWindows) {
+        try {
+          await HiddenForceUploader.instance.runSilentForceUpload();
+          if (queueBox.isEmpty) {
+            debugPrint('[SyncService] ✅ Queue successfully drained by high-speed cloud engine!');
+            return;
+          }
+        } catch (e) {
+          debugPrint('[SyncService] High-speed uploader notice: $e (continuing standard sync)');
+        }
+      }
+
+      if (queueBox.length >= 8) {
+        uploadStatus = BusyStatus.begin('Syncing offline data (${queueBox.length} items queued)', background: true);
+      }
+      final passStarted = DateTime.now();
+      final writesBefore = QuotaService.dailyWriteCount;
+      final skippedBefore = CloudDb.skippedUnchanged;
+
       // Track attendance headers updated during this pass to avoid writing parent doc 50x per batch
       final updatedAttendanceHeaders = <String>{};
 
-      // Quota gate: bypassed if forced or when priority records need flushing
-      final hasPriority = queueBox.values.any((v) =>
-          v is Map && (_isPriorityType(v['type']?.toString() ?? '') || v['collection'] != null));
-      if (!force && !hasPriority && (QuotaService.isQuotaExhausted || !QuotaService.canWrite())) {
-        debugPrint('[SyncService] ⛔ Quota check failed and no priority records — upload batch skipped');
-        return;
-      }
-
-      // Minimum-Version Fleet Lock Check (with strict 3-second timeout)
-      try {
-        final versionDoc = await _db
-            .collection('app_config')
-            .doc('version')
-            .get()
-            .timeout(const Duration(seconds: 3));
-        if (versionDoc.exists) {
-          final minVersion = versionDoc.data()?['min_supported_version']?.toString();
-          if (minVersion != null && AutoUpdateService.compareVersions(AutoUpdateService.currentVersion, minVersion) < 0) {
-            debugPrint('[SyncService] ⚠️ App version (${AutoUpdateService.currentVersion}) is below minimum supported version ($minVersion). Sync continuing in compatibility mode.');
+      // Minimum-Version Fleet Lock Check (with strict 3-second timeout). At most every
+      // 6 h: it ran on every 15-second pass, costing a Firestore read each time.
+      final lastVersionCheck = _lastVersionCheckAt;
+      if (lastVersionCheck == null || DateTime.now().difference(lastVersionCheck) > const Duration(hours: 6)) {
+        _lastVersionCheckAt = DateTime.now();
+        try {
+          final versionDoc = await _db
+              .collection('app_config')
+              .doc('version')
+              .get()
+              .timeout(const Duration(seconds: 3));
+          if (versionDoc.exists) {
+            final minVersion = versionDoc.data()?['min_supported_version']?.toString();
+            if (minVersion != null && AutoUpdateService.compareVersions(AutoUpdateService.currentVersion, minVersion) < 0) {
+              debugPrint('[SyncService] ⚠️ App version (${AutoUpdateService.currentVersion}) is below minimum supported version ($minVersion). Sync continuing in compatibility mode.');
+            }
           }
+        } catch (e) {
+          debugPrint('[SyncService] Version check notice: $e');
         }
-      } catch (e) {
-        debugPrint('[SyncService] Version check notice: $e');
       }
 
-      // Fast purge bloated duplicates before processing
-      if (queueBox.length > 50) {
-        await LocalStorageService.purgeBloatedSyncQueue();
+      // Fast purge bloated duplicates before processing (throttled to at most once per 10 minutes unless forced)
+      final lastSyncPurge = _lastSyncPurgeAt;
+      if (force || lastSyncPurge == null || DateTime.now().difference(lastSyncPurge) > const Duration(minutes: 10)) {
+        if (queueBox.length > 50) {
+          _lastSyncPurgeAt = DateTime.now();
+          await LocalStorageService.purgeBloatedSyncQueue();
+        }
       }
 
       // Process in batches until queue is drained or max 80 batches (8,000 items)
       int batchesRun = 0;
-      while (queueBox.isNotEmpty && batchesRun < 80) {
+      var consecutiveNetworkFailures = 0;
+      var uploadedThisPass = 0;
+      var backlogDeferred = 0;
+      var quotaStop = false;
+      while (queueBox.isNotEmpty && batchesRun < 80 && !quotaStop) {
         batchesRun++;
+        ServerSyncCoordinator.touch();
+        if (uploadStatus != null && queueBox.isNotEmpty) {
+          uploadStatus.update('Syncing offline data (${queueBox.length} remaining)');
+        }
+        // Dual-Lane (Express & Freight) Key Partitioning
         final allKeys = queueBox.keys.toList();
         if (allKeys.isEmpty) break;
+        final rawLiveKeys = <dynamic>[], rawBacklogKeys = <dynamic>[];
+        int keyScanCounter = 0;
+        for (final k in allKeys) {
+          final v = queueBox.get(k);
+          (v is Map && _isBacklogItem(v) ? rawBacklogKeys : rawLiveKeys).add(k);
+          if (++keyScanCounter % 25 == 0) {
+            await Future.delayed(Duration.zero);
+          }
+        }
 
         // Select ready keys (not in backoff window, unless forced)
-        final batchKeys = <dynamic>[];
         DateTime? earliestBackoff;
-        for (final k in allKeys) {
+        bool isKeyReady(dynamic k) {
           final raw = queueBox.get(k);
-          if (raw is! Map) {
-            batchKeys.add(k);
+          if (raw is! Map) return true;
+          final nextRetryAtStr = raw['nextRetryAt'] as String?;
+          final coalesceUntil = (force || queueBox.length > 5) ? null : _coalesceUntil(raw);
+          if (coalesceUntil != null) {
+            if (earliestBackoff == null || coalesceUntil.isBefore(earliestBackoff!)) {
+              earliestBackoff = coalesceUntil;
+            }
+            return false;
+          } else if (force || nextRetryAtStr == null) {
+            return true;
           } else {
-            final nextRetryAtStr = raw['nextRetryAt'] as String?;
-            if (force || nextRetryAtStr == null) {
-              batchKeys.add(k);
+            final nextRetry = DateTime.tryParse(nextRetryAtStr);
+            if (nextRetry == null || !DateTime.now().isBefore(nextRetry) || nextRetry.difference(DateTime.now()).inSeconds > 30) {
+              return true;
             } else {
-              final nextRetry = DateTime.tryParse(nextRetryAtStr);
-              if (nextRetry == null || !DateTime.now().isBefore(nextRetry)) {
-                batchKeys.add(k);
-              } else {
-                if (earliestBackoff == null || nextRetry.isBefore(earliestBackoff)) {
-                  earliestBackoff = nextRetry;
-                }
+              if (earliestBackoff == null || nextRetry.isBefore(earliestBackoff!)) {
+                earliestBackoff = nextRetry;
+              }
+              return false;
+            }
+          }
+        }
+
+        final readyLiveKeys = <dynamic>[];
+        for (final k in rawLiveKeys) {
+          if (isKeyReady(k)) readyLiveKeys.add(k);
+        }
+
+        final readyBacklogKeys = <dynamic>[];
+        for (final k in rawBacklogKeys) {
+          if (isKeyReady(k)) readyBacklogKeys.add(k);
+        }
+
+        // Dependency Promotion: If a live action references a patient, token, or student that is pending in backlog,
+        // promote that backlog action to the Express Lane so parents are never uploaded after children!
+        final livePatientIds = <String>{};
+        final liveSerials = <String>{};
+        final liveStudentIds = <String>{};
+        for (final k in readyLiveKeys) {
+          final raw = queueBox.get(k);
+          if (raw is Map) {
+            final pid = (raw['patientId'] ?? (raw['data'] is Map ? raw['data']['patientId'] : null) ?? raw['id'])?.toString().trim();
+            if (pid != null && pid.isNotEmpty) livePatientIds.add(pid);
+            final s = (raw['serial'] ?? (raw['data'] is Map ? raw['data']['serial'] : null))?.toString().trim();
+            if (s != null && s.isNotEmpty) liveSerials.add(s);
+            final sid = (raw['studentId'] ?? (raw['data'] is Map ? raw['data']['studentId'] : null))?.toString().trim();
+            if (sid != null && sid.isNotEmpty) liveStudentIds.add(sid);
+          }
+        }
+
+        if (livePatientIds.isNotEmpty || liveSerials.isNotEmpty || liveStudentIds.isNotEmpty) {
+          final promoted = <dynamic>[];
+          for (final bk in readyBacklogKeys) {
+            final raw = queueBox.get(bk);
+            if (raw is Map) {
+              final type = (raw['type'] ?? '').toString();
+              if (type == 'save_patient') {
+                final pid = (raw['patientId'] ?? (raw['data'] is Map ? raw['data']['patientId'] : null) ?? raw['id'])?.toString().trim();
+                if (pid != null && livePatientIds.contains(pid)) promoted.add(bk);
+              } else if (type == 'save_entry') {
+                final s = (raw['serial'] ?? (raw['data'] is Map ? raw['data']['serial'] : null))?.toString().trim();
+                if (s != null && liveSerials.contains(s)) promoted.add(bk);
+              } else if (type == 'save_madrassa_student' || type == 'save_school_student') {
+                final sid = (raw['studentId'] ?? (raw['data'] is Map ? (raw['data']['studentId'] ?? raw['data']['id']) : null) ?? raw['id'])?.toString().trim();
+                if (sid != null && liveStudentIds.contains(sid)) promoted.add(bk);
               }
             }
           }
-          if (batchKeys.length >= 100) break;
+          for (final pk in promoted) {
+            readyBacklogKeys.remove(pk);
+            readyLiveKeys.add(pk);
+          }
+        }
+
+        // Sort both lanes with Causal Precedence and FIFO timestamps
+        readyLiveKeys.sort((a, b) {
+          final rawA = queueBox.get(a);
+          final rawB = queueBox.get(b);
+          if (rawA is Map && rawB is Map) {
+            return _compareSyncActions(rawA, rawB);
+          }
+          return 0;
+        });
+
+        readyBacklogKeys.sort((a, b) {
+          final rawA = queueBox.get(a);
+          final rawB = queueBox.get(b);
+          if (rawA is Map && rawB is Map) {
+            return _compareSyncActions(rawA, rawB);
+          }
+          return 0;
+        });
+
+        // Dual-Lane (80/20) Batch Scheduler:
+        // Max 100 items per batch. Up to 80 slots for today's live Express Lane,
+        // and up to 20 slots for Freight Lane (backlog) to prevent backlog starvation.
+        // If either lane has fewer items, remaining quota dynamically transfers to the other.
+        const int maxBatchSize = 100;
+        final int expressCount = min(80, readyLiveKeys.length);
+        final int remainingCapacity = maxBatchSize - expressCount;
+        final int freightCount = min(remainingCapacity, readyBacklogKeys.length);
+
+        final batchKeys = <dynamic>[];
+        // 1. Express items first (live data appears immediately in Firestore for HQ & Chairman)
+        batchKeys.addAll(readyLiveKeys.take(expressCount));
+        // 2. Freight items (backlog continually drains in background)
+        batchKeys.addAll(readyBacklogKeys.take(freightCount));
+
+        // 3. If there is still capacity and more live items are waiting, take them
+        if (batchKeys.length < maxBatchSize && readyLiveKeys.length > expressCount) {
+          final extraLive = readyLiveKeys.skip(expressCount).take(maxBatchSize - batchKeys.length);
+          batchKeys.addAll(extraLive);
         }
 
         if (batchKeys.isEmpty) {
           // If all remaining keys are in backoff, schedule an immediate retry for when the earliest backoff expires!
           if (earliestBackoff != null) {
-            final waitSeconds = earliestBackoff.difference(DateTime.now()).inSeconds.clamp(1, 15);
+            final waitSeconds = earliestBackoff!.difference(DateTime.now()).inSeconds.clamp(1, 15);
             _retryTimer?.cancel();
             _retryTimer = Timer(Duration(seconds: waitSeconds), () {
               triggerUpload();
@@ -1605,40 +1899,48 @@ class SyncService {
         final type     = action['type'] as String? ?? 'unknown';
         final attempts = (action['attempts'] as int?) ?? 0;
 
-        // Exponential backoff check (Pillar 2-C) - bypassed when forced
+        // Exponential backoff check - only skip if backoff is active and <= 30 seconds away
         final nextRetryAtStr = action['nextRetryAt'] as String?;
         if (!force && nextRetryAtStr != null) {
           final nextRetry = DateTime.tryParse(nextRetryAtStr);
-          if (nextRetry != null && DateTime.now().isBefore(nextRetry)) {
-            continue; // Skip key until backoff window expires
+          if (nextRetry != null && DateTime.now().isBefore(nextRetry) && nextRetry.difference(DateTime.now()).inSeconds <= 30) {
+            continue; // Skip key until short backoff window expires
           }
         }
 
-        // Bounded retry: Route to dead letter queue after 10 attempts (Pillar 2-C)
-        if (!force && attempts >= 10) {
+        // Bounded retry: Route to dead letter queue after 15 attempts (Pillar 2-C)
+        if (!force && attempts >= 15) {
           action['lastFailureLoggedAt'] = DateTime.now().toIso8601String();
           await _flagPersistentSyncFailure(key, action, type);
           await LocalStorageService.moveToDeadLetterQueue(
             LocalStorageService.syncBox,
             key,
             action,
-            reason: action['lastError']?.toString() ?? 'Exceeded max retry attempts (10)',
+            reason: action['lastError']?.toString() ?? 'Exceeded max retry attempts (15)',
           );
+          continue;
+        }
+
+        // Only defer backlog if a temporary rate-limit cooldown is active (at most 30s)
+        if (!force && _isBacklogItem(action) && QuotaService.isPausedForDailyReset) {
+          action['nextRetryAt'] = DateTime.now().add(const Duration(seconds: 30)).toIso8601String();
+          await queueBox.put(key, action);
+          backlogDeferred++;
           continue;
         }
 
         try {
           final branchId = _cleanBranch(action['branchId']);
+          debugPrint('[SyncService] 📤 Uploading [$type] key: $key (attempt ${attempts + 1})...');
 
-          // Per-item quota check: priority entities and forced uploads always proceed
-          final isPriority = _isPriorityType(type);
-          if (!force && !QuotaService.canWrite(isPriority: isPriority)) {
-            debugPrint('[SyncService] ⛔ Daily write ceiling or pause reached for $type — deferring item');
-            action['nextRetryAt'] = DateTime.now().add(const Duration(seconds: 15)).toIso8601String();
-            await queueBox.put(key, action);
-            continue;
-          }
+          _uploadStartedAt = DateTime.now(); // progress heartbeat for the hung-pass watchdog
 
+          // One item's work. Every write in it goes through CloudDb (Firestore's REST API) and
+          // completes only once Firestore has accepted it, so getting to the end without an
+          // error means the item really is in the cloud. Nothing waits in a hidden SDK queue.
+          // ignore: no_leading_underscores_for_local_identifiers
+          final _db = CloudDb.instance;
+          Future<void> work() async {
           if (action['collection'] != null) {
             final colPath = action['collection'].toString().trim();
             final docId = action['docId']?.toString().trim();
@@ -1647,7 +1949,7 @@ class SyncService {
 
             if (colPath.isNotEmpty && docId != null && docId.isNotEmpty) {
               final isUserCol = colPath == 'users' || colPath.endsWith('/users') || colPath.contains('users');
-              final DocumentReference<Map<String, dynamic>> docRef;
+              final CloudDoc docRef;
               if (colPath.contains('/')) {
                 docRef = _db.doc('$colPath/$docId');
               } else {
@@ -1655,21 +1957,21 @@ class SyncService {
               }
 
               if (act == 'delete') {
-                await docRef.delete().timeout(const Duration(seconds: 10));
+                await docRef.delete();
                 if (isUserCol) {
-                  await _db.collection('users').doc(docId).delete().timeout(const Duration(seconds: 10)).catchError((_) {});
+                  await _db.collection('users').doc(docId).delete().catchError((_) {});
                   if (branchId.isNotEmpty && branchId != 'all' && branchId != 'global') {
-                    await _db.collection('branches').doc(branchId).collection('users').doc(docId).delete().timeout(const Duration(seconds: 10)).catchError((_) {});
+                    await _db.collection('branches').doc(branchId).collection('users').doc(docId).delete().catchError((_) {});
                   }
                 }
               } else {
                 final fsData = LocalStorageService.sanitizeForCloudUpload(data);
-                await docRef.set(fsData, SetOptions(merge: true)).timeout(const Duration(seconds: 10));
+                await docRef.set(fsData, SetOptions(merge: true));
                 if (isUserCol) {
                   // Dual write: ensure both root /users and branch /branches/{b}/users are updated
-                  await _db.collection('users').doc(docId).set(fsData, SetOptions(merge: true)).timeout(const Duration(seconds: 10)).catchError((_) {});
+                  await _db.collection('users').doc(docId).set(fsData, SetOptions(merge: true)).catchError((_) {});
                   if (branchId.isNotEmpty && branchId != 'all' && branchId != 'global') {
-                    await _db.collection('branches').doc(branchId).collection('users').doc(docId).set(fsData, SetOptions(merge: true)).timeout(const Duration(seconds: 10)).catchError((_) {});
+                    await _db.collection('branches').doc(branchId).collection('users').doc(docId).set(fsData, SetOptions(merge: true)).catchError((_) {});
                   }
                 }
               }
@@ -1790,7 +2092,7 @@ class SyncService {
               } catch (_) {}
             }
             final fsData = LocalStorageService.sanitizeForCloudUpload(data);
-            await _db.collection('branches').doc(bId).collection('patients').doc(patientId).set(fsData, SetOptions(merge: true)).timeout(const Duration(seconds: 6));
+            await _db.collection('branches').doc(bId).collection('patients').doc(patientId).set(fsData, SetOptions(merge: true));
             if (Hive.isBoxOpen('app_flags')) {
               await Hive.box('app_flags').put('patient_synced_$patientId', true);
             }
@@ -1813,7 +2115,7 @@ class SyncService {
                 'patientId': patientId,
                 'branchId': bId,
               };
-              await _db.collection('branches').doc(bId).collection('patients').doc(patientId).set(tombstone, SetOptions(merge: true)).timeout(const Duration(seconds: 25));
+              await _db.collection('branches').doc(bId).collection('patients').doc(patientId).set(tombstone, SetOptions(merge: true));
               await Hive.box('app_flags').delete('patient_synced_$patientId');
               if (Hive.isBoxOpen(LocalStorageService.patientsBox)) {
                 final pBox = Hive.box(LocalStorageService.patientsBox);
@@ -1828,15 +2130,15 @@ class SyncService {
             final serial = action['serial']?.toString() ?? '';
             final path = action['path']?.toString() ?? '';
             if (path.isNotEmpty) {
-              await _db.doc(path).delete().timeout(const Duration(seconds: 10));
+              await _db.doc(path).delete();
             }
             if (pCnic.isNotEmpty && serial.isNotEmpty) {
-              await _db.collection('branches').doc(bId).collection('patients').doc(pCnic).collection('prescriptions').doc(serial).delete().timeout(const Duration(seconds: 10));
+              await _db.collection('branches').doc(bId).collection('patients').doc(pCnic).collection('prescriptions').doc(serial).delete();
               try {
-                await _db.collection('branches').doc(bId).collection('prescriptions').doc(pCnic).collection('prescriptions').doc(serial).delete().timeout(const Duration(seconds: 10));
+                await _db.collection('branches').doc(bId).collection('prescriptions').doc(pCnic).collection('prescriptions').doc(serial).delete();
               } catch (_) {}
               try {
-                await _db.collection('prescriptions').doc(pCnic).collection('prescriptions').doc(serial).delete().timeout(const Duration(seconds: 10));
+                await _db.collection('prescriptions').doc(pCnic).collection('prescriptions').doc(serial).delete();
               } catch (_) {}
             }
           }
@@ -1846,15 +2148,15 @@ class SyncService {
             final serial  = action['serial']?.toString() ?? '';
             final path    = action['path']?.toString() ?? '';
             if (path.isNotEmpty) {
-              await _db.doc(path).delete().timeout(const Duration(seconds: 10));
+              await _db.doc(path).delete();
             }
             if (bId.isNotEmpty && dateKey.isNotEmpty && serial.isNotEmpty) {
-              await _db.collection('branches').doc(bId).collection('dispensary').doc(dateKey).collection(dateKey).doc(serial).delete().timeout(const Duration(seconds: 10));
+              await _db.collection('branches').doc(bId).collection('dispensary').doc(dateKey).collection(dateKey).doc(serial).delete();
               try {
-                await _db.collection('branches').doc(bId).collection('dispensary').doc(dateKey).collection('dispensed').doc(serial).delete().timeout(const Duration(seconds: 10));
+                await _db.collection('branches').doc(bId).collection('dispensary').doc(dateKey).collection('dispensed').doc(serial).delete();
               } catch (_) {}
               try {
-                await _db.collection('branches').doc(bId).collection('dispensary').doc(serial).delete().timeout(const Duration(seconds: 10));
+                await _db.collection('branches').doc(bId).collection('dispensary').doc(serial).delete();
               } catch (_) {}
             }
           }
@@ -1914,7 +2216,17 @@ class SyncService {
                 serial: upperSerial,
               );
               final fsData = LocalStorageService.sanitizeForCloudUpload(data);
-              await _db.collection('branches').doc(branchId).collection('serials').doc(campDocKey).collection(queueType).doc(upperSerial).set(fsData, SetOptions(merge: true)).timeout(const Duration(seconds: 10));
+              // This PC's copy may be older than the cloud's (another PC dispensed it). With
+              // merge, its 'pending' would undo that dispense, so only 'dispensed' is written.
+              if ((fsData['dispenseStatus'] ?? '').toString().toLowerCase() != 'dispensed') {
+                fsData.remove('dispenseStatus');
+              }
+              // Re-uploaded older records must not move a completed token back to waiting.
+              final st = (fsData['status'] ?? '').toString().toLowerCase();
+              if (_isBacklogItem(action) && (st == 'waiting' || st == 'pending' || st.isEmpty)) {
+                fsData.remove('status');
+              }
+              await _db.collection('branches').doc(branchId).collection('serials').doc(campDocKey).collection(queueType).doc(upperSerial).set(fsData, SetOptions(merge: true));
               if (serial != upperSerial) {
                 try {
                   await _db.collection('branches').doc(branchId).collection('serials').doc(campDocKey).collection(queueType).doc(serial.toLowerCase()).delete();
@@ -1959,7 +2271,9 @@ class SyncService {
             final updateMap = <String, dynamic>{
               'status':         'completed',
               'completedAt':    data['completedAt'] ?? DateTime.now().toUtc().toIso8601String(),
-              'dispenseStatus': data['dispenseStatus'] ?? 'pending',
+              // Only ever write 'dispensed' here: the doctor's prescription carries 'pending', and
+              // a delayed doctor upload (merge) used to undo a dispense already in the cloud.
+              if ((data['dispenseStatus'] ?? '').toString().toLowerCase() == 'dispensed') 'dispenseStatus': 'dispensed',
             };
 
             // Terminal Status Protection: Preserve dispensed status if already dispensed locally
@@ -2163,8 +2477,8 @@ class SyncService {
                 dispensaryTag: (action['dispensaryTag'] ?? nestedData['dispensaryTag'])?.toString(),
                 serial: serialHint,
               );
-              await _db.collection('branches').doc(targetBranch).collection(invCol).doc(medicineId).delete().timeout(const Duration(seconds: 10)).catchError((_) {});
-              await _db.collection('branches').doc(targetBranch).collection('inventory').doc(medicineId).delete().timeout(const Duration(seconds: 10)).catchError((_) {});
+              await _db.collection('branches').doc(targetBranch).collection(invCol).doc(medicineId).delete().catchError((_) {});
+              await _db.collection('branches').doc(targetBranch).collection('inventory').doc(medicineId).delete().catchError((_) {});
             }
           }
           else if (type == 'save_inventory_log') {
@@ -2265,7 +2579,7 @@ class SyncService {
                   if (remoteUpdate != null && localUpdate != null && DateTime.parse(remoteUpdate).isAfter(DateTime.parse(localUpdate))) {
                     if (hiveKey != null) await DonationsLocalStorage.mergeRemoteDonation(hiveKey, stableId, remoteDoc.data() ?? {});
                     await queueBox.delete(key);
-                    continue;
+                    return;
                   }
                 }
               } catch (_) {}
@@ -2277,8 +2591,8 @@ class SyncService {
             final fsData = Map<String, dynamic>.from(data)..remove('hiveKey')..remove('syncStatus')..remove('firestoreId');
 
             // Dual write: subcollection AND top-level collection (ensures remote visibility anywhere in Firestore)
-            await docRef.set(fsData, SetOptions(merge: true)).timeout(const Duration(seconds: 10));
-            await _db.collection('donations').doc(stableId).set(fsData, SetOptions(merge: true)).timeout(const Duration(seconds: 10)).catchError((_) {});
+            await docRef.set(fsData, SetOptions(merge: true));
+            await _db.collection('donations').doc(stableId).set(fsData, SetOptions(merge: true)).catchError((_) {});
 
             if (hiveKey != null) await DonationsLocalStorage.markDonationSynced(hiveKey, docRef.id);
           }
@@ -2290,7 +2604,7 @@ class SyncService {
             final batch = _db.batch();
             batch.set(_db.collection('branches').doc(logBranch).collection('audit_logs').doc(logId), data, SetOptions(merge: true));
             batch.set(_db.collection('global_audit_logs').doc(logId), data, SetOptions(merge: true));
-            await batch.commit().timeout(const Duration(seconds: 10));
+            await batch.commit();
           }
           else if (type == 'save_journal_entry') {
             final data    = Map<String, dynamic>.from(action['data'] ?? {});
@@ -2302,7 +2616,7 @@ class SyncService {
                 batch.set(_db.collection('branches').doc(bId).collection('journal_entries').doc(entryId), data, SetOptions(merge: true));
               }
               batch.set(_db.collection('global_journal_entries').doc(entryId), data, SetOptions(merge: true));
-              await batch.commit().timeout(const Duration(seconds: 10));
+              await batch.commit();
             }
           }
           else if (type == 'save_org_bank_account') {
@@ -2325,7 +2639,7 @@ class SyncService {
               if (remoteUpdate != null && localUpdate != null && DateTime.parse(remoteUpdate).isAfter(DateTime.parse(localUpdate))) {
                 await DonationsLocalStorage.mergeRemoteDonor(donorId, remoteDoc.data() ?? {});
                 await queueBox.delete(key);
-                continue;
+                return;
               }
             }
             final fsData = Map<String, dynamic>.from(data)..remove('syncStatus')..remove('isEdited');
@@ -2344,7 +2658,7 @@ class SyncService {
               if (remoteUpdate != null && localUpdate != null && DateTime.parse(remoteUpdate).isAfter(DateTime.parse(localUpdate))) {
                 await DonationsLocalStorage.mergeRemoteDonor(donorId, remoteDoc.data() ?? {});
                 await queueBox.delete(key);
-                continue;
+                return;
               }
             }
             final fsData = Map<String, dynamic>.from(data)..remove('syncStatus')..remove('isEdited');
@@ -2370,7 +2684,7 @@ class SyncService {
                     await DonationsLocalStorage.mergeRemoteDonation(hiveKey, firestoreId, remoteDoc.data() ?? {});
                   }
                   await queueBox.delete(key);
-                  continue;
+                  return;
                 }
               }
             } catch (_) {}
@@ -2425,7 +2739,7 @@ class SyncService {
             if (FinanceLocalStorage.isPlaceholderEmployee(data)) {
               // Silently delete placeholder employee from queue to avoid infinite backlog
               await queueBox.delete(key);
-              continue;
+              return;
             }
             final localId = action['localId']?.toString() ?? data['localId']?.toString();
             final bId = _cleanBranch(action['branchId'] ?? data['branchId'] ?? branchId);
@@ -2445,8 +2759,8 @@ class SyncService {
             }
 
             final fsData = LocalStorageService.sanitizeForCloudUpload(data);
-            await _db.collection('branches').doc(bId).collection('employees').doc(localId).set(fsData, SetOptions(merge: true)).timeout(const Duration(seconds: 10));
-            await _db.collection('employees').doc(localId).set(fsData, SetOptions(merge: true)).timeout(const Duration(seconds: 10)).catchError((_) {});
+            await _db.collection('branches').doc(bId).collection('employees').doc(localId).set(fsData, SetOptions(merge: true));
+            await _db.collection('employees').doc(localId).set(fsData, SetOptions(merge: true)).catchError((_) {});
             
             if (Hive.isBoxOpen(LocalStorageService.employeesBox)) {
               final box = Hive.box(LocalStorageService.employeesBox);
@@ -2465,8 +2779,8 @@ class SyncService {
             final bId = _cleanBranch(action['branchId'] ?? branchId);
             if (localId == null || localId.isEmpty) throw Exception('Missing localId');
 
-            await _db.collection('branches').doc(bId).collection('employees').doc(localId).delete().timeout(const Duration(seconds: 10)).catchError((_) {});
-            await _db.collection('employees').doc(localId).delete().timeout(const Duration(seconds: 10)).catchError((_) {});
+            await _db.collection('branches').doc(bId).collection('employees').doc(localId).delete().catchError((_) {});
+            await _db.collection('employees').doc(localId).delete().catchError((_) {});
           }
           else if (type == 'save_user') {
             final rawData = Map<String, dynamic>.from(action['data'] ?? {});
@@ -2527,9 +2841,9 @@ class SyncService {
             }
 
             // Write user to root collection /users and branch subcollection with timeout
-            await _db.collection('users').doc(uid).set(fsData, SetOptions(merge: true)).timeout(const Duration(seconds: 10));
+            await _db.collection('users').doc(uid).set(fsData, SetOptions(merge: true));
             if (bId.isNotEmpty && bId != 'all' && bId != 'global') {
-              await _db.collection('branches').doc(bId).collection('users').doc(uid).set(fsData, SetOptions(merge: true)).timeout(const Duration(seconds: 10)).catchError((_) {});
+              await _db.collection('branches').doc(bId).collection('users').doc(uid).set(fsData, SetOptions(merge: true)).catchError((_) {});
             }
 
             final uLower = (fsData['usernameLower'] ?? fsData['username'] ?? '').toString().trim().toLowerCase();
@@ -2569,7 +2883,7 @@ class SyncService {
                   // User was re-created with a new UID! Discard this stale delete action.
                   debugPrint('[SyncService] Discarding stale delete_user for $username: user was re-created with new UID $localUid');
                   await queueBox.delete(key);
-                  continue;
+                  return;
                 }
               }
             }
@@ -2609,25 +2923,25 @@ class SyncService {
             // 2. Query root collection 'users' - ONLY tombstone docs matching target UID
             if (uid.isNotEmpty) {
               try {
-                final snap = await _db.collection('users').where('uid', isEqualTo: uid).get();
+                final snap = await _db.sdk.collection('users').where('uid', isEqualTo: uid).get();
                 for (final doc in snap.docs) {
-                  await doc.reference.set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+                  await _db.ref(doc.reference).set(deletePayload, SetOptions(merge: true)).catchError((_) {});
                 }
               } catch (_) {}
             } else {
               if (username.isNotEmpty) {
                 try {
-                  final snap = await _db.collection('users').where('usernameLower', isEqualTo: username).get();
+                  final snap = await _db.sdk.collection('users').where('usernameLower', isEqualTo: username).get();
                   for (final doc in snap.docs) {
-                    await doc.reference.set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+                    await _db.ref(doc.reference).set(deletePayload, SetOptions(merge: true)).catchError((_) {});
                   }
                 } catch (_) {}
               }
               if (email.isNotEmpty) {
                 try {
-                  final snap = await _db.collection('users').where('email', isEqualTo: email).get();
+                  final snap = await _db.sdk.collection('users').where('email', isEqualTo: email).get();
                   for (final doc in snap.docs) {
-                    await doc.reference.set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+                    await _db.ref(doc.reference).set(deletePayload, SetOptions(merge: true)).catchError((_) {});
                   }
                 } catch (_) {}
               }
@@ -2638,7 +2952,7 @@ class SyncService {
               if (uid.isNotEmpty) {
                 final gSnap = await _db.collectionGroup('users').where('uid', isEqualTo: uid).get();
                 for (final doc in gSnap.docs) {
-                  await doc.reference.set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+                  await _db.ref(doc.reference).set(deletePayload, SetOptions(merge: true)).catchError((_) {});
                 }
               }
             } catch (_) {}
@@ -2647,7 +2961,7 @@ class SyncService {
               final branchDocs = await _db.collection('branches').get();
               for (final bDoc in branchDocs.docs) {
                 for (final identifier in identifiers) {
-                  await bDoc.reference.collection('users').doc(identifier).set(deletePayload, SetOptions(merge: true)).catchError((_) {});
+                  await _db.ref(bDoc.reference).collection('users').doc(identifier).set(deletePayload, SetOptions(merge: true)).catchError((_) {});
                 }
               }
             } catch (_) {}
@@ -2756,7 +3070,7 @@ class SyncService {
                 'date': dateStr,
                 'branchId': bId,
                 'lastUpdated': FieldValue.serverTimestamp(),
-              }, SetOptions(merge: true)).timeout(const Duration(seconds: 10));
+              }, SetOptions(merge: true));
             }
             await _db
                 .collection('branches')
@@ -2765,28 +3079,40 @@ class SyncService {
                 .doc(dateStr)
                 .collection('records')
                 .doc(employeeId)
-                .set(fsData, SetOptions(merge: true)).timeout(const Duration(seconds: 10));
+                .set(fsData, SetOptions(merge: true));
 
             if (type == 'save_biometric_log' || action['punchSequence'] != null) {
-              await _db.collection('branches').doc(bId).collection('biometric_logs').doc(logId).set(fsData, SetOptions(merge: true)).timeout(const Duration(seconds: 10)).catchError((_) {});
+              await _db.collection('branches').doc(bId).collection('biometric_logs').doc(logId).set(fsData, SetOptions(merge: true)).catchError((_) {});
             }
 
             if (Hive.isBoxOpen(LocalStorageService.attendanceBox)) {
               final aBox = Hive.box(LocalStorageService.attendanceBox);
               final hKey = '${employeeId}_$dateStr';
-              final localRecord = aBox.get(hKey);
-              if (localRecord is Map) {
-                final updated = Map<String, dynamic>.from(localRecord)
-                  ..['syncStatus'] = 'synced'
-                  ..['remoteId'] = employeeId
-                  ..['lastSyncedAt'] = DateTime.now().toUtc().toIso8601String();
-                await aBox.put(hKey, updated);
-              }
-              if (action['localId'] != null && aBox.containsKey(action['localId'])) {
-                final r = aBox.get(action['localId']);
-                if (r is Map) {
-                  await aBox.put(action['localId'], Map<String, dynamic>.from(r)..['syncStatus'] = 'synced');
+              final keysToCheck = <dynamic>{
+                hKey,
+                if (action['localKey'] != null) action['localKey'],
+                if (action['localId'] != null) action['localId'],
+              };
+              for (final k in keysToCheck) {
+                if (aBox.containsKey(k)) {
+                  final rec = aBox.get(k);
+                  if (rec is Map) {
+                    final updated = Map<String, dynamic>.from(rec)
+                      ..['syncStatus'] = 'synced'
+                      ..['synced'] = true
+                      ..['pendingSync'] = false
+                      ..['remoteId'] = employeeId
+                      ..['lastSyncedAt'] = DateTime.now().toUtc().toIso8601String();
+                    await aBox.put(k, updated);
+                  }
                 }
+              }
+              if (Hive.isBoxOpen('app_flags')) {
+                final flags = Hive.box('app_flags');
+                for (final k in keysToCheck) {
+                  await flags.put('attendance_synced_$k', true);
+                }
+                await flags.put('attendance_synced_${employeeId}_$dateStr', true);
               }
             }
           }
@@ -2828,7 +3154,7 @@ class SyncService {
                 if (remoteVoid != localVoid || (remoteVoid && localVoid && remoteData['voidReason'] != data['voidReason'])) {
                   await _handleSyncConflict(bId, recordId, 'salary_ledger', data, remoteData);
                   await queueBox.delete(key);
-                  continue;
+                  return;
                 }
               }
             }
@@ -2955,7 +3281,7 @@ class SyncService {
                 for (final doc in groupSnap.docs) {
                   final d = doc.data();
                   if (doc.id == deviceId || d['deviceId'] == deviceId) {
-                    await doc.reference.delete();
+                    await _db.ref(doc.reference).delete();
                   }
                 }
               } catch (_) {}
@@ -3064,7 +3390,7 @@ class SyncService {
                 if (hasConflict) {
                   await _handleSyncConflict(bId, loanId, 'loan', data, remoteData);
                   await queueBox.delete(key);
-                  continue;
+                  return;
                 }
               }
             }
@@ -3283,16 +3609,41 @@ class SyncService {
           }
           else if (type == 'save_madrassa_log' ||
               type == 'save_madrassa_daily_log' ||
-              type == 'save_madrassa_attendance') {
-            final dateKey = (action['dateKey'] ?? action['datePart'] ?? action['data']?['dateKey'])?.toString();
-            final bId = (action['branchId']?.toString() ?? branchId).toLowerCase().trim();
-            final data = Map<String, dynamic>.from(action['data'] ?? {});
-            if (dateKey == null) throw Exception('Missing dateKey');
+              type == 'save_madrassa_attendance' ||
+              type == 'enrollment' ||
+              type == 'status_change' ||
+              type == 'ptm_reschedule') {
+            final dateKey = (action['dateKey'] ??
+                    action['datePart'] ??
+                    action['date'] ??
+                    action['data']?['dateKey'] ??
+                    action['data']?['date'] ??
+                    DateFormat('yyyy-MM-dd').format(DateTime.now()))
+                .toString();
+            final bId = LocalStorageService.sanitizeBranchId(
+              action['branchId'] ?? (action['data'] is Map ? action['data']['branchId'] : null),
+              fallback: (branchId.isNotEmpty && branchId != 'all' && branchId != 'global') ? branchId : 'gujrat',
+            );
+            final data = Map<String, dynamic>.from(action['data'] ?? action);
+            data.remove('syncStatus');
+            data.remove('localBox');
+            data.remove('localKey');
             await _db.collection('branches').doc(bId).collection('madrassa_daily_logs').doc(dateKey).set(data, SetOptions(merge: true));
+            if (Hive.isBoxOpen(LocalStorageService.madrassaLogsBox)) {
+              final mBox = Hive.box(LocalStorageService.madrassaLogsBox);
+              final lKey = action['localKey'] ?? '${bId}__log__$dateKey';
+              final local = mBox.get(lKey);
+              if (local is Map) {
+                await mBox.put(lKey, Map<String, dynamic>.from(local)..['syncStatus'] = 'synced');
+              }
+            }
           }
           else if (type == 'save_madrassa_teacher_attendance') {
             final dateKey = (action['dateKey'] ?? action['datePart'] ?? action['data']?['dateKey'])?.toString();
-            final bId = (action['branchId']?.toString() ?? branchId).toLowerCase().trim();
+            final bId = LocalStorageService.sanitizeBranchId(
+              action['branchId'] ?? (action['data'] is Map ? action['data']['branchId'] : null),
+              fallback: (branchId.isNotEmpty && branchId != 'all' && branchId != 'global') ? branchId : 'gujrat',
+            );
             final data = Map<String, dynamic>.from(action['data'] ?? {});
             if (dateKey == null) throw Exception('Missing dateKey');
             data['lastUpdatedAt'] = FieldValue.serverTimestamp();
@@ -3348,7 +3699,7 @@ class SyncService {
                 Map<String, dynamic>.from(action),
                 reason: 'save_madrassa_student has no studentId',
               );
-              continue;
+              return;
             }
             var bId = (action['branchId']?.toString() ?? branchId).toLowerCase().trim();
             if (bId.isEmpty || bId == 'all' || bId == 'global') {
@@ -3359,14 +3710,14 @@ class SyncService {
                 bId = 'gujrat';
               }
             }
-            if (studentId == null || studentId.isEmpty) throw Exception('Missing studentId');
+            if (studentId.isEmpty) throw Exception('Missing studentId');
             if (data['joinDate'] is String) {
               final parsed = DateTime.tryParse(data['joinDate'] as String);
               if (parsed != null) data['joinDate'] = Timestamp.fromDate(parsed);
             }
             data['lastUpdatedAt'] = FieldValue.serverTimestamp();
             final fsData = LocalStorageService.sanitizeForCloudUpload(data);
-            await _db.collection('branches').doc(bId).collection('madrassa_students').doc(studentId).set(fsData, SetOptions(merge: true)).timeout(const Duration(seconds: 10));
+            await _db.collection('branches').doc(bId).collection('madrassa_students').doc(studentId).set(fsData, SetOptions(merge: true));
             if (Hive.isBoxOpen(LocalStorageService.madrassaStudentsBox)) {
               final sBox = Hive.box(LocalStorageService.madrassaStudentsBox);
               for (final k in sBox.keys) {
@@ -3382,7 +3733,7 @@ class SyncService {
             final studentId = action['studentId'] as String?;
             final bId = (action['branchId']?.toString() ?? branchId).toLowerCase().trim();
             if (studentId != null && studentId.isNotEmpty) {
-              await _db.collection('branches').doc(bId).collection('madrassa_students').doc(studentId).delete().timeout(const Duration(seconds: 10)).catchError((_) {});
+              await _db.collection('branches').doc(bId).collection('madrassa_students').doc(studentId).delete().catchError((_) {});
             }
           }
           else if (type == 'delete_madrassa_student' || type == 'offboard_madrassa_student') {
@@ -3394,7 +3745,7 @@ class SyncService {
               'status': status,
               'batch': status,
               'lastUpdatedAt': FieldValue.serverTimestamp(),
-            }, SetOptions(merge: true)).timeout(const Duration(seconds: 10));
+            }, SetOptions(merge: true));
           }
           else if (type == 'update_madrassa_student') {
             final studentId = action['studentId'] as String?;
@@ -3435,7 +3786,7 @@ class SyncService {
                 if (remoteData['isVoided'] == true && data['isVoided'] == true && remoteData['voidReason'] != data['voidReason']) {
                   await _handleSyncConflict(bId, expenseId, 'expense', data, remoteData);
                   await queueBox.delete(key);
-                  continue;
+                  return;
                 }
               }
             }
@@ -3452,33 +3803,204 @@ class SyncService {
               await box.put(expenseId, updated);
             }
           }
+          // ── Types that were queued but had no upload handler (in 1.6.1 they were dropped
+          // from the queue without ever reaching Firestore). Each goes where its module
+          // reads it from.
+          else if (type == 'save_madrassa_holiday' || type == 'delete_madrassa_holiday') {
+            final bId = _cleanBranch(action['branchId']);
+            final id = (action['id'] ?? action['data']?['id'] ?? action['data']?['dateKey'])?.toString().trim() ?? '';
+            if (id.isEmpty) throw Exception('$type without id');
+            final ref = _db.collection('branches').doc(bId).collection('madrassa_holidays').doc(id);
+            if (type == 'delete_madrassa_holiday') {
+              await ref.delete();
+            } else {
+              await ref.set(LocalStorageService.sanitizeForCloudUpload(Map<String, dynamic>.from(action['data'] ?? {})),
+                  SetOptions(merge: true));
+            }
+          }
+          else if (type == 'save_school_daily_log' || type == 'save_school_teacher_log') {
+            // Biometric punches for school students/teachers: the same daily documents the
+            // School module's attendance screens write and read.
+            final bId = _cleanBranch(action['branchId']);
+            final date = (action['date'] ?? action['dateKey'] ?? action['data']?['date'])?.toString().trim() ?? '';
+            if (date.isEmpty) throw Exception('$type without date');
+            final isTeacher = type == 'save_school_teacher_log';
+            final logData = Map<String, dynamic>.from(action['data'] ?? {})
+              ..remove('syncStatus')
+              ..remove('synced')
+              ..remove('pendingSync')
+              ..remove('lastSyncedAt');
+            await _db
+                .collection('branches')
+                .doc(bId)
+                .collection(isTeacher ? 'school_teacher_attendance' : 'school_attendance')
+                .doc(date)
+                .set(LocalStorageService.sanitizeForCloudUpload(logData), SetOptions(merge: true));
+            if (Hive.isBoxOpen(LocalStorageService.schoolLogsBox)) {
+              final lBox = Hive.box(LocalStorageService.schoolLogsBox);
+              final lKey = isTeacher ? '${bId}__tchlog__$date' : '${bId}__log__$date';
+              final local = lBox.get(lKey);
+              if (local is Map) {
+                await lBox.put(lKey, Map<String, dynamic>.from(local)
+                  ..['syncStatus'] = 'synced'
+                  ..['synced'] = true
+                  ..['pendingSync'] = false
+                  ..['lastSyncedAt'] = DateTime.now().toIso8601String());
+              }
+            }
+          }
+          else if (type == 'save_restock_request') {
+            final bId = _cleanBranch(action['branchId']);
+            final data = Map<String, dynamic>.from(action['data'] ?? {});
+            final id = (action['id'] ?? data['id'])?.toString().trim() ?? '';
+            if (id.isEmpty) throw Exception('save_restock_request without id');
+            await _db.collection('branches').doc(bId).collection('restock_requests').doc(id)
+                .set(LocalStorageService.sanitizeForCloudUpload(data), SetOptions(merge: true));
+          }
+          else if (type == 'save_inventory_edit_request' || type == 'save_token_reversal_request') {
+            final bId = _cleanBranch(action['branchId']);
+            final data = Map<String, dynamic>.from(action['data'] ?? {});
+            final requestId = (action['requestId'] ?? data['id'])?.toString().trim() ?? '';
+            if (requestId.isEmpty) throw Exception('$type without requestId');
+            for (final f in ['requestedAt', 'reviewedAt', 'approvedAt']) {
+              if (data[f] is String) {
+                try {
+                  data[f] = Timestamp.fromDate(DateTime.parse(data[f] as String));
+                } catch (_) {}
+              }
+            }
+            await _db.collection('branches').doc(bId).collection('edit_requests').doc(requestId)
+                .set(LocalStorageService.sanitizeForCloudUpload(data), SetOptions(merge: true));
+          }
+          else if (type == 'token_reversal') {
+            // Removes the reversed token from the cloud (the same document the request
+            // screen deletes directly; this makes sure it happens even if that failed).
+            final bId = _cleanBranch(action['branchId']);
+            final data = Map<String, dynamic>.from(action['data'] ?? {});
+            final serial = (action['serial'] ?? data['tokenSerial'])?.toString().trim() ?? '';
+            final dateKey = (action['dateKey'] ?? data['dateKey'])?.toString().trim() ?? '';
+            final queueCol = data['queueType']?.toString().trim() ?? '';
+            if (serial.isNotEmpty && dateKey.isNotEmpty && queueCol.isNotEmpty) {
+              await _db.collection('branches').doc(bId).collection('serials').doc(dateKey)
+                  .collection(queueCol).doc(serial).delete();
+            }
+          }
+          else if (type == 'save_medicine_restriction') {
+            final bId = _cleanBranch(action['branchId']);
+            final patientId = action['patientId']?.toString().trim() ?? '';
+            if (patientId.isEmpty) throw Exception('save_medicine_restriction without patientId');
+            await _db.collection('branches').doc(bId).collection('medicine_restrictions').doc(patientId)
+                .set(LocalStorageService.sanitizeForCloudUpload(Map<String, dynamic>.from(action['data'] ?? {})),
+                    SetOptions(merge: true));
+          }
+          else if (type == 'ramadan_registration' || type == 'ramadan_lucky_draw_winner') {
+            final data = Map<String, dynamic>.from(action['data'] ?? {});
+            final rawB = (action['branchId'] ?? data['branchId'] ?? '').toString().toLowerCase().trim();
+            final bId = rawB.isEmpty ? 'global' : rawB;
+            final id = (action['hiveKey'] ?? data['id'])?.toString().trim() ?? '';
+            if (id.isEmpty) throw Exception('$type without id');
+            await _db.collection('branches').doc(bId).collection('ramadan_registrations').doc(id)
+                .set(LocalStorageService.sanitizeForCloudUpload(data), SetOptions(merge: true));
+          }
+          else if (type == 'save_submission' || type == 'update_submission_status') {
+            // Donation cash hand-over chain (collector → supervisor → office).
+            final bId = _cleanBranch(action['branchId']);
+            final id = (action['hiveKey'] ?? action['data']?['id'])?.toString().trim() ?? '';
+            if (id.isEmpty) throw Exception('$type without id');
+            final Map<String, dynamic> fields;
+            if (type == 'save_submission') {
+              fields = Map<String, dynamic>.from(action['data'] ?? {});
+            } else {
+              fields = {
+                for (final f in ['status', 'acknowledgedBy', 'acknowledgedAt', 'returnReason'])
+                  if (action[f] != null) f: action[f],
+              };
+            }
+            await _db.collection('branches').doc(bId).collection('donation_submissions').doc(id)
+                .set(LocalStorageService.sanitizeForCloudUpload(fields), SetOptions(merge: true));
+          }
+          else if (type.startsWith('request_') && type.endsWith('_approval')) {
+            // Loan / repayment / write-off / month-lock requests awaiting CEO approval.
+            final bId = _cleanBranch(action['branchId']);
+            final data = Map<String, dynamic>.from(action['data'] ?? {});
+            final id = (data['id'] ?? action['id'])?.toString().trim() ?? '';
+            if (id.isEmpty) throw Exception('$type without id');
+            data['requestType'] = type;
+            data['status'] ??= 'pending';
+            await _db.collection('branches').doc(bId).collection('approval_requests').doc(id)
+                .set(LocalStorageService.sanitizeForCloudUpload(data), SetOptions(merge: true));
+          }
+          else if (type == 'edit_proforma_medicine') {
+            // The master proforma catalogue is local (shared over LAN, no cloud copy):
+            // nothing to upload.
+          }
+          else {
+            // Generic fallback for any event types not handled explicitly above
+            debugPrint('[SyncService] ℹ️ Generic sync type "$type" — saving to branches/$branchId/sync_records');
+            final recData = Map<String, dynamic>.from(action['data'] is Map ? action['data'] : action);
+            final recId = (action['docId'] ?? action['entityId'] ?? action['id'] ?? recData['id'] ?? recData['key'] ?? key).toString();
+            final fsData = LocalStorageService.sanitizeForCloudUpload(recData);
+            await _db.collection('branches').doc(branchId).collection('sync_records').doc(recId).set(fsData, SetOptions(merge: true));
+          }
 
+          await _markLocalRecordSynced(action);
           await queueBox.delete(key);
+          debugPrint('[SyncService] ✅ Uploaded [$type] key: $key successfully! (${queueBox.length} remaining in queue)');
           if (['update_inventory', 'add_inventory_stock', 'register_medicine', 'save_token_exception_request', 'approve_token_exception'].contains(type)) {
             await _resolveInventorySyncFailure(key, branchId);
           }
-        } catch (e, stackTrace) {
-          final isPriority = _isPriorityType(type);
-          if (QuotaService.isQuotaError(e)) {
-            QuotaService.recordQuotaExceeded(error: e);
-            if (!isPriority && !force) {
-              QuotaService.pauseForDuration(const Duration(seconds: 15));
-              debugPrint('[SyncService] ⛔ Quota error detected — pausing non-priority uploads for 15 seconds');
-              break; // Stop processing more non-priority items
-            } else {
-              debugPrint('[SyncService] ⚠️ Quota alert on priority type ($type), continuing critical uploads');
-            }
           }
-          final nextAttempts = attempts + 1;
+          // The time limit only guards against a read that never answers; REST writes have
+          // their own limits. A timed-out item is simply retried (its writes are idempotent).
+          await CloudDb.runWith(CloudWriteContext(force: force, backlog: _isBacklogItem(action)), work)
+              .timeout(const Duration(seconds: 120));
+          consecutiveNetworkFailures = 0;
+          uploadedThisPass++;
+        } catch (e, stackTrace) {
+          debugPrint('[SyncService] ❌ Failed to upload [$type] key: $key: $e');
+          if (QuotaService.isQuotaError(e) && QuotaService.isPausedForDailyReset) {
+            action['lastAttempt'] = DateTime.now().toIso8601String();
+            action['lastError'] = e.toString();
+            action['nextRetryAt'] = DateTime.now().add(const Duration(seconds: 30)).toIso8601String();
+            await queueBox.put(key, action);
+            quotaStop = true;
+            break;
+          }
+          // Transient problems (no network, a read that timed out) are retried later
+          // without counting toward the dead-letter limit — older data used to be
+          // dead-lettered after a few minutes offline and never retried.
+          if (_isTransientError(e)) {
+            action['lastAttempt'] = DateTime.now().toIso8601String();
+            action['lastError'] = e.toString();
+            action['nextRetryAt'] = DateTime.now().add(const Duration(seconds: 15)).toIso8601String();
+            await queueBox.put(key, action);
+            _noteUploadFailure(type, key.toString(), attempts, e, stackTrace);
+            if (++consecutiveNetworkFailures >= 5) {
+              _stalledUntil = DateTime.now().add(const Duration(seconds: 30));
+              SyncLog.write('⏸️ Cloud not reachable ($e) — uploads retry in 30 seconds');
+              quotaStop = true;
+              break;
+            }
+            continue;
+          }
+          final errStr = e.toString().toLowerCase();
+          final isNetworkError = errStr.contains('network') ||
+              errStr.contains('socket') ||
+              errStr.contains('timeout') ||
+              errStr.contains('unavailable') ||
+              errStr.contains('connection') ||
+              errStr.contains('deadline') ||
+              errStr.contains('host');
+
+          final nextAttempts = isNetworkError ? attempts : attempts + 1;
           action['attempts'] = nextAttempts;
           action['lastAttempt'] = DateTime.now().toIso8601String();
           action['lastError'] = e.toString();
 
-          // Exponential backoff (1s, 2s, 4s, 8s, 16s ... capped at 60s)
-          final backoffSeconds = min(60, pow(2, min(nextAttempts, 6)).toInt());
+          final backoffSeconds = min(30, pow(2, min(nextAttempts + 1, 5)).toInt());
           action['nextRetryAt'] = DateTime.now().add(Duration(seconds: backoffSeconds)).toIso8601String();
 
-          if (nextAttempts >= 10) {
+          if (!isNetworkError && nextAttempts >= 15) {
             await LocalStorageService.moveToDeadLetterQueue(
               LocalStorageService.syncBox,
               key,
@@ -3500,11 +4022,44 @@ class SyncService {
         // Yield to event loop on every item so Windows message pump stays alive and UI never freezes
         await Future.delayed(const Duration(milliseconds: 10));
       }
+      // Between batches, yield 50ms so Windows message pump processes clicks and draws UI
+      await Future.delayed(const Duration(milliseconds: 50));
       }
-      // If items remain in queue after the run, keep draining with a short timer!
-      if (Hive.isBoxOpen(LocalStorageService.syncBox) && queueBox.isOpen && queueBox.isNotEmpty) {
+      if (backlogDeferred > 0) {
+        SyncLog.write('📦 Backlog share of today\'s quota used — $backlogDeferred older item(s) wait for the '
+            'next reset (${QuotaService.dailyBacklogWriteCount}/${QuotaService.backlogDailyBudget} backlog writes today)');
+      }
+      final writesThisPass = QuotaService.dailyWriteCount - writesBefore;
+      final skippedThisPass = CloudDb.skippedUnchanged - skippedBefore;
+      if (uploadedThisPass > 0 || writesThisPass > 0 || quotaStop) {
+        SyncLog.write('Upload pass${force ? ' (forced)' : ''}: $uploadedThisPass item(s) uploaded, '
+            '$writesThisPass write(s), $skippedThisPass unchanged skipped, ${queueBox.length} still queued, '
+            '${DateTime.now().difference(passStarted).inSeconds}s. Today: ${QuotaService.dailyWriteCount} writes from this PC'
+            '${QuotaService.isPausedForDailyReset ? ' — quota used up, waiting for the reset' : ''}');
+      }
+      // If items that are ready to send remain, keep draining with a short timer. Items
+      // waiting out a backoff or a coalescing delay don't count — re-running the pass
+      // every 10 s for them prevents UI stall loops.
+      final now = DateTime.now();
+      bool hasReadyItems = false;
+      if (!quotaStop && !QuotaService.isPausedForDailyReset && queueBox.isOpen) {
+        for (final k in queueBox.keys) {
+          final v = queueBox.get(k);
+          if (v is! Map) {
+            hasReadyItems = true;
+            break;
+          }
+          if (_coalesceUntil(v) != null) continue;
+          final next = DateTime.tryParse((v['nextRetryAt'] ?? '').toString());
+          if (next == null || !now.isBefore(next)) {
+            hasReadyItems = true;
+            break;
+          }
+        }
+      }
+      if (Hive.isBoxOpen(LocalStorageService.syncBox) && hasReadyItems) {
         _retryTimer?.cancel();
-        _retryTimer = Timer(const Duration(seconds: 3), () {
+        _retryTimer = Timer(const Duration(seconds: 10), () {
           if (Hive.isBoxOpen(LocalStorageService.syncBox)) {
             triggerUpload();
           }
@@ -3513,8 +4068,32 @@ class SyncService {
     } catch (fatal) {
       Logger().d("FATAL sync: $fatal");
     } finally {
+      uploadStatus?.end();
       _isUploading = false;
       ServerSyncCoordinator.markFinished(isServer: false);
+      if (_forceRequested) {
+        _forceRequested = false;
+        Timer(const Duration(milliseconds: 500), () => triggerUpload(force: true));
+      }
+    }
+  }
+
+  bool _forceRequested = false;
+
+  /// Marks the local record a queued action came from as synced, when the action names it
+  /// ('localBox'/'localKey'); otherwise the backfill sweep would queue it again forever.
+  Future<void> _markLocalRecordSynced(Map<String, dynamic> action) async {
+    final boxName = action['localBox']?.toString();
+    final localKey = action['localKey'];
+    if (boxName == null || localKey == null || !Hive.isBoxOpen(boxName)) return;
+    final box = Hive.box(boxName);
+    final r = box.get(localKey);
+    if (r is Map) {
+      await box.put(localKey, Map<String, dynamic>.from(r)
+        ..['syncStatus'] = 'synced'
+        ..['synced'] = true
+        ..['pendingSync'] = false
+        ..['lastSyncedAt'] = DateTime.now().toIso8601String());
     }
   }
 
@@ -3779,14 +4358,13 @@ class SyncService {
       return;
     }
 
-    // Sweep cooldown: 3 minutes between automatic sweeps.
-    // Bypassed when force=true or when there are pending items waiting to upload.
+    // Sweep cooldown: 5 minutes between automatic sweeps unless forced.
     try {
       final settings = Hive.box('app_settings');
       final lastSweepStr = settings.get('last_sweep_timestamp') as String?;
-      if (!force && !hasPendingItems && lastSweepStr != null) {
+      if (!force && lastSweepStr != null) {
         final lastSweep = DateTime.tryParse(lastSweepStr);
-        if (lastSweep != null && DateTime.now().difference(lastSweep).inMinutes < 3) {
+        if (lastSweep != null && DateTime.now().difference(lastSweep).inMinutes < 5) {
           debugPrint('[SyncService] Sweep cooldown active (last: $lastSweepStr)');
           return;
         }
@@ -3796,376 +4374,129 @@ class SyncService {
 
     try {
       debugPrint('[SyncService] 🧹 Starting comprehensive sweep of all pending local data...');
+      await LocalStorageService.healLegacyHistoricalData();
 
-      // 1. Madrassa Daily Logs & Students sweep
+      // Everything below only QUEUES records; the upload pass sends them. The sweep used to
+      // write madrassa, food-token, donation and school records to Firestore directly, with
+      // no timeout: when Firestore stopped answering the first write hung forever, so the
+      // rest of the sweep (and the forced upload at its end) never ran, and every later
+      // sweep stacked the same writes again. It also bypassed the quota checks, and the food
+      // tokens it wrote were counted twice (it and the queue both incremented totalTokens).
+      // Madrassa students, food tokens, donations and school records are queued by the
+      // _enqueueMissing* backfills below; the three record kinds with no backfill are queued here.
       try {
         if (Hive.isBoxOpen(LocalStorageService.madrassaLogsBox)) {
           final mBox = Hive.box(LocalStorageService.madrassaLogsBox);
-          for (final key in mBox.keys) {
+          for (final key in mBox.keys.toList()) {
             final raw = mBox.get(key);
-            if (raw is Map && raw['syncStatus'] != 'synced') {
-              final keyStr = key.toString();
-              String bId = _currentBranchId ?? 'karachi';
-              String dateKey = keyStr;
-              if (keyStr.contains('__log__')) {
-                final parts = keyStr.split('__log__');
-                bId = _cleanBranch(parts[0]);
-                dateKey = parts.length > 1 ? parts[1] : keyStr;
-              } else if (keyStr.contains('_')) {
-                final parts = keyStr.split('_');
-                bId = parts.isNotEmpty ? _cleanBranch(parts.first) : (_currentBranchId ?? 'karachi');
-                dateKey = parts.length >= 4 ? '${parts[1]}-${parts[2]}-${parts[3]}' : parts.last;
-              }
-              final fsData = LocalStorageService.sanitizeForCloudUpload(raw);
-              await _db.collection('branches').doc(bId).collection('madrassa_daily_logs').doc(dateKey).set(
-                fsData,
-                SetOptions(merge: true),
-              );
-              await mBox.put(key, Map<String, dynamic>.from(raw)..['syncStatus'] = 'synced');
+            if (raw is! Map || raw['syncStatus'] == 'synced') continue;
+            final keyStr = key.toString();
+            String bId = _currentBranchId ?? 'karachi';
+            String dateKey = keyStr;
+            if (keyStr.contains('__log__')) {
+              final parts = keyStr.split('__log__');
+              bId = _cleanBranch(parts[0]);
+              dateKey = parts.length > 1 ? parts[1] : keyStr;
+            } else if (keyStr.contains('_')) {
+              final parts = keyStr.split('_');
+              bId = parts.isNotEmpty ? _cleanBranch(parts.first) : (_currentBranchId ?? 'karachi');
+              dateKey = parts.length >= 4 ? '${parts[1]}-${parts[2]}-${parts[3]}' : parts.last;
             }
-          }
-        }
-        if (Hive.isBoxOpen(LocalStorageService.madrassaStudentsBox)) {
-          final sBox = Hive.box(LocalStorageService.madrassaStudentsBox);
-          for (final key in sBox.keys) {
-            final raw = sBox.get(key);
-            if (raw is Map && raw['syncStatus'] != 'synced') {
-              final keyStr = key.toString();
-              String bId = _cleanBranch(raw['branchId']);
-              String studentId = (raw['id'] ?? raw['studentId'] ?? keyStr).toString();
-              if (keyStr.contains('__std__')) {
-                final parts = keyStr.split('__std__');
-                if (bId.isEmpty) bId = _cleanBranch(parts[0]);
-                if (raw['id'] == null) studentId = parts.length > 1 ? parts[1] : studentId;
-              }
-              if (studentId.isNotEmpty) {
-                final fsData = LocalStorageService.sanitizeForCloudUpload(raw);
-                fsData['lastUpdatedAt'] = FieldValue.serverTimestamp();
-                await _db.collection('branches').doc(bId).collection('madrassa_students').doc(studentId).set(
-                  fsData,
-                  SetOptions(merge: true),
-                );
-                await sBox.put(key, Map<String, dynamic>.from(raw)..['syncStatus'] = 'synced');
-              }
-            }
+            await LocalStorageService.enqueueSync({
+              'backlog': true,
+              'type': 'save_madrassa_daily_log',
+              'entityId': 'mlog_${bId}_$dateKey',
+              'branchId': bId,
+              'dateKey': dateKey,
+              'data': Map<String, dynamic>.from(raw)..remove('syncStatus'),
+              'localBox': LocalStorageService.madrassaLogsBox,
+              'localKey': keyStr,
+            });
           }
         }
       } catch (e) {
-        debugPrint('[SyncService] Sweep madrassa logs/students notice: $e');
+        debugPrint('[SyncService] Sweep madrassa logs notice: $e');
       }
 
-      // 2. Dasterkhwaan Tokens sweep
+      await Future.delayed(const Duration(milliseconds: 50));
+
       try {
-        if (Hive.isBoxOpen('dasterkhwaan_tokens')) {
-          final tBox = Hive.box('dasterkhwaan_tokens');
-          final unsyncedTokens = <Map<String, dynamic>>[];
-          for (final raw in tBox.values) {
-            if (raw is Map && raw['syncStatus'] != 'synced') {
-              unsyncedTokens.add(Map<String, dynamic>.from(raw));
-            }
-          }
-          if (unsyncedTokens.isNotEmpty) {
-            final grouped = <String, List<Map<String, dynamic>>>{};
-            for (final t in unsyncedTokens) {
-              final bId = _cleanBranch(t['branchId']);
-              final dKey = (t['dateKey'] ?? DateTime.now().toIso8601String().substring(0, 10)).toString();
-              final gKey = '$bId###$dKey';
-              grouped.putIfAbsent(gKey, () => []).add(t);
-            }
-            for (final gEntry in grouped.entries) {
-              final parts = gEntry.key.split('###');
-              final bId = parts[0];
-              final dateKey = parts[1];
-              final list = gEntry.value;
-
-              final dayDocRef = _db.collection('branches').doc(bId).collection('dasterkhwaan').doc(dateKey);
-              final tokensCol = dayDocRef.collection('tokens');
-              final batch = _db.batch();
-              for (final t in list) {
-                final tokenId = t['id']?.toString() ?? tokensCol.doc().id;
-                batch.set(tokensCol.doc(tokenId), {
-                  'number': t['number'] ?? 1,
-                  'served': t['served'] == true,
-                  'session': t['session'] ?? 'lunch',
-                  'time': t['time'] != null
-                      ? Timestamp.fromDate(DateTime.tryParse(t['time'].toString()) ?? DateTime.now())
-                      : FieldValue.serverTimestamp(),
-                  'issuedBy': t['issuedBy'] ?? '',
-                  'localId': tokenId,
-                }, SetOptions(merge: true));
-              }
-              batch.set(dayDocRef, {
-                'totalTokens': FieldValue.increment(list.length),
-                'lastUpdated': FieldValue.serverTimestamp(),
-              }, SetOptions(merge: true));
-
-              await batch.commit();
-              for (final t in list) {
-                if (t['id'] != null) {
-                  await tBox.put(t['id'], Map<String, dynamic>.from(t)..['syncStatus'] = 'synced');
-                }
-              }
-            }
-          }
-        }
-      } catch (e) {
-        debugPrint('[SyncService] Sweep dasterkhwaan tokens notice: $e');
-      }
-
-      // 3. Donation Boxes & Openings sweep
-      try {
-        if (Hive.isBoxOpen(DonationBoxStorage.boxesBoxName)) {
-          final bBox = Hive.box(DonationBoxStorage.boxesBoxName);
-          for (final key in bBox.keys) {
-            final raw = bBox.get(key);
-            if (raw is Map && raw['syncStatus'] != 'synced') {
-              final bId = LocalStorageService.sanitizeBranchId(raw['branchId'], fallback: 'karachi');
-              final boxId = (raw['id'] ?? key).toString();
-              final fsData = LocalStorageService.sanitizeForCloudUpload(raw);
-              await _db.collection('branches').doc(bId).collection('donation_boxes').doc(boxId).set(fsData, SetOptions(merge: true));
-              await bBox.put(key, Map<String, dynamic>.from(raw)..['syncStatus'] = 'synced');
-            }
-          }
-        }
-        if (Hive.isBoxOpen(DonationBoxStorage.openingsBoxName)) {
-          final oBox = Hive.box(DonationBoxStorage.openingsBoxName);
-          for (final key in oBox.keys) {
-            final raw = oBox.get(key);
-            if (raw is Map && raw['syncStatus'] != 'synced') {
-              final bId = LocalStorageService.sanitizeBranchId(raw['branchId'], fallback: 'karachi');
-              final openingId = (raw['id'] ?? key).toString();
-              final fsData = LocalStorageService.sanitizeForCloudUpload(raw);
-              await _db.collection('branches').doc(bId).collection('donation_box_openings').doc(openingId).set(fsData, SetOptions(merge: true));
-              await oBox.put(key, Map<String, dynamic>.from(raw)..['syncStatus'] = 'synced');
-            }
+        for (final (boxName, type) in [
+          (DonationBoxStorage.boxesBoxName, 'save_donation_box'),
+          (DonationBoxStorage.openingsBoxName, 'save_box_opening'),
+        ]) {
+          if (!Hive.isBoxOpen(boxName)) continue;
+          final b = Hive.box(boxName);
+          for (final key in b.keys.toList()) {
+            final raw = b.get(key);
+            if (raw is! Map || raw['syncStatus'] == 'synced') continue;
+            final id = (raw['id'] ?? key).toString();
+            await LocalStorageService.enqueueSync({
+              'backlog': true,
+              'type': type,
+              'entityId': id,
+              'branchId': LocalStorageService.sanitizeBranchId(raw['branchId'], fallback: 'karachi'),
+              'data': Map<String, dynamic>.from(raw)..['id'] = id,
+              'localBox': boxName,
+              'localKey': key,
+            });
           }
         }
       } catch (e) {
         debugPrint('[SyncService] Sweep donation boxes notice: $e');
       }
 
-      // 4. Local Donations sweep
-      try {
-        if (!Hive.isBoxOpen(LocalStorageService.donationsBox)) {
-          await LocalStorageService.openBoxSafe(LocalStorageService.donationsBox);
-        }
-        final dBox = Hive.box(LocalStorageService.donationsBox);
-        for (final key in dBox.keys) {
-          final raw = dBox.get(key);
-          if (raw is Map && (raw['syncStatus'] != 'synced' || raw['synced'] != true)) {
-            final bId = LocalStorageService.sanitizeBranchId(raw['branchId'], fallback: 'karachi');
-            final donId = (raw['firestoreId'] ?? raw['localId'] ?? raw['id'] ?? key).toString();
-            final fsData = LocalStorageService.sanitizeForCloudUpload(raw);
-            await _db.collection('branches').doc(bId).collection('donations').doc(donId).set(fsData, SetOptions(merge: true));
-            await dBox.put(key, Map<String, dynamic>.from(raw)
-              ..['synced'] = true
-              ..['syncStatus'] = 'synced'
-              ..['firestoreId'] = donId);
-          }
-        }
-      } catch (e) {
-        debugPrint('[SyncService] Sweep local donations notice: $e');
-      }
+      await Future.delayed(const Duration(milliseconds: 50));
 
-      // 5. School Data direct sweep
+      // Backlog harvesting. Each backfill scans ALL local records and uses the record's own
+      // branchId (the argument is only the fallback), so one call covers every branch.
+      final b = _currentBranchId ?? 'karachi';
+      // Quiet background status so the user can see why things may feel slower right now.
+      final status = BusyStatus.begin('Checking records to sync', background: true);
       try {
-        if (Hive.isBoxOpen(LocalStorageService.schoolStudentsBox)) {
-          final sBox = Hive.box(LocalStorageService.schoolStudentsBox);
-          for (final key in sBox.keys) {
-            final raw = sBox.get(key);
-            if (raw is Map && (raw['syncStatus'] != 'synced' || raw['pendingSync'] == true)) {
-              final keyStr = key.toString();
-              String bId = _cleanBranch(raw['branchId']);
-              String studentId = (raw['id'] ?? raw['studentId'] ?? keyStr).toString();
-              if (keyStr.contains('__std__')) {
-                final parts = keyStr.split('__std__');
-                if (bId.isEmpty) bId = _cleanBranch(parts[0]);
-                if (raw['id'] == null) studentId = parts.length > 1 ? parts[1] : studentId;
-              }
-              if (bId.isEmpty) bId = _currentBranchId ?? 'gujrat';
-              if (studentId.isNotEmpty) {
-                final fsData = LocalStorageService.sanitizeForCloudUpload(raw);
-                fsData['lastUpdatedAt'] = FieldValue.serverTimestamp();
-                await _db.collection('branches').doc(bId).collection('school_students').doc(studentId).set(
-                  fsData,
-                  SetOptions(merge: true),
-                );
-                await sBox.put(key, Map<String, dynamic>.from(raw)
-                  ..['syncStatus'] = 'synced'
-                  ..['synced'] = true
-                  ..['pendingSync'] = false
-                  ..['lastSyncedAt'] = DateTime.now().toIso8601String());
-              }
-            }
-          }
-        }
-        if (Hive.isBoxOpen(LocalStorageService.schoolTeachersBox)) {
-          final tBox = Hive.box(LocalStorageService.schoolTeachersBox);
-          for (final key in tBox.keys) {
-            final raw = tBox.get(key);
-            if (raw is Map && (raw['syncStatus'] != 'synced' || raw['pendingSync'] == true)) {
-              final keyStr = key.toString();
-              String bId = _cleanBranch(raw['branchId']);
-              String teacherId = (raw['id'] ?? raw['teacherId'] ?? keyStr).toString();
-              if (keyStr.contains('__tch__')) {
-                final parts = keyStr.split('__tch__');
-                if (bId.isEmpty) bId = _cleanBranch(parts[0]);
-                if (raw['id'] == null) teacherId = parts.length > 1 ? parts[1] : teacherId;
-              }
-              if (bId.isEmpty) bId = _currentBranchId ?? 'gujrat';
-              if (teacherId.isNotEmpty) {
-                final fsData = LocalStorageService.sanitizeForCloudUpload(raw);
-                fsData['lastUpdatedAt'] = FieldValue.serverTimestamp();
-                await _db.collection('branches').doc(bId).collection('school_teachers').doc(teacherId).set(
-                  fsData,
-                  SetOptions(merge: true),
-                );
-                await tBox.put(key, Map<String, dynamic>.from(raw)
-                  ..['syncStatus'] = 'synced'
-                  ..['synced'] = true
-                  ..['pendingSync'] = false
-                  ..['lastSyncedAt'] = DateTime.now().toIso8601String());
-              }
-            }
-          }
-        }
-        if (Hive.isBoxOpen(LocalStorageService.schoolLogsBox)) {
-          final lBox = Hive.box(LocalStorageService.schoolLogsBox);
-          for (final key in lBox.keys) {
-            final raw = lBox.get(key);
-            if (raw is Map && (raw['syncStatus'] != 'synced' || raw['pendingSync'] == true)) {
-              final keyStr = key.toString();
-              final isTeacher = keyStr.contains('__tchlog__');
-              String bId = _currentBranchId ?? 'gujrat';
-              String dateKey = keyStr;
-              if (isTeacher) {
-                final parts = keyStr.split('__tchlog__');
-                bId = _cleanBranch(parts[0]);
-                dateKey = parts.length > 1 ? parts[1] : keyStr;
-              } else if (keyStr.contains('__log__')) {
-                final parts = keyStr.split('__log__');
-                bId = _cleanBranch(parts[0]);
-                dateKey = parts.length > 1 ? parts[1] : keyStr;
-              }
-              if (bId.isEmpty) bId = _currentBranchId ?? 'gujrat';
-              final collName = isTeacher ? 'school_teacher_attendance' : 'school_attendance';
-              final fsData = LocalStorageService.sanitizeForCloudUpload(raw);
-              await _db.collection('branches').doc(bId).collection(collName).doc(dateKey).set(
-                fsData,
-                SetOptions(merge: true),
-              );
-              await lBox.put(key, Map<String, dynamic>.from(raw)
-                ..['syncStatus'] = 'synced'
-                ..['synced'] = true
-                ..['pendingSync'] = false
-                ..['lastSyncedAt'] = DateTime.now().toIso8601String());
-            }
-          }
-        }
-        if (Hive.isBoxOpen(LocalStorageService.schoolGradesBox)) {
-          final gBox = Hive.box(LocalStorageService.schoolGradesBox);
-          for (final key in gBox.keys) {
-            final raw = gBox.get(key);
-            if (raw is Map && (raw['syncStatus'] != 'synced' || raw['pendingSync'] == true)) {
-              final keyStr = key.toString();
-              String bId = _cleanBranch(raw['branchId']);
-              String gradeId = (raw['id'] ?? keyStr).toString();
-              if (keyStr.contains('__')) {
-                final parts = keyStr.split('__');
-                if (bId.isEmpty) bId = _cleanBranch(parts[0]);
-                gradeId = parts.length > 1 ? parts[1] : gradeId;
-              }
-              if (bId.isEmpty) bId = _currentBranchId ?? 'gujrat';
-              final fsData = LocalStorageService.sanitizeForCloudUpload(raw);
-              await _db.collection('branches').doc(bId).collection('school_grades').doc(gradeId).set(
-                fsData,
-                SetOptions(merge: true),
-              );
-              await gBox.put(key, Map<String, dynamic>.from(raw)
-                ..['syncStatus'] = 'synced'
-                ..['synced'] = true
-                ..['pendingSync'] = false
-                ..['lastSyncedAt'] = DateTime.now().toIso8601String());
-            }
-          }
-        }
-        if (Hive.isBoxOpen(LocalStorageService.schoolFeesBox)) {
-          final fBox = Hive.box(LocalStorageService.schoolFeesBox);
-          for (final key in fBox.keys) {
-            final raw = fBox.get(key);
-            if (raw is Map && (raw['syncStatus'] != 'synced' || raw['pendingSync'] == true)) {
-              final keyStr = key.toString();
-              String bId = _cleanBranch(raw['branchId']);
-              String feeId = (raw['id'] ?? keyStr).toString();
-              if (keyStr.contains('__')) {
-                final parts = keyStr.split('__');
-                if (bId.isEmpty) bId = _cleanBranch(parts[0]);
-                feeId = parts.length > 1 ? parts[1] : feeId;
-              }
-              if (bId.isEmpty) bId = _currentBranchId ?? 'gujrat';
-              final fsData = LocalStorageService.sanitizeForCloudUpload(raw);
-              await _db.collection('branches').doc(bId).collection('school_fees').doc(feeId).set(
-                fsData,
-                SetOptions(merge: true),
-              );
-              await fBox.put(key, Map<String, dynamic>.from(raw)
-                ..['syncStatus'] = 'synced'
-                ..['synced'] = true
-                ..['pendingSync'] = false
-                ..['lastSyncedAt'] = DateTime.now().toIso8601String());
-            }
-          }
-        }
-      } catch (e) {
-        debugPrint('[SyncService] Sweep school records notice: $e');
-      }
+        status.update('Checking tokens to sync');
+        await _enqueueMissingEntries(b, force: force);
+        await Future.delayed(const Duration(milliseconds: 75));
 
-      // 6. Backlog harvesting for ALL known branches (read from Hive, not hardcoded)
-      final allBranchIds = <String>{};
-      // Add the active branch first
-      if (_currentBranchId != null && LocalStorageService.isValidBranchId(_currentBranchId)) {
-        allBranchIds.add(_currentBranchId!);
-      }
-      allBranchIds.addAll(_authorizedBranches.where((b) => LocalStorageService.isValidBranchId(b)));
-      // Also scan Hive branches box for any dynamically-registered branches
-      try {
-        for (final boxName in [LocalStorageService.branchesBox, 'local_branches']) {
-          if (Hive.isBoxOpen(boxName)) {
-            for (final val in Hive.box(boxName).values) {
-              if (val is Map) {
-                final id = (val['id'] ?? '').toString().toLowerCase().trim();
-                if (id.isNotEmpty && LocalStorageService.isValidBranchId(id)) {
-                  allBranchIds.add(id);
-                }
-              }
-            }
-          }
-        }
-      } catch (_) {}
-      // Fallback known branches if nothing found
-      if (allBranchIds.isEmpty) {
-        allBranchIds.addAll(['karachi', 'gujrat', 'sialkot', 'rawalpindi', 'main']);
-      }
-
-      // Await these so triggerUpload sees a populated syncBox
-      for (final b in allBranchIds) {
-        await _enqueueMissingEntries(b);
+        status.update('Checking donations to sync');
         await _enqueueMissingDonations(b);
+        await Future.delayed(const Duration(milliseconds: 75));
+
+        status.update('Checking food records to sync');
         await _enqueueMissingFoodTokens(b);
+        await Future.delayed(const Duration(milliseconds: 50));
         await _enqueueMissingFoodLogs(b);
+        await Future.delayed(const Duration(milliseconds: 75));
+
+        status.update('Checking staff records to sync');
         await _enqueueMissingEmployees(b);
-        await _enqueueMissingAttendance(b);
-        await _enqueueMissingPatients(b);
+        await Future.delayed(const Duration(milliseconds: 50));
+        await _enqueueMissingAttendance(b, force: force);
+        await Future.delayed(const Duration(milliseconds: 75));
+
+        status.update('Checking patient records to sync');
+        await _enqueueMissingPatients(b, force: force);
+        await Future.delayed(const Duration(milliseconds: 75));
+
+        status.update('Checking madrassa & school records');
         await _enqueueMissingMadrassaStudents(b);
+        await Future.delayed(const Duration(milliseconds: 50));
         await _enqueueMissingSchoolData(b);
+        await Future.delayed(const Duration(milliseconds: 75));
+
+        // Synchronize all local users (including recently created ones) to Firestore
+        status.update('Syncing user accounts');
+        await LocalStorageService.pushLocalUsersToFirestore();
+        await Future.delayed(const Duration(milliseconds: 100));
+
+        // Upload pass now that the queue is populated. Only a user-forced sweep forces it: the
+        // startup sweep used to force it too, which cleared any daily-quota pause on every start.
+        status.update('Uploading changes');
+        await triggerUpload(force: force);
+      } finally {
+        status.end();
       }
-
-      // Synchronize all local users (including recently created ones) to Firestore
-      await LocalStorageService.pushLocalUsersToFirestore();
-
-      // Trigger standard upload pass now that queue is fully populated
-      await triggerUpload(force: true);
-      debugPrint('[SyncService] ✅ Comprehensive sweep completed (${allBranchIds.length} branches).');
+      debugPrint('[SyncService] ✅ Comprehensive sweep completed.');
     } catch (e) {
       debugPrint('[SyncService] sweepAllPendingLocalData error: $e');
     }

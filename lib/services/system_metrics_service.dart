@@ -54,7 +54,9 @@ class SystemMetricsService {
   Timer? _timer;
   bool _isQuerying = false;
 
-  void startMonitoring({Duration interval = const Duration(seconds: 30)}) {
+  /// Every 3 min (was 30 s): each query starts powershell.exe with 3 CIM queries, which
+  /// costs 1–2 s of a full core and a 60–80 MB RAM spike on the i3 clinic PCs.
+  void startMonitoring({Duration interval = const Duration(minutes: 3)}) {
     _timer?.cancel();
     _queryMetrics();
     _timer = Timer.periodic(interval, (_) => _queryMetrics());

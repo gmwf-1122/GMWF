@@ -1,6 +1,8 @@
 // lib/widgets/app_skeleton.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:shimmer/shimmer.dart';
 import 'package:hive/hive.dart';
 
@@ -24,8 +26,8 @@ class AppSkeleton extends StatelessWidget {
   Widget build(BuildContext context) {
     final dark = isDark ?? getIsDarkMode(context);
 
-    final baseColor = dark ? const Color(0xFF1E293B) : Colors.grey.shade200;
-    final highlightColor = dark ? const Color(0xFF334155) : Colors.grey.shade100;
+    final baseColor = dark ? SoftPalette.slate800 : SoftPalette.gray100;
+    final highlightColor = dark ? SoftPalette.slate700 : SoftPalette.gray100;
 
     return Shimmer.fromColors(
       baseColor: baseColor,
@@ -56,7 +58,7 @@ class AppSkeletonBox extends StatelessWidget {
       width: width,
       height: height,
       decoration: BoxDecoration(
-        color: color ?? Colors.white,
+        color: color ?? context.adapt(SoftPalette.gray50),
         borderRadius: BorderRadius.circular(borderRadius),
       ),
     );
@@ -82,10 +84,10 @@ class PatientHistorySkeleton extends StatelessWidget {
         itemBuilder: (context, index) => Container(
           margin: const EdgeInsets.only(bottom: 10),
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF0F172A) : Colors.white,
+            color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
-              color: isDark ? const Color(0xFF334155) : Colors.grey.shade300,
+              color: isDark ? SoftPalette.slate700 : SoftPalette.gray150,
             ),
           ),
           child: Column(
@@ -95,7 +97,7 @@ class PatientHistorySkeleton extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF1E293B) : Colors.grey.shade300,
+                  color: isDark ? SoftPalette.slate800 : SoftPalette.gray150,
                   borderRadius: const BorderRadius.vertical(top: Radius.circular(11)),
                 ),
                 child: const Row(
@@ -157,7 +159,7 @@ class PatientDetailSkeleton extends StatelessWidget {
     final isDark = AppSkeleton.getIsDarkMode(context);
 
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0B1120) : const Color(0xFFF8FAFC),
+      backgroundColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
       body: AppSkeleton(
         isDark: isDark,
         child: SingleChildScrollView(
@@ -229,9 +231,9 @@ class PatientDetailSkeleton extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A) : Colors.white,
+        color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: isDark ? const Color(0xFF334155) : Colors.grey.shade200),
+        border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.gray100),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -305,10 +307,10 @@ class _AppLogoLoadingIndicatorState extends State<AppLogoLoadingIndicator>
             height: widget.size + 16,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: dark ? const Color(0xFF0F172A) : Colors.white,
+              color: dark ? SoftPalette.slate900 : SoftPalette.gray50,
               boxShadow: [
                 BoxShadow(
-                  color: const Color(0xFF0D9488).withValues(alpha: 0.25),
+                  color: SoftPalette.teal500.withValues(alpha: 0.25),
                   blurRadius: 20,
                   spreadRadius: 2,
                 ),
@@ -318,7 +320,7 @@ class _AppLogoLoadingIndicatorState extends State<AppLogoLoadingIndicator>
             child: Image.asset(
               'assets/logo/gmwf-1.webp',
               fit: BoxFit.contain,
-              errorBuilder: (_, __, ___) => const Icon(Icons.local_pharmacy, color: Color(0xFF0D9488)),
+              errorBuilder: (_, __, ___) => Icon(Icons.local_pharmacy, color: context.adapt(SoftPalette.teal500)),
             ),
           ),
         ),
@@ -329,7 +331,7 @@ class _AppLogoLoadingIndicatorState extends State<AppLogoLoadingIndicator>
             style: TextStyle(
               fontSize: 12.5,
               fontWeight: FontWeight.w600,
-              color: dark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+              color: dark ? SoftPalette.slate350 : SoftPalette.slate550,
             ),
           ),
         ],

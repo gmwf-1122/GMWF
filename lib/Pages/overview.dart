@@ -2,6 +2,7 @@
 // Unified sidebar-less dashboard for executive roles.
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:collection/collection.dart';
 import 'package:intl/intl.dart';
 import '../theme/role_theme_provider.dart';
@@ -116,7 +117,7 @@ class _OverviewScreenState extends State<OverviewScreen>
                         ]
                       : [
                           BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.02),
+                            color: SoftPalette.gray900.withValues(alpha: 0.02),
                             blurRadius: 4,
                             offset: const Offset(0, 2),
                           )
@@ -128,13 +129,13 @@ class _OverviewScreenState extends State<OverviewScreen>
                     Icon(
                       tab['icon'] as IconData,
                       size: 15,
-                      color: active ? Colors.white : t.textSecondary,
+                      color: active ? SoftPalette.gray50 : t.textSecondary,
                     ),
                     const SizedBox(width: 8),
                     Text(
                       tab['label'] as String,
                       style: TextStyle(
-                        color: active ? Colors.white : t.textSecondary,
+                        color: active ? SoftPalette.gray50 : t.textSecondary,
                         fontSize: 12,
                         fontWeight: active ? FontWeight.w800 : FontWeight.w600,
                       ),
@@ -289,10 +290,10 @@ class _OverviewScreenState extends State<OverviewScreen>
         backgroundColor: t.accent,
         elevation: 4,
         surfaceTintColor: Colors.transparent,
-        iconTheme: const IconThemeData(color: Colors.white),
+        iconTheme: const IconThemeData(color: SoftPalette.gray50),
         leading: Navigator.canPop(context)
             ? IconButton(
-                icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 22),
+                icon: const Icon(Icons.arrow_back_rounded, color: SoftPalette.gray50, size: 22),
                 onPressed: () => Navigator.maybePop(context),
               )
             : null,
@@ -302,7 +303,7 @@ class _OverviewScreenState extends State<OverviewScreen>
           Text(
             role.name.toUpperCase(),
             style: const TextStyle(
-                color: Colors.white,
+                color: SoftPalette.gray50,
                 fontSize: 13,
                 fontWeight: FontWeight.w800,
                 letterSpacing: 3),
@@ -315,11 +316,11 @@ class _OverviewScreenState extends State<OverviewScreen>
                   padding: EdgeInsets.symmetric(horizontal: 14),
                   child: SizedBox(
                     width: 20, height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50),
                   ),
                 )
               : IconButton(
-                  icon: const Icon(Icons.refresh_rounded, color: Colors.white, size: 22),
+                  icon: const Icon(Icons.refresh_rounded, color: SoftPalette.gray50, size: 22),
                   tooltip: 'Refresh dashboard',
                   onPressed: _forceRefresh,
                 ),
@@ -570,8 +571,8 @@ class _OverviewHeader extends StatelessWidget {
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: [
-            Color.lerp(t.accent, Colors.black, 0.40)!,
-            Color.lerp(t.accent, Colors.black, 0.72)!,
+            Color.lerp(t.accent, SoftPalette.gray900, 0.40)!,
+            Color.lerp(t.accent, SoftPalette.gray900, 0.72)!,
           ],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
@@ -593,6 +594,8 @@ class _OverviewHeader extends StatelessWidget {
       child: Stack(
         children: [
           // Islamic Pattern in WHITE on the Right Side (assets/images/1.webp)
+          // (skipped when patterns are off: ShaderMask+Opacity over an empty box still costs layers)
+          if (GDecor.patternsEnabled)
           Positioned(
             right: isMobile ? -55 : -80,
             top: -20,
@@ -605,8 +608,8 @@ class _OverviewHeader extends StatelessWidget {
                     begin: Alignment.centerRight,
                     end: Alignment.centerLeft,
                     colors: [
-                      Colors.black,
-                      Colors.black87,
+                      SoftPalette.gray900,
+                      SoftPalette.gray900A87,
                       Colors.transparent,
                     ],
                     stops: [0.0, 0.65, 1.0],
@@ -617,9 +620,9 @@ class _OverviewHeader extends StatelessWidget {
                   opacity: 0.35,
                   child: Transform.rotate(
                     angle: -0.15,
-                    child: Image.asset(
+                    child: GDecorativeImage.asset(
                       'assets/images/1.webp',
-                      color: Colors.white,
+                      color: SoftPalette.gray50,
                       colorBlendMode: BlendMode.srcIn,
                       fit: BoxFit.contain,
                       alignment: Alignment.centerRight,
@@ -642,15 +645,15 @@ class _OverviewHeader extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.1),
+                    color: SoftPalette.gray50.withValues(alpha: 0.1),
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: Colors.white.withValues(alpha: 0.25),
+                      color: SoftPalette.gray50.withValues(alpha: 0.25),
                       width: 1.5,
                     ),
                     boxShadow: [
                       BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.1),
+                        color: SoftPalette.gray900.withValues(alpha: 0.1),
                         blurRadius: 8,
                         offset: const Offset(0, 4),
                       ),
@@ -678,10 +681,10 @@ class _OverviewHeader extends StatelessWidget {
                               vertical: 4,
                             ),
                             decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.12),
+                              color: SoftPalette.gray50.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
-                                color: Colors.white.withValues(alpha: 0.2),
+                                color: SoftPalette.gray50.withValues(alpha: 0.2),
                                 width: 1,
                               ),
                             ),
@@ -690,14 +693,14 @@ class _OverviewHeader extends StatelessWidget {
                               children: [
                                 const Icon(
                                   Icons.workspace_premium_rounded,
-                                  color: Colors.white,
+                                  color: SoftPalette.gray50,
                                   size: 12,
                                 ),
                                 const SizedBox(width: 6),
                                 Text(
                                   roleName,
                                   style: const TextStyle(
-                                    color: Colors.white,
+                                    color: SoftPalette.gray50,
                                     fontSize: 10,
                                     fontWeight: FontWeight.w800,
                                     letterSpacing: 1.2,
@@ -712,7 +715,7 @@ class _OverviewHeader extends StatelessWidget {
                       Text(
                         'Welcome Back,',
                         style: TextStyle(
-                          color: Colors.white.withValues(alpha: 0.65),
+                          color: SoftPalette.gray50.withValues(alpha: 0.65),
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
                         ),
@@ -721,7 +724,7 @@ class _OverviewHeader extends StatelessWidget {
                       Text(
                         username,
                         style: TextStyle(
-                          color: Colors.white,
+                          color: SoftPalette.gray50,
                           fontSize: isMobile ? 20 : 24,
                           fontWeight: FontWeight.w900,
                           letterSpacing: -0.5,
@@ -739,17 +742,17 @@ class _OverviewHeader extends StatelessWidget {
                       vertical: 12,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.08),
+                      color: SoftPalette.gray50.withValues(alpha: 0.08),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.12),
+                        color: SoftPalette.gray50.withValues(alpha: 0.12),
                       ),
                     ),
                     child: Row(
                       children: [
                         const Icon(
                           Icons.calendar_today_rounded,
-                          color: Colors.white,
+                          color: SoftPalette.gray50,
                           size: 16,
                         ),
                         const SizedBox(width: 10),
@@ -759,7 +762,7 @@ class _OverviewHeader extends StatelessWidget {
                             Text(
                               DateFormat('EEEE').format(DateTime.now()),
                               style: const TextStyle(
-                                color: Colors.white,
+                                color: SoftPalette.gray50,
                                 fontSize: 13,
                                 fontWeight: FontWeight.w800,
                               ),
@@ -767,7 +770,7 @@ class _OverviewHeader extends StatelessWidget {
                             Text(
                               DateFormat('d MMMM yyyy').format(DateTime.now()),
                               style: TextStyle(
-                                color: Colors.white.withValues(alpha: 0.7),
+                                color: SoftPalette.gray50.withValues(alpha: 0.7),
                                 fontSize: 11,
                                 fontWeight: FontWeight.w500,
                               ),
@@ -1014,26 +1017,26 @@ class _DonationStatCard extends StatelessWidget {
     final cleanLabel = label.toLowerCase();
     final LinearGradient gradient;
     final Color glowColor;
-    final Color labelColor = Colors.white.withValues(alpha: 0.75);
-    final Color valueColor = Colors.white;
-    final Color prefixColor = Colors.white.withValues(alpha: 0.7);
-    final Color iconBgColor = Colors.white.withValues(alpha: 0.15);
-    final Color iconColor = Colors.white;
+    final Color labelColor = SoftPalette.gray50.withValues(alpha: 0.75);
+    final Color valueColor = SoftPalette.gray50;
+    final Color prefixColor = SoftPalette.gray50.withValues(alpha: 0.7);
+    final Color iconBgColor = SoftPalette.gray50.withValues(alpha: 0.15);
+    final Color iconColor = SoftPalette.gray50;
 
     if (cleanLabel.contains('jamia') || cleanLabel.contains('masjid')) {
       gradient = const LinearGradient(
-        colors: [Color(0xFF2563EB), Color(0xFF1D4ED8)], // Sapphire
+        colors: [SoftPalette.blue550, SoftPalette.blue550], // Sapphire
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
       );
-      glowColor = const Color(0xFF1D4ED8).withValues(alpha: 0.35);
+      glowColor = SoftPalette.blue550.withValues(alpha: 0.35);
     } else {
       gradient = const LinearGradient(
-        colors: [Color(0xFF0D9488), Color(0xFF0F766E)], // Emerald / Teal
+        colors: [SoftPalette.teal500, SoftPalette.teal550], // Emerald / Teal
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
       );
-      glowColor = const Color(0xFF0F766E).withValues(alpha: 0.35);
+      glowColor = SoftPalette.teal550.withValues(alpha: 0.35);
     }
 
     return Container(
@@ -1047,7 +1050,7 @@ class _DonationStatCard extends StatelessWidget {
             offset: const Offset(0, 6),
           ),
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.05),
+            color: SoftPalette.gray900.withValues(alpha: 0.05),
             blurRadius: 4,
             offset: const Offset(0, 2),
           ),
@@ -1064,7 +1067,7 @@ class _DonationStatCard extends StatelessWidget {
               height: 80,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: Colors.white.withValues(alpha: 0.05),
+                color: SoftPalette.gray50.withValues(alpha: 0.05),
               ),
             ),
           ),

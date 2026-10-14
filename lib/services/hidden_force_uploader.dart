@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:hive/hive.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
@@ -79,6 +80,43 @@ class HiddenForceUploader {
         return;
       }
 
+      // On mobile devices (Android / iOS), run native Dart Firestore high-speed forced upload
+      if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+        _notify((ctx) {
+          AppFeedback.showInfo(
+            ctx,
+            'Mobile Force Upload Started',
+            subtitle: 'Uploading $totalPending records directly to Cloud Firestore...',
+            duration: const Duration(seconds: 4),
+          );
+        });
+        await SyncService().sweepAllPendingLocalData(force: true);
+        await SyncService().triggerUpload(force: true);
+        final remaining = Hive.isBoxOpen(LocalStorageService.syncBox)
+            ? Hive.box(LocalStorageService.syncBox).length
+            : 0;
+        _notify((ctx) {
+          if (remaining == 0) {
+            AppFeedback.showSuccess(
+              ctx,
+              'All Data Synchronized',
+              subtitle: 'Local queue successfully uploaded to Cloud Firestore.',
+              duration: const Duration(seconds: 3),
+            );
+          } else {
+            AppFeedback.showInfo(
+              ctx,
+              'Sync Pass Finished',
+              subtitle: '$remaining item(s) remain in offline queue.',
+              duration: const Duration(seconds: 3),
+              actionLabel: 'Details',
+              onAction: () => QueueDoctorDialog.show(ctx),
+            );
+          }
+        });
+        return;
+      }
+
       // 1. Initial Notification: Let user know Ctrl+Shift+U was received and started!
       _notify((ctx) {
         AppFeedback.showInfo(
@@ -116,13 +154,12 @@ class HiddenForceUploader {
       await exportFile.writeAsString(jsonEncode(items), flush: true);
 
       // 3. Discover Python interpreter & scripts
-      final pythonExe = await PythonRunnerService.instance.resolvePythonExecutable();
       final scriptsDir = await PythonRunnerService.instance.resolveScriptsDirectory();
 
       final scriptCandidates = [
+        r'E:\GMWF\gmwf\scripts\hidden_cloud_sync.py',
         p.join(scriptsDir, 'hidden_cloud_sync.py'),
         p.join(Directory.current.path, 'scripts', 'hidden_cloud_sync.py'),
-        r'E:\GMWF\gmwf\scripts\hidden_cloud_sync.py',
       ];
 
       String? targetScript;
@@ -134,9 +171,9 @@ class HiddenForceUploader {
       }
 
       final credsCandidates = [
+        r'E:\GMWF\gmwf\scripts\serviceAccountKey.json',
         p.join(scriptsDir, 'serviceAccountKey.json'),
         p.join(Directory.current.path, 'scripts', 'serviceAccountKey.json'),
-        r'E:\GMWF\gmwf\scripts\serviceAccountKey.json',
       ];
 
       String? targetCreds;
@@ -147,15 +184,39 @@ class HiddenForceUploader {
         }
       }
 
+      // Check python candidates that actually have firebase_admin installed
+      final candidatePythons = <String>[
+        r'E:\GMWF\gmwf\Installer\python-3.12.10-embed-amd64\python.exe',
+        p.join(Directory.current.path, 'Installer', 'python-3.12.10-embed-amd64', 'python.exe'),
+        p.join(Platform.environment['LOCALAPPDATA'] ?? '', 'Python', 'bin', 'python.exe'),
+      ];
+      final detectedPy = await PythonRunnerService.instance.resolvePythonExecutable();
+      if (detectedPy != null) candidatePythons.add(detectedPy);
+
+      String? pythonExe;
+      for (final py in candidatePythons) {
+        if (await File(py).exists()) {
+          try {
+            final test = await Process.run(py, ['-c', 'import firebase_admin']).timeout(const Duration(seconds: 2));
+            if (test.exitCode == 0) {
+              pythonExe = py;
+              break;
+            }
+          } catch (_) {}
+        }
+      }
+
       if (pythonExe == null || targetScript == null || targetCreds == null) {
+        debugPrint('[HiddenForceUploader] Python firebase_admin engine unavailable. Running native Dart cloud sync.');
         _notify((ctx) {
-          AppFeedback.showError(
+          AppFeedback.showInfo(
             ctx,
-            'Python Engine Missing',
-            subtitle: 'Could not find python.exe or serviceAccountKey.json. Running standard sync.',
+            'Syncing via Native Engine',
+            subtitle: 'Processing $totalPending records directly to Cloud Firestore...',
+            duration: const Duration(seconds: 4),
           );
         });
-        unawaited(SyncService().triggerUpload(force: true));
+        await SyncService().triggerUpload(force: true);
         return;
       }
 
@@ -266,17 +327,40 @@ class HiddenForceUploader {
       } else if (result.exitCode != 0) {
         final errText = result.stderr.toString().isNotEmpty
             ? result.stderr.toString().trim().split('\n').last
-            : 'Upload encountered an issue. Inspect details in Queue Doctor.';
+            : 'Exit code ${result.exitCode}';
+        debugPrint('[HiddenForceUploader] Python notice: $errText. Seamlessly uploading via native Dart engine.');
         _notify((ctx) {
-          AppFeedback.showError(
+          AppFeedback.showInfo(
             ctx,
-            'Force Upload Exited (${result.exitCode})',
-            subtitle: errText,
-            duration: const Duration(seconds: 6),
-            actionLabel: 'Doctor',
-            onAction: () => QueueDoctorDialog.show(ctx),
+            'Syncing via Native Engine',
+            subtitle: 'Uploading records directly via native cloud engine...',
+            duration: const Duration(seconds: 3),
           );
         });
+        await SyncService().triggerUpload(force: true);
+        final remaining = Hive.isBoxOpen(LocalStorageService.syncBox)
+            ? Hive.box(LocalStorageService.syncBox).length
+            : 0;
+        _notify((ctx) {
+          if (remaining == 0) {
+            AppFeedback.showSuccess(
+              ctx,
+              'All Data Synchronized',
+              subtitle: 'Records successfully uploaded to Cloud Firestore.',
+              duration: const Duration(seconds: 4),
+            );
+          } else {
+            AppFeedback.showInfo(
+              ctx,
+              'Sync Pass Finished',
+              subtitle: '$remaining item(s) remain in offline queue.',
+              duration: const Duration(seconds: 3),
+              actionLabel: 'Details',
+              onAction: () => QueueDoctorDialog.show(ctx),
+            );
+          }
+        });
+        return;
       } else {
         _notify((ctx) {
           AppFeedback.showInfo(

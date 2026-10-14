@@ -1,6 +1,7 @@
 // lib/pages/school/views/school_audit_log_view.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/design_system.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 import '../../../services/local_storage_service.dart';
@@ -31,31 +32,31 @@ class SchoolAuditLogView extends StatelessWidget {
       future: SchoolLocalStorage.ensureBoxesOpen(),
       builder: (context, snapshot) {
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(
-            backgroundColor: SchoolTheme.bgLight,
-            body: Center(child: CircularProgressIndicator(color: SchoolTheme.primary)),
+          return Scaffold(
+            backgroundColor: context.adapt(SchoolTheme.bgLight),
+            body: Center(child: CircularProgressIndicator(color: context.adapt(SchoolTheme.primary))),
           );
         }
 
         return Scaffold(
-          backgroundColor: SchoolTheme.bgLight,
+          backgroundColor: context.adapt(SchoolTheme.bgLight),
           body: Padding(
             padding: const EdgeInsets.all(24.0),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text(
+                Text(
                   'School Audit Trail & Activity Log',
                   style: TextStyle(
                     fontSize: 20,
                     fontWeight: FontWeight.bold,
-                    color: Color(0xFF0F172A),
+                    color: context.adapt(SoftPalette.slate900),
                   ),
                 ),
                 const SizedBox(height: 6),
                 Text(
                   'Track all modifications, admissions, daily logs, and library operations across the school module.',
-                  style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
+                  style: TextStyle(color: context.adapt(SoftPalette.gray500), fontSize: 14),
                 ),
                 const SizedBox(height: 20),
 
@@ -70,16 +71,16 @@ class SchoolAuditLogView extends StatelessWidget {
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
-                              Icon(Icons.history_rounded, size: 64, color: Colors.grey.shade300),
+                              Icon(Icons.history_rounded, size: 64, color: context.adapt(SoftPalette.gray150)),
                               const SizedBox(height: 12),
-                              const Text(
+                              Text(
                                 'No audit log entries recorded yet.',
-                                style: TextStyle(color: Colors.grey, fontSize: 16, fontWeight: FontWeight.bold),
+                                style: TextStyle(color: context.adapt(SoftPalette.gray350), fontSize: 16, fontWeight: FontWeight.bold),
                               ),
                               const SizedBox(height: 4),
-                              const Text(
+                              Text(
                                 'Actions in student registry, attendance, and library will be logged here.',
-                                style: TextStyle(color: Colors.grey),
+                                style: TextStyle(color: context.adapt(SoftPalette.gray350)),
                               ),
                             ],
                           ),
@@ -108,19 +109,19 @@ class SchoolAuditLogView extends StatelessWidget {
                           return Container(
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
-                              color: Colors.white,
+                              color: context.adapt(SoftPalette.gray50),
                               borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: Colors.grey.shade200),
+                              border: Border.all(color: context.adapt(SoftPalette.gray100)),
                             ),
                             child: Row(
                               children: [
                                 Container(
                                   padding: const EdgeInsets.all(10),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFF1B4965).withValues(alpha: 0.1),
+                                    color: context.adapt(SoftPalette.sky700).withValues(alpha: 0.1),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
-                                  child: const Icon(Icons.security_rounded, color: Color(0xFF1B4965), size: 20),
+                                  child: Icon(Icons.security_rounded, color: context.adapt(SoftPalette.sky700), size: 20),
                                 ),
                                 const SizedBox(width: 14),
                                 Expanded(
@@ -132,13 +133,13 @@ class SchoolAuditLogView extends StatelessWidget {
                                           Container(
                                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                             decoration: BoxDecoration(
-                                              color: const Color(0xFFE0E7FF),
+                                              color: context.adapt(SoftPalette.slate150),
                                               borderRadius: BorderRadius.circular(6),
                                             ),
                                             child: Text(
                                               action,
-                                              style: const TextStyle(
-                                                color: Color(0xFF4338CA),
+                                              style: TextStyle(
+                                                color: context.adapt(SoftPalette.indigo600),
                                                 fontWeight: FontWeight.bold,
                                                 fontSize: 11,
                                               ),
@@ -147,10 +148,10 @@ class SchoolAuditLogView extends StatelessWidget {
                                           const SizedBox(width: 8),
                                           Text(
                                             'By $user',
-                                            style: const TextStyle(
+                                            style: TextStyle(
                                               fontWeight: FontWeight.bold,
                                               fontSize: 13,
-                                              color: Color(0xFF334155),
+                                              color: context.adapt(SoftPalette.slate700),
                                             ),
                                           ),
                                         ],
@@ -158,14 +159,14 @@ class SchoolAuditLogView extends StatelessWidget {
                                       const SizedBox(height: 4),
                                       Text(
                                         details,
-                                        style: TextStyle(color: Colors.grey.shade700, fontSize: 13),
+                                        style: TextStyle(color: context.adapt(SoftPalette.gray550), fontSize: 13),
                                       ),
                                     ],
                                   ),
                                 ),
                                 Text(
                                   timeFormatted,
-                                  style: TextStyle(color: Colors.grey.shade500, fontSize: 12),
+                                  style: TextStyle(color: context.adapt(SoftPalette.gray350), fontSize: 12),
                                 ),
                               ],
                             ),

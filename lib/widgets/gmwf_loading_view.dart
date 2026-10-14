@@ -1,7 +1,9 @@
 // lib/widgets/gmwf_loading_view.dart
 import 'dart:async';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'dart:math';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/components/decorative_image.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:lottie/lottie.dart';
 import '../constants/navigator_key.dart';
@@ -134,19 +136,19 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     // ── Design tokens (matching LoginPage) ───────────────────────────────────
-    final bgColor   = isDark ? const Color(0xFF031611) : const Color(0xFFEFF6F0);
-    final cardBg    = isDark ? const Color(0xFF041C16).withValues(alpha: 0.95) : Colors.white;
-    final cardBorder= isDark ? const Color(0xFF10B981).withValues(alpha: 0.25) : const Color(0xFFD1FAE5);
-    final cardShadow= isDark ? Colors.black.withValues(alpha: 0.45) : const Color(0xFF047857).withValues(alpha: 0.08);
-    final badgeColor= isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
-    final badgeDivider= isDark ? const Color(0xFF047857) : const Color(0xFFA7F3D0);
-    final titleMain = isDark ? Colors.white : const Color(0xFF064E3B);
-    final titleAccent= isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
-    final subtitleColor= isDark ? Colors.white.withValues(alpha: 0.5) : const Color(0xFF4B5563);
-    final shimmerColor= isDark ? const Color(0xFF34D399) : const Color(0xFF059669);
-    final shimmerTrack= isDark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFF059669).withValues(alpha: 0.12);
-    final glowColor = isDark ? const Color(0xFF10B981) : const Color(0xFF059669);
-    final panelBg   = isDark ? const Color(0xFF02100C) : const Color(0xFF064E3B);
+    final bgColor   = isDark ? SoftPalette.teal900 : SoftPalette.green100t;
+    final cardBg    = isDark ? SoftPalette.teal900.withValues(alpha: 0.95) : SoftPalette.gray50;
+    final cardBorder= isDark ? SoftPalette.emerald350.withValues(alpha: 0.25) : SoftPalette.emerald100;
+    final cardShadow= isDark ? SoftPalette.gray900.withValues(alpha: 0.45) : SoftPalette.emerald550.withValues(alpha: 0.08);
+    final badgeColor= isDark ? SoftPalette.emerald300 : SoftPalette.emerald500;
+    final badgeDivider= isDark ? SoftPalette.emerald550 : SoftPalette.emerald150;
+    final titleMain = isDark ? SoftPalette.gray50 : SoftPalette.emerald700;
+    final titleAccent= isDark ? SoftPalette.emerald300 : SoftPalette.emerald500;
+    final subtitleColor= isDark ? SoftPalette.gray50.withValues(alpha: 0.5) : SoftPalette.slate600;
+    final shimmerColor= isDark ? SoftPalette.emerald300 : SoftPalette.emerald500;
+    final shimmerTrack= isDark ? SoftPalette.gray50.withValues(alpha: 0.08) : SoftPalette.emerald500.withValues(alpha: 0.12);
+    final glowColor = isDark ? SoftPalette.emerald350 : SoftPalette.emerald500;
+    final panelBg   = isDark ? SoftPalette.teal900 : SoftPalette.emerald700;
 
     final displayMessage = widget.message ?? _defaultMessages[_messageIndex];
 
@@ -199,7 +201,7 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
                   child: Container(
                     decoration: BoxDecoration(
                       shape: BoxShape.circle,
-                      color: isDark ? const Color(0xFF02140F) : Colors.white,
+                      color: isDark ? SoftPalette.teal900 : SoftPalette.gray50,
                       border: Border.all(
                         color: glowColor.withValues(alpha: 0.35 + 0.30 * _pulseAnim.value),
                         width: 2,
@@ -357,9 +359,9 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
               Container(
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: Colors.orange.withValues(alpha: isDark ? 0.10 : 0.06),
+                  color: SoftPalette.amber300.withValues(alpha: isDark ? 0.10 : 0.06),
                   borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.orange.withValues(alpha: 0.3)),
+                  border: Border.all(color: SoftPalette.amber300.withValues(alpha: 0.3)),
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
@@ -368,7 +370,7 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
                       "Taking longer than expected?",
                       style: GoogleFonts.inter(
                         fontWeight: FontWeight.w700,
-                        color: Colors.orangeAccent,
+                        color: SoftPalette.amber300,
                         fontSize: 12,
                       ),
                     ),
@@ -393,8 +395,8 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
                         style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w700),
                       ),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF059669),
-                        foregroundColor: Colors.white,
+                        backgroundColor: SoftPalette.emerald500,
+                        foregroundColor: SoftPalette.gray50,
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
@@ -426,7 +428,7 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
             width: isDesktop ? 560 : (size.width * 0.75).clamp(240.0, 420.0),
             child: Opacity(
               opacity: isDark ? 0.22 : 0.15,
-              child: Image.asset(
+              child: GDecorativeImage.asset(
                 'assets/images/2.webp',
                 fit: BoxFit.fitHeight,
                 alignment: Alignment.topLeft,
@@ -520,7 +522,7 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
                             style: GoogleFonts.inter(
                               fontSize: 20,
                               fontWeight: FontWeight.w400,
-                              color: isDark ? Colors.white.withValues(alpha: 0.7) : const Color(0xFF064E3B),
+                              color: isDark ? SoftPalette.gray50.withValues(alpha: 0.7) : SoftPalette.emerald700,
                             ),
                           ),
                           const SizedBox(height: 28),
@@ -596,8 +598,8 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
                   color: isDark
-                      ? const Color(0xFF041C16).withValues(alpha: 0.8)
-                      : Colors.white.withValues(alpha: 0.85),
+                      ? SoftPalette.teal900.withValues(alpha: 0.8)
+                      : SoftPalette.gray50.withValues(alpha: 0.85),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
                     color: glowColor.withValues(alpha: isDark ? 0.2 : 0.15),
@@ -614,7 +616,7 @@ class _GmwfLoadingViewState extends State<GmwfLoadingView>
                       style: GoogleFonts.inter(
                         fontSize: 10,
                         fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white70 : const Color(0xFF064E3B),
+                        color: isDark ? SoftPalette.gray50A70 : SoftPalette.emerald700,
                       ),
                     ),
                   ],
@@ -660,7 +662,7 @@ class _DesktopProgramPill extends StatelessWidget {
           style: GoogleFonts.inter(
             fontSize: 13,
             fontWeight: FontWeight.w500,
-            color: isDark ? Colors.white.withValues(alpha: 0.75) : const Color(0xFF064E3B).withValues(alpha: 0.8),
+            color: isDark ? SoftPalette.gray50.withValues(alpha: 0.75) : SoftPalette.emerald700.withValues(alpha: 0.8),
           ),
         ),
       ],

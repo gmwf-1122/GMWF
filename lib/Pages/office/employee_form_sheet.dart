@@ -1,6 +1,7 @@
 // lib/pages/office/employee_form_sheet.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -10,7 +11,6 @@ import 'package:uuid/uuid.dart';
 import 'dart:async';
 import 'dart:io';
 
-import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../theme/role_theme_provider.dart';
 import '../../theme/app_theme.dart';
 import '../../services/finance_local_storage.dart';
@@ -19,9 +19,7 @@ import '../../services/zkteco_network_service.dart';
 import '../../services/image_upload_service.dart';
 import '../../utils/formatters.dart';
 import '../../services/user_theme_service.dart';
-import '../../services/local_storage_service.dart';
 import '../../services/camp_session_service.dart';
-import '../../services/network_health_service.dart';
 import 'shared_widgets.dart';
 import '../../design/design_system.dart';
 
@@ -40,19 +38,19 @@ void openEmployeeFormSheet(
       ? RoleThemeData(
           roleLabel: tOriginal.roleLabel,
           isDarkCanvas: true,
-          bg: const Color(0xFF0F172A),
-          bgCard: const Color(0xFF1E293B),
-          bgCardAlt: const Color(0xFF0F172A),
-          bgRule: const Color(0xFF334155),
-          accent: const Color(0xFF10B981),
-          accentLight: const Color(0xFF34D399),
-          accentMuted: const Color(0xFF064E3B).withValues(alpha: 0.3),
-          accentGradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
-          glassTint: const Color(0x1A10B981),
-          textPrimary: const Color(0xFFF8FAFC),
-          textSecondary: const Color(0xFF94A3B8),
-          textTertiary: const Color(0xFF64748B),
-          danger: const Color(0xFFEF4444),
+          bg: SoftPalette.slate900,
+          bgCard: SoftPalette.slate800,
+          bgCardAlt: SoftPalette.slate900,
+          bgRule: SoftPalette.slate700,
+          accent: SoftPalette.emerald350,
+          accentLight: SoftPalette.emerald300,
+          accentMuted: SoftPalette.emerald700.withValues(alpha: 0.3),
+          accentGradient: const LinearGradient(colors: [SoftPalette.emerald350, SoftPalette.emerald500]),
+          glassTint: SoftPalette.emerald350A10,
+          textPrimary: SoftPalette.gray50,
+          textSecondary: SoftPalette.slate350,
+          textTertiary: SoftPalette.slate550,
+          danger: SoftPalette.red400,
           zakat: tOriginal.zakat,
           nonZakat: tOriginal.nonZakat,
           gmwf: tOriginal.gmwf,
@@ -67,19 +65,19 @@ void openEmployeeFormSheet(
       : RoleThemeData(
           roleLabel: tOriginal.roleLabel,
           isDarkCanvas: false,
-          bg: const Color(0xFFF8FAFC),
-          bgCard: Colors.white,
-          bgCardAlt: const Color(0xFFF1F5F9),
-          bgRule: const Color(0xFFE2E8F0),
-          accent: const Color(0xFF10B981),
-          accentLight: const Color(0xFF34D399),
-          accentMuted: const Color(0xFFD1FAE5),
-          accentGradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
-          glassTint: const Color(0x1A10B981),
-          textPrimary: const Color(0xFF111827),
-          textSecondary: const Color(0xFF6B7280),
-          textTertiary: const Color(0xFF9CA3AF),
-          danger: const Color(0xFFEF4444),
+          bg: SoftPalette.gray50,
+          bgCard: SoftPalette.gray50,
+          bgCardAlt: SoftPalette.slate100,
+          bgRule: SoftPalette.slate150,
+          accent: SoftPalette.emerald350,
+          accentLight: SoftPalette.emerald300,
+          accentMuted: SoftPalette.emerald100,
+          accentGradient: const LinearGradient(colors: [SoftPalette.emerald350, SoftPalette.emerald500]),
+          glassTint: SoftPalette.emerald350A10,
+          textPrimary: SoftPalette.slate900,
+          textSecondary: SoftPalette.slate550,
+          textTertiary: SoftPalette.slate350,
+          danger: SoftPalette.red400,
           zakat: tOriginal.zakat,
           nonZakat: tOriginal.nonZakat,
           gmwf: tOriginal.gmwf,
@@ -309,11 +307,11 @@ void openEmployeeFormSheet(
                           height: 84,
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            color: const Color(0xFFE2E8F0),
-                            border: Border.all(color: const Color(0xFF10B981), width: 2.5),
+                            color: context.adapt(SoftPalette.slate150),
+                            border: Border.all(color: SoftPalette.emerald350, width: 2.5),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.08),
+                                color: SoftPalette.gray900.withOpacity(0.08),
                                 blurRadius: 10,
                                 offset: const Offset(0, 3),
                               )
@@ -333,7 +331,7 @@ void openEmployeeFormSheet(
                                     : null,
                           ),
                           child: (selectedProfileFile == null && (existingProfileUrl == null || existingProfileUrl!.isEmpty))
-                              ? const Icon(Icons.person_rounded, size: 44, color: Color(0xFF94A3B8))
+                              ? Icon(Icons.person_rounded, size: 44, color: context.adapt(SoftPalette.slate350))
                               : null,
                         ),
                         Positioned(
@@ -357,11 +355,11 @@ void openEmployeeFormSheet(
                             child: Container(
                               padding: const EdgeInsets.all(7),
                               decoration: const BoxDecoration(
-                                color: Color(0xFF10B981),
+                                color: SoftPalette.emerald350,
                                 shape: BoxShape.circle,
-                                boxShadow: [BoxShadow(color: Colors.black26, blurRadius: 4)],
+                                boxShadow: [BoxShadow(color: SoftPalette.gray900A26, blurRadius: 4)],
                               ),
-                              child: const Icon(Icons.camera_alt_rounded, size: 15, color: Colors.white),
+                              child: const Icon(Icons.camera_alt_rounded, size: 15, color: SoftPalette.gray50),
                             ),
                           ),
                         ),
@@ -372,7 +370,7 @@ void openEmployeeFormSheet(
                   Center(
                     child: Text(
                       existingProfileUrl != null ? 'Tap camera to change photo' : 'Upload Employee Photo (Optional)',
-                      style: const TextStyle(fontSize: 11, color: Color(0xFF64748B), fontWeight: FontWeight.w500),
+                      style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.slate550), fontWeight: FontWeight.w500),
                     ),
                   ),
                   const SizedBox(height: 18),
@@ -555,14 +553,14 @@ void openEmployeeFormSheet(
                         children: [
                           Icon(
                             showIdDocs ? Icons.expand_less_rounded : Icons.expand_more_rounded,
-                            color: const Color(0xFF0D9488),
+                            color: SoftPalette.teal500,
                             size: 20,
                           ),
                           const SizedBox(width: 6),
                           Text(
                             showIdDocs ? 'Hide ID Card Scans' : 'Attach CNIC / ID Card Scans (Front & Back)',
                             style: const TextStyle(
-                              color: Color(0xFF0D9488),
+                              color: SoftPalette.teal500,
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
                             ),
@@ -879,8 +877,8 @@ void openEmployeeFormSheet(
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         colors: isDark
-                            ? [const Color(0xFF064E3B).withValues(alpha: 0.35), const Color(0xFF022C22).withValues(alpha: 0.35)]
-                            : [const Color(0xFFF0FDF4), const Color(0xFFECFDF5)],
+                            ? [SoftPalette.emerald700.withValues(alpha: 0.35), SoftPalette.teal800.withValues(alpha: 0.35)]
+                            : [SoftPalette.emerald50m, SoftPalette.emerald50],
                       ),
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(color: t.accent.withValues(alpha: isDark ? 0.5 : 0.4), width: 1.3),
@@ -894,7 +892,7 @@ void openEmployeeFormSheet(
                             const SizedBox(width: 8),
                             Text(
                               'Base Monthly Salary *',
-                              style: TextStyle(color: isDark ? const Color(0xFF34D399) : const Color(0xFF065F46), fontWeight: FontWeight.bold, fontSize: 12),
+                              style: TextStyle(color: isDark ? SoftPalette.emerald300 : SoftPalette.emerald600, fontWeight: FontWeight.bold, fontSize: 12),
                             ),
                           ],
                         ),
@@ -909,7 +907,7 @@ void openEmployeeFormSheet(
                               ),
                               child: const Text(
                                 'PKR',
-                                style: TextStyle(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 12),
+                                style: TextStyle(fontWeight: FontWeight.bold, color: SoftPalette.gray50, fontSize: 12),
                               ),
                             ),
                             const SizedBox(width: 10),
@@ -919,7 +917,7 @@ void openEmployeeFormSheet(
                                 keyboardType: TextInputType.number,
                                 inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                                 style: TextStyle(
-                                  color: isDark ? const Color(0xFF6EE7B7) : const Color(0xFF065F46),
+                                  color: isDark ? SoftPalette.emerald200 : SoftPalette.emerald600,
                                   fontSize: 20,
                                   fontWeight: FontWeight.w800,
                                   letterSpacing: 0.5,
@@ -927,7 +925,7 @@ void openEmployeeFormSheet(
                                 decoration: InputDecoration(
                                   hintText: 'e.g. 35000',
                                   hintStyle: TextStyle(
-                                    color: isDark ? const Color(0xFF047857) : const Color(0xFFA7F3D0),
+                                    color: isDark ? SoftPalette.emerald550 : SoftPalette.emerald150,
                                     fontSize: 18,
                                     fontWeight: FontWeight.normal,
                                   ),
@@ -942,7 +940,7 @@ void openEmployeeFormSheet(
                         const SizedBox(height: 4),
                         Text(
                           'Gross monthly pay before deductions & loan installments.',
-                          style: TextStyle(color: isDark ? const Color(0xFF34D399).withValues(alpha: 0.8) : const Color(0xFF047857), fontSize: 10.5),
+                          style: TextStyle(color: isDark ? SoftPalette.emerald300.withValues(alpha: 0.8) : SoftPalette.emerald550, fontSize: 10.5),
                         ),
                       ],
                     ),
@@ -964,12 +962,12 @@ void openEmployeeFormSheet(
                           inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                         ),
                       ),
-                      const Expanded(
+                      Expanded(
                         child: Padding(
                           padding: EdgeInsets.only(top: 4, left: 6),
                           child: Text(
                             'Numeric PIN for physical ZKTeco fingerprint/face attendance hardware (e.g. 159).',
-                            style: TextStyle(color: Color(0xFF64748B), fontSize: 11),
+                            style: TextStyle(color: context.adapt(SoftPalette.slate550), fontSize: 11),
                           ),
                         ),
                       ),
@@ -1028,11 +1026,11 @@ void openEmployeeFormSheet(
                             padding: const EdgeInsets.symmetric(vertical: 10),
                             decoration: BoxDecoration(
                               color: paymentMethod == 'Bank Transfer'
-                                  ? (isDark ? const Color(0xFF1E3A8A).withValues(alpha: 0.35) : const Color(0xFFEFF6FF))
+                                  ? (isDark ? SoftPalette.blue700.withValues(alpha: 0.35) : SoftPalette.slate100)
                                   : t.bgCardAlt,
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(
-                                color: paymentMethod == 'Bank Transfer' ? const Color(0xFF3B82F6) : t.bgRule,
+                                color: paymentMethod == 'Bank Transfer' ? SoftPalette.blue500 : t.bgRule,
                                 width: paymentMethod == 'Bank Transfer' ? 1.8 : 1.0,
                               ),
                             ),
@@ -1042,7 +1040,7 @@ void openEmployeeFormSheet(
                                 Icon(
                                   Icons.account_balance_rounded,
                                   size: 16,
-                                  color: paymentMethod == 'Bank Transfer' ? const Color(0xFF3B82F6) : t.textSecondary,
+                                  color: paymentMethod == 'Bank Transfer' ? SoftPalette.blue500 : t.textSecondary,
                                 ),
                                 const SizedBox(width: 8),
                                 Text(
@@ -1051,7 +1049,7 @@ void openEmployeeFormSheet(
                                     fontSize: 12.5,
                                     fontWeight: FontWeight.bold,
                                     color: paymentMethod == 'Bank Transfer'
-                                        ? (isDark ? const Color(0xFF93C5FD) : const Color(0xFF1E40AF))
+                                        ? (isDark ? SoftPalette.blue300 : SoftPalette.blue600)
                                         : t.textSecondary,
                                   ),
                                 ),
@@ -1076,11 +1074,11 @@ void openEmployeeFormSheet(
                             padding: const EdgeInsets.symmetric(vertical: 10),
                             decoration: BoxDecoration(
                               color: paymentMethod == 'Cash'
-                                  ? (isDark ? const Color(0xFF064E3B).withValues(alpha: 0.35) : const Color(0xFFF0FDF4))
+                                  ? (isDark ? SoftPalette.emerald700.withValues(alpha: 0.35) : SoftPalette.emerald50m)
                                   : t.bgCardAlt,
                               borderRadius: BorderRadius.circular(10),
                               border: Border.all(
-                                color: paymentMethod == 'Cash' ? const Color(0xFF10B981) : t.bgRule,
+                                color: paymentMethod == 'Cash' ? SoftPalette.emerald350 : t.bgRule,
                                 width: paymentMethod == 'Cash' ? 1.8 : 1.0,
                               ),
                             ),
@@ -1090,7 +1088,7 @@ void openEmployeeFormSheet(
                                 Icon(
                                   Icons.payments_rounded,
                                   size: 16,
-                                  color: paymentMethod == 'Cash' ? const Color(0xFF10B981) : t.textSecondary,
+                                  color: paymentMethod == 'Cash' ? SoftPalette.emerald350 : t.textSecondary,
                                 ),
                                 const SizedBox(width: 8),
                                 Text(
@@ -1099,7 +1097,7 @@ void openEmployeeFormSheet(
                                     fontSize: 12.5,
                                     fontWeight: FontWeight.bold,
                                     color: paymentMethod == 'Cash'
-                                        ? (isDark ? const Color(0xFF6EE7B7) : const Color(0xFF065F46))
+                                        ? (isDark ? SoftPalette.emerald200 : SoftPalette.emerald600)
                                         : t.textSecondary,
                                   ),
                                 ),
@@ -1236,13 +1234,13 @@ void openEmployeeFormSheet(
                                   c,
                                   style: TextStyle(
                                     fontSize: 11,
-                                    color: isSel ? Colors.white : t.textPrimary,
+                                    color: isSel ? SoftPalette.gray50 : t.textPrimary,
                                     fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
                                   ),
                                 ),
                                 selected: isSel,
                                 selectedColor: t.accent,
-                                checkmarkColor: Colors.white,
+                                checkmarkColor: SoftPalette.gray50,
                                 backgroundColor: t.bgCard,
                                 onSelected: (selected) {
                                   setState(() {
@@ -1402,9 +1400,9 @@ void openEmployeeFormSheet(
                   const SizedBox(height: 12),
 
                   // Work Schedule Timings
-                  const Text(
+                  Text(
                     'Work Schedule (Optional)',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate700)),
                   ),
                   const SizedBox(height: 8),
                   buildResponsiveFieldRow(
@@ -1437,11 +1435,11 @@ void openEmployeeFormSheet(
                     children: [
                       Text(
                         'Emergency Contacts (${emergencyContacts.length})',
-                        style: const TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF334155)),
+                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate700)),
                       ),
                       TextButton.icon(
                         style: TextButton.styleFrom(
-                          foregroundColor: const Color(0xFF0D9488),
+                          foregroundColor: SoftPalette.teal500,
                           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         ),
                         icon: const Icon(Icons.add_circle_outline_rounded, size: 16),
@@ -1472,7 +1470,7 @@ void openEmployeeFormSheet(
                               actions: [
                                 TextButton(onPressed: () => Navigator.pop(subCtx), child: const Text('Cancel')),
                                 ElevatedButton(
-                                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF10B981)),
+                                  style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.emerald350),
                                   onPressed: () {
                                     if (cName.text.trim().isNotEmpty && cPhone.text.trim().isNotEmpty) {
                                       setState(() {
@@ -1485,7 +1483,7 @@ void openEmployeeFormSheet(
                                       Navigator.pop(subCtx);
                                     }
                                   },
-                                  child: const Text('Add', style: TextStyle(color: Colors.white)),
+                                  child: const Text('Add', style: TextStyle(color: SoftPalette.gray50)),
                                 ),
                               ],
                             ),
@@ -1498,14 +1496,14 @@ void openEmployeeFormSheet(
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFF8FAFC),
+                        color: context.adapt(SoftPalette.gray50),
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                        border: Border.all(color: context.adapt(SoftPalette.slate150)),
                       ),
-                      child: const Center(
+                      child: Center(
                         child: Text(
                           'No emergency contacts added. (Optional)',
-                          style: TextStyle(fontSize: 11.5, color: Color(0xFF94A3B8)),
+                          style: TextStyle(fontSize: 11.5, color: context.adapt(SoftPalette.slate350)),
                         ),
                       ),
                     )
@@ -1517,23 +1515,23 @@ void openEmployeeFormSheet(
                         return Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFF1F5F9),
+                            color: context.adapt(SoftPalette.slate100),
                             borderRadius: BorderRadius.circular(8),
-                            border: Border.all(color: const Color(0xFFCBD5E1)),
+                            border: Border.all(color: context.adapt(SoftPalette.slate200)),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.person_pin_rounded, size: 14, color: Color(0xFF0D9488)),
+                              const Icon(Icons.person_pin_rounded, size: 14, color: SoftPalette.teal500),
                               const SizedBox(width: 6),
                               Text(
                                 '${contact['name']} (${contact['relation']}) • ${contact['phone']}',
-                                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF334155)),
+                                style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.slate700)),
                               ),
                               const SizedBox(width: 6),
                               InkWell(
                                 onTap: () => setState(() => emergencyContacts.remove(contact)),
-                                child: const Icon(Icons.close_rounded, size: 14, color: Color(0xFFEF4444)),
+                                child: const Icon(Icons.close_rounded, size: 14, color: SoftPalette.red400),
                               ),
                             ],
                           ),
@@ -1681,20 +1679,9 @@ void openEmployeeFormSheet(
                   performedBy: curUser,
                 );
 
-                // Direct cloud write fallback if device is online
-                try {
-                  if (NetworkHealthService().isStableOnline) {
-                    final bId = LocalStorageService.sanitizeBranchId(targetBranchId, fallback: 'karachi');
-                    final fsData = Map<String, dynamic>.from(employeeData)..remove('syncStatus');
-                    unawaited(FirebaseFirestore.instance
-                        .collection('branches')
-                        .doc(bId)
-                        .collection('employees')
-                        .doc(empLocalId)
-                        .set(fsData, SetOptions(merge: true))
-                        .catchError((_) {}));
-                  }
-                } catch (_) {}
+                // Uploaded by the queued item above. The direct write that was here was a second
+                // write of the same document, left in the SDK's hidden queue whenever Firestore
+                // did not answer (and sent again later, costing quota twice).
 
                 // 2. Initial / Updated Salary History (Safe & local)
                 try {
@@ -1878,8 +1865,8 @@ void openEmployeeFormSheet(
                               if (currentStep < 2)
                                 ElevatedButton.icon(
                                   style: ElevatedButton.styleFrom(
-                                    backgroundColor: isDark ? const Color(0xFF334155) : const Color(0xFF0F172A),
-                                    foregroundColor: Colors.white,
+                                    backgroundColor: isDark ? SoftPalette.slate700 : SoftPalette.slate900,
+                                    foregroundColor: SoftPalette.gray50,
                                     padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                                   ),
@@ -1897,7 +1884,7 @@ void openEmployeeFormSheet(
                               ElevatedButton.icon(
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: t.accent,
-                                  foregroundColor: Colors.white,
+                                  foregroundColor: SoftPalette.gray50,
                                   padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                                   elevation: 2,
                                   shadowColor: t.accent.withValues(alpha: 0.4),
@@ -1907,7 +1894,7 @@ void openEmployeeFormSheet(
                                     ? const SizedBox(
                                         width: 16,
                                         height: 16,
-                                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                        child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50),
                                       )
                                     : const Icon(Icons.check_circle_rounded, size: 18),
                                 label: Text(
@@ -1946,11 +1933,11 @@ Widget _buildStepTab(int stepIndex, String title, IconData icon, int currentStep
         duration: const Duration(milliseconds: 180),
         padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
         decoration: BoxDecoration(
-          color: isActive ? (isDark ? t.bgCard : Colors.white) : Colors.transparent,
+          color: isActive ? (isDark ? t.bgCard : SoftPalette.gray50) : Colors.transparent,
           borderRadius: BorderRadius.circular(9),
           border: isActive ? Border.all(color: t.bgRule) : null,
           boxShadow: isActive
-              ? [BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.06), blurRadius: 4, offset: const Offset(0, 2))]
+              ? [BoxShadow(color: SoftPalette.gray900.withValues(alpha: isDark ? 0.2 : 0.06), blurRadius: 4, offset: const Offset(0, 2))]
               : null,
         ),
         child: Row(
@@ -1960,7 +1947,7 @@ Widget _buildStepTab(int stepIndex, String title, IconData icon, int currentStep
               isDone ? Icons.check_circle_rounded : icon,
               size: 14,
               color: isDone
-                  ? const Color(0xFF10B981)
+                  ? SoftPalette.emerald350
                   : (isActive ? t.accent : t.textTertiary),
             ),
             const SizedBox(width: 5),
@@ -2040,7 +2027,7 @@ void showCustomBranchDialog({
                 onAdded(id, name);
               }
             },
-            child: const Text('Add Branch', style: TextStyle(color: Colors.white)),
+            child: const Text('Add Branch', style: TextStyle(color: SoftPalette.gray50)),
           ),
         ],
       );
@@ -2282,12 +2269,12 @@ void _showBranchTransferDialog({
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
                 backgroundColor: theme.accent,
-                foregroundColor: Colors.white,
+                foregroundColor: SoftPalette.gray50,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
               ),
               icon: isTransferring
-                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50))
                   : const Icon(Icons.swap_horiz_rounded, size: 16),
               label: Text(isTransferring ? 'Transferring...' : 'Confirm Transfer', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
               onPressed: isTransferring || targetBranchId == currentBranchId

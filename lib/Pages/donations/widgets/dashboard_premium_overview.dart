@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:intl/intl.dart';
 import '../../../models/donation_models.dart';
 import '../../../theme/app_theme.dart';
@@ -115,7 +116,7 @@ class DashboardPremiumOverview extends StatelessWidget {
                     label: isSyncing
                         ? 'Syncing...'
                         : (role.canSeeAllBranches ? 'Sync All (Permanent Local Save)' : 'Sync My Collections (Local Save)'),
-                    color: const Color(0xFF0284C7),
+                    color: SoftPalette.sky500,
                     isActive: isSyncing,
                     onTap: onSyncTap!,
                   ),
@@ -124,7 +125,7 @@ class DashboardPremiumOverview extends StatelessWidget {
                   t: t,
                   icon: Icons.people_alt_rounded,
                   label: 'Donors Registry',
-                  color: const Color(0xFF6366F1),
+                  color: SoftPalette.indigo500,
                   onTap: () => showDialog(
                     context: context,
                     builder: (_) => DonorRegistryDialog(branchId: branchId, branchName: branchName),
@@ -135,7 +136,7 @@ class DashboardPremiumOverview extends StatelessWidget {
                   t: t,
                   icon: Icons.file_download_rounded,
                   label: 'Export Excel',
-                  color: const Color(0xFF10B981),
+                  color: SoftPalette.emerald350,
                   onTap: onExportTap,
                 ),
                 _buildActionPill(
@@ -143,7 +144,7 @@ class DashboardPremiumOverview extends StatelessWidget {
                   t: t,
                   icon: Icons.analytics_rounded,
                   label: 'Analytics Summary',
-                  color: const Color(0xFF0EA5E9),
+                  color: SoftPalette.sky400,
                   isActive: isAnalyticsActive,
                   onTap: onSummaryTap,
                 ),
@@ -153,7 +154,7 @@ class DashboardPremiumOverview extends StatelessWidget {
                     t: t,
                     icon: Icons.history_rounded,
                     label: 'Global Audit Trail',
-                    color: const Color(0xFFF59E0B),
+                    color: SoftPalette.amber300,
                     onTap: () => Navigator.push(
                       context,
                       MaterialPageRoute(builder: (_) => GlobalAuditTrailScreen(role: role)),
@@ -166,7 +167,7 @@ class DashboardPremiumOverview extends StatelessWidget {
                     t: t,
                     icon: Icons.file_upload_rounded,
                     label: 'Import Excel',
-                    color: const Color(0xFF8B5CF6),
+                    color: SoftPalette.violet500,
                     onTap: onImportTap!,
                   ),
                 ],
@@ -183,7 +184,7 @@ class DashboardPremiumOverview extends StatelessWidget {
               trendText: "${computationPool.length} recs",
               subtitle: allLocal.length > currentDonations.length ? "Overall total" : "All time",
               isPositiveTrend: true,
-              badgeColor: const Color(0xFF6366F1),
+              badgeColor: SoftPalette.indigo500,
               badgeIcon: Icons.account_balance_wallet_rounded,
               symbolIcon: Icons.payments_rounded,
               subItems: [
@@ -200,7 +201,7 @@ class DashboardPremiumOverview extends StatelessWidget {
               trendText: "$receivedCount verified",
               subtitle: "Verified collections",
               isPositiveTrend: true,
-              badgeColor: const Color(0xFF10B981),
+              badgeColor: SoftPalette.emerald350,
               badgeIcon: Icons.check_circle_rounded,
               symbolIcon: Icons.verified_rounded,
               subItems: [
@@ -216,7 +217,7 @@ class DashboardPremiumOverview extends StatelessWidget {
               trendText: "$pendingCount pending",
               subtitle: "Awaiting review",
               isPositiveTrend: pendingCount == 0,
-              badgeColor: const Color(0xFFF59E0B),
+              badgeColor: SoftPalette.amber300,
               badgeIcon: Icons.hourglass_top_rounded,
               symbolIcon: Icons.pending_actions_rounded,
               subItems: [
@@ -232,7 +233,7 @@ class DashboardPremiumOverview extends StatelessWidget {
               trendText: computationPool.isNotEmpty ? "Highest" : "No records",
               subtitle: topDonor.isNotEmpty && topDonor != '—' ? topDonor : "Highest single",
               isPositiveTrend: true,
-              badgeColor: const Color(0xFFD97706),
+              badgeColor: SoftPalette.orange400,
               badgeIcon: Icons.emoji_events_rounded,
               symbolIcon: Icons.auto_awesome_rounded,
               subItems: [
@@ -330,7 +331,7 @@ class DashboardPremiumOverview extends StatelessWidget {
           border: Border.all(color: t.bgRule.withValues(alpha: 0.8), width: 1),
           boxShadow: [
             BoxShadow(
-              color: isDark ? Colors.black.withValues(alpha: 0.25) : badgeColor.withValues(alpha: 0.04),
+              color: isDark ? SoftPalette.gray900.withValues(alpha: 0.25) : badgeColor.withValues(alpha: 0.04),
               blurRadius: 8,
               offset: const Offset(0, 2),
             ),
@@ -366,7 +367,7 @@ class DashboardPremiumOverview extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
                     decoration: BoxDecoration(
-                      color: (isPositiveTrend ? const Color(0xFF10B981) : Colors.amber).withValues(alpha: 0.14),
+                      color: (isPositiveTrend ? SoftPalette.emerald350 : SoftPalette.amber200).withValues(alpha: 0.14),
                       borderRadius: BorderRadius.circular(16),
                     ),
                     child: Row(
@@ -375,7 +376,7 @@ class DashboardPremiumOverview extends StatelessWidget {
                         Icon(
                           isPositiveTrend ? Icons.arrow_upward_rounded : Icons.schedule_rounded,
                           size: 9.5,
-                          color: isPositiveTrend ? const Color(0xFF10B981) : Colors.amber[800],
+                          color: isPositiveTrend ? SoftPalette.emerald350 : SoftPalette.orange350,
                         ),
                         const SizedBox(width: 2.5),
                         ConstrainedBox(
@@ -385,7 +386,7 @@ class DashboardPremiumOverview extends StatelessWidget {
                             style: TextStyle(
                               fontSize: 9,
                               fontWeight: FontWeight.w700,
-                              color: isPositiveTrend ? const Color(0xFF10B981) : Colors.amber[800],
+                              color: isPositiveTrend ? SoftPalette.emerald350 : SoftPalette.orange350,
                             ),
                             overflow: TextOverflow.ellipsis,
                             maxLines: 1,
@@ -452,7 +453,7 @@ class DashboardPremiumOverview extends StatelessWidget {
         border: Border.all(color: t.bgRule.withValues(alpha: 0.8), width: 1),
         boxShadow: [
           BoxShadow(
-            color: isDark ? Colors.black.withValues(alpha: 0.25) : badgeColor.withValues(alpha: 0.04),
+            color: isDark ? SoftPalette.gray900.withValues(alpha: 0.25) : badgeColor.withValues(alpha: 0.04),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -508,7 +509,7 @@ class DashboardPremiumOverview extends StatelessWidget {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: isPositiveTrend ? const Color(0xFF10B981).withValues(alpha: 0.12) : Colors.amber.withValues(alpha: 0.12),
+                            color: isPositiveTrend ? SoftPalette.emerald350.withValues(alpha: 0.12) : SoftPalette.amber200.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Row(
@@ -517,7 +518,7 @@ class DashboardPremiumOverview extends StatelessWidget {
                               Icon(
                                 isPositiveTrend ? Icons.arrow_upward_rounded : Icons.schedule_rounded,
                                 size: 10,
-                                color: isPositiveTrend ? const Color(0xFF10B981) : Colors.amber[800],
+                                color: isPositiveTrend ? SoftPalette.emerald350 : SoftPalette.orange350,
                               ),
                               const SizedBox(width: 2),
                               Text(
@@ -525,7 +526,7 @@ class DashboardPremiumOverview extends StatelessWidget {
                                 style: TextStyle(
                                   fontSize: 9.5,
                                   fontWeight: FontWeight.w700,
-                                  color: isPositiveTrend ? const Color(0xFF10B981) : Colors.amber[800],
+                                  color: isPositiveTrend ? SoftPalette.emerald350 : SoftPalette.orange350,
                                 ),
                               ),
                             ],
@@ -609,7 +610,7 @@ class DashboardPremiumOverview extends StatelessWidget {
             ? color.withValues(alpha: 0.15)
             : t.bgCard;
     final borderColor = isPrimary ? color : (isActive ? color : t.bgRule);
-    final fgColor = isPrimary ? Colors.white : t.textPrimary;
+    final fgColor = isPrimary ? SoftPalette.gray50 : t.textPrimary;
 
     return InkWell(
       onTap: onTap,
@@ -630,7 +631,7 @@ class DashboardPremiumOverview extends StatelessWidget {
                 ]
               : [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.02),
+                    color: SoftPalette.gray900.withValues(alpha: 0.02),
                     blurRadius: 4,
                     offset: const Offset(0, 2),
                   ),
@@ -639,7 +640,7 @@ class DashboardPremiumOverview extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 16, color: isPrimary ? Colors.white : color),
+            Icon(icon, size: 16, color: isPrimary ? SoftPalette.gray50 : color),
             const SizedBox(width: 8),
             Text(
               label,

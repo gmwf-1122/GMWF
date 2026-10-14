@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../services/multi_server_service.dart';
@@ -50,12 +52,12 @@ class _MultiServerControlWidgetState extends State<MultiServerControlWidget> {
         _isCheckingPing = false;
       });
 
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: Text(isReachable
               ? '✅ Server ($ip:$port) is reachable & active on LAN!'
               : '❌ Server ($ip:$port) is unreachable on LAN.'),
-          backgroundColor: isReachable ? Colors.green : Colors.red,
+          backgroundColor: isReachable ? SoftPalette.green400 : SoftPalette.red400,
           duration: const Duration(seconds: 3),
         ),
       );
@@ -67,20 +69,20 @@ class _MultiServerControlWidgetState extends State<MultiServerControlWidget> {
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1F2937),
-        title: const Text('Promote to Primary Server?', style: TextStyle(color: Colors.white)),
+        backgroundColor: SoftPalette.slate800,
+        title: const Text('Promote to Primary Server?', style: TextStyle(color: SoftPalette.gray50)),
         content: Text(
           'Make "${server.serverName}" (${server.ipAddress}) the primary LAN server node for branch [${targetBranch.toUpperCase()}]?',
-          style: const TextStyle(color: Colors.white70),
+          style: const TextStyle(color: SoftPalette.gray50A70),
         ),
         actions: [
           TextButton(
-            child: const Text('Cancel', style: TextStyle(color: Colors.white54)),
+            child: const Text('Cancel', style: TextStyle(color: SoftPalette.gray50A54)),
             onPressed: () => Navigator.pop(ctx, false),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
-            child: const Text('Promote Now', style: TextStyle(color: Colors.white)),
+            style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.blue400),
+            child: const Text('Promote Now', style: TextStyle(color: SoftPalette.gray50)),
             onPressed: () => Navigator.pop(ctx, true),
           ),
         ],
@@ -90,10 +92,10 @@ class _MultiServerControlWidgetState extends State<MultiServerControlWidget> {
     if (confirm == true) {
       await MultiServerService().promoteToPrimary(targetBranch, server.serverId, server.ipAddress);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('⚡ ${server.serverName} is now set as Primary Branch Server!'),
-            backgroundColor: Colors.blueAccent,
+            backgroundColor: SoftPalette.blue400,
           ),
         );
       }
@@ -116,7 +118,7 @@ class _MultiServerControlWidgetState extends State<MultiServerControlWidget> {
         // Branch Filter Bar
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-          color: const Color(0xFF111827),
+          color: SoftPalette.slate900,
           child: SingleChildScrollView(
             scrollDirection: Axis.horizontal,
             child: Row(
@@ -129,19 +131,19 @@ class _MultiServerControlWidgetState extends State<MultiServerControlWidget> {
                     label: Text(
                       b['name'] ?? bId,
                       style: TextStyle(
-                        color: isSelected ? Colors.white : Colors.white70,
+                        color: isSelected ? SoftPalette.gray50 : SoftPalette.gray50A70,
                         fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
                         fontSize: 12,
                       ),
                     ),
                     selected: isSelected,
-                    selectedColor: Colors.blueAccent.withValues(alpha: 0.35),
-                    backgroundColor: const Color(0xFF1F2937),
-                    checkmarkColor: Colors.blueAccent,
+                    selectedColor: SoftPalette.blue400.withValues(alpha: 0.35),
+                    backgroundColor: SoftPalette.slate800,
+                    checkmarkColor: SoftPalette.blue400,
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(8),
                       side: BorderSide(
-                        color: isSelected ? Colors.blueAccent : Colors.white12,
+                        color: isSelected ? SoftPalette.blue400 : SoftPalette.gray50A12,
                       ),
                     ),
                     onSelected: (_) => setState(() => _selectedBranch = bId),
@@ -157,7 +159,7 @@ class _MultiServerControlWidgetState extends State<MultiServerControlWidget> {
             stream: MultiServerService().getBranchServersStream(_selectedBranch),
             builder: (context, snapshot) {
               if (snapshot.connectionState == ConnectionState.waiting) {
-                return const Center(child: CircularProgressIndicator(color: Colors.blueAccent));
+                return const Center(child: CircularProgressIndicator(color: SoftPalette.blue400));
               }
 
               final servers = snapshot.data ?? [];
@@ -167,18 +169,18 @@ class _MultiServerControlWidgetState extends State<MultiServerControlWidget> {
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      const Icon(Icons.dns_rounded, size: 48, color: Colors.white24),
+                      const Icon(Icons.dns_rounded, size: 48, color: SoftPalette.gray50A24),
                       const SizedBox(height: 12),
                       Text(
                         _selectedBranch == 'all'
                             ? 'No registered server nodes found across any branch.'
                             : 'No registered server nodes found for branch [${_selectedBranch.toUpperCase()}].',
-                        style: const TextStyle(color: Colors.white54, fontSize: 15),
+                        style: const TextStyle(color: SoftPalette.gray50A54, fontSize: 15),
                       ),
                       const SizedBox(height: 8),
                       const Text(
                         'When GMWF launches on a server machine, it will automatically register here.',
-                        style: TextStyle(color: Colors.white38, fontSize: 12),
+                        style: TextStyle(color: SoftPalette.gray50A38, fontSize: 12),
                       ),
                     ],
                   ),
@@ -194,19 +196,19 @@ class _MultiServerControlWidgetState extends State<MultiServerControlWidget> {
                     Container(
                       padding: const EdgeInsets.all(20),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF1F2937).withValues(alpha: 0.8),
+                        color: SoftPalette.slate800.withValues(alpha: 0.8),
                         borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: Colors.blueAccent.withValues(alpha: 0.3)),
+                        border: Border.all(color: SoftPalette.blue400.withValues(alpha: 0.3)),
                       ),
                       child: Row(
                         children: [
                           Container(
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: Colors.blueAccent.withValues(alpha: 0.15),
+                              color: SoftPalette.blue400.withValues(alpha: 0.15),
                               shape: BoxShape.circle,
                             ),
-                            child: const Icon(Icons.dns_rounded, size: 28, color: Colors.blueAccent),
+                            child: const Icon(Icons.dns_rounded, size: 28, color: SoftPalette.blue400),
                           ),
                           const SizedBox(width: 16),
                           Expanded(
@@ -215,12 +217,12 @@ class _MultiServerControlWidgetState extends State<MultiServerControlWidget> {
                               children: [
                                 const Text(
                                   'Multi-Server Cluster Management',
-                                  style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                                  style: TextStyle(color: SoftPalette.gray50, fontSize: 18, fontWeight: FontWeight.bold),
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
                                   '${servers.length} Registered Server Node(s) [${_selectedBranch.toUpperCase()}]',
-                                  style: const TextStyle(color: Colors.white54, fontSize: 12),
+                                  style: const TextStyle(color: SoftPalette.gray50A54, fontSize: 12),
                                 ),
                               ],
                             ),
@@ -233,7 +235,7 @@ class _MultiServerControlWidgetState extends State<MultiServerControlWidget> {
                     // Server Cards Grid / List
                     const Text(
                       'ACTIVE BRANCH SERVERS & NODE CLUSTER',
-                      style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 0.8),
+                      style: TextStyle(color: SoftPalette.gray50, fontSize: 13, fontWeight: FontWeight.bold, letterSpacing: 0.8),
                     ),
                     const SizedBox(height: 12),
 
@@ -246,16 +248,16 @@ class _MultiServerControlWidgetState extends State<MultiServerControlWidget> {
                         final isPrimary = srv.role == 'primary';
                         final isPingSuccess = _pingResults[srv.serverId];
 
-                        final roleColor = isPrimary ? Colors.purpleAccent : Colors.blueAccent;
-                        final statusColor = srv.isOnline ? Colors.greenAccent : Colors.grey;
+                        final roleColor = isPrimary ? SoftPalette.purple400 : SoftPalette.blue400;
+                        final statusColor = srv.isOnline ? SoftPalette.emerald200 : SoftPalette.gray350;
 
                         return Card(
-                          color: const Color(0xFF1F2937).withValues(alpha: 0.85),
+                          color: SoftPalette.slate800.withValues(alpha: 0.85),
                           margin: const EdgeInsets.only(bottom: 16),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(18),
                             side: BorderSide(
-                              color: isPrimary ? Colors.purpleAccent.withValues(alpha: 0.5) : Colors.white10,
+                              color: isPrimary ? SoftPalette.purple400.withValues(alpha: 0.5) : SoftPalette.gray50A10,
                               width: isPrimary ? 1.5 : 1,
                             ),
                           ),
@@ -276,7 +278,7 @@ class _MultiServerControlWidgetState extends State<MultiServerControlWidget> {
                                             children: [
                                               Text(
                                                 srv.serverName,
-                                                style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                                                style: const TextStyle(color: SoftPalette.gray50, fontSize: 17, fontWeight: FontWeight.bold),
                                               ),
                                               const SizedBox(width: 10),
                                               Container(
@@ -295,12 +297,12 @@ class _MultiServerControlWidgetState extends State<MultiServerControlWidget> {
                                               Container(
                                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                                 decoration: BoxDecoration(
-                                                  color: Colors.white10,
+                                                  color: SoftPalette.gray50A10,
                                                   borderRadius: BorderRadius.circular(8),
                                                 ),
                                                 child: Text(
                                                   LocalStorageService.getBranchName(srv.branchId),
-                                                  style: const TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold),
+                                                  style: const TextStyle(color: SoftPalette.gray50A70, fontSize: 10, fontWeight: FontWeight.bold),
                                                 ),
                                               ),
                                             ],
@@ -308,7 +310,7 @@ class _MultiServerControlWidgetState extends State<MultiServerControlWidget> {
                                           const SizedBox(height: 4),
                                           Text(
                                             '${srv.ipAddress}:${srv.port}',
-                                            style: const TextStyle(color: Colors.white54, fontSize: 13, fontFamily: 'monospace'),
+                                            style: const TextStyle(color: SoftPalette.gray50A54, fontSize: 13, fontFamily: 'monospace'),
                                           ),
                                         ],
                                       ),
@@ -345,15 +347,15 @@ class _MultiServerControlWidgetState extends State<MultiServerControlWidget> {
                                   spacing: 12,
                                   runSpacing: 8,
                                   children: [
-                                    _buildMetricChip(Icons.people_alt_rounded, '${srv.connectedClients} Connected Clients', Colors.blueAccent),
-                                    _buildMetricChip(Icons.sync_rounded, '${srv.syncQueueSize} Queued for Sync', Colors.amberAccent),
-                                    _buildMetricChip(Icons.schedule_rounded, 'Heartbeat: ${DateFormat('hh:mm:ss a').format(srv.lastHeartbeat)}', Colors.white54),
-                                    _buildMetricChip(Icons.verified_rounded, 'App Version: ${srv.appVersion}', Colors.white54),
+                                    _buildMetricChip(Icons.people_alt_rounded, '${srv.connectedClients} Connected Clients', SoftPalette.blue400),
+                                    _buildMetricChip(Icons.sync_rounded, '${srv.syncQueueSize} Queued for Sync', SoftPalette.yellow200),
+                                    _buildMetricChip(Icons.schedule_rounded, 'Heartbeat: ${DateFormat('hh:mm:ss a').format(srv.lastHeartbeat)}', SoftPalette.gray50A54),
+                                    _buildMetricChip(Icons.verified_rounded, 'App Version: ${srv.appVersion}', SoftPalette.gray50A54),
                                   ],
                                 ),
 
                                 const SizedBox(height: 16),
-                                const Divider(color: Colors.white10),
+                                const Divider(color: SoftPalette.gray50A10),
                                 const SizedBox(height: 12),
 
                                 // Actions Row
@@ -372,12 +374,12 @@ class _MultiServerControlWidgetState extends State<MultiServerControlWidget> {
                                       ),
                                       style: OutlinedButton.styleFrom(
                                         foregroundColor: isPingSuccess == null
-                                            ? Colors.white70
-                                            : (isPingSuccess ? Colors.greenAccent : Colors.redAccent),
+                                            ? SoftPalette.gray50A70
+                                            : (isPingSuccess ? SoftPalette.emerald200 : SoftPalette.red400),
                                         side: BorderSide(
                                           color: isPingSuccess == null
-                                              ? Colors.white24
-                                              : (isPingSuccess ? Colors.greenAccent : Colors.redAccent),
+                                              ? SoftPalette.gray50A24
+                                              : (isPingSuccess ? SoftPalette.emerald200 : SoftPalette.red400),
                                         ),
                                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                                       ),
@@ -389,15 +391,15 @@ class _MultiServerControlWidgetState extends State<MultiServerControlWidget> {
                                         icon: const Icon(Icons.upgrade_rounded, size: 16),
                                         label: const Text('Set as Primary'),
                                         style: ElevatedButton.styleFrom(
-                                          backgroundColor: Colors.blueAccent,
-                                          foregroundColor: Colors.white,
+                                          backgroundColor: SoftPalette.blue400,
+                                          foregroundColor: SoftPalette.gray50,
                                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                                         ),
                                       ),
                                     if (widget.onTriggerSync != null) ...[
                                       const SizedBox(width: 8),
                                       IconButton(
-                                        icon: const Icon(Icons.sync_rounded, color: Colors.blueAccent),
+                                        icon: const Icon(Icons.sync_rounded, color: SoftPalette.blue400),
                                         tooltip: 'Trigger Cloud Sync Now',
                                         onPressed: widget.onTriggerSync,
                                       ),

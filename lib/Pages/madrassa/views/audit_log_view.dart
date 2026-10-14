@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import '../widgets/madrassa_common_widgets.dart';
@@ -103,23 +105,23 @@ class _AuditLogViewState extends State<AuditLogView> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF8F9FD),
+      backgroundColor: context.adapt(SoftPalette.gray50),
       appBar: AppBar(
         title: Text(
           context.l.auditLog,
           style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)),
         ),
-        backgroundColor: Colors.white,
-        foregroundColor: const Color(0xFF1A1C1E),
+        backgroundColor: context.adapt(SoftPalette.gray50),
+        foregroundColor: context.adapt(SoftPalette.gray900),
         elevation: 0.5,
       ),
       body: _logs.isEmpty && _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Color(0xFF4C4DDC)))
+          ? Center(child: CircularProgressIndicator(color: context.adapt(SoftPalette.indigo550)))
           : _logs.isEmpty
               ? Center(
                   child: Text(
                     context.l.noData,
-                    style: context.urduStyle(style: const TextStyle(color: Colors.grey)),
+                    style: context.urduStyle(style: TextStyle(color: context.adapt(SoftPalette.gray350))),
                   ),
                 )
               : ListView.builder(
@@ -128,9 +130,9 @@ class _AuditLogViewState extends State<AuditLogView> {
                   itemCount: _logs.length + (_hasMore ? 1 : 0),
                   itemBuilder: (context, index) {
                     if (index == _logs.length) {
-                      return const Padding(
+                      return Padding(
                         padding: EdgeInsets.symmetric(vertical: 16.0),
-                        child: Center(child: CircularProgressIndicator(color: Color(0xFF4C4DDC))),
+                        child: Center(child: CircularProgressIndicator(color: context.adapt(SoftPalette.indigo550))),
                       );
                     }
 
@@ -151,27 +153,27 @@ class _AuditLogViewState extends State<AuditLogView> {
                     final timeStr = timestamp != null ? _formatRelativeTime(timestamp) : '';
                     String title = editor;
                     IconData icon = Icons.info_outline;
-                    Color color = Colors.blue;
+                    Color color = context.adapt(SoftPalette.blue400);
 
                     final type = log['type'] ?? '';
                     if (type == 'ptm_reschedule') {
                       icon = Icons.notification_important_rounded;
-                      color = Colors.red;
+                      color = context.adapt(SoftPalette.red400);
                     } else if (type == 'daily_log_edit') {
                       icon = Icons.edit_calendar_rounded;
-                      color = Colors.indigo;
+                      color = context.adapt(SoftPalette.indigo600);
                     } else if (type == 'status_change') {
                       icon = Icons.swap_horiz_rounded;
-                      color = Colors.orange;
+                      color = context.adapt(SoftPalette.amber300);
                     } else if (type == 'config_change') {
                       icon = Icons.settings_rounded;
-                      color = Colors.teal;
+                      color = context.adapt(SoftPalette.teal500);
                     } else if (type == 'student_enrollment') {
                       icon = Icons.person_add_rounded;
-                      color = Colors.green;
+                      color = context.adapt(SoftPalette.green400);
                     } else if (type == 'student_edit') {
                       icon = Icons.edit_note_rounded;
-                      color = Colors.blueGrey;
+                      color = context.adapt(SoftPalette.slate500);
                     }
 
                     return buildActivityItem(context, title, message, timeStr, icon, color, role: role);

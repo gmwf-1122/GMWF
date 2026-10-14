@@ -1,7 +1,9 @@
 // lib/pages/global_modular_dashboard.dart
 // ─────────────────────────────────────────────────────────────────────────────
 
+import 'package:gmwf/services/cloud/cloud_db.dart';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -451,6 +453,8 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
   }
 
   void _logout() async {
+    final confirm = await showLogoutDialog(context);
+    if (confirm != true || !mounted) return;
     try {
       await AuthService().signOut();
     } catch (e) {
@@ -479,7 +483,7 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: const [
-            Icon(Icons.cloud_upload_rounded, color: Color(0xFF10B981), size: 28),
+            Icon(Icons.cloud_upload_rounded, color: SoftPalette.emerald350, size: 28),
             SizedBox(width: 12),
             Expanded(
               child: Text(
@@ -500,8 +504,8 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
           ),
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF10B981),
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.emerald350,
+              foregroundColor: SoftPalette.gray50,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
             onPressed: () => Navigator.pop(ctx, true),
@@ -515,20 +519,20 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
     if (confirmed != true) return;
 
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
+    AppToast.showSnackBar(context, 
       const SnackBar(
         content: Row(
           children: [
             SizedBox(
               width: 18,
               height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+              child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50),
             ),
             SizedBox(width: 12),
             Text('📡 Broadcasting global sync to all devices & uploading local queue...'),
           ],
         ),
-        backgroundColor: Color(0xFF0F766E),
+        backgroundColor: SoftPalette.teal550,
         duration: Duration(seconds: 4),
       ),
     );
@@ -544,10 +548,10 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
       if (mounted) setState(() {});
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           const SnackBar(
             content: Text('✅ Global Cloud Sync completed successfully! All nodes notified.'),
-            backgroundColor: Color(0xFF10B981),
+            backgroundColor: SoftPalette.emerald350,
             duration: Duration(seconds: 4),
           ),
         );
@@ -555,10 +559,10 @@ class _GlobalModularDashboardState extends State<GlobalModularDashboard>
     } catch (e) {
       debugPrint('[GlobalSync] Error triggering force sync: $e');
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('⚠️ Sync completed with warning: $e'),
-            backgroundColor: Colors.amber.shade900,
+            backgroundColor: SoftPalette.orange350,
           ),
         );
       }
@@ -767,7 +771,7 @@ class _SupervisorScaffoldState extends State<_SupervisorScaffold> {
     return Scaffold(
       backgroundColor: t.bg,
       appBar: AppBar(
-        backgroundColor: isDark ? const Color(0xFF161B22) : t.bgCard,
+        backgroundColor: isDark ? SoftPalette.slate900 : t.bgCard,
         elevation: 0,
         surfaceTintColor: Colors.transparent,
         automaticallyImplyLeading: false,
@@ -787,7 +791,7 @@ class _SupervisorScaffoldState extends State<_SupervisorScaffold> {
                     style: TextStyle(
                       fontSize: 16.5,
                       fontWeight: FontWeight.w900,
-                      color: isDark ? Colors.white : t.textPrimary,
+                      color: isDark ? SoftPalette.gray50 : t.textPrimary,
                       letterSpacing: -0.2,
                     ),
                     overflow: TextOverflow.ellipsis,
@@ -797,7 +801,7 @@ class _SupervisorScaffoldState extends State<_SupervisorScaffold> {
                     _getSupervisorTabSubtitle(navIndex, userName, branchName),
                     style: TextStyle(
                       fontSize: 11,
-                      color: isDark ? const Color(0xFF8B949E) : t.textTertiary,
+                      color: isDark ? SoftPalette.slate400 : t.textTertiary,
                       fontWeight: FontWeight.w600,
                     ),
                     overflow: TextOverflow.ellipsis,
@@ -813,7 +817,7 @@ class _SupervisorScaffoldState extends State<_SupervisorScaffold> {
             tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
             icon: Icon(
               isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-              color: isDark ? const Color(0xFFFBBF24) : t.textSecondary,
+              color: isDark ? SoftPalette.amber200 : t.textSecondary,
               size: 20,
             ),
             onPressed: () async {
@@ -823,7 +827,7 @@ class _SupervisorScaffoldState extends State<_SupervisorScaffold> {
           ),
           IconButton(
             tooltip: 'Sign Out',
-            icon: const Icon(Icons.logout_rounded, color: Color(0xFFEF4444), size: 20),
+            icon: const Icon(Icons.logout_rounded, color: SoftPalette.red400, size: 20),
             onPressed: widget.state._logout,
           ),
           const SizedBox(width: 8),
@@ -832,7 +836,7 @@ class _SupervisorScaffoldState extends State<_SupervisorScaffold> {
           preferredSize: const Size.fromHeight(1),
           child: Divider(
             height: 1,
-            color: isDark ? const Color(0xFF30363D) : t.bgRule,
+            color: isDark ? SoftPalette.slate750 : t.bgRule,
           ),
         ),
       ),
@@ -842,7 +846,8 @@ class _SupervisorScaffoldState extends State<_SupervisorScaffold> {
           return IndexedStack(
             index: curIdx == 0 ? 0 : 1,
             children: [
-              _SupervisorHomeHub(state: widget.state, t: t),
+              // Hidden home hub keeps its state but must not keep animating (CPU on low-end PCs).
+              TickerMode(enabled: curIdx == 0, child: _SupervisorHomeHub(state: widget.state, t: t)),
               if (curIdx != 0)
                 KeyedSubtree(
                   key: ValueKey('supervisor_tab_$curIdx'),
@@ -856,17 +861,17 @@ class _SupervisorScaffoldState extends State<_SupervisorScaffold> {
       ),
       bottomNavigationBar: Container(
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF161B22) : t.bgCard,
+          color: isDark ? SoftPalette.slate900 : t.bgCard,
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.05),
+              color: SoftPalette.gray900.withValues(alpha: isDark ? 0.35 : 0.05),
               blurRadius: 14,
               offset: const Offset(0, -2),
             ),
           ],
           border: Border(
             top: BorderSide(
-              color: isDark ? const Color(0xFF30363D) : t.bgRule,
+              color: isDark ? SoftPalette.slate750 : t.bgRule,
               width: 1,
             ),
           ),
@@ -889,7 +894,7 @@ class _SupervisorScaffoldState extends State<_SupervisorScaffold> {
                   icon: Icons.dashboard_rounded,
                   label: 'Summary',
                   isSelected: navIndex == 1,
-                  accentColor: const Color(0xFF6366F1),
+                  accentColor: SoftPalette.indigo500,
                   isDark: isDark,
                   onTap: () => widget.state.setSupervisorTab(1),
                 ),
@@ -897,7 +902,7 @@ class _SupervisorScaffoldState extends State<_SupervisorScaffold> {
                   icon: Icons.inventory_2_rounded,
                   label: 'Inventory',
                   isSelected: navIndex == 2,
-                  accentColor: const Color(0xFF10B981),
+                  accentColor: SoftPalette.emerald350,
                   isDark: isDark,
                   onTap: () => widget.state.setSupervisorTab(2),
                 ),
@@ -905,7 +910,7 @@ class _SupervisorScaffoldState extends State<_SupervisorScaffold> {
                   icon: Icons.rule_rounded,
                   label: 'Requests',
                   isSelected: navIndex == 3,
-                  accentColor: const Color(0xFFF59E0B),
+                  accentColor: SoftPalette.amber300,
                   isDark: isDark,
                   onTap: () => widget.state.setSupervisorTab(3),
                 ),
@@ -913,7 +918,7 @@ class _SupervisorScaffoldState extends State<_SupervisorScaffold> {
                   icon: Icons.receipt_long_rounded,
                   label: 'Ledger',
                   isSelected: navIndex == 4,
-                  accentColor: const Color(0xFF8B5CF6),
+                  accentColor: SoftPalette.violet500,
                   isDark: isDark,
                   onTap: () => widget.state.setSupervisorTab(4),
                 ),
@@ -921,7 +926,7 @@ class _SupervisorScaffoldState extends State<_SupervisorScaffold> {
                   icon: Icons.person_rounded,
                   label: 'Account',
                   isSelected: navIndex == 5,
-                  accentColor: const Color(0xFF06B6D4),
+                  accentColor: SoftPalette.cyan350,
                   isDark: isDark,
                   onTap: () => widget.state.setSupervisorTab(5),
                 ),
@@ -974,7 +979,7 @@ class _SupervisorNavItem extends StatelessWidget {
                   size: 20,
                   color: isSelected
                       ? accentColor
-                      : (isDark ? const Color(0xFF8B949E) : const Color(0xFF64748B)),
+                      : (isDark ? SoftPalette.slate400 : SoftPalette.slate550),
                 ),
                 const SizedBox(height: 2),
                 FittedBox(
@@ -987,7 +992,7 @@ class _SupervisorNavItem extends StatelessWidget {
                       fontWeight: isSelected ? FontWeight.w800 : FontWeight.w500,
                       color: isSelected
                           ? accentColor
-                          : (isDark ? const Color(0xFF8B949E) : const Color(0xFF64748B)),
+                          : (isDark ? SoftPalette.slate400 : SoftPalette.slate550),
                       letterSpacing: 0.1,
                     ),
                   ),
@@ -1095,15 +1100,15 @@ class _SupervisorHomeHub extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Color(0xFFD97706),
-            Color(0xFFF59E0B),
-            Color(0xFFB45309),
+            SoftPalette.orange400,
+            SoftPalette.amber300,
+            SoftPalette.orange500,
           ],
         ),
         borderRadius: BorderRadius.circular(18),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFFF59E0B).withValues(alpha: 0.35),
+            color: SoftPalette.amber300.withValues(alpha: 0.35),
             blurRadius: 14,
             offset: const Offset(0, 4),
           ),
@@ -1114,7 +1119,7 @@ class _SupervisorHomeHub extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.22),
+              color: SoftPalette.gray50.withValues(alpha: 0.22),
               shape: BoxShape.circle,
             ),
             child: const Text('🏆', style: TextStyle(fontSize: 22)),
@@ -1129,7 +1134,7 @@ class _SupervisorHomeHub extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w900,
-                    color: Colors.white,
+                    color: SoftPalette.gray50,
                     letterSpacing: 0.8,
                   ),
                 ),
@@ -1139,7 +1144,7 @@ class _SupervisorHomeHub extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 11.5,
                     fontWeight: FontWeight.w600,
-                    color: Colors.white.withValues(alpha: 0.95),
+                    color: SoftPalette.gray50.withValues(alpha: 0.95),
                   ),
                 ),
               ],
@@ -1157,7 +1162,7 @@ class _SupervisorHomeHub extends StatelessWidget {
         title: 'Summary & Overview',
         subtitle: 'Live token queue, prescriptions status, and dispensary stats',
         icon: Icons.dashboard_rounded,
-        gradient: const [Color(0xFF6366F1), Color(0xFF4338CA)],
+        gradient: const [SoftPalette.indigo500, SoftPalette.indigo600],
         badgeText: 'Live Queue',
         isDark: isDark,
         isVertical: isDesktopRow,
@@ -1169,7 +1174,7 @@ class _SupervisorHomeHub extends StatelessWidget {
         title: 'Medicine Inventory',
         subtitle: 'Track clinical stock levels, batch updates & stock adjustments',
         icon: Icons.inventory_2_rounded,
-        gradient: const [Color(0xFF10B981), Color(0xFF047857)],
+        gradient: const [SoftPalette.emerald350, SoftPalette.emerald550],
         badgeText: 'Stock In/Out',
         isDark: isDark,
         isVertical: isDesktopRow,
@@ -1181,7 +1186,7 @@ class _SupervisorHomeHub extends StatelessWidget {
         title: 'Requests & Approvals',
         subtitle: 'Review and approve supervisor token exceptions and void requests',
         icon: Icons.rule_rounded,
-        gradient: const [Color(0xFFF59E0B), Color(0xFFD97706)],
+        gradient: const [SoftPalette.amber300, SoftPalette.orange400],
         badgeText: 'Approvals',
         isDark: isDark,
         isVertical: isDesktopRow,
@@ -1193,7 +1198,7 @@ class _SupervisorHomeHub extends StatelessWidget {
         title: 'Medicine Stock Ledger',
         subtitle: 'Complete registers of medicine consumption & category records',
         icon: Icons.receipt_long_rounded,
-        gradient: const [Color(0xFF8B5CF6), Color(0xFF6D28D9)],
+        gradient: const [SoftPalette.violet500, SoftPalette.violet550],
         badgeText: 'Consumption',
         isDark: isDark,
         isVertical: isDesktopRow,
@@ -1205,7 +1210,7 @@ class _SupervisorHomeHub extends StatelessWidget {
         title: 'Account & Preferences',
         subtitle: 'User profile, app preferences, dark mode & password',
         icon: Icons.person_rounded,
-        gradient: const [Color(0xFF06B6D4), Color(0xFF0E7490)],
+        gradient: const [SoftPalette.cyan350, SoftPalette.sky550],
         badgeText: 'Account',
         isDark: isDark,
         isVertical: isDesktopRow,
@@ -1266,18 +1271,18 @@ class _SupervisorModuleCardState extends State<_SupervisorModuleCard> {
             curve: Curves.easeOutCubic,
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1E293B) : Colors.white,
+              color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: isDark
                     ? [
-                        const Color(0xFF1E293B),
-                        const Color(0xFF0F172A),
+                        SoftPalette.slate800,
+                        SoftPalette.slate900,
                       ]
                     : [
-                        Colors.white,
-                        const Color(0xFFF8FAFC),
+                        SoftPalette.gray50,
+                        SoftPalette.gray50,
                       ],
               ),
               borderRadius: BorderRadius.circular(18),
@@ -1285,8 +1290,8 @@ class _SupervisorModuleCardState extends State<_SupervisorModuleCard> {
                 color: _isHovered
                     ? primaryColor.withValues(alpha: isDark ? 0.7 : 0.5)
                     : (isDark
-                        ? Colors.white.withValues(alpha: 0.12)
-                        : const Color(0xFFE2E8F0)),
+                        ? SoftPalette.gray50.withValues(alpha: 0.12)
+                        : SoftPalette.slate150),
                 width: _isHovered ? 1.5 : 1.0,
               ),
               boxShadow: [
@@ -1294,7 +1299,7 @@ class _SupervisorModuleCardState extends State<_SupervisorModuleCard> {
                   color: _isHovered
                       ? primaryColor.withValues(alpha: isDark ? 0.30 : 0.16)
                       : (isDark
-                          ? Colors.black.withValues(alpha: 0.25)
+                          ? SoftPalette.gray900.withValues(alpha: 0.25)
                           : primaryColor.withValues(alpha: 0.05)),
                   blurRadius: _isHovered ? 16 : 8,
                   offset: Offset(0, _isHovered ? 6 : 2),
@@ -1327,7 +1332,7 @@ class _SupervisorModuleCardState extends State<_SupervisorModuleCard> {
                           ),
                         ],
                       ),
-                      child: Icon(widget.icon, color: Colors.white, size: 20),
+                      child: Icon(widget.icon, color: SoftPalette.gray50, size: 20),
                     ),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
@@ -1362,7 +1367,7 @@ class _SupervisorModuleCardState extends State<_SupervisorModuleCard> {
                       style: TextStyle(
                         fontSize: 13.5,
                         fontWeight: FontWeight.w800,
-                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                        color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                         letterSpacing: -0.2,
                         height: 1.15,
                       ),
@@ -1374,7 +1379,7 @@ class _SupervisorModuleCardState extends State<_SupervisorModuleCard> {
                       widget.subtitle,
                       style: TextStyle(
                         fontSize: 10.5,
-                        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                        color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
                         height: 1.2,
                       ),
                       maxLines: 2,
@@ -1392,7 +1397,7 @@ class _SupervisorModuleCardState extends State<_SupervisorModuleCard> {
                       child: Icon(
                         Icons.arrow_forward_rounded,
                         size: 14,
-                        color: _isHovered ? primaryColor : (isDark ? Colors.white38 : const Color(0xFF94A3B8)),
+                        color: _isHovered ? primaryColor : (isDark ? SoftPalette.gray50A38 : SoftPalette.slate350),
                       ),
                     ),
                   ],
@@ -1415,18 +1420,18 @@ class _SupervisorModuleCardState extends State<_SupervisorModuleCard> {
             curve: Curves.easeOutCubic,
             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1E293B) : Colors.white,
+              color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
               gradient: LinearGradient(
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
                 colors: isDark
                     ? [
-                        const Color(0xFF1E293B),
-                        const Color(0xFF0F172A),
+                        SoftPalette.slate800,
+                        SoftPalette.slate900,
                       ]
                     : [
-                        Colors.white,
-                        const Color(0xFFF8FAFC),
+                        SoftPalette.gray50,
+                        SoftPalette.gray50,
                       ],
               ),
               borderRadius: BorderRadius.circular(16),
@@ -1434,8 +1439,8 @@ class _SupervisorModuleCardState extends State<_SupervisorModuleCard> {
                 color: _isHovered
                     ? primaryColor.withValues(alpha: isDark ? 0.7 : 0.5)
                     : (isDark
-                        ? Colors.white.withValues(alpha: 0.12)
-                        : const Color(0xFFE2E8F0)),
+                        ? SoftPalette.gray50.withValues(alpha: 0.12)
+                        : SoftPalette.slate150),
                 width: _isHovered ? 1.5 : 1.0,
               ),
               boxShadow: [
@@ -1443,7 +1448,7 @@ class _SupervisorModuleCardState extends State<_SupervisorModuleCard> {
                   color: _isHovered
                       ? primaryColor.withValues(alpha: isDark ? 0.25 : 0.12)
                       : (isDark
-                          ? Colors.black.withValues(alpha: 0.20)
+                          ? SoftPalette.gray900.withValues(alpha: 0.20)
                           : primaryColor.withValues(alpha: 0.04)),
                   blurRadius: _isHovered ? 12 : 6,
                   offset: Offset(0, _isHovered ? 4 : 2),
@@ -1471,7 +1476,7 @@ class _SupervisorModuleCardState extends State<_SupervisorModuleCard> {
                       ),
                     ],
                   ),
-                  child: Icon(widget.icon, color: Colors.white, size: 22),
+                  child: Icon(widget.icon, color: SoftPalette.gray50, size: 22),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -1487,7 +1492,7 @@ class _SupervisorModuleCardState extends State<_SupervisorModuleCard> {
                               style: TextStyle(
                                 fontSize: 14.5,
                                 fontWeight: FontWeight.w800,
-                                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                                 letterSpacing: -0.2,
                               ),
                               overflow: TextOverflow.ellipsis,
@@ -1520,7 +1525,7 @@ class _SupervisorModuleCardState extends State<_SupervisorModuleCard> {
                         widget.subtitle,
                         style: TextStyle(
                           fontSize: 11,
-                          color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                          color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
                           height: 1.2,
                         ),
                         maxLines: 1,
@@ -1542,7 +1547,7 @@ class _SupervisorModuleCardState extends State<_SupervisorModuleCard> {
                   child: Center(
                     child: Icon(
                       Icons.arrow_forward_rounded,
-                      color: _isHovered ? Colors.white : primaryColor,
+                      color: _isHovered ? SoftPalette.gray50 : primaryColor,
                       size: 15,
                     ),
                   ),
@@ -1566,8 +1571,8 @@ class _Sidebar extends StatelessWidget {
   const _Sidebar({required this.state, required this.t});
 
   bool get _dark => state._isDark;
-  Color get _divider => _dark ? Colors.white.withValues(alpha: 0.10) : t.accent.withValues(alpha: 0.15);
-  Color get _muted => _dark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+  Color get _divider => _dark ? SoftPalette.gray50.withValues(alpha: 0.10) : t.accent.withValues(alpha: 0.15);
+  Color get _muted => _dark ? SoftPalette.slate350 : SoftPalette.slate550;
 
   @override
   Widget build(BuildContext context) {
@@ -1586,7 +1591,7 @@ class _Sidebar extends StatelessWidget {
             decoration: BoxDecoration(
               border: Border(
                 right: BorderSide(
-                  color: _dark ? Colors.white.withValues(alpha: 0.12) : Colors.white.withValues(alpha: 0.65),
+                  color: _dark ? SoftPalette.gray50.withValues(alpha: 0.12) : SoftPalette.gray50.withValues(alpha: 0.65),
                   width: 1.2,
                 ),
               ),
@@ -1597,15 +1602,15 @@ class _Sidebar extends StatelessWidget {
                   offset: const Offset(6, 0),
                 ),
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: _dark ? 0.35 : 0.04),
+                  color: SoftPalette.gray900.withValues(alpha: _dark ? 0.35 : 0.04),
                   blurRadius: 10,
                   offset: const Offset(2, 0),
                 ),
               ],
             ),
+            // No BackdropFilter: a full-height sigma-24 blur re-rendered on every frame pinned
+            // the HD 520 GPU; the near-opaque gradient below looks the same without it.
             child: ClipRect(
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
                 child: Container(
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
@@ -1613,12 +1618,12 @@ class _Sidebar extends StatelessWidget {
                       end: Alignment.bottomCenter,
                       colors: _dark
                           ? [
-                              const Color(0xFF1E293B).withValues(alpha: 0.90),
-                              const Color(0xFF0F172A).withValues(alpha: 0.84),
+                              SoftPalette.slate800.withValues(alpha: 0.95),
+                              SoftPalette.slate900.withValues(alpha: 0.92),
                             ]
                           : [
-                              const Color(0xFFF8FAFC).withValues(alpha: 0.98),
-                              const Color(0xFFF1F5F9).withValues(alpha: 0.94),
+                              SoftPalette.gray50.withValues(alpha: 0.98),
+                              SoftPalette.slate100.withValues(alpha: 0.94),
                             ],
                     ),
                   ),
@@ -1657,8 +1662,8 @@ class _Sidebar extends StatelessWidget {
                               shape: BoxShape.circle,
                               gradient: RadialGradient(
                                 colors: [
-                                  const Color(0xFF0EA5E9).withValues(alpha: _dark ? 0.16 : 0.08),
-                                  const Color(0xFF0EA5E9).withValues(alpha: 0.0),
+                                  SoftPalette.sky400.withValues(alpha: _dark ? 0.16 : 0.08),
+                                  SoftPalette.sky400.withValues(alpha: 0.0),
                                 ],
                               ),
                             ),
@@ -1694,7 +1699,6 @@ class _Sidebar extends StatelessWidget {
                     ],
                   ),
                 ),
-              ),
             ),
             ),
           ),
@@ -1774,16 +1778,16 @@ class _SidebarBrand extends StatelessWidget {
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: dark
-            ? const Color(0xFF1E293B).withValues(alpha: 0.65)
-            : Colors.white.withValues(alpha: 0.92),
+            ? SoftPalette.slate800.withValues(alpha: 0.65)
+            : SoftPalette.gray50.withValues(alpha: 0.92),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
-          color: dark ? Colors.white.withValues(alpha: 0.12) : const Color(0xFFE2E8F0).withValues(alpha: 0.90),
+          color: dark ? SoftPalette.gray50.withValues(alpha: 0.12) : SoftPalette.slate150.withValues(alpha: 0.90),
           width: 1.0,
         ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: dark ? 0.25 : 0.04),
+            color: SoftPalette.gray900.withValues(alpha: dark ? 0.25 : 0.04),
             blurRadius: 10,
             offset: const Offset(0, 3),
           ),
@@ -1804,7 +1808,7 @@ class _SidebarBrand extends StatelessWidget {
                     Text(
                       'GMWF',
                       style: TextStyle(
-                        color: dark ? Colors.white : const Color(0xFF0F172A),
+                        color: dark ? SoftPalette.gray50 : SoftPalette.slate900,
                         fontWeight: FontWeight.w900,
                         fontSize: 15,
                         letterSpacing: 1.0,
@@ -1815,7 +1819,7 @@ class _SidebarBrand extends StatelessWidget {
                         Text(
                           'Enterprise ERP',
                           style: TextStyle(
-                            color: dark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                            color: dark ? SoftPalette.slate350 : SoftPalette.slate550,
                             fontSize: 9.5,
                             fontWeight: FontWeight.w600,
                           ),
@@ -1824,14 +1828,14 @@ class _SidebarBrand extends StatelessWidget {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF10B981).withValues(alpha: dark ? 0.20 : 0.12),
+                            color: SoftPalette.emerald350.withValues(alpha: dark ? 0.20 : 0.12),
                             borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.35), width: 0.8),
+                            border: Border.all(color: SoftPalette.emerald350.withValues(alpha: 0.35), width: 0.8),
                           ),
                           child: const Text(
                             'Online',
                             style: TextStyle(
-                              color: Color(0xFF10B981),
+                              color: SoftPalette.emerald350,
                               fontSize: 8,
                               fontWeight: FontWeight.w800,
                             ),
@@ -1848,7 +1852,7 @@ class _SidebarBrand extends StatelessWidget {
           // Divider rule inside card
           Container(
             height: 1,
-            color: dark ? Colors.white.withValues(alpha: 0.08) : const Color(0xFFE2E8F0),
+            color: dark ? SoftPalette.gray50.withValues(alpha: 0.08) : SoftPalette.slate150,
           ),
           const SizedBox(height: 10),
           // User Role Pill & Full Name
@@ -1860,8 +1864,8 @@ class _SidebarBrand extends StatelessWidget {
                   gradient: LinearGradient(
                     colors: (isChairman || isCeo)
                         ? [
-                            const Color(0xFFF59E0B).withValues(alpha: dark ? 0.30 : 0.20),
-                            const Color(0xFFD97706).withValues(alpha: dark ? 0.20 : 0.12),
+                            SoftPalette.amber300.withValues(alpha: dark ? 0.30 : 0.20),
+                            SoftPalette.orange400.withValues(alpha: dark ? 0.20 : 0.12),
                           ]
                         : [
                             t.accent.withValues(alpha: dark ? 0.30 : 0.18),
@@ -1871,7 +1875,7 @@ class _SidebarBrand extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
                     color: (isChairman || isCeo)
-                        ? const Color(0xFFF59E0B).withValues(alpha: dark ? 0.40 : 0.45)
+                        ? SoftPalette.amber300.withValues(alpha: dark ? 0.40 : 0.45)
                         : t.accent.withValues(alpha: dark ? 0.35 : 0.40),
                     width: 0.8,
                   ),
@@ -1882,13 +1886,13 @@ class _SidebarBrand extends StatelessWidget {
                     Icon(
                       (isChairman || isCeo) ? Icons.workspace_premium_rounded : Icons.verified_user_rounded,
                       size: 10,
-                      color: (isChairman || isCeo) ? (dark ? const Color(0xFFFBBF24) : const Color(0xFFB45309)) : t.accent,
+                      color: (isChairman || isCeo) ? (dark ? SoftPalette.amber200 : SoftPalette.orange500) : t.accent,
                     ),
                     const SizedBox(width: 3.5),
                     Text(
                       state._role.toUpperCase(),
                       style: TextStyle(
-                        color: (isChairman || isCeo) ? (dark ? const Color(0xFFFBBF24) : const Color(0xFFB45309)) : t.accent,
+                        color: (isChairman || isCeo) ? (dark ? SoftPalette.amber200 : SoftPalette.orange500) : t.accent,
                         fontSize: 8.5,
                         fontWeight: FontWeight.w800,
                         letterSpacing: 1.0,
@@ -1901,7 +1905,7 @@ class _SidebarBrand extends StatelessWidget {
               Text(
                 'v${AutoUpdateService.resolvedVersion}',
                 style: TextStyle(
-                  color: dark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+                  color: dark ? SoftPalette.slate550 : SoftPalette.slate350,
                   fontSize: 8.5,
                   fontWeight: FontWeight.w600,
                 ),
@@ -1912,7 +1916,7 @@ class _SidebarBrand extends StatelessWidget {
           Text(
             state._userName,
             style: TextStyle(
-              color: dark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+              color: dark ? SoftPalette.gray50 : SoftPalette.slate900,
               fontSize: 13,
               fontWeight: FontWeight.w800,
               height: 1.2,
@@ -1944,7 +1948,7 @@ class _SidebarActions extends StatelessWidget {
           _ActionTile(
             icon: Icons.preview_rounded,
             label: 'Role Simulator',
-            accentColor: const Color(0xFF8B5CF6),
+            accentColor: SoftPalette.violet500,
             t: t,
             dark: dark,
             onTap: () => RoleSimulatorService.showRoleSelectorModal(context),
@@ -1956,7 +1960,7 @@ class _SidebarActions extends StatelessWidget {
           _ActionTile(
             icon: Icons.notifications_outlined,
             label: 'Notifications',
-            accentColor: const Color(0xFFF59E0B),
+            accentColor: SoftPalette.amber300,
             t: t,
             dark: dark,
             onTap: () => Navigator.push(
@@ -1974,7 +1978,7 @@ class _SidebarActions extends StatelessWidget {
           _ActionTile(
             icon: Icons.cloud_upload_rounded,
             label: 'Force Global Sync',
-            accentColor: const Color(0xFF10B981),
+            accentColor: SoftPalette.emerald350,
             t: t,
             dark: dark,
             onTap: () => state._confirmAndTriggerForceGlobalSync(context),
@@ -1982,7 +1986,7 @@ class _SidebarActions extends StatelessWidget {
         _ActionTile(
           icon: Icons.settings_outlined,
           label: 'Settings',
-          accentColor: const Color(0xFF38BDF8),
+          accentColor: SoftPalette.sky350,
           t: t,
           dark: dark,
           onTap: () => Navigator.push(
@@ -1997,7 +2001,7 @@ class _SidebarActions extends StatelessWidget {
           _ActionTile(
             icon: Icons.cleaning_services_outlined,
             label: 'Data Integrity',
-            accentColor: const Color(0xFF10B981),
+            accentColor: SoftPalette.emerald350,
             t: t,
             dark: dark,
             onTap: () => Navigator.push(
@@ -2008,7 +2012,7 @@ class _SidebarActions extends StatelessWidget {
         _ActionTile(
           icon: Icons.help_outline_rounded,
           label: 'Support',
-          accentColor: const Color(0xFFF59E0B),
+          accentColor: SoftPalette.amber300,
           t: t,
           dark: dark,
           onTap: () => Navigator.push(context,
@@ -2017,7 +2021,7 @@ class _SidebarActions extends StatelessWidget {
         _ActionTile(
           icon: Icons.logout_rounded,
           label: 'Sign Out',
-          accentColor: const Color(0xFFEF4444),
+          accentColor: SoftPalette.red400,
           t: t,
           dark: dark,
           danger: true,
@@ -2101,11 +2105,11 @@ class _LogoPulse extends StatelessWidget {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
-            Colors.white,
-            Color(0xFFF1F5F9),
+            SoftPalette.gray50,
+            SoftPalette.slate100,
           ],
         ),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.9), width: 1.0),
+        border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.9), width: 1.0),
         boxShadow: [
           BoxShadow(
             color: accent.withValues(alpha: 0.35),
@@ -2129,17 +2133,17 @@ class _LogoPulse extends StatelessWidget {
 Color _getCatColor(DashboardCategoryFilter cat, {bool dark = false}) {
   switch (cat) {
     case DashboardCategoryFilter.overall:
-      return const Color(0xFF0EA5E9); // Sky Blue
+      return SoftPalette.sky400; // Sky Blue
     case DashboardCategoryFilter.office:
-      return const Color(0xFF6366F1); // Royal Indigo / Purple
+      return SoftPalette.indigo500; // Royal Indigo / Purple
     case DashboardCategoryFilter.dispensary:
-      return const Color(0xFF0D9488); // Teal / Emerald
+      return SoftPalette.teal500; // Teal / Emerald
     case DashboardCategoryFilter.dasterkhwaan:
-      return const Color(0xFFF97316); // Warm Amber / Orange
+      return SoftPalette.orange350; // Warm Amber / Orange
     case DashboardCategoryFilter.madrassa:
-      return const Color(0xFFE11D48); // Berry Rose
+      return SoftPalette.red500; // Berry Rose
     case DashboardCategoryFilter.school:
-      return dark ? const Color(0xFF38BDF8) : const Color(0xFF1B4965); // Deep Ocean Navy (SchoolTheme)
+      return dark ? SoftPalette.sky350 : SoftPalette.sky700; // Deep Ocean Navy (SchoolTheme)
   }
 }
 
@@ -2198,14 +2202,14 @@ class _SidebarCatItemState extends State<_SidebarCatItem> {
             color: sel
                 ? (dark ? catColor.withValues(alpha: 0.22) : catColor.withValues(alpha: 0.16))
                 : (_hov
-                    ? (dark ? Colors.white.withValues(alpha: 0.06) : catColor.withValues(alpha: 0.08))
+                    ? (dark ? SoftPalette.gray50.withValues(alpha: 0.06) : catColor.withValues(alpha: 0.08))
                     : Colors.transparent),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
               color: sel
                   ? catColor.withValues(alpha: dark ? 0.50 : 0.45)
                   : (_hov
-                      ? (dark ? Colors.white.withValues(alpha: 0.10) : catColor.withValues(alpha: 0.20))
+                      ? (dark ? SoftPalette.gray50.withValues(alpha: 0.10) : catColor.withValues(alpha: 0.20))
                       : Colors.transparent),
               width: 1.0,
             ),
@@ -2252,14 +2256,14 @@ class _SidebarCatItemState extends State<_SidebarCatItem> {
                     : null,
                 color: !sel
                     ? (dark
-                        ? const Color(0xFF1E293B)
+                        ? SoftPalette.slate800
                         : catColor.withValues(alpha: 0.10))
                     : null,
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
                   color: sel
-                      ? Colors.white.withValues(alpha: 0.35)
-                      : (dark ? Colors.white.withValues(alpha: 0.06) : catColor.withValues(alpha: 0.20)),
+                      ? SoftPalette.gray50.withValues(alpha: 0.35)
+                      : (dark ? SoftPalette.gray50.withValues(alpha: 0.06) : catColor.withValues(alpha: 0.20)),
                   width: 0.8,
                 ),
                 boxShadow: sel
@@ -2275,8 +2279,8 @@ class _SidebarCatItemState extends State<_SidebarCatItem> {
               child: Icon(
                 _icons[widget.cat] ?? Icons.circle_outlined,
                 color: sel
-                    ? Colors.white
-                    : (dark ? const Color(0xFFCBD5E1) : catColor),
+                    ? SoftPalette.gray50
+                    : (dark ? SoftPalette.slate200 : catColor),
                 size: 15,
               ),
             ),
@@ -2286,10 +2290,10 @@ class _SidebarCatItemState extends State<_SidebarCatItem> {
                 label,
                 style: TextStyle(
                   color: sel
-                      ? (dark ? Colors.white : catColor)
+                      ? (dark ? SoftPalette.gray50 : catColor)
                       : (_hov
-                          ? (dark ? const Color(0xFFF1F5F9) : const Color(0xFF0F172A))
-                          : (dark ? const Color(0xFFCBD5E1) : const Color(0xFF334155))),
+                          ? (dark ? SoftPalette.slate100 : SoftPalette.slate900)
+                          : (dark ? SoftPalette.slate200 : SoftPalette.slate700)),
                   fontWeight: sel ? FontWeight.w900 : FontWeight.w600,
                   fontSize: 13,
                 ),
@@ -2374,11 +2378,11 @@ class _SidebarModuleTileState extends State<_SidebarModuleTile> {
               decoration: BoxDecoration(
                 gradient: _hov ? t.accentGradient : null,
                 color: !_hov
-                    ? (dark ? const Color(0xFF1E293B) : t.accent.withValues(alpha: 0.08))
+                    ? (dark ? SoftPalette.slate800 : t.accent.withValues(alpha: 0.08))
                     : null,
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
-                  color: _hov ? Colors.white.withValues(alpha: 0.3) : Colors.transparent,
+                  color: _hov ? SoftPalette.gray50.withValues(alpha: 0.3) : Colors.transparent,
                   width: 0.8,
                 ),
                 boxShadow: _hov
@@ -2394,8 +2398,8 @@ class _SidebarModuleTileState extends State<_SidebarModuleTile> {
               child: Icon(
                 widget.module.icon,
                 color: _hov
-                    ? Colors.white
-                    : (dark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                    ? SoftPalette.gray50
+                    : (dark ? SoftPalette.slate350 : SoftPalette.slate550),
                 size: 15,
               ),
             ),
@@ -2405,8 +2409,8 @@ class _SidebarModuleTileState extends State<_SidebarModuleTile> {
                 widget.module.title,
                 style: TextStyle(
                   color: _hov
-                      ? (dark ? Colors.white : const Color(0xFF0F172A))
-                      : (dark ? const Color(0xFFCBD5E1) : const Color(0xFF475569)),
+                      ? (dark ? SoftPalette.gray50 : SoftPalette.slate900)
+                      : (dark ? SoftPalette.slate200 : SoftPalette.slate600),
                   fontWeight: _hov ? FontWeight.w800 : FontWeight.w600,
                   fontSize: 13,
                 ),
@@ -2466,12 +2470,12 @@ class _ActionTileState extends State<_ActionTile> {
   @override
   Widget build(BuildContext context) {
     final effectiveAccent = widget.danger
-        ? const Color(0xFFEF4444)
+        ? SoftPalette.red400
         : (widget.accentColor ?? widget.t.accent);
 
     final col = widget.danger
-        ? const Color(0xFFEF4444)
-        : (widget.dark ? const Color(0xFF94A3B8) : const Color(0xFF64748B));
+        ? SoftPalette.red400
+        : (widget.dark ? SoftPalette.slate350 : SoftPalette.slate550);
 
     return MouseRegion(
       onEnter: (_) => setState(() => _hov = true),
@@ -2503,8 +2507,8 @@ class _ActionTileState extends State<_ActionTile> {
               style: TextStyle(
                 color: _hov
                     ? (widget.danger
-                        ? const Color(0xFFEF4444)
-                        : (widget.dark ? Colors.white : const Color(0xFF0F172A)))
+                        ? SoftPalette.red400
+                        : (widget.dark ? SoftPalette.gray50 : SoftPalette.slate900))
                     : col,
                 fontSize: 13,
                 fontWeight: widget.danger || _hov ? FontWeight.w700 : FontWeight.w500,
@@ -2542,7 +2546,7 @@ class _MobileLayout extends StatelessWidget {
     final isCeo = state._role == 'ceo';
 
     return AppBar(
-      backgroundColor: _dark ? const Color(0xFF0D1117) : t.bgCard,
+      backgroundColor: _dark ? SoftPalette.slate900 : t.bgCard,
       elevation: 0,
       surfaceTintColor: Colors.transparent,
       automaticallyImplyLeading: false,
@@ -2563,7 +2567,7 @@ class _MobileLayout extends StatelessWidget {
                     Text(
                       'GMWF',
                       style: TextStyle(
-                        color: _dark ? Colors.white : t.textPrimary,
+                        color: _dark ? SoftPalette.gray50 : t.textPrimary,
                         fontWeight: FontWeight.w900,
                         fontSize: 16.5,
                         letterSpacing: 0.8,
@@ -2592,7 +2596,7 @@ class _MobileLayout extends StatelessWidget {
                 Text(
                   'Healthcare & Community System',
                   style: TextStyle(
-                    color: _dark ? const Color(0xFF8B949E) : t.textTertiary,
+                    color: _dark ? SoftPalette.slate400 : t.textTertiary,
                     fontSize: 10.5,
                     fontWeight: FontWeight.w500,
                   ),
@@ -2612,8 +2616,8 @@ class _MobileLayout extends StatelessWidget {
             gradient: LinearGradient(
               colors: (isChairman || isCeo)
                   ? [
-                      const Color(0xFFF59E0B).withValues(alpha: _dark ? 0.25 : 0.18),
-                      const Color(0xFFD97706).withValues(alpha: _dark ? 0.15 : 0.08),
+                      SoftPalette.amber300.withValues(alpha: _dark ? 0.25 : 0.18),
+                      SoftPalette.orange400.withValues(alpha: _dark ? 0.15 : 0.08),
                     ]
                   : [
                       t.accent.withValues(alpha: _dark ? 0.25 : 0.15),
@@ -2623,7 +2627,7 @@ class _MobileLayout extends StatelessWidget {
             borderRadius: BorderRadius.circular(8),
             border: Border.all(
               color: (isChairman || isCeo)
-                  ? const Color(0xFFF59E0B).withValues(alpha: 0.4)
+                  ? SoftPalette.amber300.withValues(alpha: 0.4)
                   : t.accent.withValues(alpha: 0.3),
               width: 0.8,
             ),
@@ -2634,13 +2638,13 @@ class _MobileLayout extends StatelessWidget {
               Icon(
                 (isChairman || isCeo) ? Icons.workspace_premium_rounded : Icons.verified_user_rounded,
                 size: 11,
-                color: (isChairman || isCeo) ? const Color(0xFFF59E0B) : t.accent,
+                color: (isChairman || isCeo) ? SoftPalette.amber300 : t.accent,
               ),
               const SizedBox(width: 4),
               Text(
                 state._role.toUpperCase(),
                 style: TextStyle(
-                  color: (isChairman || isCeo) ? const Color(0xFFF59E0B) : t.accent,
+                  color: (isChairman || isCeo) ? SoftPalette.amber300 : t.accent,
                   fontSize: 9.5,
                   fontWeight: FontWeight.w800,
                   letterSpacing: 0.8,
@@ -2652,20 +2656,20 @@ class _MobileLayout extends StatelessWidget {
         if (RoleSimulatorService.canAccessSimulator(state._role))
           IconButton(
             tooltip: 'Live Role Simulator',
-            icon: const Icon(Icons.preview_rounded, color: Colors.amberAccent, size: 20),
+            icon: const Icon(Icons.preview_rounded, color: SoftPalette.yellow200, size: 20),
             onPressed: () => RoleSimulatorService.showRoleSelectorModal(context),
           ),
         if (state._isFullExecutive || state._isGlobalExecutive)
           IconButton(
             tooltip: 'Force Global Cloud Sync',
-            icon: const Icon(Icons.cloud_upload_rounded, color: Color(0xFF10B981), size: 21),
+            icon: const Icon(Icons.cloud_upload_rounded, color: SoftPalette.emerald350, size: 21),
             onPressed: () => state._confirmAndTriggerForceGlobalSync(context),
           ),
         IconButton(
           tooltip: 'Settings',
           icon: Icon(
             Icons.settings_outlined,
-            color: _dark ? Colors.white70 : t.textSecondary,
+            color: _dark ? SoftPalette.gray50A70 : t.textSecondary,
             size: 20,
           ),
           onPressed: () => Navigator.push(
@@ -2681,7 +2685,7 @@ class _MobileLayout extends StatelessWidget {
         preferredSize: const Size.fromHeight(1),
         child: Divider(
           height: 1,
-          color: _dark ? const Color(0xFF30363D) : t.bgRule,
+          color: _dark ? SoftPalette.slate750 : t.bgRule,
         ),
       ),
     );
@@ -2804,7 +2808,7 @@ class _SectionLabel extends StatelessWidget {
         Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Your Modules',
               style: TextStyle(
-                  color: _dark ? const Color(0xFFE6EDF3) : t.textPrimary,
+                  color: _dark ? SoftPalette.slate150 : t.textPrimary,
                   fontSize: isDesktop ? 20 : 17,
                   fontWeight: FontWeight.w800,
                   letterSpacing: -0.5)),
@@ -2814,7 +2818,7 @@ class _SectionLabel extends StatelessWidget {
             child: Text('$count available',
                 key: ValueKey(count),
                 style: TextStyle(
-                    color: _dark ? const Color(0xFF8B949E) : t.textTertiary,
+                    color: _dark ? SoftPalette.slate400 : t.textTertiary,
                     fontSize: 12,
                     fontWeight: FontWeight.w500)),
           ),
@@ -2930,25 +2934,25 @@ Widget _buildProfileHeroCard({
     margin: EdgeInsets.fromLTRB(hPad, isDesktop ? 22 : 16, hPad, 0),
     decoration: BoxDecoration(
       borderRadius: BorderRadius.circular(28.0),
-      color: isDark ? const Color(0xFF1E293B) : Colors.white,
+      color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
       gradient: LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
         colors: isDark
             ? [
-                const Color(0xFF1E293B),
-                const Color(0xFF0F172A),
+                SoftPalette.slate800,
+                SoftPalette.slate900,
               ]
             : [
-                const Color(0xFFFFFBEB),
-                const Color(0xFFF8FAFC),
-                Colors.white,
+                SoftPalette.yellow50m,
+                SoftPalette.gray50,
+                SoftPalette.gray50,
               ],
       ),
       border: Border.all(
         color: isDark
-            ? Colors.white.withValues(alpha: 0.16)
-            : const Color(0xFFF59E0B).withValues(alpha: 0.25),
+            ? SoftPalette.gray50.withValues(alpha: 0.16)
+            : SoftPalette.amber300.withValues(alpha: 0.25),
         width: 1.2,
       ),
       boxShadow: [
@@ -2958,7 +2962,7 @@ Widget _buildProfileHeroCard({
           offset: const Offset(0, 6),
         ),
         BoxShadow(
-          color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.04),
+          color: SoftPalette.gray900.withValues(alpha: isDark ? 0.35 : 0.04),
           blurRadius: 10,
           offset: const Offset(0, 3),
         ),
@@ -2974,29 +2978,29 @@ Widget _buildProfileHeroCard({
               end: Alignment.bottomRight,
               colors: isDark
                   ? [
-                      const Color(0xFF1E293B).withValues(alpha: 0.90),
-                      const Color(0xFF0F172A).withValues(alpha: 0.82),
+                      SoftPalette.slate800.withValues(alpha: 0.90),
+                      SoftPalette.slate900.withValues(alpha: 0.82),
                     ]
                   : [
-                      const Color(0xFFFFFBEB).withValues(alpha: 0.98),
-                      const Color(0xFFF8FAFC).withValues(alpha: 0.94),
-                      Colors.white.withValues(alpha: 0.98),
+                      SoftPalette.yellow50m.withValues(alpha: 0.98),
+                      SoftPalette.gray50.withValues(alpha: 0.94),
+                      SoftPalette.gray50.withValues(alpha: 0.98),
                     ],
             ),
             border: Border.all(
               color: isDark
-                  ? Colors.white.withValues(alpha: 0.16)
-                  : const Color(0xFFF59E0B).withValues(alpha: 0.25),
+                  ? SoftPalette.gray50.withValues(alpha: 0.16)
+                  : SoftPalette.amber300.withValues(alpha: 0.25),
               width: 1.2,
             ),
             boxShadow: [
               BoxShadow(
-                color: const Color(0xFFF59E0B).withValues(alpha: isDark ? 0.25 : 0.08),
+                color: SoftPalette.amber300.withValues(alpha: isDark ? 0.25 : 0.08),
                 blurRadius: 20,
                 offset: const Offset(0, 6),
               ),
               BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.03),
+                color: SoftPalette.gray900.withValues(alpha: isDark ? 0.35 : 0.03),
                 blurRadius: 10,
                 offset: const Offset(0, 2),
               ),
@@ -3016,7 +3020,7 @@ Widget _buildProfileHeroCard({
                       shape: BoxShape.circle,
                       gradient: RadialGradient(
                         colors: [
-                          const Color(0xFFF59E0B).withValues(alpha: isDark ? 0.35 : 0.18),
+                          SoftPalette.amber300.withValues(alpha: isDark ? 0.35 : 0.18),
                           primaryThemeColor.withValues(alpha: 0.0),
                         ],
                       ),
@@ -3037,8 +3041,8 @@ Widget _buildProfileHeroCard({
                       shape: BoxShape.circle,
                       gradient: RadialGradient(
                         colors: [
-                          const Color(0xFF0EA5E9).withValues(alpha: isDark ? 0.22 : 0.12),
-                          const Color(0xFF0EA5E9).withValues(alpha: 0.0),
+                          SoftPalette.sky400.withValues(alpha: isDark ? 0.22 : 0.12),
+                          SoftPalette.sky400.withValues(alpha: 0.0),
                         ],
                       ),
                     ),
@@ -3047,6 +3051,9 @@ Widget _buildProfileHeroCard({
               ),
 
               // Seamlessly Dissolved Islamic Pattern Watermark on Right
+              // (skipped entirely when patterns are off: a ShaderMask+Opacity over an empty box
+              // still costs offscreen layers every frame)
+              if (GDecor.patternsEnabled)
               Positioned(
                 right: -20,
                 top: -20,
@@ -3059,7 +3066,7 @@ Widget _buildProfileHeroCard({
                         center: Alignment.centerRight,
                         radius: 0.85,
                         colors: [
-                          Colors.black.withValues(alpha: isDark ? 0.35 : 0.18),
+                          SoftPalette.gray900.withValues(alpha: isDark ? 0.35 : 0.18),
                           Colors.transparent,
                         ],
                         stops: const [0.2, 1.0],
@@ -3068,9 +3075,9 @@ Widget _buildProfileHeroCard({
                     blendMode: BlendMode.dstIn,
                     child: Opacity(
                       opacity: isDark ? 0.30 : 0.15,
-                      child: Image.asset(
+                      child: GDecorativeImage.asset(
                         'assets/images/1.webp',
-                        color: isDark ? Colors.white : primaryThemeColor,
+                        color: isDark ? SoftPalette.gray50 : primaryThemeColor,
                         colorBlendMode: BlendMode.srcIn,
                         fit: BoxFit.contain,
                         alignment: Alignment.centerRight,
@@ -3096,15 +3103,15 @@ Widget _buildProfileHeroCard({
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 5),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF59E0B).withValues(alpha: isDark ? 0.18 : 0.10),
+                              color: SoftPalette.amber300.withValues(alpha: isDark ? 0.18 : 0.10),
                               borderRadius: BorderRadius.circular(20),
                               border: Border.all(
-                                color: const Color(0xFFF59E0B).withValues(alpha: isDark ? 0.45 : 0.35),
+                                color: SoftPalette.amber300.withValues(alpha: isDark ? 0.45 : 0.35),
                                 width: 1.0,
                               ),
                               boxShadow: [
                                 BoxShadow(
-                                  color: const Color(0xFFF59E0B).withValues(alpha: isDark ? 0.20 : 0.08),
+                                  color: SoftPalette.amber300.withValues(alpha: isDark ? 0.20 : 0.08),
                                   blurRadius: 8,
                                   offset: const Offset(0, 2),
                                 ),
@@ -3116,7 +3123,7 @@ Widget _buildProfileHeroCard({
                                 Text(
                                   greetingBadgeText,
                                   style: TextStyle(
-                                    color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706),
+                                    color: isDark ? SoftPalette.amber200 : SoftPalette.orange400,
                                     fontSize: 10.5,
                                     fontWeight: FontWeight.w900,
                                     letterSpacing: 1.3,
@@ -3148,13 +3155,13 @@ Widget _buildProfileHeroCard({
                                               begin: Alignment.topLeft,
                                               end: Alignment.bottomRight,
                                               colors: [
-                                                Color(0xFFFBBF24),
-                                                Color(0xFFD97706),
+                                                SoftPalette.amber200,
+                                                SoftPalette.orange400,
                                               ],
                                             ),
                                             boxShadow: [
                                               BoxShadow(
-                                                color: const Color(0xFFF59E0B).withValues(alpha: 0.40),
+                                                color: SoftPalette.amber300.withValues(alpha: 0.40),
                                                 blurRadius: 12,
                                                 spreadRadius: 1,
                                               ),
@@ -3172,15 +3179,15 @@ Widget _buildProfileHeroCard({
                                             width: 15,
                                             height: 15,
                                             decoration: BoxDecoration(
-                                              color: const Color(0xFF10B981),
+                                              color: SoftPalette.emerald350,
                                               shape: BoxShape.circle,
                                               border: Border.all(
-                                                color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                                                color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                                                 width: 2.0,
                                               ),
                                               boxShadow: [
                                                 BoxShadow(
-                                                  color: const Color(0xFF10B981).withValues(alpha: 0.6),
+                                                  color: SoftPalette.emerald350.withValues(alpha: 0.6),
                                                   blurRadius: 6,
                                                 ),
                                               ],
@@ -3201,7 +3208,7 @@ Widget _buildProfileHeroCard({
                                     Text(
                                       userName,
                                       style: TextStyle(
-                                        color: isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                                        color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                                         fontSize: isDesktop ? 24 : 19,
                                         fontWeight: FontWeight.w900,
                                         letterSpacing: -0.3,
@@ -3217,16 +3224,16 @@ Widget _buildProfileHeroCard({
                                           Icons.calendar_today_outlined,
                                           size: 13,
                                           color: isDark
-                                              ? const Color(0xFF94A3B8)
-                                              : const Color(0xFF64748B),
+                                              ? SoftPalette.slate350
+                                              : SoftPalette.slate550,
                                         ),
                                         const SizedBox(width: 6),
                                         Text(
                                           dateStr,
                                           style: TextStyle(
                                             color: isDark
-                                                ? const Color(0xFF94A3B8)
-                                                : const Color(0xFF64748B),
+                                                ? SoftPalette.slate350
+                                                : SoftPalette.slate550,
                                             fontSize: 12.5,
                                             fontWeight: FontWeight.w500,
                                           ),
@@ -3252,7 +3259,7 @@ Widget _buildProfileHeroCard({
                                   icon: (isChairman || isCeo)
                                       ? Icons.workspace_premium_rounded
                                       : Icons.shield_outlined,
-                                  accentColor: const Color(0xFFF59E0B),
+                                  accentColor: SoftPalette.amber300,
                                   isDark: isDark,
                                   isCompact: !isDesktop,
                                 ),
@@ -3260,7 +3267,7 @@ Widget _buildProfileHeroCard({
                                 _ExecutiveGlassPill(
                                   label: '${state._availableModules.length} Modules',
                                   icon: Icons.grid_view_rounded,
-                                  accentColor: const Color(0xFF6366F1),
+                                  accentColor: SoftPalette.indigo500,
                                   isDark: isDark,
                                   isCompact: !isDesktop,
                                 ),
@@ -3270,7 +3277,7 @@ Widget _buildProfileHeroCard({
                                     _ExecutiveGlassPill(
                                       label: (state.widget.userData['branchId'] ?? '').toString().toUpperCase(),
                                       icon: Icons.storefront_rounded,
-                                      accentColor: const Color(0xFF10B981),
+                                      accentColor: SoftPalette.emerald350,
                                       isDark: isDark,
                                       isCompact: !isDesktop,
                                     ),
@@ -3280,7 +3287,7 @@ Widget _buildProfileHeroCard({
                                   _ExecutiveGlassPill(
                                     label: 'Global Access',
                                     icon: Icons.public_rounded,
-                                    accentColor: const Color(0xFF0EA5E9),
+                                    accentColor: SoftPalette.sky400,
                                     isDark: isDark,
                                     isCompact: !isDesktop,
                                   ),
@@ -3288,7 +3295,7 @@ Widget _buildProfileHeroCard({
                                   _ExecutiveGlassPill(
                                     label: 'Live Network',
                                     icon: Icons.sensors_rounded,
-                                    accentColor: const Color(0xFF10B981),
+                                    accentColor: SoftPalette.emerald350,
                                     isDark: isDark,
                                     isPulse: true,
                                     isCompact: !isDesktop,
@@ -3317,8 +3324,8 @@ Widget _buildProfileHeroCard({
                                     gradient: RadialGradient(
                                       colors: [
                                         (isDark
-                                                ? const Color(0xFF0EA5E9)
-                                                : const Color(0xFFF59E0B))
+                                                ? SoftPalette.sky400
+                                                : SoftPalette.amber300)
                                             .withValues(alpha: isDark ? 0.18 : 0.10),
                                         Colors.transparent,
                                       ],
@@ -3331,6 +3338,7 @@ Widget _buildProfileHeroCard({
                             SizedBox(
                               width: 290,
                               height: 220,
+                              child: RepaintBoundary(
                               child: ColorFiltered(
                                 colorFilter: isDark
                                     ? const ColorFilter.matrix(<double>[
@@ -3348,15 +3356,17 @@ Widget _buildProfileHeroCard({
                                 child: Lottie.asset(
                                   'assets/animations/dashboard.json',
                                   fit: BoxFit.contain,
-                                  repeat: true,
+                                  // Reduce motion: play once and rest on the last frame instead of looping forever.
+                                  repeat: !GDecor.reduceMotion,
                                   errorBuilder: (context, error, stackTrace) => Icon(
                                     Icons.dashboard_customize_rounded,
                                     size: 64,
                                     color: isDark
-                                        ? const Color(0xFF38BDF8)
-                                        : const Color(0xFF0284C7),
+                                        ? SoftPalette.sky350
+                                        : SoftPalette.sky500,
                                   ),
                                 ),
+                              ),
                               ),
                             ),
                           ],
@@ -3412,16 +3422,16 @@ class _ExecutiveGlassPillState extends State<_ExecutiveGlassPill> {
           color: widget.isDark
               ? (_isHovered
                   ? widget.accentColor.withValues(alpha: 0.22)
-                  : const Color(0xFF1E293B).withValues(alpha: 0.70))
+                  : SoftPalette.slate800.withValues(alpha: 0.70))
               : (_isHovered
                   ? widget.accentColor.withValues(alpha: 0.14)
-                  : Colors.white.withValues(alpha: 0.92)),
+                  : SoftPalette.gray50.withValues(alpha: 0.92)),
           borderRadius: BorderRadius.circular(16),
           border: Border.all(
             color: _isHovered
                 ? widget.accentColor.withValues(alpha: widget.isDark ? 0.65 : 0.55)
                 : (widget.isDark
-                    ? Colors.white.withValues(alpha: 0.12)
+                    ? SoftPalette.gray50.withValues(alpha: 0.12)
                     : widget.accentColor.withValues(alpha: 0.25)),
             width: 0.8,
           ),
@@ -3458,8 +3468,8 @@ class _ExecutiveGlassPillState extends State<_ExecutiveGlassPill> {
               widget.label,
               style: TextStyle(
                 color: widget.isDark
-                    ? (_isHovered ? Colors.white : const Color(0xFFE2E8F0))
-                    : (_isHovered ? const Color(0xFF0F172A) : const Color(0xFF334155)),
+                    ? (_isHovered ? SoftPalette.gray50 : SoftPalette.slate150)
+                    : (_isHovered ? SoftPalette.slate900 : SoftPalette.slate700),
                 fontSize: widget.isCompact ? 10.0 : 11.5,
                 fontWeight: FontWeight.w800,
                 letterSpacing: 0.2,
@@ -3521,7 +3531,7 @@ Future<void> _showEnlargedAvatarDialog(
             constraints: const BoxConstraints(maxWidth: 520),
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: const Color(0xFF0F172A),
+              color: SoftPalette.slate900,
               borderRadius: BorderRadius.circular(24),
               border: Border.all(color: t.accent.withValues(alpha: 0.4), width: 1.8),
               boxShadow: [
@@ -3546,7 +3556,7 @@ Future<void> _showEnlargedAvatarDialog(
                         const Text(
                           'Profile Photo',
                           style: TextStyle(
-                            color: Colors.white,
+                            color: SoftPalette.gray50,
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
                             letterSpacing: -0.3,
@@ -3555,7 +3565,7 @@ Future<void> _showEnlargedAvatarDialog(
                       ],
                     ),
                     IconButton(
-                      icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                      icon: const Icon(Icons.close_rounded, color: SoftPalette.gray50A70),
                       onPressed: () => Navigator.pop(dialogCtx),
                       tooltip: 'Close',
                     ),
@@ -3569,10 +3579,10 @@ Future<void> _showEnlargedAvatarDialog(
                   height: 320,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    border: Border.all(color: const Color(0xFFF59E0B), width: 4.0),
+                    border: Border.all(color: SoftPalette.amber300, width: 4.0),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFFF59E0B).withValues(alpha: 0.45),
+                        color: SoftPalette.amber300.withValues(alpha: 0.45),
                         blurRadius: 24,
                         spreadRadius: 3,
                       ),
@@ -3588,7 +3598,7 @@ Future<void> _showEnlargedAvatarDialog(
                 Text(
                   userName,
                   style: const TextStyle(
-                    color: Colors.white,
+                    color: SoftPalette.gray50,
                     fontSize: 20,
                     fontWeight: FontWeight.w800,
                   ),
@@ -3619,9 +3629,9 @@ Future<void> _showEnlargedAvatarDialog(
                     width: double.infinity,
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.05),
+                      color: SoftPalette.gray50.withValues(alpha: 0.05),
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+                      border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.1)),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.center,
@@ -3629,18 +3639,18 @@ Future<void> _showEnlargedAvatarDialog(
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            const Icon(Icons.history_rounded, size: 13, color: Colors.white60),
+                            const Icon(Icons.history_rounded, size: 13, color: SoftPalette.gray50A60),
                             const SizedBox(width: 4),
                             Text(
                               'Last Photo Audit',
-                              style: TextStyle(color: Colors.white.withValues(alpha: 0.6), fontSize: 10.5, fontWeight: FontWeight.w700),
+                              style: TextStyle(color: SoftPalette.gray50.withValues(alpha: 0.6), fontSize: 10.5, fontWeight: FontWeight.w700),
                             ),
                           ],
                         ),
                         const SizedBox(height: 2),
                         Text(
                           'Updated by: ${lastUpdatedByName.isNotEmpty ? lastUpdatedByName : "System"}${lastUpdatedTime.isNotEmpty ? ' ($lastUpdatedTime)' : ''}',
-                          style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 11.5, fontWeight: FontWeight.w600),
+                          style: TextStyle(color: SoftPalette.gray50.withValues(alpha: 0.85), fontSize: 11.5, fontWeight: FontWeight.w600),
                           textAlign: TextAlign.center,
                         ),
                       ],
@@ -3671,10 +3681,10 @@ Future<void> _showEnlargedAvatarDialog(
 
                           setDialogState(() {});
                           if (dialogCtx.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            AppToast.showSnackBar(context, 
                               const SnackBar(
                                 content: Text('✅ Profile photo updated successfully!'),
-                                backgroundColor: Colors.green,
+                                backgroundColor: SoftPalette.green400,
                               ),
                             );
                           }
@@ -3683,7 +3693,7 @@ Future<void> _showEnlargedAvatarDialog(
                         label: const Text('Change Photo'),
                         style: ElevatedButton.styleFrom(
                           backgroundColor: t.accent,
-                          foregroundColor: Colors.white,
+                          foregroundColor: SoftPalette.gray50,
                           padding: const EdgeInsets.symmetric(vertical: 12),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           elevation: 2,
@@ -3698,18 +3708,18 @@ Future<void> _showEnlargedAvatarDialog(
                           final confirm = await showDialog<bool>(
                             context: context,
                             builder: (confirmCtx) => AlertDialog(
-                              backgroundColor: const Color(0xFF1E293B),
-                              title: const Text('Remove Profile Photo?', style: TextStyle(color: Colors.white)),
-                              content: const Text('Are you sure you want to remove your profile photo?', style: TextStyle(color: Colors.white70)),
+                              backgroundColor: SoftPalette.slate800,
+                              title: const Text('Remove Profile Photo?', style: TextStyle(color: SoftPalette.gray50)),
+                              content: const Text('Are you sure you want to remove your profile photo?', style: TextStyle(color: SoftPalette.gray50A70)),
                               actions: [
                                 TextButton(
                                   onPressed: () => Navigator.pop(confirmCtx, false),
-                                  child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
+                                  child: const Text('Cancel', style: TextStyle(color: SoftPalette.gray50A60)),
                                 ),
                                 ElevatedButton(
                                   onPressed: () => Navigator.pop(confirmCtx, true),
-                                  style: ElevatedButton.styleFrom(backgroundColor: Colors.redAccent),
-                                  child: const Text('Remove', style: TextStyle(color: Colors.white)),
+                                  style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.red400),
+                                  child: const Text('Remove', style: TextStyle(color: SoftPalette.gray50)),
                                 ),
                               ],
                             ),
@@ -3725,18 +3735,18 @@ Future<void> _showEnlargedAvatarDialog(
 
                           setDialogState(() {});
                           if (dialogCtx.mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            AppToast.showSnackBar(context, 
                               const SnackBar(
                                 content: Text('🗑️ Profile photo removed.'),
-                                backgroundColor: Colors.orange,
+                                backgroundColor: SoftPalette.amber300,
                               ),
                             );
                           }
                         },
-                        icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.redAccent),
-                        label: const Text('Remove', style: TextStyle(color: Colors.redAccent)),
+                        icon: const Icon(Icons.delete_outline_rounded, size: 18, color: SoftPalette.red400),
+                        label: const Text('Remove', style: TextStyle(color: SoftPalette.red400)),
                         style: OutlinedButton.styleFrom(
-                          side: const BorderSide(color: Colors.redAccent, width: 1.2),
+                          side: const BorderSide(color: SoftPalette.red400, width: 1.2),
                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
@@ -3808,7 +3818,7 @@ Future<void> _updateUserProfilePhoto({
 
       final branchId = state.widget.userData['branchId']?.toString();
       if (branchId != null && branchId.isNotEmpty && branchId != 'all' && branchId != 'unknown') {
-        await FirebaseFirestore.instance
+        await CloudDb.instance
             .collection('branches')
             .doc(branchId)
             .collection('users')
@@ -3817,7 +3827,7 @@ Future<void> _updateUserProfilePhoto({
       }
 
       try {
-        final cgSnap = await FirebaseFirestore.instance
+        final cgSnap = await CloudDb.instance
             .collectionGroup('users')
             .where('uid', isEqualTo: updaterUid)
             .get()
@@ -3863,17 +3873,36 @@ String _timeOfDayString(int hour) {
 String _weekdayFull(int d) => ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'][d - 1];
 String _monthFull(int m) => ['January','February','March','April','May','June','July','August','September','October','November','December'][m-1];
 
+// Avatar decode memo: the base64 photo was decoded (and the file path stat'ed) on every build, and
+// each new Uint8List was a new MemoryImage cache key, so the full-size photo was re-decoded too.
+String? _heroAvatarSrc;
+Uint8List? _heroAvatarBytes;
+bool _heroAvatarFileExists = false;
+
 Widget _buildUserHeroAvatar(String photoUrl, String userName, RoleThemeData t, {double size = 64}) {
   final str = photoUrl.trim();
+  if (str != _heroAvatarSrc) {
+    _heroAvatarSrc = str;
+    _heroAvatarBytes = str.isEmpty ? null : ImageUploadService.decodeBase64ToBytes(str);
+    _heroAvatarFileExists = _heroAvatarBytes == null &&
+        str.isNotEmpty &&
+        !str.startsWith('http://') &&
+        !str.startsWith('https://') &&
+        File(str).existsSync();
+  }
+  // Decode at display size, not the photo's native resolution.
+  final dpr = WidgetsBinding.instance.platformDispatcher.implicitView?.devicePixelRatio ?? 1.0;
+  final cachePx = (size * dpr).round();
   Widget child;
   if (str.isNotEmpty) {
-    final bytes = ImageUploadService.decodeBase64ToBytes(str);
+    final bytes = _heroAvatarBytes;
     if (bytes != null) {
       child = Image.memory(
         bytes,
         key: ValueKey('hero_avatar_${str.hashCode}'),
         width: size,
         height: size,
+        cacheWidth: cachePx,
         fit: BoxFit.cover,
         gaplessPlayback: true,
         filterQuality: FilterQuality.medium,
@@ -3885,17 +3914,19 @@ Widget _buildUserHeroAvatar(String photoUrl, String userName, RoleThemeData t, {
         key: ValueKey('hero_avatar_net_${str.hashCode}'),
         width: size,
         height: size,
+        cacheWidth: cachePx,
         fit: BoxFit.cover,
         gaplessPlayback: true,
         filterQuality: FilterQuality.medium,
         errorBuilder: (c, e, s) => _buildUserAvatarFallback(userName, t, size),
       );
-    } else if (File(str).existsSync()) {
+    } else if (_heroAvatarFileExists) {
       child = Image.file(
         File(str),
         key: ValueKey('hero_avatar_file_${str.hashCode}'),
         width: size,
         height: size,
+        cacheWidth: cachePx,
         fit: BoxFit.cover,
         gaplessPlayback: true,
         filterQuality: FilterQuality.medium,
@@ -3913,10 +3944,10 @@ Widget _buildUserHeroAvatar(String photoUrl, String userName, RoleThemeData t, {
     height: size,
     decoration: BoxDecoration(
       shape: BoxShape.circle,
-      border: Border.all(color: Colors.white.withValues(alpha: 0.95), width: 3.0),
+      border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.95), width: 3.0),
       boxShadow: [
         BoxShadow(
-          color: Colors.black.withValues(alpha: 0.25),
+          color: SoftPalette.gray900.withValues(alpha: 0.25),
           blurRadius: 16,
           offset: const Offset(0, 6),
         ),
@@ -3934,7 +3965,7 @@ Widget _buildUserAvatarFallback(String userName, RoleThemeData t, double size) {
     child: Text(
       initial,
       style: TextStyle(
-        color: Colors.white,
+        color: SoftPalette.gray50,
         fontWeight: FontWeight.w900,
         fontSize: size * 0.42,
       ),
@@ -3972,14 +4003,14 @@ class _SearchBar extends StatelessWidget {
             : const AlwaysStoppedAnimation(1.0),
         child: Container(
           decoration: BoxDecoration(
-            color: _dark ? const Color(0xFF161B22) : t.bgCard,
+            color: _dark ? SoftPalette.slate900 : t.bgCard,
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-                color: _dark ? const Color(0xFF30363D) : t.bgRule,
+                color: _dark ? SoftPalette.slate750 : t.bgRule,
                 width: 1.5),
             boxShadow: [
               BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.06),
+                  color: SoftPalette.gray900.withValues(alpha: 0.06),
                   blurRadius: 16,
                   offset: const Offset(0, 4)),
             ],
@@ -3994,22 +4025,22 @@ class _SearchBar extends StatelessWidget {
               });
             },
             style: TextStyle(
-                color: _dark ? const Color(0xFFE6EDF3) : t.textPrimary,
+                color: _dark ? SoftPalette.slate150 : t.textPrimary,
                 fontSize: 14,
                 fontWeight: FontWeight.w500),
             decoration: InputDecoration(
               hintText: 'Search modules…',
               hintStyle: TextStyle(
-                  color: _dark ? const Color(0xFF8B949E) : t.textTertiary,
+                  color: _dark ? SoftPalette.slate400 : t.textTertiary,
                   fontSize: 14),
               prefixIcon: Icon(Icons.search_rounded,
-                  color: _dark ? const Color(0xFF8B949E) : t.textTertiary,
+                  color: _dark ? SoftPalette.slate400 : t.textTertiary,
                   size: 20),
               suffixIcon: state._searchQuery.isNotEmpty
                   ? IconButton(
                       icon: Icon(Icons.close_rounded,
                           color: _dark
-                              ? const Color(0xFF8B949E)
+                              ? SoftPalette.slate400
                               : t.textTertiary,
                           size: 18),
                       onPressed: () => state.clearSearch(),
@@ -4058,21 +4089,21 @@ class _CategoryChips extends StatelessWidget {
                     _dark ? t.accent.withValues(alpha: 0.2) : t.accent,
                 labelStyle: TextStyle(
                     color: sel
-                        ? (_dark ? t.accent : Colors.white)
+                        ? (_dark ? t.accent : SoftPalette.gray50)
                         : (_dark
-                            ? const Color(0xFF8B949E)
+                            ? SoftPalette.slate400
                             : t.textSecondary),
                     fontWeight: sel ? FontWeight.w700 : FontWeight.w500,
                     fontSize: 12),
                 backgroundColor:
-                    _dark ? const Color(0xFF161B22) : t.bgCard,
+                    _dark ? SoftPalette.slate900 : t.bgCard,
                 shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(20),
                     side: BorderSide(
                         color: sel
                             ? t.accent
                             : (_dark
-                                ? const Color(0xFF30363D)
+                                ? SoftPalette.slate750
                                 : t.bgRule))),
                 showCheckmark: false,
                 padding: const EdgeInsets.symmetric(
@@ -4112,12 +4143,12 @@ class _EmptySearch extends StatelessWidget {
             constraints: const BoxConstraints(maxWidth: 480),
             padding: const EdgeInsets.all(28),
             decoration: BoxDecoration(
-              color: _dark ? const Color(0xFF161B22) : Colors.white,
+              color: _dark ? SoftPalette.slate900 : SoftPalette.gray50,
               borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: _dark ? const Color(0xFF30363D) : t.bgRule),
+              border: Border.all(color: _dark ? SoftPalette.slate750 : t.bgRule),
               boxShadow: [
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.03),
+                  color: SoftPalette.gray900.withValues(alpha: 0.03),
                   blurRadius: 16,
                   offset: const Offset(0, 4),
                 ),
@@ -4128,11 +4159,11 @@ class _EmptySearch extends StatelessWidget {
               children: [
                 Container(
                   padding: const EdgeInsets.all(18),
-                  decoration: const BoxDecoration(
-                    color: Color(0xFFEFF6FF),
+                  decoration: BoxDecoration(
+                    color: context.adapt(SoftPalette.slate100),
                     shape: BoxShape.circle,
                   ),
-                  child: const Icon(Icons.school_outlined, size: 36, color: Color(0xFF2563EB)),
+                  child: Icon(Icons.school_outlined, size: 36, color: context.adapt(SoftPalette.blue550)),
                 ),
                 const SizedBox(height: 18),
                 Text(
@@ -4141,7 +4172,7 @@ class _EmptySearch extends StatelessWidget {
                   style: TextStyle(
                     fontSize: 18,
                     fontWeight: FontWeight.w800,
-                    color: _dark ? Colors.white : const Color(0xFF1E293B),
+                    color: _dark ? SoftPalette.gray50 : SoftPalette.slate800,
                   ),
                 ),
                 const SizedBox(height: 8),
@@ -4150,7 +4181,7 @@ class _EmptySearch extends StatelessWidget {
                   textAlign: TextAlign.center,
                   style: TextStyle(
                     fontSize: 13,
-                    color: _dark ? const Color(0xFF8B949E) : const Color(0xFF64748B),
+                    color: _dark ? SoftPalette.slate400 : SoftPalette.slate550,
                   ),
                 ),
               ],
@@ -4176,25 +4207,25 @@ class _EmptySearch extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(22),
               decoration: BoxDecoration(
-                color: _dark ? const Color(0xFF161B22) : t.accentMuted.withValues(alpha: 0.3),
+                color: _dark ? SoftPalette.slate900 : t.accentMuted.withValues(alpha: 0.3),
                 shape: BoxShape.circle,
                 border: Border.all(
-                    color: _dark ? const Color(0xFF30363D) : t.bgRule),
+                    color: _dark ? SoftPalette.slate750 : t.bgRule),
               ),
               child: Icon(Icons.search_off_rounded,
                   size: 32,
-                  color: _dark ? const Color(0xFF8B949E) : t.textTertiary),
+                  color: _dark ? SoftPalette.slate400 : t.textTertiary),
             ),
             const SizedBox(height: 16),
             Text('No modules found',
                 style: TextStyle(
-                    color: _dark ? const Color(0xFFE6EDF3) : t.textPrimary,
+                    color: _dark ? SoftPalette.slate150 : t.textPrimary,
                     fontSize: 17,
                     fontWeight: FontWeight.w800)),
             const SizedBox(height: 6),
             Text(state._searchQuery.isNotEmpty ? '"${state._searchQuery}" didn\'t match anything' : 'No modules available for this category',
                 style: TextStyle(
-                    color: _dark ? const Color(0xFF8B949E) : t.textTertiary,
+                    color: _dark ? SoftPalette.slate400 : t.textTertiary,
                     fontSize: 13)),
             const SizedBox(height: 20),
             TextButton(
@@ -4319,7 +4350,7 @@ class _ModuleGrid extends StatelessWidget {
                 Text(
                   title.toUpperCase(),
                   style: TextStyle(
-                    color: dark ? const Color(0xFFE6EDF3) : t.textPrimary,
+                    color: dark ? SoftPalette.slate150 : t.textPrimary,
                     fontSize: 12,
                     fontWeight: FontWeight.w800,
                     letterSpacing: 1.0,
@@ -4374,17 +4405,17 @@ class _ModuleGrid extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         if (featured.isNotEmpty)
-          buildCategorySection('Core & Executive Operations', Icons.star_rounded, const Color(0xFFF59E0B), featured),
+          buildCategorySection('Core & Executive Operations', Icons.star_rounded, SoftPalette.amber300, featured),
         if (officeMods.isNotEmpty)
-          buildCategorySection('Office & Financial ERP', Icons.business_center_rounded, const Color(0xFF6366F1), officeMods),
+          buildCategorySection('Office & Financial ERP', Icons.business_center_rounded, SoftPalette.indigo500, officeMods),
         if (medicalMods.isNotEmpty)
-          buildCategorySection('Medical & Dispensary Services', Icons.local_hospital_rounded, const Color(0xFF0D9488), medicalMods),
+          buildCategorySection('Medical & Dispensary Services', Icons.local_hospital_rounded, SoftPalette.teal500, medicalMods),
         if (welfareMods.isNotEmpty)
-          buildCategorySection('Welfare & Relief Services', Icons.volunteer_activism_rounded, const Color(0xFFF97316), welfareMods),
+          buildCategorySection('Welfare & Relief Services', Icons.volunteer_activism_rounded, SoftPalette.orange350, welfareMods),
         if (eduMods.isNotEmpty)
-          buildCategorySection('Madrassa & School Education', Icons.school_rounded, const Color(0xFF8B5CF6), eduMods),
+          buildCategorySection('Madrassa & School Education', Icons.school_rounded, SoftPalette.violet500, eduMods),
         if (restMods.isNotEmpty)
-          buildCategorySection('System & Maintenance', Icons.settings_rounded, const Color(0xFF64748B), restMods),
+          buildCategorySection('System & Maintenance', Icons.settings_rounded, SoftPalette.slate550, restMods),
       ],
     );
   }
@@ -4446,28 +4477,28 @@ class _ModuleCardState extends State<_ModuleCard>
 
     switch (widget.module.category) {
       case ModuleCategory.office:
-        categoryColor = widget.module.id == 'finance' ? const Color(0xFF8B5CF6) : const Color(0xFF6366F1); // Soft Purple / Indigo
-        ambientGlowColor = const Color(0xFF818CF8);
+        categoryColor = widget.module.id == 'finance' ? SoftPalette.violet500 : SoftPalette.indigo500; // Soft Purple / Indigo
+        ambientGlowColor = SoftPalette.indigo400;
         categoryLabel = widget.module.id == 'finance' ? 'HR / FINANCE' : 'OFFICE';
         break;
       case ModuleCategory.dispensary:
-        categoryColor = const Color(0xFF0EA5E9); // Sky Blue / Teal
-        ambientGlowColor = const Color(0xFF38BDF8);
+        categoryColor = SoftPalette.sky400; // Sky Blue / Teal
+        ambientGlowColor = SoftPalette.sky350;
         categoryLabel = 'MEDICAL';
         break;
       case ModuleCategory.dasterkhwaan:
-        categoryColor = const Color(0xFFF97316); // Warm Orange
-        ambientGlowColor = const Color(0xFFFB923C);
+        categoryColor = SoftPalette.orange350; // Warm Orange
+        ambientGlowColor = SoftPalette.orange350;
         categoryLabel = 'WELFARE';
         break;
       case ModuleCategory.madrassa:
-        categoryColor = const Color(0xFFE11D48); // Deep Rose / Berry
-        ambientGlowColor = const Color(0xFFF43F5E);
+        categoryColor = SoftPalette.red500; // Deep Rose / Berry
+        ambientGlowColor = SoftPalette.red400;
         categoryLabel = 'MADRASSA';
         break;
       case ModuleCategory.school:
-        categoryColor = dark ? const Color(0xFF38BDF8) : const Color(0xFF1B4965); // Deep Ocean Navy / Sky Blue
-        ambientGlowColor = const Color(0xFF2D9B83); // Sage Teal
+        categoryColor = dark ? SoftPalette.sky350 : SoftPalette.sky700; // Deep Ocean Navy / Sky Blue
+        ambientGlowColor = SoftPalette.teal500; // Sage Teal
         categoryLabel = 'SCHOOL';
         break;
     }
@@ -4499,7 +4530,7 @@ class _ModuleCardState extends State<_ModuleCard>
                   offset: Offset(0, _hov ? 8 : 3),
                 ),
                 BoxShadow(
-                  color: Colors.black.withValues(alpha: dark ? 0.35 : 0.05),
+                  color: SoftPalette.gray900.withValues(alpha: dark ? 0.35 : 0.05),
                   blurRadius: 8,
                   offset: const Offset(0, 2),
                 ),
@@ -4516,20 +4547,20 @@ class _ModuleCardState extends State<_ModuleCard>
                     end: Alignment.bottomRight,
                     colors: dark
                         ? [
-                            const Color(0xFF1E293B),
-                            const Color(0xFF0F172A),
+                            SoftPalette.slate800,
+                            SoftPalette.slate900,
                           ]
                         : [
-                            Colors.white,
-                            const Color(0xFFF8FAFC),
+                            SoftPalette.gray50,
+                            SoftPalette.gray50,
                           ],
                   ),
                   border: Border.all(
                     color: _hov
                         ? categoryColor.withValues(alpha: dark ? 0.70 : 0.60)
                         : (dark
-                            ? const Color(0xFF334155)
-                            : const Color(0xFFE2E8F0)),
+                            ? SoftPalette.slate700
+                            : SoftPalette.slate150),
                     width: _hov ? 1.6 : 1.2,
                   ),
                 ),
@@ -4608,7 +4639,7 @@ class _ModuleCardState extends State<_ModuleCard>
                                         ],
                                       ),
                                       border: Border.all(
-                                        color: Colors.white.withValues(alpha: 0.35),
+                                        color: SoftPalette.gray50.withValues(alpha: 0.35),
                                         width: 1.0,
                                       ),
                                       boxShadow: [
@@ -4618,7 +4649,7 @@ class _ModuleCardState extends State<_ModuleCard>
                                           offset: const Offset(0, 4),
                                         ),
                                         BoxShadow(
-                                          color: Colors.white.withValues(alpha: 0.25),
+                                          color: SoftPalette.gray50.withValues(alpha: 0.25),
                                           blurRadius: 1,
                                           offset: const Offset(-1, -1),
                                         ),
@@ -4626,7 +4657,7 @@ class _ModuleCardState extends State<_ModuleCard>
                                     ),
                                     child: Icon(
                                       widget.module.icon,
-                                      color: Colors.white,
+                                      color: SoftPalette.gray50,
                                       size: tiny ? 19 : 22,
                                     ),
                                   ),
@@ -4667,7 +4698,7 @@ class _ModuleCardState extends State<_ModuleCard>
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
                                         style: TextStyle(
-                                          color: dark ? const Color(0xFFF8FAFC) : const Color(0xFF0F172A),
+                                          color: dark ? SoftPalette.gray50 : SoftPalette.slate900,
                                           fontSize: tiny ? 14.0 : 15.5,
                                           fontWeight: FontWeight.w800,
                                           letterSpacing: -0.2,
@@ -4689,13 +4720,13 @@ class _ModuleCardState extends State<_ModuleCard>
                                     color: _hov
                                         ? categoryColor
                                         : (dark
-                                            ? Colors.white.withValues(alpha: 0.08)
+                                            ? SoftPalette.gray50.withValues(alpha: 0.08)
                                             : categoryColor.withValues(alpha: 0.10)),
                                     border: Border.all(
                                       color: _hov
                                           ? Colors.transparent
                                           : (dark
-                                              ? Colors.white.withValues(alpha: 0.20)
+                                              ? SoftPalette.gray50.withValues(alpha: 0.20)
                                               : categoryColor.withValues(alpha: 0.22)),
                                       width: 1.0,
                                     ),
@@ -4715,7 +4746,7 @@ class _ModuleCardState extends State<_ModuleCard>
                                       offset: Offset(_hov ? 0.1 : 0.0, 0.0),
                                       child: Icon(
                                         Icons.arrow_forward_rounded,
-                                        color: _hov ? Colors.white : categoryColor,
+                                        color: _hov ? SoftPalette.gray50 : categoryColor,
                                         size: 14,
                                       ),
                                     ),
@@ -4733,8 +4764,8 @@ class _ModuleCardState extends State<_ModuleCard>
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 color: dark
-                                    ? (_hov ? const Color(0xFFCBD5E1) : const Color(0xFF94A3B8))
-                                    : (_hov ? const Color(0xFF475569) : const Color(0xFF64748B)),
+                                    ? (_hov ? SoftPalette.slate200 : SoftPalette.slate350)
+                                    : (_hov ? SoftPalette.slate600 : SoftPalette.slate550),
                                 fontSize: tiny ? 11.0 : 12.0,
                                 fontWeight: FontWeight.w400,
                                 height: 1.35,

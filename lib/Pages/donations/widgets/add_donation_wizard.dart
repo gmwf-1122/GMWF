@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
@@ -512,7 +513,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
           border: Border.all(color: t.bgRule, width: 1.5),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.18),
+              color: SoftPalette.gray900.withValues(alpha: 0.18),
               blurRadius: 28,
               offset: const Offset(0, 10),
             ),
@@ -626,10 +627,10 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
               decoration: BoxDecoration(
-                color: isBackdated ? const Color(0xFFF59E0B).withValues(alpha: 0.12) : t.accent.withValues(alpha: 0.08),
+                color: isBackdated ? SoftPalette.amber300.withValues(alpha: 0.12) : t.accent.withValues(alpha: 0.08),
                 borderRadius: BorderRadius.circular(10),
                 border: Border.all(
-                  color: isBackdated ? const Color(0xFFF59E0B).withValues(alpha: 0.5) : t.accent.withValues(alpha: 0.25),
+                  color: isBackdated ? SoftPalette.amber300.withValues(alpha: 0.5) : t.accent.withValues(alpha: 0.25),
                 ),
               ),
               child: Row(
@@ -638,7 +639,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
                   Icon(
                     Icons.calendar_month_rounded,
                     size: 14,
-                    color: isBackdated ? const Color(0xFFD97706) : t.accent,
+                    color: isBackdated ? SoftPalette.orange400 : t.accent,
                   ),
                   const SizedBox(width: 5),
                   Text(
@@ -646,7 +647,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
                     style: TextStyle(
                       fontSize: 11.5,
                       fontWeight: FontWeight.bold,
-                      color: isBackdated ? const Color(0xFFD97706) : t.textPrimary,
+                      color: isBackdated ? SoftPalette.orange400 : t.textPrimary,
                     ),
                   ),
                   if (isBackdated) ...[
@@ -654,12 +655,12 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFD97706),
+                        color: SoftPalette.orange400,
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: const Text(
                         'Past',
-                        style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: Colors.white),
+                        style: TextStyle(fontSize: 8.5, fontWeight: FontWeight.bold, color: SoftPalette.gray50),
                       ),
                     ),
                   ],
@@ -691,7 +692,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
-        color: t.isDarkCanvas ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+        color: t.isDarkCanvas ? SoftPalette.slate900 : SoftPalette.gray50,
         border: Border(bottom: BorderSide(color: t.bgRule)),
       ),
       child: Row(
@@ -709,18 +710,18 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
                     color: isCompleted
-                        ? const Color(0xFF10B981)
-                        : (isCurrent ? t.accent : (t.isDarkCanvas ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0))),
+                        ? SoftPalette.emerald350
+                        : (isCurrent ? t.accent : (t.isDarkCanvas ? SoftPalette.slate800 : SoftPalette.slate150)),
                   ),
                   child: Center(
                     child: isCompleted
-                        ? const Icon(Icons.check_rounded, size: 14, color: Colors.white)
+                        ? const Icon(Icons.check_rounded, size: 14, color: SoftPalette.gray50)
                         : Text(
                             item['num']!,
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.bold,
-                              color: isCurrent ? Colors.white : t.textSecondary,
+                              color: isCurrent ? SoftPalette.gray50 : t.textSecondary,
                             ),
                           ),
                   ),
@@ -755,18 +756,18 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
       decoration: BoxDecoration(
-        color: Colors.red.withValues(alpha: 0.08),
+        color: SoftPalette.red400.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
+        border: Border.all(color: SoftPalette.red400.withValues(alpha: 0.3)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.error_outline_rounded, color: Colors.red, size: 18),
+          const Icon(Icons.error_outline_rounded, color: SoftPalette.red400, size: 18),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               _error!,
-              style: const TextStyle(color: Colors.red, fontSize: 12.5, fontWeight: FontWeight.w600),
+              style: const TextStyle(color: SoftPalette.red400, fontSize: 12.5, fontWeight: FontWeight.w600),
             ),
           ),
         ],
@@ -808,10 +809,10 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
-                  color: isBackdated ? const Color(0xFFF59E0B).withValues(alpha: 0.12) : t.accent.withValues(alpha: 0.08),
+                  color: isBackdated ? SoftPalette.amber300.withValues(alpha: 0.12) : t.accent.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color: isBackdated ? const Color(0xFFF59E0B) : t.accent.withValues(alpha: 0.25),
+                    color: isBackdated ? SoftPalette.amber300 : t.accent.withValues(alpha: 0.25),
                   ),
                 ),
                 child: Row(
@@ -819,7 +820,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
                     Icon(
                       Icons.calendar_today_rounded,
                       size: 13,
-                      color: isBackdated ? const Color(0xFFD97706) : t.accent,
+                      color: isBackdated ? SoftPalette.orange400 : t.accent,
                     ),
                     const SizedBox(width: 5),
                     Text(
@@ -827,7 +828,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
                       style: TextStyle(
                         fontSize: 11.5,
                         fontWeight: FontWeight.bold,
-                        color: isBackdated ? const Color(0xFFD97706) : t.textPrimary,
+                        color: isBackdated ? SoftPalette.orange400 : t.textPrimary,
                       ),
                     ),
                   ],
@@ -873,7 +874,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: t.isDarkCanvas ? const Color(0xFF1E293B).withValues(alpha: 0.5) : const Color(0xFFF8FAFC),
+              color: t.isDarkCanvas ? SoftPalette.slate800.withValues(alpha: 0.5) : SoftPalette.gray50,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: t.bgRule),
             ),
@@ -940,7 +941,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: t.isDarkCanvas ? const Color(0xFF1E293B).withValues(alpha: 0.5) : const Color(0xFFF8FAFC),
+              color: t.isDarkCanvas ? SoftPalette.slate800.withValues(alpha: 0.5) : SoftPalette.gray50,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: t.bgRule),
             ),
@@ -953,19 +954,19 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
                     margin: const EdgeInsets.only(bottom: 14),
                     padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                      color: SoftPalette.emerald350.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+                      border: Border.all(color: SoftPalette.emerald350.withValues(alpha: 0.3)),
                     ),
                     child: Row(
                       children: [
                         Container(
                           padding: const EdgeInsets.all(6),
                           decoration: const BoxDecoration(
-                            color: Color(0xFF10B981),
+                            color: SoftPalette.emerald350,
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.check_rounded, color: Colors.white, size: 14),
+                          child: const Icon(Icons.check_rounded, color: SoftPalette.gray50, size: 14),
                         ),
                         const SizedBox(width: 10),
                         Expanded(
@@ -989,15 +990,15 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                                      color: SoftPalette.emerald350.withValues(alpha: 0.15),
                                       borderRadius: BorderRadius.circular(4),
                                     ),
                                     child: Text(
                                       'LINKED DONOR',
-                                      style: const TextStyle(
+                                      style: TextStyle(
                                         fontSize: 9,
                                         fontWeight: FontWeight.w800,
-                                        color: Color(0xFF047857),
+                                        color: context.adapt(SoftPalette.emerald550),
                                       ),
                                     ),
                                   ),
@@ -1076,7 +1077,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
                             ),
                             child: const Text(
                               'Search',
-                              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Colors.white),
+                              style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: SoftPalette.gray50),
                             ),
                           ),
                         ],
@@ -1099,7 +1100,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
                     suffixIcon: _selectedDonor != null
                         ? const Padding(
                             padding: EdgeInsets.only(right: 10),
-                            child: Icon(Icons.verified_rounded, color: Color(0xFF10B981), size: 18),
+                            child: Icon(Icons.verified_rounded, color: SoftPalette.emerald350, size: 18),
                           )
                         : null,
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: t.bgRule)),
@@ -1144,7 +1145,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
                       border: Border.all(color: t.accent.withValues(alpha: 0.3)),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.04),
+                          color: SoftPalette.gray900.withValues(alpha: 0.04),
                           blurRadius: 8,
                           offset: const Offset(0, 2),
                         ),
@@ -1182,7 +1183,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
                               margin: const EdgeInsets.only(bottom: 4),
                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                               decoration: BoxDecoration(
-                                color: t.isDarkCanvas ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                                color: t.isDarkCanvas ? SoftPalette.slate800 : SoftPalette.slate100,
                                 borderRadius: BorderRadius.circular(8),
                               ),
                               child: Row(
@@ -1225,7 +1226,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
                                     ),
                                     child: const Text(
                                       'Select',
-                                      style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Colors.white),
+                                      style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: SoftPalette.gray50),
                                     ),
                                   ),
                                 ],
@@ -1244,7 +1245,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: t.isDarkCanvas ? const Color(0xFF1E293B).withValues(alpha: 0.5) : const Color(0xFFF8FAFC),
+              color: t.isDarkCanvas ? SoftPalette.slate800.withValues(alpha: 0.5) : SoftPalette.gray50,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: t.bgRule),
             ),
@@ -1255,13 +1256,13 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.amber.withValues(alpha: 0.1),
+                      color: SoftPalette.amber200.withValues(alpha: 0.1),
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+                      border: Border.all(color: SoftPalette.amber200.withValues(alpha: 0.3)),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.info_outline_rounded, color: Colors.amber, size: 18),
+                        const Icon(Icons.info_outline_rounded, color: SoftPalette.amber200, size: 18),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
@@ -1332,7 +1333,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
           padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
           constraints: const BoxConstraints(minHeight: 78),
           decoration: BoxDecoration(
-            color: isSelected ? t.accent.withValues(alpha: 0.12) : (t.isDarkCanvas ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
+            color: isSelected ? t.accent.withValues(alpha: 0.12) : (t.isDarkCanvas ? SoftPalette.slate800 : SoftPalette.slate100),
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: isSelected ? t.accent : t.bgRule,
@@ -1493,7 +1494,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
       child: Container(
         padding: const EdgeInsets.symmetric(vertical: 12),
         decoration: BoxDecoration(
-          color: isSelected ? t.accent.withValues(alpha: 0.12) : (t.isDarkCanvas ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
+          color: isSelected ? t.accent.withValues(alpha: 0.12) : (t.isDarkCanvas ? SoftPalette.slate800 : SoftPalette.slate100),
           borderRadius: BorderRadius.circular(12),
           border: Border.all(color: isSelected ? t.accent : t.bgRule, width: isSelected ? 2 : 1),
         ),
@@ -1571,7 +1572,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                 decoration: BoxDecoration(
-                  color: isSelected ? t.accent : (t.isDarkCanvas ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
+                  color: isSelected ? t.accent : (t.isDarkCanvas ? SoftPalette.slate800 : SoftPalette.slate100),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(color: isSelected ? t.accent : t.bgRule),
                 ),
@@ -1580,7 +1581,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
                   style: TextStyle(
                     fontSize: 11.5,
                     fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
-                    color: isSelected ? Colors.white : t.textPrimary,
+                    color: isSelected ? SoftPalette.gray50 : t.textPrimary,
                   ),
                 ),
               ),
@@ -1728,18 +1729,18 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF10B981).withValues(alpha: 0.08),
+        color: SoftPalette.emerald350.withValues(alpha: 0.08),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+        border: Border.all(color: SoftPalette.emerald350.withValues(alpha: 0.3)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
             children: [
-              const Icon(Icons.verified_rounded, size: 16, color: Color(0xFF10B981)),
+              const Icon(Icons.verified_rounded, size: 16, color: SoftPalette.emerald350),
               const SizedBox(width: 6),
-              const Text('Receipt Summary Preview', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Color(0xFF10B981))),
+              const Text('Receipt Summary Preview', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: SoftPalette.emerald350)),
             ],
           ),
           const SizedBox(height: 8),
@@ -1755,7 +1756,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Expanded(child: Text('Cause: $causeDisplay', style: TextStyle(fontSize: 11.5, color: t.textSecondary), overflow: TextOverflow.ellipsis)),
-              Text(amountDisplay, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: Color(0xFF10B981))),
+              Text(amountDisplay, style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900, color: SoftPalette.emerald350)),
             ],
           ),
         ],
@@ -1803,20 +1804,20 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
                 ? const SizedBox(
                     width: 16,
                     height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                    child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50),
                   )
                 : Icon(
                     isLastStep ? Icons.check_circle_rounded : Icons.arrow_forward_rounded,
                     size: 18,
-                    color: Colors.white,
+                    color: SoftPalette.gray50,
                   ),
             label: Text(
               _saving ? 'Saving...' : (isLastStep ? 'Record & Issue Receipt' : 'Next Step'),
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: Colors.white),
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: SoftPalette.gray50),
             ),
             style: ElevatedButton.styleFrom(
-              backgroundColor: isLastStep ? const Color(0xFF10B981) : t.accent,
-              foregroundColor: Colors.white,
+              backgroundColor: isLastStep ? SoftPalette.emerald350 : t.accent,
+              foregroundColor: SoftPalette.gray50,
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               elevation: 0,
@@ -1854,11 +1855,11 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
             height: 64,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: const Color(0xFF10B981).withValues(alpha: 0.14),
-              border: Border.all(color: const Color(0xFF10B981), width: 2),
+              color: SoftPalette.emerald350.withValues(alpha: 0.14),
+              border: Border.all(color: SoftPalette.emerald350, width: 2),
             ),
             child: const Center(
-              child: Icon(Icons.check_rounded, color: Color(0xFF10B981), size: 36),
+              child: Icon(Icons.check_rounded, color: SoftPalette.emerald350, size: 36),
             ),
           ),
           const SizedBox(height: 14),
@@ -1886,7 +1887,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
-              color: t.isDarkCanvas ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+              color: t.isDarkCanvas ? SoftPalette.slate900 : SoftPalette.gray50,
               borderRadius: BorderRadius.circular(16),
               border: Border.all(color: t.bgRule, width: 1.2),
             ),
@@ -1918,7 +1919,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
                       tooltip: 'Copy Receipt Number',
                       onPressed: () {
                         Clipboard.setData(ClipboardData(text: receiptNumberDisplay));
-                        ScaffoldMessenger.of(context).showSnackBar(
+                        AppToast.showSnackBar(context, 
                           const SnackBar(
                             content: Text('Receipt number copied to clipboard!'),
                             duration: Duration(seconds: 2),
@@ -1941,7 +1942,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
                       style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.w900,
-                        color: Color(0xFF10B981),
+                        color: SoftPalette.emerald350,
                       ),
                     ),
                   ],
@@ -2014,7 +2015,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
                 child: _buildSuccessActionBtn(
                   icon: Icons.share_rounded,
                   label: 'Share / WhatsApp',
-                  color: const Color(0xFF10B981),
+                  color: SoftPalette.emerald350,
                   onTap: () => showReceiptShareSheet(context, r.toMap()),
                 ),
               ),
@@ -2023,7 +2024,7 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
                 child: _buildSuccessActionBtn(
                   icon: Icons.picture_as_pdf_rounded,
                   label: 'PDF',
-                  color: const Color(0xFFEF4444),
+                  color: SoftPalette.red400,
                   onTap: () => downloadReceiptPdf(r, context),
                 ),
               ),
@@ -2051,10 +2052,10 @@ class _AddDonationWizardState extends State<AddDonationWizard> {
               Expanded(
                 child: ElevatedButton.icon(
                   onPressed: () => Navigator.pop(context, r),
-                  icon: const Icon(Icons.done_all_rounded, size: 18, color: Colors.white),
-                  label: const Text('Done', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Colors.white)),
+                  icon: const Icon(Icons.done_all_rounded, size: 18, color: SoftPalette.gray50),
+                  label: const Text('Done', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: SoftPalette.gray50)),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF10B981),
+                    backgroundColor: SoftPalette.emerald350,
                     padding: const EdgeInsets.symmetric(vertical: 12),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     elevation: 0,
@@ -2180,7 +2181,7 @@ class _DonorPickerDialogState extends State<_DonorPickerDialog> {
           border: Border.all(color: t.bgRule, width: 1.5),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.2),
+              color: SoftPalette.gray900.withValues(alpha: 0.2),
               blurRadius: 30,
               offset: const Offset(0, 10),
             ),
@@ -2277,7 +2278,7 @@ class _DonorPickerDialogState extends State<_DonorPickerDialog> {
                         )
                       : null,
                   filled: true,
-                  fillColor: t.isDarkCanvas ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                  fillColor: t.isDarkCanvas ? SoftPalette.slate800 : SoftPalette.slate100,
                   border: OutlineInputBorder(
                     borderRadius: BorderRadius.circular(12),
                     borderSide: BorderSide(color: t.bgRule),
@@ -2353,7 +2354,7 @@ class _DonorPickerDialogState extends State<_DonorPickerDialog> {
                             decoration: BoxDecoration(
                               color: isSelected
                                   ? t.accent.withValues(alpha: 0.1)
-                                  : (t.isDarkCanvas ? const Color(0xFF1E293B).withValues(alpha: 0.6) : const Color(0xFFF8FAFC)),
+                                  : (t.isDarkCanvas ? SoftPalette.slate800.withValues(alpha: 0.6) : SoftPalette.gray50),
                               borderRadius: BorderRadius.circular(12),
                               border: Border.all(
                                 color: isSelected ? t.accent : t.bgRule,
@@ -2370,7 +2371,7 @@ class _DonorPickerDialogState extends State<_DonorPickerDialog> {
                                     style: TextStyle(
                                       fontSize: 14,
                                       fontWeight: FontWeight.bold,
-                                      color: isSelected ? Colors.white : t.accent,
+                                      color: isSelected ? SoftPalette.gray50 : t.accent,
                                     ),
                                   ),
                                 ),
@@ -2394,7 +2395,7 @@ class _DonorPickerDialogState extends State<_DonorPickerDialog> {
                                           ),
                                           if (donor.phones.isNotEmpty) ...[
                                             const SizedBox(width: 6),
-                                            const Icon(Icons.verified_rounded, size: 14, color: Color(0xFF10B981)),
+                                            const Icon(Icons.verified_rounded, size: 14, color: SoftPalette.emerald350),
                                           ],
                                         ],
                                       ),
@@ -2432,7 +2433,7 @@ class _DonorPickerDialogState extends State<_DonorPickerDialog> {
                                       color: t.accent,
                                       shape: BoxShape.circle,
                                     ),
-                                    child: const Icon(Icons.check_rounded, size: 14, color: Colors.white),
+                                    child: const Icon(Icons.check_rounded, size: 14, color: SoftPalette.gray50),
                                   )
                                 else
                                   Container(

@@ -1,16 +1,17 @@
 // lib/pages/office/report_builder_page.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/design_system.dart';
 import 'package:intl/intl.dart';
 import 'finance_report_helper.dart';
 
 
-const _kAccent = Color(0xFF10B981);
-const _kBg = Color(0xFFF8FAFC);
-const _kBgCard = Colors.white;
-const _kBorder = Color(0xFFE2E8F0);
-const _kTextPrimary = Color(0xFF0F172A);
-const _kTextSecondary = Color(0xFF64748B);
+const _kAccent = SoftPalette.emerald350;
+const _kBg = SoftPalette.gray50;
+const _kBgCard = SoftPalette.gray50;
+const _kBorder = SoftPalette.slate150;
+const _kTextPrimary = SoftPalette.slate900;
+const _kTextSecondary = SoftPalette.slate550;
 
 class ReportBuilderPage extends StatefulWidget {
   final String branchId;
@@ -51,7 +52,7 @@ class _ReportBuilderPageState extends State<ReportBuilderPage> {
   }
 
   void _generateReport() async {
-    ScaffoldMessenger.of(context).showSnackBar(
+    AppToast.showSnackBar(context, 
       SnackBar(content: Text('Generating $_selectedReportType report for period $_selectedMonth...')),
     );
 
@@ -70,25 +71,25 @@ class _ReportBuilderPageState extends State<ReportBuilderPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _kBg,
+      backgroundColor: context.adapt(_kBg),
       body: Row(
         children: [
           // Left Report Type Picker
           Expanded(
             flex: 3,
             child: Container(
-              color: Colors.white,
+              color: context.adapt(SoftPalette.gray50),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.all(20),
                     child: Text(
                       'ERP Report Builder',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: _kTextPrimary),
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: context.adapt(_kTextPrimary)),
                     ),
                   ),
-                  const Divider(height: 1, color: _kBorder),
+                  Divider(height: 1, color: context.adapt(_kBorder)),
                   Expanded(
                     child: ListView.separated(
                       padding: const EdgeInsets.all(12),
@@ -104,9 +105,9 @@ class _ReportBuilderPageState extends State<ReportBuilderPage> {
                           child: Container(
                             padding: const EdgeInsets.all(14),
                             decoration: BoxDecoration(
-                              color: isSel ? const Color(0xFFECFDF5) : const Color(0xFFF8FAFC),
+                              color: isSel ? context.adapt(SoftPalette.emerald50) : context.adapt(SoftPalette.gray50),
                               borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: isSel ? _kAccent : _kBorder, width: isSel ? 1.5 : 1),
+                              border: Border.all(color: isSel ? _kAccent : context.adapt(_kBorder), width: isSel ? 1.5 : 1),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
@@ -116,13 +117,13 @@ class _ReportBuilderPageState extends State<ReportBuilderPage> {
                                   style: TextStyle(
                                     fontWeight: FontWeight.bold,
                                     fontSize: 13,
-                                    color: isSel ? _kAccent : _kTextPrimary,
+                                    color: isSel ? _kAccent : context.adapt(_kTextPrimary),
                                   ),
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
                                   rep['desc']!,
-                                  style: const TextStyle(fontSize: 11, color: _kTextSecondary),
+                                  style: TextStyle(fontSize: 11, color: context.adapt(_kTextSecondary)),
                                 ),
                               ],
                             ),
@@ -136,7 +137,7 @@ class _ReportBuilderPageState extends State<ReportBuilderPage> {
             ),
           ),
 
-          const VerticalDivider(width: 1, color: _kBorder),
+          VerticalDivider(width: 1, color: context.adapt(_kBorder)),
 
           // Right Configuration & Download Panel
           Expanded(
@@ -146,19 +147,19 @@ class _ReportBuilderPageState extends State<ReportBuilderPage> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
+                  Text(
                     'Configure & Export Report',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: _kTextPrimary),
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: context.adapt(_kTextPrimary)),
                   ),
                   const SizedBox(height: 4),
-                  const Text(
+                  Text(
                     'Reports are generated directly from balanced double-entry journal entries ensuring 100% data integrity.',
-                    style: TextStyle(fontSize: 12, color: _kTextSecondary),
+                    style: TextStyle(fontSize: 12, color: context.adapt(_kTextSecondary)),
                   ),
                   const SizedBox(height: 24),
 
                   // Month Selector
-                  const Text('Select Accounting Month', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _kTextPrimary)),
+                  Text('Select Accounting Month', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(_kTextPrimary))),
                   const SizedBox(height: 6),
                   TextFormField(
                     initialValue: _selectedMonth,
@@ -172,7 +173,7 @@ class _ReportBuilderPageState extends State<ReportBuilderPage> {
                   const SizedBox(height: 16),
 
                   // Format Selector
-                  const Text('Output Format', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: _kTextPrimary)),
+                  Text('Output Format', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(_kTextPrimary))),
                   const SizedBox(height: 6),
                   Row(
                     children: [
@@ -196,7 +197,7 @@ class _ReportBuilderPageState extends State<ReportBuilderPage> {
                     width: double.infinity,
                     height: 48,
                     child: ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(backgroundColor: _kAccent, foregroundColor: Colors.white),
+                      style: ElevatedButton.styleFrom(backgroundColor: _kAccent, foregroundColor: SoftPalette.gray50),
                       icon: const Icon(Icons.download_rounded),
                       label: const Text('Generate & Save Report', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 15)),
                       onPressed: _generateReport,

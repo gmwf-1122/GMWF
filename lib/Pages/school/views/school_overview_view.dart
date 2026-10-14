@@ -1,6 +1,7 @@
 // lib/pages/school/views/school_overview_view.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:intl/intl.dart';
 import '../theme/school_theme.dart';
 import '../utils/school_local_storage.dart';
@@ -138,14 +139,14 @@ class SchoolOverviewView extends StatelessWidget {
                                         padding: const EdgeInsets.all(24),
                                         decoration: BoxDecoration(
                                           gradient: const LinearGradient(
-                                            colors: [Color(0xFF0D2137), Color(0xFF1B4965), Color(0xFF2C6E8A)],
+                                            colors: [SoftPalette.slate900, SoftPalette.sky700, SoftPalette.sky550],
                                             begin: Alignment.topLeft,
                                             end: Alignment.bottomRight,
                                           ),
                                           borderRadius: BorderRadius.circular(20),
                                           boxShadow: [
                                             BoxShadow(
-                                              color: Colors.black.withValues(alpha: 0.12),
+                                              color: SoftPalette.gray900.withValues(alpha: 0.12),
                                               blurRadius: 16,
                                               offset: const Offset(0, 8),
                                             ),
@@ -170,15 +171,15 @@ class SchoolOverviewView extends StatelessWidget {
                                                           errorBuilder: (context, error, stackTrace) => Container(
                                                             padding: const EdgeInsets.all(6),
                                                             decoration: BoxDecoration(
-                                                              color: Colors.white.withValues(alpha: 0.2),
+                                                              color: SoftPalette.gray50.withValues(alpha: 0.2),
                                                               borderRadius: BorderRadius.circular(8),
                                                             ),
-                                                            child: const Text('GMWF', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 10)),
+                                                            child: const Text('GMWF', style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 10)),
                                                           ),
                                                         ),
                                                       ),
                                                       const SizedBox(width: 12),
-                                                      const Text('•', style: TextStyle(color: Colors.white38, fontSize: 20)),
+                                                      const Text('•', style: TextStyle(color: SoftPalette.gray50A38, fontSize: 20)),
                                                       const SizedBox(width: 12),
 
                                                       // 2. TWT Official School Logo
@@ -192,10 +193,10 @@ class SchoolOverviewView extends StatelessWidget {
                                                           errorBuilder: (context, error, stackTrace) => Container(
                                                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                                             decoration: BoxDecoration(
-                                                              color: const Color(0xFF1E3A8A),
+                                                              color: SoftPalette.blue700,
                                                               borderRadius: BorderRadius.circular(8),
                                                             ),
-                                                            child: const Text('TWT', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12)),
+                                                            child: const Text('TWT', style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 12)),
                                                           ),
                                                         ),
                                                       ),
@@ -205,7 +206,7 @@ class SchoolOverviewView extends StatelessWidget {
                                                   const Text(
                                                     'Taleem-wa-Tarbiyat School System',
                                                     style: TextStyle(
-                                                      color: Colors.white,
+                                                      color: SoftPalette.gray50,
                                                       fontSize: 22,
                                                       fontWeight: FontWeight.w900,
                                                       letterSpacing: -0.4,
@@ -215,7 +216,7 @@ class SchoolOverviewView extends StatelessWidget {
                                                   Text(
                                                     'A Project of Gulzar Madina Welfare Foundation (GMWF) • Campus Intelligence & Performance Hub',
                                                     style: TextStyle(
-                                                      color: Colors.white.withValues(alpha: 0.85),
+                                                      color: SoftPalette.gray50.withValues(alpha: 0.85),
                                                       fontSize: 13,
                                                       fontWeight: FontWeight.w500,
                                                     ),
@@ -249,7 +250,7 @@ class SchoolOverviewView extends StatelessWidget {
                                                 value: '$activeStudents',
                                                 subtitle: 'Total Enrolled: $totalStudents',
                                                 icon: Icons.groups_rounded,
-                                                color: const Color(0xFF1B4965),
+                                                color: context.adapt(SoftPalette.sky700),
                                               ),
                                               _buildMetricCard(
                                                 t: t,
@@ -257,7 +258,7 @@ class SchoolOverviewView extends StatelessWidget {
                                                 value: '$stdPresent Present',
                                                 subtitle: '$attendancePct% • Absent: $stdAbsent • Leave: $stdLeave',
                                                 icon: Icons.how_to_reg_rounded,
-                                                color: const Color(0xFF2D9B83),
+                                                color: SoftPalette.teal500,
                                               ),
                                               _buildMetricCard(
                                                 t: t,
@@ -265,7 +266,7 @@ class SchoolOverviewView extends StatelessWidget {
                                                 value: '$activeTeachers Staff',
                                                 subtitle: 'Total Registered: $totalTeachers',
                                                 icon: Icons.record_voice_over_rounded,
-                                                color: const Color(0xFF3B7DDD),
+                                                color: SoftPalette.blue500,
                                               ),
                                               _buildMetricCard(
                                                 t: t,
@@ -273,7 +274,7 @@ class SchoolOverviewView extends StatelessWidget {
                                                 value: '$tchPresent Present',
                                                 subtitle: 'Absent: $tchAbsent • Leave: $tchLeave',
                                                 icon: Icons.co_present_rounded,
-                                                color: const Color(0xFF06B6D4),
+                                                color: SoftPalette.cyan350,
                                               ),
                                               _buildMetricCard(
                                                 t: t,
@@ -281,7 +282,7 @@ class SchoolOverviewView extends StatelessWidget {
                                                 value: '$availableBooks Available',
                                                 subtitle: 'Total Catalog: $totalBooks',
                                                 icon: Icons.local_library_rounded,
-                                                color: const Color(0xFFD4940A),
+                                                color: SoftPalette.amber350,
                                               ),
                                               _buildMetricCard(
                                                 t: t,
@@ -289,7 +290,7 @@ class SchoolOverviewView extends StatelessWidget {
                                                 value: '$activeLoans Lent',
                                                 subtitle: '${totalBooks > 0 ? ((activeLoans / totalBooks) * 100).toStringAsFixed(0) : 0}% Circulation',
                                                 icon: Icons.book_outlined,
-                                                color: const Color(0xFFEC4899),
+                                                color: SoftPalette.pink400,
                                               ),
                                               _buildMetricCard(
                                                 t: t,
@@ -297,7 +298,7 @@ class SchoolOverviewView extends StatelessWidget {
                                                 value: avgPct == 'N/A' ? 'N/A' : '$avgPct%',
                                                 subtitle: '$validCount grade archives',
                                                 icon: Icons.grade_rounded,
-                                                color: const Color(0xFF7C6CC4),
+                                                color: SoftPalette.violet500,
                                               ),
                                               _buildMetricCard(
                                                 t: t,
@@ -305,7 +306,7 @@ class SchoolOverviewView extends StatelessWidget {
                                                 value: branchId.toUpperCase(),
                                                 subtitle: 'Secure Local Database',
                                                 icon: Icons.domain_rounded,
-                                                color: const Color(0xFF64748B),
+                                                color: context.adapt(SoftPalette.slate550),
                                               ),
                                             ],
                                           );
@@ -360,7 +361,7 @@ class SchoolOverviewView extends StatelessWidget {
         border: Border.all(color: t.bgRule),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.02),
+            color: SoftPalette.gray900.withValues(alpha: 0.02),
             blurRadius: 8,
             offset: const Offset(0, 3),
           ),
@@ -462,7 +463,7 @@ class SchoolOverviewView extends StatelessWidget {
             width: 155,
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: t.isDarkCanvas ? const Color(0xFF161B22) : const Color(0xFFF8FAFC),
+              color: t.isDarkCanvas ? SoftPalette.slate900 : SoftPalette.gray50,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: t.bgRule),
             ),

@@ -18,6 +18,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import '../../theme/role_theme_provider.dart' show RoleThemeScope;
 import '../tokens/spacing.dart';
 import '../tokens/radius.dart';
@@ -179,10 +180,10 @@ class HeroStatCard extends StatelessWidget {
                 children: [
                   Text(
                     label,
-                    style: GText.label(Colors.white.withValues(alpha: 0.75)),
+                    style: GText.label(SoftPalette.gray50.withValues(alpha: 0.75)),
                   ),
                   const SizedBox(height: Gsp.sp2),
-                  Text(value, style: GText.statXl(Colors.white)),
+                  Text(value, style: GText.statXl(SoftPalette.gray50)),
                   if (trend != null) ...[
                     const SizedBox(height: Gsp.sp2),
                     Row(
@@ -203,10 +204,10 @@ class HeroStatCard extends StatelessWidget {
                 width: 52,
                 height: 52,
                 decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.15),
+                  color: SoftPalette.gray50.withValues(alpha: 0.15),
                   borderRadius: Gr.card,
                 ),
-                child: Icon(icon, size: GColor.iconXl, color: Colors.white),
+                child: Icon(icon, size: GColor.iconXl, color: SoftPalette.gray50),
               ),
             ],
           ],

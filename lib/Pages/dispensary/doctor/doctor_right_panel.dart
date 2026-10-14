@@ -1,12 +1,14 @@
 // lib/pages/dispensary/doctor/doctor_right_panel.dart (updated)
 
 import 'dart:async';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
+import 'package:gmwf/utils/formatters.dart';
 import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:another_flushbar/flushbar.dart';
+import 'package:gmwf/design/components/flushbar_compat.dart';
 
 import 'package:gmwf/services/local_storage_service.dart';
 import 'package:gmwf/services/master_proforma_service.dart';
@@ -92,14 +94,14 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     Map<String, int> _reservedQuantities = {};
   Timer? _stockBoxDebounce;
 
-  static const Color _teal     = Color(0xFF00695C);
-  static const Color _orange   = Color(0xFFFF6D00);
-  static const Color _blueGrey = Color(0xFF455A64);
+  static const Color _teal     = SoftPalette.teal600;
+  static const Color _orange   = SoftPalette.orange350;
+  static const Color _blueGrey = SoftPalette.slate600;
 
   // Dose pill colours (teal ramp)
-  static const Color _dosePillBg     = Color(0xFFE1F5EE);
-  static const Color _dosePillBorder = Color(0xFF5DCAA5);
-  static const Color _dosePillText   = Color(0xFF0F6E56);
+  static const Color _dosePillBg     = SoftPalette.teal100m;
+  static const Color _dosePillBorder = SoftPalette.emerald350;
+  static const Color _dosePillText   = SoftPalette.emerald600;
 
   bool get _isKarachi {
     final b = widget.branchId.toLowerCase().trim();
@@ -254,12 +256,12 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       } else {
         LocalStorageService.saveLocalInventoryItem(data);
       }
-      _loadInventory();
+      _debouncedStockBoxReload();
       return;
     } else if (type == RealtimeEvents.deleteStockItem || type == 'delete_stock_item') {
       final mId = (data['id'] ?? data['medicineId'])?.toString();
       if (mId != null) LocalStorageService.deleteLocalStockItem(mId);
-      _loadInventory();
+      _debouncedStockBoxReload();
       return;
     } else if (type == 'save_prescription_template' || type == 'delete_prescription_template') {
       _loadPrescriptionTemplates();
@@ -318,7 +320,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       if (!isReplay && mounted) {
         Flushbar(
           message: 'Prescription updated in realtime',
-          backgroundColor: Colors.blue.shade700,
+          backgroundColor: SoftPalette.blue500,
           duration: const Duration(seconds: 4),
         ).show(context);
       }
@@ -329,6 +331,76 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     final type = (m['type'] ?? '').toString().toLowerCase().trim();
     final name = (m['name'] ?? '').toString().toLowerCase().trim();
     return type.contains('syringe') || type == 'syr' || type == 'syr.' || name.contains('syringe');
+  }
+
+  // ── Deterministic Medicine Sorting Hierarchy ─────────────────────────────
+  // Order: 1. Name/Formula (A-Z) -> 2. Form/Type Priority -> 3. Dose (numeric ascending) -> 4. ID tiebreaker
+  static int _getTypeSortPriority(String type) {
+    final t = type.toLowerCase().trim();
+    if (t.contains('tab')) return 1;          // 1. Tablets
+    if (t.contains('cap')) return 2;          // 2. Capsules
+    if (t.contains('syp') || t.contains('syrup')) return 3; // 3. Syrups
+    if (t.contains('susp')) return 4;         // 4. Suspensions
+    if (t.contains('drop')) return 5;         // 5. Drops
+    if (t.contains('inj') || t.contains('injection')) return 6; // 6. Injections
+    if (t.contains('inf') || t.contains('infusion') || t.contains('drip')) return 7; // 7. Infusions & Drips
+    if (t.contains('inhal')) return 8;        // 8. Inhalers
+    if (t.contains('cream') || t.contains('ointment') || t.contains('gel')) return 9; // 9. Topicals
+    if (t.contains('sachet')) return 10;      // 10. Sachets
+    return 11;                                // 11. Others
+  }
+
+  static double? _parseDoseNumber(String dose) {
+    final match = RegExp(r'(\d+(?:\.\d+)?)').firstMatch(dose);
+    if (match != null) {
+      return double.tryParse(match.group(1)!);
+    }
+    return null;
+  }
+
+  static int _compareDoses(String doseA, String doseB) {
+    if (doseA == doseB) return 0;
+    if (doseA.isEmpty) return 1;
+    if (doseB.isEmpty) return -1;
+
+    final numA = _parseDoseNumber(doseA);
+    final numB = _parseDoseNumber(doseB);
+    if (numA != null && numB != null && numA != numB) {
+      return numA.compareTo(numB);
+    }
+    return doseA.compareTo(doseB);
+  }
+
+  static void _sortMedicinesDeterministic(List<Map<String, dynamic>> list) {
+    list.sort((a, b) {
+      // 1. Primary: Medicine Name / Formula (alphabetical)
+      final na = (a['name'] ?? a['formula'] ?? '').toString().toLowerCase().trim();
+      final nb = (b['name'] ?? b['formula'] ?? '').toString().toLowerCase().trim();
+      final nameCmp = na.compareTo(nb);
+      if (nameCmp != 0) return nameCmp;
+
+      // 2. Secondary: Dosage Form / Type Priority (Tab -> Cap -> Syp -> Susp -> Drop -> Inj -> Inf -> Other)
+      final typeA = _getMedicineType(a);
+      final typeB = _getMedicineType(b);
+      final prioA = _getTypeSortPriority(typeA);
+      final prioB = _getTypeSortPriority(typeB);
+      if (prioA != prioB) return prioA.compareTo(prioB);
+
+      // If same priority number, sort type name string alphabetically
+      final typeCmp = typeA.toLowerCase().compareTo(typeB.toLowerCase());
+      if (typeCmp != 0) return typeCmp;
+
+      // 3. Tertiary: Strength / Dose (Numeric ascending e.g. 100 < 250 < 500)
+      final doseA = _getMedicineDose(a).toLowerCase().replaceAll(RegExp(r'\s+'), '');
+      final doseB = _getMedicineDose(b).toLowerCase().replaceAll(RegExp(r'\s+'), '');
+      final doseCmp = _compareDoses(doseA, doseB);
+      if (doseCmp != 0) return doseCmp;
+
+      // 4. Quaternary: Deterministic tie-breaker by ID / Code
+      final idA = (a['id'] ?? a['code'] ?? a['barcode'] ?? '').toString();
+      final idB = (b['id'] ?? b['code'] ?? b['barcode'] ?? '').toString();
+      return idA.compareTo(idB);
+    });
   }
 
   Future<void> _loadInventory([String? overrideCamp]) async {
@@ -359,7 +431,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     }
 
     // Fallback 3: MasterProforma catalog items so doctor can ALWAYS prescribe regardless of stock box status
-    if (localItems.isEmpty) {
+    if (localItems.isEmpty && _allInventory.isEmpty) {
       final proforma = MasterProformaService.getAllItems().where((m) => !_isSyringeItem(m)).toList();
       for (final p in proforma) {
         localItems.add({
@@ -373,7 +445,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       }
     }
 
-    if (localItems.isEmpty) {
+    if (localItems.isEmpty && _allInventory.isEmpty) {
       // Auto-heal: If local stock was deleted or is empty, restore directly from Firestore
       LocalStorageService.downloadInventory(widget.branchId, forceFull: true).then((_) {
         if (mounted) {
@@ -388,15 +460,40 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       }).catchError((_) {});
     }
 
+    // If localItems is empty but we already have loaded inventory in memory, don't wipe it out
+    if (localItems.isEmpty && _allInventory.isNotEmpty) {
+      final reserved = await _computeReservedQuantities();
+      if (mounted) {
+        setState(() => _reservedQuantities = reserved);
+        _activeDialogSetState?.call(() {});
+      }
+      return;
+    }
+
     final Map<String, List<Map<String, dynamic>>> grouped = {};
 
     for (final s in localItems) {
       final item = Map<String, dynamic>.from(s);
+      final rawName = (item['name'] ?? item['formula'] ?? item['medicineName'] ?? '').toString().trim();
+      final rawFormula = (item['formula'] ?? '').toString().trim();
+
+      // Guard: Skip corrupt or phantom items with empty names so ghost row never appears
+      if (rawName.isEmpty || rawName.toLowerCase() == 'null') {
+        continue;
+      }
+
+      // Resolve and save clean medicine type and dose from raw data BEFORE brand cleaning strips them
+      final resolvedType = _getMedicineType(item);
+      item['type'] = resolvedType;
+
+      final resolvedDose = _getMedicineDose(item);
+      if (resolvedDose.isNotEmpty) {
+        item['dose'] = resolvedDose;
+      }
+
       final isCustom = item['isCustomized'] == true || item['userEdited'] == true;
       if (!isCustom) {
-        final rawName = (item['name'] ?? '').toString();
         item['name'] = MasterProformaService.cleanBrandToFormula(rawName);
-        final rawFormula = (item['formula'] ?? '').toString();
         if (rawFormula.isNotEmpty) {
           item['formula'] = MasterProformaService.cleanBrandToFormula(rawFormula);
         }
@@ -404,18 +501,12 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       item['quantity'] = item['quantity'] ?? item['stock'] ?? 0;
 
       final cleanName = (item['name'] ?? item['formula'] ?? '').toString().trim().toLowerCase();
-      final cleanType = _getMedicineType(item).toLowerCase();
-      final cleanDose = _getMedicineDose(item).toLowerCase().replaceAll(RegExp(r'\s+'), '');
-      String groupKey = '$cleanName|$cleanType|$cleanDose';
-
-      if (cleanDose.isEmpty) {
-        for (final k in grouped.keys) {
-          if (k.startsWith('$cleanName|$cleanType|')) {
-            groupKey = k;
-            break;
-          }
-        }
+      if (cleanName.isEmpty || cleanName == 'null') {
+        continue;
       }
+      final cleanType = (item['type'] ?? '').toString().trim().toLowerCase();
+      final cleanDose = (item['dose'] ?? '').toString().trim().toLowerCase().replaceAll(RegExp(r'\s+'), '');
+      final groupKey = '$cleanName|$cleanType|$cleanDose';
 
       grouped.putIfAbsent(groupKey, () => []).add(item);
     }
@@ -425,11 +516,15 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     for (final entry in grouped.entries) {
       final batches = entry.value;
 
-      // FEFO Sort: Earliest expiry date first, invalid/missing dates last
+      // FEFO Sort: Earliest expiry date first, invalid/missing dates last, with deterministic ID tiebreaker
       batches.sort((a, b) {
         final expA = MasterProformaService.parseExpiryDate(a['expiryDate'] ?? a['expiry'], (a['id'] ?? a['medicineId'])?.toString());
         final expB = MasterProformaService.parseExpiryDate(b['expiryDate'] ?? b['expiry'], (b['id'] ?? b['medicineId'])?.toString());
-        return expA.compareTo(expB);
+        final expCmp = expA.compareTo(expB);
+        if (expCmp != 0) return expCmp;
+        final idA = (a['id'] ?? a['medicineId'] ?? '').toString();
+        final idB = (b['id'] ?? b['medicineId'] ?? '').toString();
+        return idA.compareTo(idB);
       });
 
       // Aggregate total quantity across all batches
@@ -470,20 +565,18 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       combined.add(primary);
     }
 
-    // Sort combined alphabetically by name / formula
-    combined.sort((a, b) {
-      final na = (a['name'] ?? a['formula'] ?? '').toString().toLowerCase();
-      final nb = (b['name'] ?? b['formula'] ?? '').toString().toLowerCase();
-      return na.compareTo(nb);
-    });
+    // Rock-solid deterministic sort: Name -> Form/Type -> Dose -> ID
+    _sortMedicinesDeterministic(combined);
+
+    final reserved = await _computeReservedQuantities();
 
     if (mounted) {
-      setState(() => _allInventory = combined);
+      setState(() {
+        _allInventory = combined;
+        _reservedQuantities = reserved;
+      });
       _activeDialogSetState?.call(() {});
     }
-    // Build reserved map after inventory is loaded
-    await _buildReservedQuantities();
-    _activeDialogSetState?.call(() {});
   }
 
   // ── FIX: Scan ALL pending prescriptions in Hive and sum up reserved qty ──
@@ -493,7 +586,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
   //     dispenseStatus == 'dispensed'.
   // We skip the current patient's serial so their own session counts
   // are handled separately by _getAvailableStock().
-  Future<void> _buildReservedQuantities() async {
+  Future<Map<String, int>> _computeReservedQuantities() async {
     final Map<String, int> reserved = {};
 
     try {
@@ -597,18 +690,23 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
         }
       }
     } catch (e) {
-      debugPrint('[DoctorPanel] _buildReservedQuantities error: $e');
+      debugPrint('[DoctorPanel] _computeReservedQuantities error: $e');
     }
 
+    return reserved;
+  }
+
+  Future<void> _buildReservedQuantities() async {
+    final reserved = await _computeReservedQuantities();
     if (mounted) {
       setState(() => _reservedQuantities = reserved);
       _activeDialogSetState?.call(() {});
     }
   }
 
-    void _debouncedStockBoxReload() {
+  void _debouncedStockBoxReload() {
     _stockBoxDebounce?.cancel();
-    _stockBoxDebounce = Timer(const Duration(milliseconds: 150), () {
+    _stockBoxDebounce = Timer(const Duration(milliseconds: 600), () {
       if (mounted) _loadInventory();
     });
   }
@@ -702,23 +800,23 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
 
   static ({Color bg, Color border, Color text}) _getTypeBadgeColors(String type, bool isOutOfStock) {
     if (isOutOfStock) {
-      return (bg: const Color(0xFFF3F4F6), border: const Color(0xFFD1D5DB), text: const Color(0xFF6B7280));
+      return (bg: SoftPalette.gray100, border: SoftPalette.slate200, text: SoftPalette.slate550);
     }
     final t = type.toLowerCase();
     if (t.contains('tab')) {
-      return (bg: const Color(0xFFEFF6FF), border: const Color(0xFF93C5FD), text: const Color(0xFF1D4ED8)); // Blue
+      return (bg: SoftPalette.slate100, border: SoftPalette.blue300, text: SoftPalette.blue550); // Blue
     } else if (t.contains('cap')) {
-      return (bg: const Color(0xFFF5F3FF), border: const Color(0xFFC4B5FD), text: const Color(0xFF6D28D9)); // Purple
+      return (bg: SoftPalette.violet100m, border: SoftPalette.violet300, text: SoftPalette.violet550); // Purple
     } else if (t.contains('inj')) {
-      return (bg: const Color(0xFFFFF1F2), border: const Color(0xFFFDA4AF), text: const Color(0xFFBE123C)); // Rose/Red
+      return (bg: SoftPalette.red100m, border: SoftPalette.red300, text: SoftPalette.red550); // Rose/Red
     } else if (t.contains('inf') || t.contains('drip')) {
-      return (bg: const Color(0xFFECFEFF), border: const Color(0xFF67E8F9), text: const Color(0xFF0E7490)); // Cyan
+      return (bg: SoftPalette.slate50, border: SoftPalette.cyan200, text: SoftPalette.sky550); // Cyan
     } else if (t.contains('syp') || t.contains('syrup') || t.contains('susp')) {
-      return (bg: const Color(0xFFFFFBEB), border: const Color(0xFFFDE68A), text: const Color(0xFFB45309)); // Amber
+      return (bg: SoftPalette.yellow50m, border: SoftPalette.yellow150, text: SoftPalette.orange500); // Amber
     } else if (t.contains('drop')) {
-      return (bg: const Color(0xFFECFDF5), border: const Color(0xFF6EE7B7), text: const Color(0xFF047857)); // Emerald
+      return (bg: SoftPalette.emerald50, border: SoftPalette.emerald200, text: SoftPalette.emerald550); // Emerald
     }
-    return (bg: const Color(0xFFF8FAFC), border: const Color(0xFFCBD5E1), text: const Color(0xFF475569)); // Slate
+    return (bg: SoftPalette.gray50, border: SoftPalette.slate200, text: SoftPalette.slate600); // Slate
   }
 
   IconData _getMedicineIcon(Map<String, dynamic> med) {
@@ -944,6 +1042,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                   dose.contains(query) ||
                   formula.contains(query);
             }).toList();
+            _sortMedicinesDeterministic(filteredMeds);
 
             final mediaQuery = MediaQuery.of(context);
             final isCompact = GBreakpoint.isMobile(context);
@@ -971,12 +1070,12 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                   maxHeight: mediaQuery.size.height * 0.88,
                 ),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                  color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                   borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: isDark ? const Color(0xFF334155) : Colors.transparent),
+                  border: Border.all(color: isDark ? SoftPalette.slate700 : Colors.transparent),
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withValues(alpha: 0.22),
+                      color: SoftPalette.gray900.withValues(alpha: 0.22),
                       blurRadius: 28,
                       offset: const Offset(0, 10),
                     ),
@@ -993,7 +1092,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                         gradient: LinearGradient(
                           begin: Alignment.topLeft,
                           end: Alignment.bottomRight,
-                          colors: [_teal, Color(0xFF004D40)],
+                          colors: [_teal, SoftPalette.teal700],
                         ),
                         borderRadius: BorderRadius.only(
                           topLeft: Radius.circular(24),
@@ -1005,10 +1104,10 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                           Container(
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              color: Colors.white.withValues(alpha: 0.18),
+                              color: SoftPalette.gray50.withValues(alpha: 0.18),
                               borderRadius: BorderRadius.circular(12),
                             ),
-                            child: const FaIcon(FontAwesomeIcons.pills, color: Colors.white, size: 18),
+                            child: const FaIcon(FontAwesomeIcons.pills, color: SoftPalette.gray50, size: 18),
                           ),
                           const SizedBox(width: 14),
                           Expanded(
@@ -1022,7 +1121,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                       child: Text(
                                         'Select Prescription Medicine',
                                         style: const TextStyle(
-                                          color: Colors.white,
+                                          color: SoftPalette.gray50,
                                           fontSize: 17,
                                           fontWeight: FontWeight.bold,
                                           letterSpacing: 0.2,
@@ -1035,17 +1134,17 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                         decoration: BoxDecoration(
-                                          color: Colors.black.withValues(alpha: 0.25),
+                                          color: SoftPalette.gray900.withValues(alpha: 0.25),
                                           borderRadius: BorderRadius.circular(14),
-                                          border: Border.all(color: Colors.white.withValues(alpha: 0.3), width: 0.8),
+                                          border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.3), width: 0.8),
                                         ),
                                         child: DropdownButtonHideUnderline(
                                           child: DropdownButton<String>(
                                             value: dialogCamp,
-                                            dropdownColor: const Color(0xFF004D40),
-                                            icon: const Icon(Icons.arrow_drop_down, color: Colors.white70, size: 16),
+                                            dropdownColor: SoftPalette.teal700,
+                                            icon: const Icon(Icons.arrow_drop_down, color: SoftPalette.gray50A70, size: 16),
                                             isDense: true,
-                                            style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.bold),
+                                            style: const TextStyle(color: SoftPalette.gray50, fontSize: 11.5, fontWeight: FontWeight.bold),
                                             items: availableCampOptions.map((opt) {
                                               return DropdownMenuItem<String>(
                                                 value: opt['id'],
@@ -1071,13 +1170,13 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1.5),
                                       decoration: BoxDecoration(
-                                        color: Colors.white.withValues(alpha: 0.22),
+                                        color: SoftPalette.gray50.withValues(alpha: 0.22),
                                         borderRadius: BorderRadius.circular(10),
                                       ),
                                       child: Text(
                                         '$countAll Stock Items',
                                         style: const TextStyle(
-                                          color: Colors.white,
+                                          color: SoftPalette.gray50,
                                           fontSize: 10.5,
                                           fontWeight: FontWeight.w600,
                                         ),
@@ -1087,14 +1186,14 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1.5),
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFF10B981).withValues(alpha: 0.35),
+                                        color: SoftPalette.emerald350.withValues(alpha: 0.35),
                                         borderRadius: BorderRadius.circular(10),
-                                        border: Border.all(color: Colors.white.withValues(alpha: 0.3), width: 0.6),
+                                        border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.3), width: 0.6),
                                       ),
                                       child: Text(
                                         '$inStockCount In-Stock',
                                         style: const TextStyle(
-                                          color: Colors.white,
+                                          color: SoftPalette.gray50,
                                           fontSize: 10.5,
                                           fontWeight: FontWeight.bold,
                                         ),
@@ -1105,13 +1204,13 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 1.5),
                                         decoration: BoxDecoration(
-                                          color: Colors.white.withValues(alpha: 0.22),
+                                          color: SoftPalette.gray50.withValues(alpha: 0.22),
                                           borderRadius: BorderRadius.circular(10),
                                         ),
                                         child: Text(
                                           CampSessionService.getCampLabel(dialogCamp),
                                           style: const TextStyle(
-                                            color: Colors.white,
+                                            color: SoftPalette.gray50,
                                             fontSize: 10.5,
                                             fontWeight: FontWeight.w600,
                                           ),
@@ -1143,20 +1242,20 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                       margin: const EdgeInsets.only(top: 6),
                                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                       decoration: BoxDecoration(
-                                        color: Colors.black.withValues(alpha: 0.26),
+                                        color: SoftPalette.gray900.withValues(alpha: 0.26),
                                         borderRadius: BorderRadius.circular(10),
-                                        border: Border.all(color: Colors.white.withValues(alpha: 0.25), width: 0.8),
+                                        border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.25), width: 0.8),
                                       ),
                                       child: Row(
                                         mainAxisSize: MainAxisSize.min,
                                         children: [
-                                          const Icon(Icons.person, color: Colors.white, size: 13),
+                                          const Icon(Icons.person, color: SoftPalette.gray50, size: 13),
                                           const SizedBox(width: 5),
                                           Flexible(
                                             child: Text(
                                               pName.isNotEmpty ? 'Prescribing for: $pName' : 'Active Patient',
                                               style: const TextStyle(
-                                                color: Colors.white,
+                                                color: SoftPalette.gray50,
                                                 fontWeight: FontWeight.bold,
                                                 fontSize: 12,
                                               ),
@@ -1168,12 +1267,12 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                             Container(
                                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
                                               decoration: BoxDecoration(
-                                                color: Colors.white.withValues(alpha: 0.2),
+                                                color: SoftPalette.gray50.withValues(alpha: 0.2),
                                                 borderRadius: BorderRadius.circular(5),
                                               ),
                                               child: Text(
                                                 '#$pSerial',
-                                                style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.bold),
+                                                style: const TextStyle(color: SoftPalette.gray50, fontSize: 10.5, fontWeight: FontWeight.bold),
                                               ),
                                             ),
                                           ],
@@ -1181,7 +1280,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                             const SizedBox(width: 6),
                                             Text(
                                               '• ${[if (pGender.isNotEmpty) pGender, if (pAge.isNotEmpty) '$pAge yrs'].join(', ')}',
-                                              style: const TextStyle(color: Colors.white70, fontSize: 11),
+                                              style: const TextStyle(color: SoftPalette.gray50A70, fontSize: 11),
                                             ),
                                           ],
                                           if (qLabel.isNotEmpty) ...[
@@ -1189,12 +1288,12 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                             Container(
                                               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                                               decoration: BoxDecoration(
-                                                color: Colors.amber.shade600,
+                                                color: SoftPalette.amber300,
                                                 borderRadius: BorderRadius.circular(5),
                                               ),
                                               child: Text(
                                                 qLabel,
-                                                style: const TextStyle(color: Colors.black87, fontSize: 9.5, fontWeight: FontWeight.bold),
+                                                style: const TextStyle(color: SoftPalette.gray900A87, fontSize: 9.5, fontWeight: FontWeight.bold),
                                               ),
                                             ),
                                           ],
@@ -1207,7 +1306,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                             ),
                           ),
                           IconButton(
-                            icon: const FaIcon(FontAwesomeIcons.arrowsRotate, color: Colors.white70, size: 15),
+                            icon: const FaIcon(FontAwesomeIcons.arrowsRotate, color: SoftPalette.gray50A70, size: 15),
                             tooltip: 'Restore & Sync Inventory from Cloud',
                             onPressed: () async {
                               await LocalStorageService.downloadInventory(widget.branchId, forceFull: true);
@@ -1216,7 +1315,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                             },
                           ),
                           IconButton(
-                            icon: const Icon(Icons.close, color: Colors.white),
+                            icon: const Icon(Icons.close, color: SoftPalette.gray50),
                             tooltip: 'Close (Esc)',
                             onPressed: closeSelectionDialog,
                           ),
@@ -1228,8 +1327,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                     Container(
                       padding: const EdgeInsets.fromLTRB(18, 14, 18, 12),
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
-                        border: Border(bottom: BorderSide(color: isDark ? const Color(0xFF334155) : Colors.grey.shade200)),
+                        color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+                        border: Border(bottom: BorderSide(color: isDark ? SoftPalette.slate700 : SoftPalette.gray100)),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1239,14 +1338,14 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                             controller: queryCtrl,
                             autofocus: true,
                             onChanged: (_) => setDialogState(() {}),
-                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: isDark ? Colors.white : Colors.black87),
+                            style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
                             decoration: InputDecoration(
                               hintText: 'Search by generic formula, name, dosage, form...',
-                              hintStyle: TextStyle(fontSize: 13.5, color: isDark ? const Color(0xFF64748B) : Colors.grey.shade400),
-                              prefixIcon: const Icon(Icons.search, color: _teal, size: 22),
+                              hintStyle: TextStyle(fontSize: 13.5, color: isDark ? SoftPalette.slate550 : SoftPalette.gray300),
+                              prefixIcon: Icon(Icons.search, color: context.adapt(_teal), size: 22),
                               suffixIcon: queryCtrl.text.isNotEmpty
                                   ? IconButton(
-                                      icon: Icon(Icons.clear, size: 18, color: isDark ? Colors.white70 : Colors.grey),
+                                      icon: Icon(Icons.clear, size: 18, color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray350),
                                       onPressed: () {
                                         queryCtrl.clear();
                                         setDialogState(() {});
@@ -1254,20 +1353,20 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                     )
                                   : null,
                               filled: true,
-                              fillColor: isDark ? const Color(0xFF0F172A) : Colors.white,
+                              fillColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                               isDense: true,
                               contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(14),
-                                borderSide: BorderSide(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+                                borderSide: BorderSide(color: isDark ? SoftPalette.slate700 : SoftPalette.gray150),
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(14),
-                                borderSide: BorderSide(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+                                borderSide: BorderSide(color: isDark ? SoftPalette.slate700 : SoftPalette.gray150),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(14),
-                                borderSide: const BorderSide(color: _teal, width: 2),
+                                borderSide: BorderSide(color: context.adapt(_teal), width: 2),
                               ),
                             ),
                           ),
@@ -1283,7 +1382,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                   style: TextStyle(
                                     fontSize: 11,
                                     fontWeight: FontWeight.bold,
-                                    color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade500,
+                                    color: isDark ? SoftPalette.slate350 : SoftPalette.gray350,
                                   ),
                                 ),
                                 ...quickSearchKeywords.map((kw) {
@@ -1304,10 +1403,10 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                       child: Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                         decoration: BoxDecoration(
-                                          color: isActive ? _teal.withValues(alpha: 0.25) : (isDark ? const Color(0xFF0F172A) : Colors.white),
+                                          color: isActive ? context.adapt(_teal).withValues(alpha: 0.25) : (isDark ? SoftPalette.slate900 : SoftPalette.gray50),
                                           borderRadius: BorderRadius.circular(8),
                                           border: Border.all(
-                                            color: isActive ? _teal : (isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+                                            color: isActive ? context.adapt(_teal) : (isDark ? SoftPalette.slate700 : SoftPalette.gray150),
                                             width: isActive ? 1.2 : 0.8,
                                           ),
                                         ),
@@ -1316,7 +1415,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                           style: TextStyle(
                                             fontSize: 11.5,
                                             fontWeight: isActive ? FontWeight.bold : FontWeight.w500,
-                                            color: isActive ? _teal : (isDark ? const Color(0xFFCBD5E1) : Colors.grey.shade800),
+                                            color: isActive ? context.adapt(_teal) : (isDark ? SoftPalette.slate200 : SoftPalette.gray700),
                                           ),
                                         ),
                                       ),
@@ -1346,7 +1445,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                     avatar: Icon(
                                       icon,
                                       size: 14,
-                                      color: isSelected ? Colors.white : (isDark ? const Color(0xFF2DD4BF) : _teal),
+                                      color: isSelected ? SoftPalette.gray50 : (isDark ? SoftPalette.teal300 : _teal),
                                     ),
                                     label: Row(
                                       mainAxisSize: MainAxisSize.min,
@@ -1357,8 +1456,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                           padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
                                           decoration: BoxDecoration(
                                             color: isSelected
-                                                ? Colors.white.withValues(alpha: 0.25)
-                                                : (isDark ? const Color(0xFF334155) : Colors.grey.shade200),
+                                                ? SoftPalette.gray50.withValues(alpha: 0.25)
+                                                : (isDark ? SoftPalette.slate700 : SoftPalette.gray100),
                                             borderRadius: BorderRadius.circular(8),
                                           ),
                                           child: Text(
@@ -1366,7 +1465,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                             style: TextStyle(
                                               fontSize: 10,
                                               fontWeight: FontWeight.bold,
-                                              color: isSelected ? Colors.white : (isDark ? Colors.white : Colors.grey.shade800),
+                                              color: isSelected ? SoftPalette.gray50 : (isDark ? SoftPalette.gray50 : SoftPalette.gray700),
                                             ),
                                           ),
                                         ),
@@ -1374,9 +1473,9 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                     ),
                                     selected: isSelected,
                                     selectedColor: _teal,
-                                    backgroundColor: isDark ? const Color(0xFF0F172A) : Colors.white,
+                                    backgroundColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                                     labelStyle: TextStyle(
-                                      color: isSelected ? Colors.white : (isDark ? const Color(0xFFCBD5E1) : Colors.grey.shade800),
+                                      color: isSelected ? SoftPalette.gray50 : (isDark ? SoftPalette.slate200 : SoftPalette.gray700),
                                       fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
                                       fontSize: 12,
                                     ),
@@ -1384,7 +1483,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                     shape: RoundedRectangleBorder(
                                       borderRadius: BorderRadius.circular(12),
                                       side: BorderSide(
-                                        color: isSelected ? _teal : (isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+                                        color: isSelected ? _teal : (isDark ? SoftPalette.slate700 : SoftPalette.gray150),
                                         width: isSelected ? 1.5 : 0.8,
                                       ),
                                     ),
@@ -1404,13 +1503,13 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                               decoration: BoxDecoration(
                                 color: stockWarningNotice!.contains('Out of Stock')
-                                    ? (isDark ? const Color(0xFF450A0A) : const Color(0xFFFEE2E2))
-                                    : (isDark ? const Color(0xFF451A03) : const Color(0xFFFEF3C7)),
+                                    ? (isDark ? SoftPalette.red800 : SoftPalette.red150m)
+                                    : (isDark ? SoftPalette.orange800 : SoftPalette.yellow100),
                                 borderRadius: BorderRadius.circular(10),
                                 border: Border.all(
                                   color: stockWarningNotice!.contains('Out of Stock')
-                                      ? Colors.red.shade400
-                                      : Colors.amber.shade500,
+                                      ? context.adapt(SoftPalette.red400)
+                                      : context.adapt(SoftPalette.amber200),
                                 ),
                               ),
                               child: Row(
@@ -1419,7 +1518,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                     stockWarningNotice!.contains('Out of Stock')
                                         ? Icons.cancel_outlined
                                         : Icons.warning_amber_rounded,
-                                    color: stockWarningNotice!.contains('Out of Stock') ? Colors.red.shade700 : Colors.amber.shade900,
+                                    color: stockWarningNotice!.contains('Out of Stock') ? context.adapt(SoftPalette.red500) : context.adapt(SoftPalette.orange350),
                                     size: 18,
                                   ),
                                   const SizedBox(width: 8),
@@ -1429,13 +1528,13 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                       style: TextStyle(
                                         fontSize: 12,
                                         fontWeight: FontWeight.bold,
-                                        color: stockWarningNotice!.contains('Out of Stock') ? Colors.red.shade900 : Colors.amber.shade900,
+                                        color: stockWarningNotice!.contains('Out of Stock') ? context.adapt(SoftPalette.red550) : context.adapt(SoftPalette.orange350),
                                       ),
                                     ),
                                   ),
                                   InkWell(
                                     onTap: () => setDialogState(() => stockWarningNotice = null),
-                                    child: const Icon(Icons.close, size: 16, color: Colors.grey),
+                                    child: Icon(Icons.close, size: 16, color: context.adapt(SoftPalette.gray350)),
                                   ),
                                 ],
                               ),
@@ -1449,8 +1548,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                         width: double.infinity,
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                         decoration: BoxDecoration(
-                          color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
-                          border: Border(bottom: BorderSide(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300)),
+                          color: isDark ? SoftPalette.slate800 : SoftPalette.slate100,
+                          border: Border(bottom: BorderSide(color: isDark ? SoftPalette.slate700 : SoftPalette.gray150)),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
@@ -1458,20 +1557,20 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                           children: [
                             Row(
                               children: [
-                                const Icon(Icons.check_circle, size: 14, color: _teal),
+                                Icon(Icons.check_circle, size: 14, color: context.adapt(_teal)),
                                 const SizedBox(width: 6),
                                 Text(
                                   'Selected Medicines (${widget.prescriptions.length})',
                                   style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.bold,
-                                    color: isDark ? const Color(0xFF2DD4BF) : _teal,
+                                    color: isDark ? SoftPalette.teal300 : _teal,
                                   ),
                                 ),
                                 const Spacer(),
                                 Text(
                                   'Tap to edit • ✕ to remove',
-                                  style: TextStyle(fontSize: 10.5, color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade500),
+                                  style: TextStyle(fontSize: 10.5, color: isDark ? SoftPalette.slate350 : SoftPalette.gray350),
                                 ),
                               ],
                             ),
@@ -1487,19 +1586,19 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                   final timing = (m['timing'] ?? '').toString().trim();
                                   final qty = m['quantity'] ?? 1;
                                   final chipBg = isInj
-                                      ? Colors.orange.shade800
-                                      : (isCust ? const Color(0xFF475569) : _teal);
+                                      ? SoftPalette.orange400
+                                      : (isCust ? SoftPalette.slate600 : _teal);
 
                                   return Padding(
                                     padding: const EdgeInsets.only(right: 6),
                                     child: InputChip(
-                                      avatar: Icon(isCust ? Icons.auto_awesome : Icons.edit, size: 11, color: Colors.white70),
+                                      avatar: Icon(isCust ? Icons.auto_awesome : Icons.edit, size: 11, color: SoftPalette.gray50A70),
                                       label: Text(
                                         _medChipLabel(m),
-                                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: Colors.white),
+                                        style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: SoftPalette.gray50),
                                       ),
                                       backgroundColor: chipBg,
-                                      deleteIconColor: Colors.white70,
+                                      deleteIconColor: SoftPalette.gray50A70,
                                       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                                       onPressed: () async {
                                         await _addMedicineDialog(
@@ -1535,7 +1634,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                 child: Column(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(Icons.search_off_rounded, size: 54, color: Colors.grey.shade300),
+                                    Icon(Icons.search_off_rounded, size: 54, color: context.adapt(SoftPalette.gray150)),
                                     const SizedBox(height: 14),
                                     Text(
                                       queryCtrl.text.isNotEmpty
@@ -1544,7 +1643,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                       style: TextStyle(
                                         fontSize: 14.5,
                                         fontWeight: FontWeight.w600,
-                                        color: Colors.grey.shade700,
+                                        color: context.adapt(SoftPalette.gray550),
                                       ),
                                       textAlign: TextAlign.center,
                                     ),
@@ -1560,7 +1659,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                       label: const Text('Add as Custom Medicine'),
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: _teal,
-                                        foregroundColor: Colors.white,
+                                        foregroundColor: SoftPalette.gray50,
                                         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
                                         shape: RoundedRectangleBorder(
                                           borderRadius: BorderRadius.circular(12),
@@ -1577,7 +1676,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                               separatorBuilder: (_, index) => Divider(
                                 height: 1,
                                 thickness: 0.8,
-                                color: Colors.grey.shade200,
+                                color: context.adapt(SoftPalette.gray100),
                                 indent: 14,
                                 endIndent: 14,
                               ),
@@ -1597,7 +1696,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                   if (m['id'] != null && cm['inventoryId'] != null) {
                                     final batchIds = (m['_batchIds'] as List?)?.map((e) => e.toString()).toSet() ?? <String>{};
                                     batchIds.add(m['id'].toString());
-                                    return batchIds.contains(cm['inventoryId'].toString());
+                                    if (batchIds.contains(cm['inventoryId'].toString())) return true;
                                   }
                                   final cmName = (cm['name'] ?? '').toString().trim().toLowerCase();
                                   final cmType = (cm['type'] ?? '').toString().toLowerCase().trim();
@@ -1613,13 +1712,14 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                 final existingMed = isAlreadyPrescribed ? widget.prescriptions[existingPrescriptionIdx] : null;
 
                                 final itemBg = isOutOfStock
-                                    ? (isDark ? const Color(0xFF450A0A) : const Color(0xFFFEF2F2))
-                                    : (isLowStock ? (isDark ? const Color(0xFF451A03) : const Color(0xFFFFFBEB)) : (isDark ? const Color(0xFF1E293B) : Colors.white));
+                                    ? (isDark ? SoftPalette.red800 : SoftPalette.red100t)
+                                    : (isLowStock ? (isDark ? SoftPalette.orange800 : SoftPalette.yellow50m) : (isDark ? SoftPalette.slate800 : SoftPalette.gray50));
                                 final itemBorder = isOutOfStock
-                                    ? (isDark ? const Color(0xFFEF4444) : const Color(0xFFFECACA))
-                                    : (isLowStock ? (isDark ? const Color(0xFFF97316) : const Color(0xFFFDE68A)) : (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)));
+                                    ? (isDark ? SoftPalette.red400 : SoftPalette.red200)
+                                    : (isLowStock ? (isDark ? SoftPalette.orange350 : SoftPalette.yellow150) : (isDark ? SoftPalette.slate700 : SoftPalette.slate150));
 
                                 return InkWell(
+                                  key: ValueKey('med_item_${m['id'] ?? ''}_${medicineName}_${medType}_$dose'),
                                   borderRadius: BorderRadius.circular(12),
                                   onTap: () async {
                                     // No stock: not selectable (a medicine already on this
@@ -1666,9 +1766,9 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                                   Container(
                                                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4.5),
                                                     decoration: BoxDecoration(
-                                                      color: isOutOfStock ? Colors.grey.shade100 : typeColors.bg,
+                                                      color: isOutOfStock ? context.adapt(SoftPalette.gray100) : context.adapt(typeColors.bg),
                                                       border: Border.all(
-                                                        color: isOutOfStock ? Colors.grey.shade300 : typeColors.border,
+                                                        color: isOutOfStock ? context.adapt(SoftPalette.gray150) : context.adapt(typeColors.border),
                                                         width: 0.9,
                                                       ),
                                                       borderRadius: BorderRadius.circular(20),
@@ -1678,7 +1778,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                                       children: [
                                                         FaIcon(
                                                           _getMedicineIcon(m),
-                                                          color: isOutOfStock ? Colors.grey.shade600 : typeColors.text,
+                                                          color: isOutOfStock ? context.adapt(SoftPalette.gray500) : context.adapt(typeColors.text),
                                                           size: 13,
                                                         ),
                                                         const SizedBox(width: 6),
@@ -1687,7 +1787,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                                           style: TextStyle(
                                                             fontSize: 12,
                                                             fontWeight: FontWeight.bold,
-                                                            color: isOutOfStock ? Colors.grey.shade600 : typeColors.text,
+                                                            color: isOutOfStock ? context.adapt(SoftPalette.gray500) : context.adapt(typeColors.text),
                                                           ),
                                                         ),
                                                       ],
@@ -1703,8 +1803,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                                         fontSize: 15,
                                                         fontWeight: FontWeight.bold,
                                                         color: isOutOfStock
-                                                            ? (isDark ? const Color(0xFFFCA5A5) : Colors.red.shade900)
-                                                            : (isDark ? Colors.white : const Color(0xFF0F172A)),
+                                                            ? (isDark ? SoftPalette.red300 : SoftPalette.red550)
+                                                            : (isDark ? SoftPalette.gray50 : SoftPalette.slate900),
                                                       ),
                                                       overflow: TextOverflow.ellipsis,
                                                     ),
@@ -1715,19 +1815,19 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                                     Container(
                                                       padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
                                                       decoration: BoxDecoration(
-                                                        color: _dosePillBg,
+                                                        color: context.adapt(_dosePillBg),
                                                         border: Border.all(
-                                                          color: _dosePillBorder,
+                                                          color: context.adapt(_dosePillBorder),
                                                           width: 0.8,
                                                         ),
                                                         borderRadius: BorderRadius.circular(20),
                                                       ),
                                                       child: Text(
                                                         dose,
-                                                        style: const TextStyle(
+                                                        style: TextStyle(
                                                           fontSize: 11.5,
                                                           fontWeight: FontWeight.w600,
-                                                          color: _dosePillText,
+                                                          color: context.adapt(_dosePillText),
                                                         ),
                                                       ),
                                                     ),
@@ -1738,14 +1838,14 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                                 const SizedBox(height: 4),
                                                 Row(
                                                   children: [
-                                                    Icon(Icons.biotech_rounded, size: 13, color: Colors.teal.shade700),
+                                                    Icon(Icons.biotech_rounded, size: 13, color: context.adapt(SoftPalette.teal550)),
                                                     const SizedBox(width: 4),
                                                     Expanded(
                                                       child: Text(
                                                         formula,
                                                         style: TextStyle(
                                                           fontSize: 11.5,
-                                                          color: Colors.grey.shade600,
+                                                          color: context.adapt(SoftPalette.gray500),
                                                           fontStyle: FontStyle.italic,
                                                         ),
                                                         overflow: TextOverflow.ellipsis,
@@ -1768,19 +1868,19 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                               Container(
                                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                                 decoration: BoxDecoration(
-                                                  color: const Color(0xFFFEE2E2),
+                                                  color: context.adapt(SoftPalette.red150m),
                                                   borderRadius: BorderRadius.circular(8),
-                                                  border: Border.all(color: Colors.red.shade300, width: 0.8),
+                                                  border: Border.all(color: context.adapt(SoftPalette.red400), width: 0.8),
                                                 ),
                                                 child: Row(
                                                   mainAxisSize: MainAxisSize.min,
                                                   children: [
-                                                    Icon(Icons.cancel_outlined, size: 12, color: Colors.red.shade700),
+                                                    Icon(Icons.cancel_outlined, size: 12, color: context.adapt(SoftPalette.red500)),
                                                     const SizedBox(width: 4),
                                                     Text(
                                                       'Avail: 0',
                                                       style: TextStyle(
-                                                        color: Colors.red.shade800,
+                                                        color: context.adapt(SoftPalette.red550),
                                                         fontWeight: FontWeight.bold,
                                                         fontSize: 11,
                                                       ),
@@ -1792,19 +1892,19 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                               Container(
                                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                                 decoration: BoxDecoration(
-                                                  color: Colors.orange.shade50,
+                                                  color: context.adapt(SoftPalette.amber100m),
                                                   borderRadius: BorderRadius.circular(8),
-                                                  border: Border.all(color: Colors.orange.shade300, width: 0.8),
+                                                  border: Border.all(color: context.adapt(SoftPalette.amber300), width: 0.8),
                                                 ),
                                                 child: Row(
                                                   mainAxisSize: MainAxisSize.min,
                                                   children: [
-                                                    Icon(Icons.warning_amber_rounded, size: 13, color: Colors.orange.shade800),
+                                                    Icon(Icons.warning_amber_rounded, size: 13, color: context.adapt(SoftPalette.orange400)),
                                                     const SizedBox(width: 3),
                                                     Text(
                                                       'Avail: $availableStock',
                                                       style: TextStyle(
-                                                        color: Colors.orange.shade900,
+                                                        color: context.adapt(SoftPalette.orange400),
                                                         fontWeight: FontWeight.bold,
                                                         fontSize: 11,
                                                       ),
@@ -1816,14 +1916,14 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                               Container(
                                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                                 decoration: BoxDecoration(
-                                                  color: Colors.green.shade50,
+                                                  color: context.adapt(SoftPalette.green100m),
                                                   borderRadius: BorderRadius.circular(8),
-                                                  border: Border.all(color: Colors.green.shade300, width: 0.8),
+                                                  border: Border.all(color: context.adapt(SoftPalette.green300), width: 0.8),
                                                 ),
                                                 child: Text(
                                                   'Avail: $availableStock',
                                                   style: TextStyle(
-                                                    color: Colors.green.shade800,
+                                                    color: context.adapt(SoftPalette.green550),
                                                     fontWeight: FontWeight.bold,
                                                     fontSize: 11,
                                                   ),
@@ -1837,7 +1937,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                                   '$reservedCount reserved',
                                                   style: TextStyle(
                                                     fontSize: 9.5,
-                                                    color: Colors.orange.shade700,
+                                                    color: context.adapt(SoftPalette.orange350),
                                                     fontStyle: FontStyle.italic,
                                                   ),
                                                 ),
@@ -1854,19 +1954,19 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                               Container(
                                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
                                                 decoration: BoxDecoration(
-                                                  color: _teal.withValues(alpha: 0.15),
+                                                  color: context.adapt(_teal).withValues(alpha: 0.15),
                                                   borderRadius: BorderRadius.circular(8),
-                                                  border: Border.all(color: _teal, width: 1),
+                                                  border: Border.all(color: context.adapt(_teal), width: 1),
                                                 ),
                                                 child: Row(
                                                   mainAxisSize: MainAxisSize.min,
                                                   children: [
-                                                    const Icon(Icons.check_circle, color: _teal, size: 14),
+                                                    Icon(Icons.check_circle, color: context.adapt(_teal), size: 14),
                                                     const SizedBox(width: 4),
                                                     Text(
                                                       _medAddedText(existingMed),
-                                                      style: const TextStyle(
-                                                        color: _teal,
+                                                      style: TextStyle(
+                                                        color: context.adapt(_teal),
                                                         fontWeight: FontWeight.bold,
                                                         fontSize: 11,
                                                       ),
@@ -1893,20 +1993,20 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                                 child: Container(
                                                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
                                                   decoration: BoxDecoration(
-                                                    color: isDark ? const Color(0xFF334155) : Colors.grey.shade200,
+                                                    color: isDark ? SoftPalette.slate700 : SoftPalette.gray100,
                                                     borderRadius: BorderRadius.circular(6),
                                                   ),
                                                   child: Row(
                                                     mainAxisSize: MainAxisSize.min,
                                                     children: [
-                                                      Icon(Icons.edit, size: 12, color: isDark ? Colors.white70 : Colors.grey.shade800),
+                                                      Icon(Icons.edit, size: 12, color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray700),
                                                       const SizedBox(width: 3),
                                                       Text(
                                                         'Edit',
                                                         style: TextStyle(
                                                           fontSize: 11,
                                                           fontWeight: FontWeight.w600,
-                                                          color: isDark ? Colors.white70 : Colors.grey.shade800,
+                                                          color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray700,
                                                         ),
                                                       ),
                                                     ],
@@ -1925,10 +2025,10 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                                 child: Container(
                                                   padding: const EdgeInsets.all(5),
                                                   decoration: BoxDecoration(
-                                                    color: Colors.red.withValues(alpha: 0.12),
+                                                    color: context.adapt(SoftPalette.red400).withValues(alpha: 0.12),
                                                     borderRadius: BorderRadius.circular(6),
                                                   ),
-                                                  child: const Icon(Icons.close, size: 13, color: Colors.red),
+                                                  child: Icon(Icons.close, size: 13, color: context.adapt(SoftPalette.red400)),
                                                 ),
                                               ),
                                             ],
@@ -1938,8 +2038,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                                             decoration: BoxDecoration(
                                               color: isOutOfStock
-                                                  ? (isDark ? const Color(0xFF475569) : Colors.grey.shade500)
-                                                  : (isLowStock ? (isDark ? const Color(0xFFC2410C) : Colors.orange.shade700) : _teal),
+                                                  ? (isDark ? SoftPalette.slate600 : SoftPalette.gray350)
+                                                  : (isLowStock ? (isDark ? SoftPalette.orange550 : SoftPalette.orange350) : _teal),
                                               borderRadius: BorderRadius.circular(8),
                                             ),
                                             child: Row(
@@ -1948,7 +2048,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                                 if (isOutOfStock) ...[
                                                   const Icon(
                                                     Icons.block,
-                                                    color: Colors.white,
+                                                    color: SoftPalette.gray50,
                                                     size: 14,
                                                   ),
                                                   const SizedBox(width: 4),
@@ -1956,7 +2056,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                                 Text(
                                                   isOutOfStock ? 'Out of Stock' : '+ Select',
                                                   style: const TextStyle(
-                                                    color: Colors.white,
+                                                    color: SoftPalette.gray50,
                                                     fontWeight: FontWeight.bold,
                                                     fontSize: 11.5,
                                                   ),
@@ -1974,63 +2074,134 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                     ),
 
                     // ── Footer ────────────────────────────────────────
-                    Divider(height: 1, thickness: 1, color: isDark ? const Color(0xFF334155) : Colors.grey.shade200),
+                    Divider(height: 1, thickness: 1, color: isDark ? SoftPalette.slate700 : SoftPalette.gray100),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF1E293B) : Colors.grey.shade100,
+                        color: isDark ? SoftPalette.slate800 : SoftPalette.gray100,
                         borderRadius: const BorderRadius.only(
                           bottomLeft: Radius.circular(24),
                           bottomRight: Radius.circular(24),
                         ),
                       ),
                       child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Flexible(
-                            child: OutlinedButton.icon(
-                              onPressed: () async {
-                                final res = await _addMedicineDialog(callerContext: dialogCtx);
-                                if (res == true) {
-                                  closeSelectionDialog();
-                                } else if (dialogCtx.mounted) {
-                                  setDialogState(() {});
-                                }
-                              },
-                              icon: const Icon(Icons.add, size: 16),
-                              label: const Text(
-                                'Add Custom Medicine',
-                                overflow: TextOverflow.ellipsis,
+                          OutlinedButton(
+                            onPressed: () async {
+                              final res = await _addMedicineDialog(callerContext: dialogCtx);
+                              if (res == true) {
+                                closeSelectionDialog();
+                              } else if (dialogCtx.mounted) {
+                                setDialogState(() {});
+                              }
+                            },
+                            style: OutlinedButton.styleFrom(
+                              backgroundColor: isDark
+                                  ? SoftPalette.teal400.withValues(alpha: 0.10)
+                                  : _teal.withValues(alpha: 0.06),
+                              foregroundColor: isDark ? SoftPalette.teal300 : _teal,
+                              side: BorderSide(
+                                color: (isDark ? SoftPalette.teal400 : _teal).withValues(alpha: 0.35),
+                                width: 1.2,
                               ),
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: isDark ? const Color(0xFF2DD4BF) : _teal,
-                                side: BorderSide(color: isDark ? const Color(0xFF2DD4BF) : _teal),
-                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
                               ),
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          Flexible(
-                            child: ElevatedButton.icon(
-                              onPressed: closeSelectionDialog,
-                              icon: const Icon(Icons.check_circle_outline, size: 16),
-                              label: Text(
-                                widget.prescriptions.isNotEmpty
-                                    ? 'Done (${widget.prescriptions.length})'
-                                    : 'Done — Close',
-                                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: _teal,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(10),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.all(2),
+                                  decoration: BoxDecoration(
+                                    color: (isDark ? SoftPalette.teal300 : _teal).withValues(alpha: 0.16),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: Icon(
+                                    Icons.add_rounded,
+                                    size: 15,
+                                    color: isDark ? SoftPalette.teal300 : _teal,
+                                  ),
                                 ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Add Custom Medicine',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    letterSpacing: 0.1,
+                                    color: isDark ? SoftPalette.teal300 : _teal,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Spacer(),
+                          ElevatedButton(
+                            onPressed: closeSelectionDialog,
+                            style: ElevatedButton.styleFrom(
+                              elevation: widget.prescriptions.isNotEmpty ? 2 : 0,
+                              shadowColor: _teal.withValues(alpha: 0.35),
+                              backgroundColor: widget.prescriptions.isNotEmpty
+                                  ? _teal
+                                  : (isDark ? SoftPalette.slate700 : SoftPalette.gray200),
+                              foregroundColor: widget.prescriptions.isNotEmpty
+                                  ? SoftPalette.gray50
+                                  : (isDark ? SoftPalette.gray300 : SoftPalette.gray700),
+                              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
                               ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  widget.prescriptions.isNotEmpty
+                                      ? Icons.check_circle_rounded
+                                      : Icons.close_rounded,
+                                  size: 17,
+                                  color: widget.prescriptions.isNotEmpty
+                                      ? SoftPalette.gray50
+                                      : (isDark ? SoftPalette.gray300 : SoftPalette.gray700),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  widget.prescriptions.isNotEmpty ? 'Done' : 'Close',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.2,
+                                    color: widget.prescriptions.isNotEmpty
+                                        ? SoftPalette.gray50
+                                        : (isDark ? SoftPalette.gray300 : SoftPalette.gray700),
+                                  ),
+                                ),
+                                if (widget.prescriptions.isNotEmpty) ...[
+                                  const SizedBox(width: 8),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: SoftPalette.gray50.withValues(alpha: 0.24),
+                                      borderRadius: BorderRadius.circular(10),
+                                      border: Border.all(
+                                        color: SoftPalette.gray50.withValues(alpha: 0.35),
+                                        width: 0.8,
+                                      ),
+                                    ),
+                                    child: Text(
+                                      '${widget.prescriptions.length}',
+                                      style: const TextStyle(
+                                        color: SoftPalette.gray50,
+                                        fontSize: 11.5,
+                                        fontWeight: FontWeight.w800,
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
                           ),
                         ],
@@ -2341,9 +2512,11 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                     final nName = name.toLowerCase();
                     final nType = (newMed['type'] ?? '').toString().toLowerCase().trim();
                     final nDose = (newMed['dose'] ?? newMed['dosage'] ?? '').toString().toLowerCase().trim();
+                    if (mType.isNotEmpty && nType.isNotEmpty && mType != nType) return false;
+                    if (mDose.isNotEmpty && nDose.isNotEmpty && mDose != nDose) return false;
                     return mName == nName &&
-                        (mType.isEmpty || nType.isEmpty || mType == nType) &&
-                        (mDose.isEmpty || nDose.isEmpty || mDose == nDose);
+                        (mType == nType || mType.isEmpty || nType.isEmpty) &&
+                        (mDose == nDose || mDose.isEmpty || nDose.isEmpty);
                   });
                   if (fIdx != -1) {
                     widget.prescriptions[fIdx] = newMed;
@@ -2365,9 +2538,11 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                   final nName = name.toLowerCase();
                   final nType = (newMed['type'] ?? '').toString().toLowerCase().trim();
                   final nDose = (newMed['dose'] ?? newMed['dosage'] ?? '').toString().toLowerCase().trim();
+                  if (mType.isNotEmpty && nType.isNotEmpty && mType != nType) return false;
+                  if (mDose.isNotEmpty && nDose.isNotEmpty && mDose != nDose) return false;
                   return mName == nName &&
-                      (mType.isEmpty || nType.isEmpty || mType == nType) &&
-                      (mDose.isEmpty || nDose.isEmpty || mDose == nDose);
+                      (mType == nType || mType.isEmpty || nType.isEmpty) &&
+                      (mDose == nDose || mDose.isEmpty || nDose.isEmpty);
                 });
                 if (matchIdx != -1) {
                   widget.prescriptions[matchIdx] = newMed;
@@ -2396,21 +2571,21 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
             }
 
             if (isStockZero && mounted) {
-              ScaffoldMessenger.of(context).hideCurrentSnackBar();
-              ScaffoldMessenger.of(context).showSnackBar(
+              AppToast.hideCurrent();
+              AppToast.showSnackBar(dialogCtx, 
                 SnackBar(
                   content: Text('⚠️ "$name" added (0 shelf stock — prescribed for external purchase / indent).'),
-                  backgroundColor: Colors.orange.shade800,
+                  backgroundColor: SoftPalette.orange400,
                   behavior: SnackBarBehavior.floating,
                   duration: const Duration(seconds: 2),
                 ),
               );
             } else if (exceedsStock && mounted) {
-              ScaffoldMessenger.of(context).hideCurrentSnackBar();
-              ScaffoldMessenger.of(context).showSnackBar(
+              AppToast.hideCurrent();
+              AppToast.showSnackBar(dialogCtx, 
                 SnackBar(
                   content: Text('⚠️ "$name" added (Shelf stock: $avail, needed: $totalNeeded — excess for external purchase).'),
-                  backgroundColor: Colors.orange.shade800,
+                  backgroundColor: SoftPalette.orange400,
                   behavior: SnackBarBehavior.floating,
                   duration: const Duration(seconds: 2),
                 ),
@@ -2437,12 +2612,12 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                     Container(
                       padding: const EdgeInsets.all(6),
                       decoration: BoxDecoration(
-                        color: _teal.withValues(alpha: 0.12),
+                        color: dialogCtx.adapt(_teal).withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Icon(
                         isEditing ? Icons.edit_note_rounded : (isInjection ? Icons.vaccines_rounded : Icons.medication_rounded),
-                        color: _teal,
+                        color: dialogCtx.adapt(_teal),
                         size: 20,
                       ),
                     ),
@@ -2462,19 +2637,19 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF1E293B) : Colors.teal.shade50,
+                      color: isDark ? SoftPalette.slate800 : SoftPalette.teal100m,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: _teal.withValues(alpha: 0.3), width: 0.8),
+                      border: Border.all(color: dialogCtx.adapt(_teal).withValues(alpha: 0.3), width: 0.8),
                     ),
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.person_outline, size: 13, color: _teal),
+                        Icon(Icons.person_outline, size: 13, color: dialogCtx.adapt(_teal)),
                         const SizedBox(width: 4),
                         Flexible(
                           child: Text(
                             'Patient: $pName',
-                            style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _teal),
+                            style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: dialogCtx.adapt(_teal)),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
@@ -2482,14 +2657,14 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                           const SizedBox(width: 6),
                           Text(
                             '(#$pSerial)',
-                            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: isDark ? Colors.white70 : Colors.grey.shade700),
+                            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray550),
                           ),
                         ],
                         if (pGender.isNotEmpty || pAge.isNotEmpty) ...[
                           const SizedBox(width: 6),
                           Text(
                             '• ${[if (pGender.isNotEmpty) pGender, if (pAge.isNotEmpty) '$pAge yrs'].join(', ')}',
-                            style: TextStyle(fontSize: 10.5, color: isDark ? Colors.white60 : Colors.grey.shade600),
+                            style: TextStyle(fontSize: 10.5, color: isDark ? SoftPalette.gray50A60 : SoftPalette.gray500),
                           ),
                         ],
                       ],
@@ -2509,19 +2684,19 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                       margin: const EdgeInsets.only(bottom: 12),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFFEBEE),
+                        color: dialogCtx.adapt(SoftPalette.pink100m),
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: const Color(0xFFEF5350)),
+                        border: Border.all(color: dialogCtx.adapt(SoftPalette.red400)),
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.error_outline_rounded, color: Color(0xFFC62828), size: 18),
+                          Icon(Icons.error_outline_rounded, color: dialogCtx.adapt(SoftPalette.red550), size: 18),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               stockError!,
-                              style: const TextStyle(
-                                color: Color(0xFFC62828),
+                              style: TextStyle(
+                                color: dialogCtx.adapt(SoftPalette.red550),
                                 fontSize: 12,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -2534,13 +2709,13 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                   TextField(
                     controller: nameCtrl,
                     readOnly: isInventory,
-                    style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                    style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
                     decoration: InputDecoration(
                       labelText: isInventory ? 'Formula / Brand' : 'Medicine Name',
-                      labelStyle: TextStyle(color: isDark ? const Color(0xFF94A3B8) : null),
+                      labelStyle: TextStyle(color: isDark ? SoftPalette.slate350 : null),
                       border: const OutlineInputBorder(),
                       filled: isInventory,
-                      fillColor: isInventory ? (isDark ? const Color(0xFF1E293B) : Colors.grey[200]) : null,
+                      fillColor: isInventory ? (isDark ? SoftPalette.slate800 : SoftPalette.gray100) : null,
                       isDense: true,
                     ),
                     onChanged: (isInventory || isEditing) ? null : (v) => setStateDialog(() {
@@ -2552,15 +2727,15 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                     const SizedBox(height: 8),
                     Row(
                       children: [
-                        const Icon(Icons.inventory_2, size: 16, color: Colors.grey),
+                        Icon(Icons.inventory_2, size: 16, color: dialogCtx.adapt(SoftPalette.gray350)),
                         const SizedBox(width: 4),
                         Text(
                           'Available: ${_getAvailableStock(effectiveInv)}',
                           style: TextStyle(
                             fontSize: 13,
                             color: _getAvailableStock(effectiveInv) < 10
-                                ? Colors.red
-                                : (isDark ? const Color(0xFFCBD5E1) : Colors.grey[700]),
+                                ? dialogCtx.adapt(SoftPalette.red400)
+                                : (isDark ? SoftPalette.slate200 : SoftPalette.gray550),
                             fontWeight: FontWeight.bold,
                           ),
                         ),
@@ -2570,7 +2745,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                             '(${_getReservedCount(effectiveInv)} reserved)',
                             style: TextStyle(
                               fontSize: 11,
-                              color: Colors.orange.shade700,
+                              color: dialogCtx.adapt(SoftPalette.orange350),
                               fontStyle: FontStyle.italic,
                             ),
                           ),
@@ -2582,14 +2757,14 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                       Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          const Icon(Icons.biotech_rounded, size: 15, color: Color(0xFF00695C)),
+                          Icon(Icons.biotech_rounded, size: 15, color: dialogCtx.adapt(SoftPalette.teal600)),
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
                               formula,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontSize: 12,
-                                color: Color(0xFF00695C),
+                                color: dialogCtx.adapt(SoftPalette.teal600),
                                 fontStyle: FontStyle.italic,
                                 fontWeight: FontWeight.w500,
                               ),
@@ -2610,31 +2785,23 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                         ),
                         Text(
                           'e.g. 1+0+1',
-                          style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
+                          style: TextStyle(fontSize: 11, color: dialogCtx.adapt(SoftPalette.gray500), fontStyle: FontStyle.italic),
                         ),
                       ],
                     ),
                     const SizedBox(height: 6),
                     TextField(
                       controller: timingCtrl,
-                      keyboardType: TextInputType.text,
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'[0-9+]')),
-                        LengthLimitingTextInputFormatter(7),
-                      ],
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [const DoseTimingInputFormatter()],
                       decoration: const InputDecoration(
                         hintText: 'e.g. 1+0+1 or 1+1+1',
                         border: OutlineInputBorder(),
                         isDense: true,
                       ),
                       onChanged: (v) {
+                        // '+' is inserted by DoseTimingInputFormatter as the doctor types.
                         setStateDialog(() => stockError = null);
-                        final trimmed = v.trim();
-                        if (RegExp(r'^\d{2,3}$').hasMatch(trimmed)) {
-                          final formatted = trimmed.split('').join('+');
-                          timingCtrl.text = formatted;
-                          timingCtrl.selection = TextSelection.collapsed(offset: formatted.length);
-                        }
                       },
                       onSubmitted: (_) => commitMedicine(closeAll: true),
                     ),
@@ -2656,10 +2823,10 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                             decoration: BoxDecoration(
-                              color: isSelected ? _teal : (isDark ? const Color(0xFF1E293B) : Colors.grey.shade100),
+                              color: isSelected ? _teal : (isDark ? SoftPalette.slate800 : SoftPalette.gray100),
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(
-                                color: isSelected ? _teal : (isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+                                color: isSelected ? _teal : (isDark ? SoftPalette.slate700 : SoftPalette.gray150),
                               ),
                             ),
                             child: Text(
@@ -2667,7 +2834,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                               style: TextStyle(
                                 fontSize: 11.5,
                                 fontWeight: FontWeight.w600,
-                                color: isSelected ? Colors.white : (isDark ? Colors.white70 : Colors.grey.shade800),
+                                color: isSelected ? SoftPalette.gray50 : (isDark ? SoftPalette.gray50A70 : SoftPalette.gray700),
                               ),
                             ),
                           ),
@@ -2719,15 +2886,15 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                           margin: const EdgeInsets.only(top: 10),
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                           decoration: BoxDecoration(
-                            color: _teal.withValues(alpha: 0.08),
+                            color: dialogCtx.adapt(_teal).withValues(alpha: 0.08),
                             borderRadius: BorderRadius.circular(10),
-                            border: Border.all(color: _teal.withValues(alpha: 0.25)),
+                            border: Border.all(color: dialogCtx.adapt(_teal).withValues(alpha: 0.25)),
                           ),
                           child: Row(
                             children: [
                               Icon(
                                 isSyrup ? Icons.science_outlined : Icons.calculate_outlined,
-                                color: _teal,
+                                color: dialogCtx.adapt(_teal),
                                 size: 18,
                               ),
                               const SizedBox(width: 8),
@@ -2736,10 +2903,10 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                   isSyrup
                                       ? 'Quantity: 1 bottle • Dose: $dosage ($mealTiming)'
                                       : 'Total Dispense: $totalUnits unit(s) ($dailyCount/day × $_daysOfMedicine day${_daysOfMedicine > 1 ? "s" : ""})',
-                                  style: const TextStyle(
+                                  style: TextStyle(
                                     fontSize: 12,
                                     fontWeight: FontWeight.bold,
-                                    color: _teal,
+                                    color: dialogCtx.adapt(_teal),
                                   ),
                                 ),
                               ),
@@ -2758,7 +2925,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                         ),
                         Text(
                           'Shelf: ${effectiveInv != null ? _getAvailableStock(effectiveInv) : "-"}',
-                          style: TextStyle(fontSize: 11, color: Colors.grey.shade600, fontWeight: FontWeight.bold),
+                          style: TextStyle(fontSize: 11, color: dialogCtx.adapt(SoftPalette.gray500), fontWeight: FontWeight.bold),
                         ),
                       ],
                     ),
@@ -2775,7 +2942,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                               });
                             }
                           },
-                          icon: const Icon(Icons.remove_circle_outline, color: _teal),
+                          icon: Icon(Icons.remove_circle_outline, color: dialogCtx.adapt(_teal)),
                           tooltip: 'Decrease Quantity',
                         ),
                         Expanded(
@@ -2801,7 +2968,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                               stockError = null;
                             });
                           },
-                          icon: const Icon(Icons.add_circle_outline, color: _teal),
+                          icon: Icon(Icons.add_circle_outline, color: dialogCtx.adapt(_teal)),
                           tooltip: 'Increase Quantity',
                         ),
                       ],
@@ -2823,10 +2990,10 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                           child: Container(
                             padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
                             decoration: BoxDecoration(
-                              color: isSelected ? _teal : (isDark ? const Color(0xFF1E293B) : Colors.grey.shade100),
+                              color: isSelected ? _teal : (isDark ? SoftPalette.slate800 : SoftPalette.gray100),
                               borderRadius: BorderRadius.circular(16),
                               border: Border.all(
-                                color: isSelected ? _teal : (isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+                                color: isSelected ? _teal : (isDark ? SoftPalette.slate700 : SoftPalette.gray150),
                               ),
                             ),
                             child: Text(
@@ -2834,7 +3001,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                               style: TextStyle(
                                 fontSize: 11.5,
                                 fontWeight: FontWeight.bold,
-                                color: isSelected ? Colors.white : (isDark ? Colors.white70 : Colors.grey.shade800),
+                                color: isSelected ? SoftPalette.gray50 : (isDark ? SoftPalette.gray50A70 : SoftPalette.gray700),
                               ),
                             ),
                           ),
@@ -2848,7 +3015,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
             actions: [
               if (isEditing) ...[
                 TextButton.icon(
-                  style: TextButton.styleFrom(foregroundColor: Colors.red),
+                  style: TextButton.styleFrom(foregroundColor: dialogCtx.adapt(SoftPalette.red400)),
                   icon: const Icon(Icons.delete_outline, size: 16),
                   label: const Text('Remove'),
                   onPressed: () {
@@ -2866,7 +3033,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _teal,
-                    foregroundColor: Colors.white,
+                    foregroundColor: SoftPalette.gray50,
                   ),
                   onPressed: () => commitMedicine(closeAll: true),
                   child: const Text('Update'),
@@ -2874,12 +3041,12 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
               ] else ...[
                 TextButton(
                   onPressed: () => Navigator.of(ctx, rootNavigator: true).pop(null),
-                  child: const Text('Cancel', style: TextStyle(color: _teal)),
+                  child: Text('Cancel', style: TextStyle(color: dialogCtx.adapt(_teal))),
                 ),
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _teal,
-                    foregroundColor: Colors.white,
+                    foregroundColor: SoftPalette.gray50,
                   ),
                   onPressed: () => commitMedicine(closeAll: true),
                   child: const Text('Add & Done'),
@@ -2917,24 +3084,24 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel', style: TextStyle(color: _teal)),
+            child: Text('Cancel', style: TextStyle(color: context.adapt(_teal))),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: _teal,
-              foregroundColor: Colors.white,
+              foregroundColor: SoftPalette.gray50,
             ),
             onPressed: () {
               final name = ctrl.text.trim();
               if (name.isEmpty || widget.labResults.any((l) => (l['name'] ?? '').toString().trim() == name)) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                    content: Text(errorText), backgroundColor: Colors.redAccent));
+                AppToast.showSnackBar(context, SnackBar(
+                    content: Text(errorText), backgroundColor: SoftPalette.red400));
                 return;
               }
               setState(() => widget.labResults.add({'name': name}));
               Navigator.pop(context);
             },
-            child: const Text('Add', style: TextStyle(color: Colors.white)),
+            child: const Text('Add', style: TextStyle(color: SoftPalette.gray50)),
           ),
         ],
       ),
@@ -2948,10 +3115,10 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             Row(children: [
-              FaIcon(icon, color: _teal, size: compact ? 16 : 20),
+              FaIcon(icon, color: context.adapt(_teal), size: compact ? 16 : 20),
               SizedBox(width: compact ? 6 : 10),
               Text(title, style: TextStyle(
-                  fontSize: compact ? 14 : 18, fontWeight: FontWeight.bold, color: _teal)),
+                  fontSize: compact ? 14 : 18, fontWeight: FontWeight.bold, color: context.adapt(_teal))),
             ]),
             if (action != null) action,
           ],
@@ -2973,20 +3140,20 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
             final isExt = m['isExternal'] == true || m['outOfStock'] == true;
             final label = _medChipLabel(m);
             return InputChip(
-              avatar: Icon(isExt ? Icons.warning_amber_rounded : Icons.edit, size: 12, color: Colors.white70),
+              avatar: Icon(isExt ? Icons.warning_amber_rounded : Icons.edit, size: 12, color: SoftPalette.gray50A70),
               label: Text(
                 label,
                 style: TextStyle(
                   fontSize: compact ? 11 : 12.5,
                   fontWeight: FontWeight.w600,
-                  color: Colors.white,
+                  color: SoftPalette.gray50,
                 ),
               ),
-              backgroundColor: isExt ? (_isDark ? const Color(0xFF9A3412) : Colors.deepOrange.shade600) : chipColor,
+              backgroundColor: isExt ? (_isDark ? SoftPalette.red600 : SoftPalette.red400) : chipColor,
               padding: EdgeInsets.symmetric(horizontal: compact ? 6 : 8),
               onPressed: () => _addMedicineDialog(existingPrescriptionMed: m),
               onDeleted: () => setState(() => widget.prescriptions.remove(m)),
-              deleteIconColor: Colors.white,
+              deleteIconColor: SoftPalette.gray50,
               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
             );
           }).toList(),
@@ -3121,16 +3288,16 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       builder: (ctx) {
         return AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
           title: Row(
             children: [
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF78350F) : Colors.amber.shade100,
+                  color: isDark ? SoftPalette.orange700 : SoftPalette.yellow150,
                   shape: BoxShape.circle,
                 ),
-                child: Icon(Icons.inventory_2_rounded, color: isDark ? const Color(0xFFFBBF24) : Colors.amber.shade900, size: 22),
+                child: Icon(Icons.inventory_2_rounded, color: isDark ? SoftPalette.amber200 : SoftPalette.orange350, size: 22),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -3138,9 +3305,9 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Inventory Stock Verification',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: isDark ? Colors.white : Colors.black87)),
+                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87)),
                     Text('Real-time audit for "${template['name']}"',
-                        style: TextStyle(fontSize: 12, color: isDark ? Colors.white60 : Colors.grey.shade600)),
+                        style: TextStyle(fontSize: 12, color: isDark ? SoftPalette.gray50A60 : SoftPalette.gray500)),
                   ],
                 ),
               ),
@@ -3154,7 +3321,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
               children: [
                 Text(
                   'The following medicines in this template have inventory stock alerts:',
-                  style: TextStyle(fontSize: 12.5, color: isDark ? Colors.white70 : Colors.black87),
+                  style: TextStyle(fontSize: 12.5, color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
                 ),
                 const SizedBox(height: 12),
                 ...outOfStockList.map((item) {
@@ -3163,21 +3330,21 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                     margin: const EdgeInsets.only(bottom: 8),
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF450A0A) : const Color(0xFFFEF2F2),
+                      color: isDark ? SoftPalette.red800 : SoftPalette.red100t,
                       borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: isDark ? const Color(0xFFEF4444) : Colors.red.shade200),
+                      border: Border.all(color: isDark ? SoftPalette.red400 : SoftPalette.red300),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.cancel, color: Colors.red, size: 18),
+                        Icon(Icons.cancel, color: context.adapt(SoftPalette.red400), size: 18),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text('${med['name']} (${med['type']})',
-                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: isDark ? const Color(0xFFFCA5A5) : Colors.red.shade900)),
-                              const Text('Status: 0 In Stock (Unavailable in dispensary)', style: TextStyle(fontSize: 11, color: Colors.redAccent)),
+                                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: isDark ? SoftPalette.red300 : SoftPalette.red550)),
+                              Text('Status: 0 In Stock (Unavailable in dispensary)', style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.red400))),
                             ],
                           ),
                         ),
@@ -3193,22 +3360,22 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                       margin: const EdgeInsets.only(bottom: 8),
                       padding: const EdgeInsets.all(10),
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF451A03) : const Color(0xFFFFFBEB),
+                        color: isDark ? SoftPalette.orange800 : SoftPalette.yellow50m,
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: isDark ? const Color(0xFFF97316) : Colors.amber.shade300),
+                        border: Border.all(color: isDark ? SoftPalette.orange350 : SoftPalette.yellow200),
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.warning_amber_rounded, color: isDark ? const Color(0xFFFBBF24) : Colors.amber.shade900, size: 18),
+                          Icon(Icons.warning_amber_rounded, color: isDark ? SoftPalette.amber200 : SoftPalette.orange350, size: 18),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text('${med['name']} (${med['type']})',
-                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: isDark ? const Color(0xFFFDE68A) : Colors.amber.shade900)),
+                                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: isDark ? SoftPalette.yellow150 : SoftPalette.orange350)),
                                 Text('Low Stock: Only $stock units left in dispensary',
-                                    style: TextStyle(fontSize: 11, color: isDark ? const Color(0xFFFCD34D) : Colors.amber.shade800)),
+                                    style: TextStyle(fontSize: 11, color: isDark ? SoftPalette.yellow200 : SoftPalette.orange350)),
                               ],
                             ),
                           ),
@@ -3228,7 +3395,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
             OutlinedButton.icon(
               icon: const Icon(Icons.filter_alt_off_rounded, size: 16),
               label: const Text('Apply In-Stock Only'),
-              style: OutlinedButton.styleFrom(foregroundColor: isDark ? const Color(0xFFF97316) : Colors.orange.shade900),
+              style: OutlinedButton.styleFrom(foregroundColor: isDark ? SoftPalette.orange350 : SoftPalette.orange400),
               onPressed: () {
                 Navigator.pop(ctx);
                 _finalizeTemplateApplication(template, resolvedMeds);
@@ -3237,7 +3404,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
             ElevatedButton.icon(
               icon: const Icon(Icons.done_all_rounded, size: 16),
               label: const Text('Apply Anyway (Custom)'),
-              style: ElevatedButton.styleFrom(backgroundColor: _teal, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: _teal, foregroundColor: SoftPalette.gray50),
               onPressed: () {
                 Navigator.pop(ctx);
                 // Convert out-of-stock medicines to Custom (no inventoryId = external purchase)
@@ -3288,7 +3455,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     });
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: Text('⚡ Applied "${template['name']}" — ${meds.length} medicine(s) loaded'),
           backgroundColor: _teal,
@@ -3304,22 +3471,22 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        backgroundColor: _isDark ? const Color(0xFF1E293B) : Colors.white,
+        backgroundColor: _isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         title: Row(
           children: [
-            const Icon(Icons.delete_outline_rounded, color: Colors.red, size: 24),
+            Icon(Icons.delete_outline_rounded, color: context.adapt(SoftPalette.red400), size: 24),
             const SizedBox(width: 8),
-            Text('Delete Template', style: TextStyle(color: _isDark ? Colors.white : Colors.black87, fontWeight: FontWeight.bold, fontSize: 16)),
+            Text('Delete Template', style: TextStyle(color: _isDark ? SoftPalette.gray50 : SoftPalette.gray900A87, fontWeight: FontWeight.bold, fontSize: 16)),
           ],
         ),
         content: Text(
           'Are you sure you want to delete the "$templateName" template?',
-          style: TextStyle(color: _isDark ? Colors.white70 : Colors.black87),
+          style: TextStyle(color: _isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
         ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.red400, foregroundColor: SoftPalette.gray50),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Delete'),
           ),
@@ -3331,10 +3498,10 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       await PrescriptionTemplateService.deleteTemplate(widget.branchId, templateId, doctorId: widget.doctorId);
       await _loadPrescriptionTemplates(syncCloud: false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('🗑️ Deleted "$templateName"'),
-            backgroundColor: Colors.red.shade700,
+            backgroundColor: SoftPalette.red500,
             duration: const Duration(seconds: 3),
             behavior: SnackBarBehavior.floating,
           ),
@@ -3360,13 +3527,13 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDlgState) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
           title: Row(
             children: [
-              const Icon(Icons.edit_note_rounded, color: _teal, size: 24),
+              Icon(Icons.edit_note_rounded, color: context.adapt(_teal), size: 24),
               const SizedBox(width: 8),
               Text('Edit Prescription Template',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? Colors.white : Colors.black87)),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87)),
             ],
           ),
           content: SizedBox(
@@ -3376,56 +3543,56 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text('Template Title:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? Colors.white70 : Colors.grey.shade700)),
+                  Text('Template Title:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray550)),
                   const SizedBox(height: 4),
                   TextField(
                     controller: titleCtrl,
-                    style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                    style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
                     decoration: InputDecoration(
                       filled: true,
-                      fillColor: isDark ? const Color(0xFF0F172A) : Colors.grey.shade50,
+                      fillColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Text('Category:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? Colors.white70 : Colors.grey.shade700)),
+                  Text('Category:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray550)),
                   const SizedBox(height: 4),
                   DropdownButtonFormField<String>(
                     value: selectedCategory,
-                    dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                    dropdownColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                     items: ['General', 'Respiratory', 'Gastro', 'Cardio', 'Pediatric', 'ENT', 'Ortho', 'Infectious']
-                        .map((c) => DropdownMenuItem(value: c, child: Text(c, style: TextStyle(color: isDark ? Colors.white : Colors.black87))))
+                        .map((c) => DropdownMenuItem(value: c, child: Text(c, style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87))))
                         .toList(),
                     onChanged: (v) => setDlgState(() => selectedCategory = v ?? 'General'),
                     decoration: InputDecoration(
                       filled: true,
-                      fillColor: isDark ? const Color(0xFF0F172A) : Colors.grey.shade50,
+                      fillColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Text('Patient Condition / Complaints:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? Colors.white70 : Colors.grey.shade700)),
+                  Text('Patient Condition / Complaints:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray550)),
                   const SizedBox(height: 4),
                   TextField(
                     controller: complaintCtrl,
                     maxLines: 2,
-                    style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                    style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
                     decoration: InputDecoration(
                       filled: true,
-                      fillColor: isDark ? const Color(0xFF0F172A) : Colors.grey.shade50,
+                      fillColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                     ),
                   ),
                   const SizedBox(height: 12),
-                  Text('Diagnosis:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? Colors.white70 : Colors.grey.shade700)),
+                  Text('Diagnosis:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray550)),
                   const SizedBox(height: 4),
                   TextField(
                     controller: diagnosisCtrl,
                     maxLines: 2,
-                    style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                    style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
                     decoration: InputDecoration(
                       filled: true,
-                      fillColor: isDark ? const Color(0xFF0F172A) : Colors.grey.shade50,
+                      fillColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                     ),
                   ),
@@ -3433,7 +3600,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text('Default Duration (Days):', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? Colors.white70 : Colors.grey.shade700)),
+                      Text('Default Duration (Days):', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray550)),
                       Row(
                         children: [1, 2, 3].map((d) {
                           return Padding(
@@ -3453,7 +3620,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text('Medicines in Template (${tempMeds.length}):',
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFF5EEAD4) : _teal)),
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.teal200 : _teal)),
                       TextButton.icon(
                         icon: const Icon(Icons.sync, size: 14),
                         label: const Text('Update with Current Form', style: TextStyle(fontSize: 11)),
@@ -3474,7 +3641,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                       margin: const EdgeInsets.only(bottom: 6),
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF0F172A) : Colors.grey.shade100,
+                        color: isDark ? SoftPalette.slate900 : SoftPalette.gray100,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
@@ -3482,11 +3649,11 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                           Expanded(
                             child: Text(
                               '${m['name']} (${m['timing'] ?? m['dose'] ?? '1+1+1'}) • ${m['meal'] ?? m['instructions'] ?? ''}',
-                              style: TextStyle(fontSize: 11.5, color: isDark ? Colors.white : Colors.black87),
+                              style: TextStyle(fontSize: 11.5, color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
                             ),
                           ),
                           IconButton(
-                            icon: const Icon(Icons.close, size: 16, color: Colors.red),
+                            icon: Icon(Icons.close, size: 16, color: context.adapt(SoftPalette.red400)),
                             onPressed: () => setDlgState(() => tempMeds.remove(m)),
                           ),
                         ],
@@ -3503,13 +3670,13 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                 Navigator.pop(ctx);
                 _deleteTemplate(template['id'], template['name']);
               },
-              style: TextButton.styleFrom(foregroundColor: Colors.red),
+              style: TextButton.styleFrom(foregroundColor: context.adapt(SoftPalette.red400)),
               child: const Text('Delete Template'),
             ),
             const SizedBox(width: 24),
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: _teal, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: _teal, foregroundColor: SoftPalette.gray50),
               onPressed: () async {
                 final newName = titleCtrl.text.trim();
                 if (newName.isEmpty) return;
@@ -3527,7 +3694,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                 if (ctx.mounted) Navigator.pop(ctx);
 
                 if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  AppToast.showSnackBar(context, 
                     SnackBar(
                       content: Text('✏️ Updated "$newName" template'),
                       backgroundColor: _teal,
@@ -3553,24 +3720,24 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDlgState) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
           title: Row(
             children: [
-              const Icon(Icons.tune_rounded, color: _teal, size: 22),
+              Icon(Icons.tune_rounded, color: context.adapt(_teal), size: 22),
               const SizedBox(width: 8),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text('Manage Templates',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? Colors.white : Colors.black87)),
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87)),
                     Text('${_prescriptionTemplates.length} saved template(s)',
-                        style: TextStyle(fontSize: 11.5, color: isDark ? Colors.white60 : Colors.grey.shade600)),
+                        style: TextStyle(fontSize: 11.5, color: isDark ? SoftPalette.gray50A60 : SoftPalette.gray500)),
                   ],
                 ),
               ),
               IconButton(
-                icon: const Icon(Icons.add_rounded, color: _teal),
+                icon: Icon(Icons.add_rounded, color: context.adapt(_teal)),
                 tooltip: 'Create New from Current Form',
                 onPressed: () {
                   Navigator.pop(ctx);
@@ -3587,13 +3754,13 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        Icon(Icons.bookmark_border_rounded, size: 48, color: isDark ? Colors.white38 : Colors.grey.shade400),
+                        Icon(Icons.bookmark_border_rounded, size: 48, color: isDark ? SoftPalette.gray50A38 : SoftPalette.gray300),
                         const SizedBox(height: 10),
                         Text('No templates added yet',
-                            style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white70 : Colors.grey.shade700)),
+                            style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray550)),
                         const SizedBox(height: 4),
                         Text('Fill a prescription and click "Save as Template"',
-                            style: TextStyle(fontSize: 12, color: isDark ? Colors.white54 : Colors.grey)),
+                            style: TextStyle(fontSize: 12, color: isDark ? SoftPalette.gray50A54 : SoftPalette.gray350)),
                       ],
                     ),
                   )
@@ -3608,36 +3775,36 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                         margin: const EdgeInsets.only(bottom: 8),
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: isDark ? const Color(0xFF0F172A) : Colors.grey.shade50,
+                          color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: isDark ? const Color(0xFF334155) : Colors.grey.shade200),
+                          border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.gray100),
                         ),
                         child: Row(
                           children: [
                             Container(
                               padding: const EdgeInsets.all(8),
                               decoration: BoxDecoration(
-                                color: isDark ? const Color(0xFF134E4A) : _dosePillBg,
+                                color: isDark ? SoftPalette.teal700 : _dosePillBg,
                                 borderRadius: BorderRadius.circular(8),
                               ),
-                              child: Icon(Icons.medical_services_rounded, color: isDark ? const Color(0xFF2DD4BF) : _teal, size: 18),
+                              child: Icon(Icons.medical_services_rounded, color: isDark ? SoftPalette.teal300 : _teal, size: 18),
                             ),
                             const SizedBox(width: 12),
                             Expanded(
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
-                                  Text(tpl['name'] ?? '', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: isDark ? Colors.white : Colors.black87)),
+                                  Text(tpl['name'] ?? '', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87)),
                                   const SizedBox(height: 2),
                                   Text(
                                     '${tpl['category'] ?? 'General'} • $medCount Meds • $labCount Labs • ${tpl['defaultDays'] ?? 1} Day(s)',
-                                    style: TextStyle(fontSize: 11, color: isDark ? Colors.white60 : Colors.grey.shade600),
+                                    style: TextStyle(fontSize: 11, color: isDark ? SoftPalette.gray50A60 : SoftPalette.gray500),
                                   ),
                                 ],
                               ),
                             ),
                             IconButton(
-                              icon: const Icon(Icons.bolt, color: Colors.amber, size: 20),
+                              icon: const Icon(Icons.bolt, color: SoftPalette.amber200, size: 20),
                               tooltip: 'Apply to Current Patient',
                               onPressed: () {
                                 Navigator.pop(ctx);
@@ -3645,7 +3812,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                               },
                             ),
                             IconButton(
-                              icon: Icon(Icons.edit_outlined, color: isDark ? Colors.white70 : Colors.grey.shade700, size: 18),
+                              icon: Icon(Icons.edit_outlined, color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray550, size: 18),
                               tooltip: 'Edit Template',
                               onPressed: () {
                                 Navigator.pop(ctx);
@@ -3653,7 +3820,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                               },
                             ),
                             IconButton(
-                              icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
+                              icon: Icon(Icons.delete_outline, color: context.adapt(SoftPalette.red400), size: 18),
                               tooltip: 'Delete Template',
                               onPressed: () async {
                                 await PrescriptionTemplateService.deleteTemplate(widget.branchId, tpl['id']);
@@ -3680,10 +3847,10 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     final diagnosis = widget.diagnosisController.text.trim();
 
     if (_prescriptionTemplates.length >= 5) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: const Text('⚠️ Maximum limit reached (5 templates). Please edit or delete an existing template.'),
-          backgroundColor: Colors.amber.shade800,
+          backgroundColor: SoftPalette.orange350,
           duration: const Duration(seconds: 4),
           behavior: SnackBarBehavior.floating,
         ),
@@ -3692,10 +3859,10 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     }
 
     if (complaint.isEmpty && diagnosis.isEmpty && widget.prescriptions.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         const SnackBar(
           content: Text('Please fill Diagnosis or Medicines first to save as a Template!'),
-          backgroundColor: Colors.orange,
+          backgroundColor: SoftPalette.amber300,
         ),
       );
       return;
@@ -3711,13 +3878,13 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDlgState) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
           title: Row(
             children: [
-              const Icon(Icons.bookmark_add_rounded, color: _teal, size: 24),
+              Icon(Icons.bookmark_add_rounded, color: context.adapt(_teal), size: 24),
               const SizedBox(width: 8),
               Text('Save As Reusable Template',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? Colors.white : Colors.black87)),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87)),
             ],
           ),
           content: SizedBox(
@@ -3727,32 +3894,32 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('Template Name / Title:',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? Colors.white70 : Colors.grey.shade700)),
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray550)),
                 const SizedBox(height: 6),
                 TextField(
                   controller: titleCtrl,
-                  style: TextStyle(color: isDark ? Colors.white : Colors.black87),
+                  style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
                   decoration: InputDecoration(
                     hintText: 'e.g. Acute URTI (Adult)',
                     filled: true,
-                    fillColor: isDark ? const Color(0xFF0F172A) : Colors.grey.shade50,
+                    fillColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
                 const SizedBox(height: 14),
                 Text('Category:',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? Colors.white70 : Colors.grey.shade700)),
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray550)),
                 const SizedBox(height: 6),
                 DropdownButtonFormField<String>(
                   value: selectedCategory,
-                  dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                  dropdownColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                   items: ['General', 'Respiratory', 'Gastro', 'Cardio', 'Pediatric', 'ENT', 'Ortho']
-                      .map((c) => DropdownMenuItem(value: c, child: Text(c, style: TextStyle(color: isDark ? Colors.white : Colors.black87))))
+                      .map((c) => DropdownMenuItem(value: c, child: Text(c, style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87))))
                       .toList(),
                   onChanged: (v) => setDlgState(() => selectedCategory = v ?? 'General'),
                   decoration: InputDecoration(
                     filled: true,
-                    fillColor: isDark ? const Color(0xFF0F172A) : Colors.grey.shade50,
+                    fillColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
@@ -3760,13 +3927,13 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF134E4A) : _dosePillBg,
+                    color: isDark ? SoftPalette.teal700 : _dosePillBg,
                     borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: isDark ? const Color(0xFF2DD4BF) : _dosePillBorder, width: 0.6),
+                    border: Border.all(color: isDark ? SoftPalette.teal300 : _dosePillBorder, width: 0.6),
                   ),
                   child: Text(
                     'Includes: ${widget.prescriptions.length} Medicine(s) • ${widget.labResults.length} Lab Test(s) • Day: $_daysOfMedicine',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: isDark ? const Color(0xFF5EEAD4) : _teal),
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.teal200 : _teal),
                   ),
                 ),
               ],
@@ -3775,7 +3942,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: _teal, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: _teal, foregroundColor: SoftPalette.gray50),
               onPressed: () async {
                 final name = titleCtrl.text.trim();
                 if (name.isEmpty || savingTemplate) return;
@@ -3798,7 +3965,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                   if (ctx.mounted) Navigator.pop(ctx);
 
                   if (mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    AppToast.showSnackBar(context, 
                       SnackBar(
                         content: Text('⭐ Saved "$name" to your templates!'),
                         backgroundColor: _teal,
@@ -3810,8 +3977,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                 } catch (e) {
                   savingTemplate = false;
                   if (ctx.mounted) {
-                    ScaffoldMessenger.of(ctx).showSnackBar(
-                      SnackBar(content: Text(e.toString().replaceAll('Exception: ', '')), backgroundColor: Colors.red),
+                    AppToast.showSnackBar(ctx, 
+                      SnackBar(content: Text(e.toString().replaceAll('Exception: ', '')), backgroundColor: SoftPalette.red400),
                     );
                   }
                 }
@@ -3825,8 +3992,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
   }
 
   Widget _buildQuickTemplatesBar(bool compact, bool isDark) {
-    final muted = isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600;
-    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFA7F3D0);
+    final muted = isDark ? SoftPalette.slate350 : SoftPalette.gray500;
+    final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.emerald150;
 
     Widget headerButton({
       required IconData icon,
@@ -3840,21 +4007,21 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
           decoration: BoxDecoration(
-            color: filled ? (isDark ? const Color(0xFF0F766E) : _teal) : Colors.transparent,
+            color: filled ? (isDark ? SoftPalette.teal550 : _teal) : Colors.transparent,
             borderRadius: BorderRadius.circular(8),
             border: Border.all(color: filled ? Colors.transparent : borderColor, width: 1),
           ),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(icon, size: 14, color: filled ? Colors.white : (isDark ? const Color(0xFF2DD4BF) : _teal)),
+              Icon(icon, size: 14, color: filled ? SoftPalette.gray50 : (isDark ? SoftPalette.teal300 : _teal)),
               const SizedBox(width: 5),
               Text(
                 label,
                 style: TextStyle(
                   fontSize: 11.5,
                   fontWeight: FontWeight.w700,
-                  color: filled ? Colors.white : (isDark ? const Color(0xFF2DD4BF) : _teal),
+                  color: filled ? SoftPalette.gray50 : (isDark ? SoftPalette.teal300 : _teal),
                 ),
               ),
             ],
@@ -3868,7 +4035,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       margin: const EdgeInsets.only(bottom: 12),
       padding: EdgeInsets.symmetric(horizontal: compact ? 10 : 12, vertical: 10),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF0FDF4),
+        color: isDark ? SoftPalette.slate900 : SoftPalette.emerald50m,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: borderColor, width: 1.0),
       ),
@@ -3878,14 +4045,14 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
           // Title + the two actions, always in the same place
           Row(
             children: [
-              Icon(Icons.bolt_rounded, size: 18, color: isDark ? const Color(0xFF2DD4BF) : _teal),
+              Icon(Icons.bolt_rounded, size: 18, color: isDark ? SoftPalette.teal300 : _teal),
               const SizedBox(width: 6),
               Text(
                 'Quick Templates',
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w800,
-                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                 ),
               ),
               const Spacer(),
@@ -3935,22 +4102,22 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                       constraints: const BoxConstraints(minHeight: 38),
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                        color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(
-                          color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1),
+                          color: isDark ? SoftPalette.slate700 : SoftPalette.slate200,
                           width: 1,
                         ),
                       ),
                       child: Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          FaIcon(iconData, size: 13, color: isDark ? const Color(0xFF2DD4BF) : _teal),
+                          FaIcon(iconData, size: 13, color: isDark ? SoftPalette.teal300 : _teal),
                           const SizedBox(width: 7),
                           Text(
                             name,
                             style: TextStyle(
-                              color: isDark ? Colors.white : const Color(0xFF0F172A),
+                              color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                               fontSize: 12.5,
                               fontWeight: FontWeight.w700,
                             ),
@@ -3959,7 +4126,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
                             decoration: BoxDecoration(
-                              color: (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                              color: (isDark ? SoftPalette.slate700 : SoftPalette.slate150),
                               borderRadius: BorderRadius.circular(8),
                             ),
                             child: Text(
@@ -3967,7 +4134,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                               style: TextStyle(
                                 fontSize: 10.5,
                                 fontWeight: FontWeight.w800,
-                                color: isDark ? Colors.white : const Color(0xFF334155),
+                                color: isDark ? SoftPalette.gray50 : SoftPalette.slate700,
                               ),
                             ),
                           ),
@@ -3997,15 +4164,15 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
           width: double.infinity,
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF0FDF4),
+            color: isDark ? SoftPalette.slate800 : SoftPalette.emerald50m,
             borderRadius: BorderRadius.circular(30),
             border: Border.all(
-              color: isDark ? const Color(0xFF334155) : const Color(0xFFD1FAE5),
+              color: isDark ? SoftPalette.slate700 : SoftPalette.emerald100,
               width: 1.5,
             ),
             boxShadow: [
               BoxShadow(
-                color: isDark ? Colors.black26 : Colors.teal.withValues(alpha: 0.05),
+                color: isDark ? SoftPalette.gray900A26 : SoftPalette.teal500.withValues(alpha: 0.05),
                 blurRadius: 6,
                 offset: const Offset(0, 2),
               ),
@@ -4017,14 +4184,14 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  FaIcon(FontAwesomeIcons.calendarDays, color: isDark ? const Color(0xFF2DD4BF) : _teal, size: 15),
+                  FaIcon(FontAwesomeIcons.calendarDays, color: isDark ? SoftPalette.teal300 : _teal, size: 15),
                   const SizedBox(width: 8),
                   Text(
                     'Days of Medicine',
                     style: TextStyle(
                       fontSize: 13.5,
                       fontWeight: FontWeight.w700,
-                      color: isDark ? const Color(0xFF5EEAD4) : _teal,
+                      color: isDark ? SoftPalette.teal200 : _teal,
                     ),
                   ),
                 ],
@@ -4046,14 +4213,14 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                             width: 1,
                             height: 20,
                             margin: const EdgeInsets.symmetric(horizontal: 10),
-                            color: isDark ? const Color(0xFF475569) : Colors.grey.shade300,
+                            color: isDark ? SoftPalette.slate600 : SoftPalette.gray150,
                           ),
                         InkWell(
                           onTap: isDisabled
                               ? () {
-                                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                                  AppToast.showSnackBar(context, const SnackBar(
                                     content: Text('💉 Injection prescribed — only 1 day of medicine allowed'),
-                                    backgroundColor: Colors.orange,
+                                    backgroundColor: SoftPalette.amber300,
                                     duration: Duration(seconds: 2),
                                   ));
                                 }
@@ -4083,7 +4250,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                         style: const TextStyle(
                                           fontSize: 14,
                                           fontWeight: FontWeight.bold,
-                                          color: Colors.white,
+                                          color: SoftPalette.gray50,
                                         ),
                                       ),
                                     ),
@@ -4092,7 +4259,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                       width: 4,
                                       height: 4,
                                       decoration: BoxDecoration(
-                                        color: isDark ? const Color(0xFF2DD4BF) : _teal,
+                                        color: isDark ? SoftPalette.teal300 : _teal,
                                         shape: BoxShape.circle,
                                       ),
                                     ),
@@ -4109,8 +4276,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                           fontSize: 13.5,
                                           fontWeight: FontWeight.bold,
                                           color: isDisabled
-                                              ? (isDark ? const Color(0xFF64748B) : Colors.grey.shade400)
-                                              : (isDark ? Colors.white70 : _teal),
+                                              ? (isDark ? SoftPalette.slate550 : SoftPalette.gray300)
+                                              : (isDark ? SoftPalette.gray50A70 : _teal),
                                         ),
                                       ),
                                       if (extra > 0 && !isDisabled)
@@ -4119,7 +4286,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                           style: TextStyle(
                                             fontSize: 9.5,
                                             fontWeight: FontWeight.bold,
-                                            color: Colors.orange.shade800,
+                                            color: context.adapt(SoftPalette.orange400),
                                           ),
                                         ),
                                     ],
@@ -4133,7 +4300,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                     width: 1,
                     height: 20,
                     margin: const EdgeInsets.symmetric(horizontal: 12),
-                    color: isDark ? const Color(0xFF475569) : Colors.grey.shade300,
+                    color: isDark ? SoftPalette.slate600 : SoftPalette.gray150,
                   ),
                   InkWell(
                     onTap: () => _showDaysInfoDialog(context),
@@ -4148,14 +4315,14 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.w600,
-                              color: isDark ? const Color(0xFF5EEAD4) : _teal,
+                              color: isDark ? SoftPalette.teal200 : _teal,
                             ),
                           ),
                           const SizedBox(width: 4),
                           Icon(
                             Icons.info_outline_rounded,
                             size: 15,
-                            color: isDark ? const Color(0xFF5EEAD4) : _teal,
+                            color: isDark ? SoftPalette.teal200 : _teal,
                           ),
                         ],
                       ),
@@ -4171,19 +4338,19 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: Colors.orange.shade50,
+              color: context.adapt(SoftPalette.amber100m),
               borderRadius: BorderRadius.circular(8),
-              border: Border.all(color: Colors.orange.shade300),
+              border: Border.all(color: context.adapt(SoftPalette.amber300)),
             ),
             child: Row(children: [
-              FaIcon(FontAwesomeIcons.syringe, size: 12, color: Colors.orange.shade700),
+              FaIcon(FontAwesomeIcons.syringe, size: 12, color: context.adapt(SoftPalette.orange350)),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   'Injection prescribed — only 1 day of medicine allowed.',
                   style: TextStyle(
                       fontSize: compact ? 9.5 : 10.5,
-                      color: Colors.orange.shade800,
+                      color: context.adapt(SoftPalette.orange400),
                       fontWeight: FontWeight.w600),
                 ),
               ),
@@ -4195,13 +4362,13 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
             decoration: BoxDecoration(
               color: _extraCharge > 0
-                  ? (isDark ? const Color(0xFF451A03) : const Color(0xFFFFF7ED))
-                  : _teal.withValues(alpha: 0.06),
+                  ? (isDark ? SoftPalette.orange800 : SoftPalette.amber50m)
+                  : context.adapt(_teal).withValues(alpha: 0.06),
               borderRadius: BorderRadius.circular(8),
               border: Border.all(
                 color: _extraCharge > 0
-                    ? (isDark ? const Color(0xFFF97316) : Colors.orange.shade300)
-                    : _teal.withValues(alpha: 0.2),
+                    ? (isDark ? SoftPalette.orange350 : SoftPalette.amber300)
+                    : context.adapt(_teal).withValues(alpha: 0.2),
               ),
             ),
             child: Row(children: [
@@ -4209,8 +4376,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                 _extraCharge > 0 ? Icons.monetization_on_outlined : Icons.info_outline,
                 size: 14,
                 color: _extraCharge > 0
-                    ? (isDark ? const Color(0xFFFB923C) : Colors.orange.shade800)
-                    : _teal.withValues(alpha: 0.8),
+                    ? (isDark ? SoftPalette.orange350 : SoftPalette.orange400)
+                    : context.adapt(_teal).withValues(alpha: 0.8),
               ),
               const SizedBox(width: 6),
               Expanded(
@@ -4221,8 +4388,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                   style: TextStyle(
                     fontSize: compact ? 9.5 : 10.5,
                     color: _extraCharge > 0
-                        ? (isDark ? const Color(0xFFFED7AA) : Colors.orange.shade900)
-                        : (isDark ? const Color(0xFF5EEAD4) : _teal.withValues(alpha: 0.85)),
+                        ? (isDark ? SoftPalette.amber150 : SoftPalette.orange400)
+                        : (isDark ? SoftPalette.teal200 : _teal.withValues(alpha: 0.85)),
                     fontWeight: FontWeight.w600,
                   ),
                 ),
@@ -4243,7 +4410,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       barrierDismissible: true,
       builder: (ctx) => Dialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         child: Container(
           width: 480,
           padding: const EdgeInsets.all(22),
@@ -4257,12 +4424,12 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                     width: 36,
                     height: 36,
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF134E4A) : const Color(0xFFCCFBF1),
+                      color: isDark ? SoftPalette.teal700 : SoftPalette.teal100,
                       shape: BoxShape.circle,
                     ),
                     child: Icon(
                       Icons.calendar_month_rounded,
-                      color: isDark ? const Color(0xFF2DD4BF) : _teal,
+                      color: isDark ? SoftPalette.teal300 : _teal,
                       size: 20,
                     ),
                   ),
@@ -4273,13 +4440,13 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                       style: TextStyle(
                         fontSize: 16.5,
                         fontWeight: FontWeight.w800,
-                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                        color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                       ),
                     ),
                   ),
                   IconButton(
                     icon: const Icon(Icons.close_rounded, size: 20),
-                    color: isDark ? Colors.white60 : Colors.grey.shade600,
+                    color: isDark ? SoftPalette.gray50A60 : SoftPalette.gray500,
                     onPressed: () => Navigator.of(ctx).pop(),
                   ),
                 ],
@@ -4291,16 +4458,16 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
-                  color: isDark ? const Color(0xFF5EEAD4) : _teal,
+                  color: isDark ? SoftPalette.teal200 : _teal,
                 ),
               ),
               const SizedBox(height: 8),
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                  color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: isDark ? const Color(0xFF334155) : Colors.grey.shade200),
+                  border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.gray100),
                 ),
                 child: Column(
                   children: [
@@ -4319,7 +4486,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                 style: TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w700,
-                  color: isDark ? const Color(0xFF5EEAD4) : _teal,
+                  color: isDark ? SoftPalette.teal200 : _teal,
                 ),
               ),
               const SizedBox(height: 6),
@@ -4329,7 +4496,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                 style: TextStyle(
                   fontSize: 12,
                   height: 1.45,
-                  color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF334155),
+                  color: isDark ? SoftPalette.slate200 : SoftPalette.slate700,
                 ),
               ),
               const SizedBox(height: 12),
@@ -4337,13 +4504,13 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.orange.shade50,
+                  color: context.adapt(SoftPalette.amber100m),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.orange.shade300),
+                  border: Border.all(color: context.adapt(SoftPalette.amber300)),
                 ),
                 child: Row(
                   children: [
-                    FaIcon(FontAwesomeIcons.syringe, size: 14, color: Colors.orange.shade800),
+                    FaIcon(FontAwesomeIcons.syringe, size: 14, color: context.adapt(SoftPalette.orange400)),
                     const SizedBox(width: 8),
                     Expanded(
                       child: Text(
@@ -4351,7 +4518,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                         style: TextStyle(
                           fontSize: 11.5,
                           fontWeight: FontWeight.bold,
-                          color: Colors.orange.shade900,
+                          color: context.adapt(SoftPalette.orange400),
                         ),
                       ),
                     ),
@@ -4364,7 +4531,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                 child: ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _teal,
-                    foregroundColor: Colors.white,
+                    foregroundColor: SoftPalette.gray50,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                     padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
                   ),
@@ -4383,8 +4550,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: isDark ? Colors.white70 : const Color(0xFF475569))),
-        Text(value, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706))),
+        Text(label, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: isDark ? SoftPalette.gray50A70 : SoftPalette.slate600)),
+        Text(value, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: isDark ? SoftPalette.amber200 : SoftPalette.orange400)),
       ],
     );
   }
@@ -4395,24 +4562,24 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     final diagnosis = widget.diagnosisController.text.trim();
 
     if (complaint.isEmpty || diagnosis.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      AppToast.showSnackBar(context, const SnackBar(
           content: Text(
             'Both Patient Condition and Diagnosis are required!',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold),
           ),
-          backgroundColor: Color(0xFFDC2626)));
+          backgroundColor: SoftPalette.red500));
       return;
     }
     final isVitalsOnly = widget.selectedPatientData?['isVitalsOnly'] == true ||
         widget.selectedPatientData?['vitalsOnly'] == true;
 
     if (!isVitalsOnly && widget.prescriptions.isEmpty && widget.labResults.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+      AppToast.showSnackBar(context, const SnackBar(
           content: Text(
             'Please add at least one medicine or lab test!',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold),
           ),
-          backgroundColor: Color(0xFFD97706)));
+          backgroundColor: SoftPalette.orange400));
       return;
     }
 
@@ -4446,11 +4613,11 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       if (required > othersOnly) {
         final rawStock = (inventoryMed['quantity'] as num?)?.toInt() ?? 0;
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          AppToast.showSnackBar(context, SnackBar(
             content: Text(
               '⚠️ "${med['name']}": Need $required (${rawStock > 0 ? "$rawStock on dispensary shelf" : "0 in stock"}). Dispensary will verify.',
             ),
-            backgroundColor: Colors.orange.shade800,
+            backgroundColor: SoftPalette.orange400,
             duration: const Duration(seconds: 3),
           ));
         }
@@ -4758,8 +4925,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       if (mounted) {
         Flushbar(
           message: 'Failed to save: $e',
-          messageColor: Colors.white,
-          backgroundColor: Colors.red.shade700,
+          messageColor: SoftPalette.gray50,
+          backgroundColor: SoftPalette.red500,
           duration: const Duration(seconds: 5),
         ).show(context);
       }
@@ -4940,12 +5107,12 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                   margin: const EdgeInsets.only(bottom: 16),
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF3B0764) : Colors.purple.shade50,
+                    color: isDark ? SoftPalette.violet800 : SoftPalette.purple150m,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: isDark ? const Color(0xFF9333EA) : Colors.purple.shade300, width: 1.5),
+                    border: Border.all(color: isDark ? SoftPalette.violet500 : SoftPalette.purple400, width: 1.5),
                   ),
                   child: Row(children: [
-                    Icon(Icons.monitor_heart, color: isDark ? const Color(0xFFD8B4FE) : Colors.purple.shade700, size: 24),
+                    Icon(Icons.monitor_heart, color: isDark ? SoftPalette.purple300 : SoftPalette.purple600, size: 24),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Column(
@@ -4954,7 +5121,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                           Text(
                             '🩺 Vitals Inspection Only',
                             style: TextStyle(
-                              color: isDark ? const Color(0xFFF5D0FE) : Colors.purple.shade900,
+                              color: isDark ? SoftPalette.purple150 : SoftPalette.violet700,
                               fontWeight: FontWeight.bold,
                               fontSize: 14,
                             ),
@@ -4963,7 +5130,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                           Text(
                             'This patient has come only for vitals inspection. No medicines or lab tests are required. Simply save to complete.',
                             style: TextStyle(
-                              color: isDark ? const Color(0xFFE9D5FF) : Colors.purple.shade800,
+                              color: isDark ? SoftPalette.purple150 : SoftPalette.purple600,
                               fontSize: 12,
                             ),
                           ),
@@ -4979,29 +5146,29 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
 
               // ── Patient condition ─────────────────────────────────────
               Row(children: [
-                Icon(Icons.description, color: _teal, size: compact ? 18 : 22),
+                Icon(Icons.description, color: context.adapt(_teal), size: compact ? 18 : 22),
                 SizedBox(width: compact ? 6 : 10),
                 Text('Patient Condition',
                     style: TextStyle(
-                        fontSize: compact ? 15 : 18, fontWeight: FontWeight.bold, color: _teal)),
+                        fontSize: compact ? 15 : 18, fontWeight: FontWeight.bold, color: context.adapt(_teal))),
               ]),
               const SizedBox(height: 8),
               TextField(
                 focusNode: _complaintFocus,
                 controller: widget.complaintController,
                 maxLines: 2,
-                style: TextStyle(fontSize: compact ? 13 : 15, color: isDark ? Colors.white : Colors.black87),
+                style: TextStyle(fontSize: compact ? 13 : 15, color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
                 decoration: InputDecoration(
                   hintText: "Describe patient's condition...",
-                  hintStyle: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey.shade500),
+                  hintStyle: TextStyle(color: isDark ? SoftPalette.slate550 : SoftPalette.gray350),
                   filled: true,
-                  fillColor: isDark ? const Color(0xFF0F172A) : Colors.green[50],
+                  fillColor: isDark ? SoftPalette.slate900 : SoftPalette.green100m,
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: isDark ? const BorderSide(color: Color(0xFF334155)) : BorderSide.none),
+                      borderSide: isDark ? const BorderSide(color: SoftPalette.slate700) : BorderSide.none),
                   enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: isDark ? const BorderSide(color: Color(0xFF334155)) : BorderSide.none),
+                      borderSide: isDark ? const BorderSide(color: SoftPalette.slate700) : BorderSide.none),
                   contentPadding: const EdgeInsets.all(12), isDense: compact,
                 ),
               ),
@@ -5009,29 +5176,29 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
 
               // ── Diagnosis ─────────────────────────────────────────────
               Row(children: [
-                Icon(Icons.medical_services, color: _teal, size: compact ? 18 : 22),
+                Icon(Icons.medical_services, color: context.adapt(_teal), size: compact ? 18 : 22),
                 SizedBox(width: compact ? 6 : 10),
                 Text('Diagnosis',
                     style: TextStyle(
-                        fontSize: compact ? 15 : 18, fontWeight: FontWeight.bold, color: _teal)),
+                        fontSize: compact ? 15 : 18, fontWeight: FontWeight.bold, color: context.adapt(_teal))),
               ]),
               const SizedBox(height: 8),
               TextField(
                 focusNode: _diagnosisFocus,
                 controller: widget.diagnosisController,
                 maxLines: 2,
-                style: TextStyle(fontSize: compact ? 13 : 15, color: isDark ? Colors.white : Colors.black87),
+                style: TextStyle(fontSize: compact ? 13 : 15, color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
                 decoration: InputDecoration(
                   hintText: 'Enter diagnosis...',
-                  hintStyle: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey.shade500),
+                  hintStyle: TextStyle(color: isDark ? SoftPalette.slate550 : SoftPalette.gray350),
                   filled: true,
-                  fillColor: isDark ? const Color(0xFF0F172A) : Colors.green[50],
+                  fillColor: isDark ? SoftPalette.slate900 : SoftPalette.green100m,
                   border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: isDark ? const BorderSide(color: Color(0xFF334155)) : BorderSide.none),
+                      borderSide: isDark ? const BorderSide(color: SoftPalette.slate700) : BorderSide.none),
                   enabledBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(12),
-                      borderSide: isDark ? const BorderSide(color: Color(0xFF334155)) : BorderSide.none),
+                      borderSide: isDark ? const BorderSide(color: SoftPalette.slate700) : BorderSide.none),
                   contentPadding: const EdgeInsets.all(12), isDense: compact,
                 ),
               ),
@@ -5049,9 +5216,9 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                           ? const SizedBox(
                               width: 18,
                               height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                              child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50),
                             )
-                          : const Icon(Icons.check_circle_outline, color: Colors.white, size: 20),
+                          : const Icon(Icons.check_circle_outline, color: SoftPalette.gray50, size: 20),
                       label: Text(
                         widget.isSaving ? 'Saving...' : 'Save & Complete Vitals Inspection',
                         style: TextStyle(
@@ -5060,8 +5227,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                         ),
                       ),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.purple.shade700,
-                        foregroundColor: Colors.white,
+                        backgroundColor: SoftPalette.purple600,
+                        foregroundColor: SoftPalette.gray50,
                         padding: EdgeInsets.symmetric(
                           horizontal: 20,
                           vertical: compact ? 12 : 16,
@@ -5079,7 +5246,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                     icon: Icon(
                       _showMedicinesForVitalsOnly ? Icons.expand_less : Icons.add_circle_outline,
                       size: 16,
-                      color: isDark ? const Color(0xFFC084FC) : Colors.purple.shade700,
+                      color: isDark ? SoftPalette.purple350 : SoftPalette.purple600,
                     ),
                     label: Text(
                       _showMedicinesForVitalsOnly
@@ -5088,7 +5255,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
-                        color: isDark ? const Color(0xFFC084FC) : Colors.purple.shade700,
+                        color: isDark ? SoftPalette.purple350 : SoftPalette.purple600,
                       ),
                     ),
                   ),
@@ -5112,16 +5279,16 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       IconButton(
-                        icon: const FaIcon(FontAwesomeIcons.arrowsRotate, size: 14, color: _teal),
+                        icon: FaIcon(FontAwesomeIcons.arrowsRotate, size: 14, color: context.adapt(_teal)),
                         tooltip: 'Restore & Refresh Inventory from Cloud',
                         onPressed: () async {
                           await LocalStorageService.downloadInventory(widget.branchId, forceFull: true);
                           await _loadInventory();
                           if (mounted) {
-                            ScaffoldMessenger.of(context).showSnackBar(
+                            AppToast.showSnackBar(context, 
                               const SnackBar(
                                 content: Text('✅ Medicines restored and synced from Cloud'),
-                                backgroundColor: Colors.green,
+                                backgroundColor: SoftPalette.green400,
                                 duration: Duration(seconds: 2),
                               ),
                             );
@@ -5134,8 +5301,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                         icon: const Icon(Icons.add, size: 14),
                         label: Text('Custom', style: TextStyle(fontSize: compact ? 11 : 12)),
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: isDark ? const Color(0xFF2DD4BF) : _teal,
-                          side: BorderSide(color: isDark ? const Color(0xFF2DD4BF) : _teal, width: 1),
+                          foregroundColor: isDark ? SoftPalette.teal300 : _teal,
+                          side: BorderSide(color: isDark ? SoftPalette.teal300 : _teal, width: 1),
                           padding: EdgeInsets.symmetric(horizontal: compact ? 8 : 10, vertical: compact ? 4 : 6),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         ),
@@ -5165,10 +5332,10 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                           duration: const Duration(milliseconds: 180),
                           padding: EdgeInsets.symmetric(horizontal: 14, vertical: compact ? 10 : 12),
                           decoration: BoxDecoration(
-                            color: isDark ? const Color(0xFF0F172A) : Colors.white,
+                            color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                             borderRadius: BorderRadius.circular(16),
                             border: Border.all(
-                              color: isFocused ? _teal : (isDark ? const Color(0xFF334155) : _teal.withValues(alpha: 0.35)),
+                              color: isFocused ? _teal : (isDark ? SoftPalette.slate700 : _teal.withValues(alpha: 0.35)),
                               width: isFocused ? 2 : 1.2,
                             ),
                             boxShadow: [
@@ -5184,10 +5351,10 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                               Container(
                                 padding: const EdgeInsets.all(8),
                                 decoration: BoxDecoration(
-                                  color: _teal.withValues(alpha: 0.1),
+                                  color: context.adapt(_teal).withValues(alpha: 0.1),
                                   borderRadius: BorderRadius.circular(10),
                                 ),
-                                child: const Icon(Icons.search, color: _teal, size: 18),
+                                child: Icon(Icons.search, color: context.adapt(_teal), size: 18),
                               ),
                               const SizedBox(width: 12),
                               Expanded(
@@ -5199,7 +5366,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                       style: TextStyle(
                                         fontSize: compact ? 13 : 14,
                                         fontWeight: FontWeight.w600,
-                                        color: isDark ? Colors.white : Colors.grey.shade800,
+                                        color: isDark ? SoftPalette.gray50 : SoftPalette.gray700,
                                       ),
                                     ),
                                     const SizedBox(height: 2),
@@ -5207,7 +5374,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                       'Click to search inventory by name, formula, or type',
                                       style: TextStyle(
                                         fontSize: compact ? 10.5 : 11.5,
-                                        color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade500,
+                                        color: isDark ? SoftPalette.slate350 : SoftPalette.gray350,
                                       ),
                                     ),
                                   ],
@@ -5225,13 +5392,13 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                                     Text(
                                       'Browse',
                                       style: TextStyle(
-                                        color: Colors.white,
+                                        color: SoftPalette.gray50,
                                         fontSize: 11.5,
                                         fontWeight: FontWeight.bold,
                                       ),
                                     ),
                                     SizedBox(width: 4),
-                                    Icon(Icons.arrow_forward_ios_rounded, color: Colors.white, size: 10),
+                                    Icon(Icons.arrow_forward_ios_rounded, color: SoftPalette.gray50, size: 10),
                                   ],
                                 ),
                               ),
@@ -5270,7 +5437,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                 _sectionHeader(widget.isPhysiotherapist ? 'Physiotherapies' : 'Lab Tests', widget.isPhysiotherapist ? FontAwesomeIcons.personWalking : FontAwesomeIcons.flask,
                     compact: compact,
                     action: IconButton(
-                      icon: Icon(Icons.add_circle_outline, color: _teal, size: compact ? 20 : 24),
+                      icon: Icon(Icons.add_circle_outline, color: context.adapt(_teal), size: compact ? 20 : 24),
                       onPressed: _addCustomLabTest,
                       padding: EdgeInsets.zero,
                       constraints: const BoxConstraints(),
@@ -5284,10 +5451,10 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                       label: Text(t, style: TextStyle(fontSize: compact ? 11 : 13)),
                       selected: selected,
                       selectedColor: _teal,
-                      backgroundColor: isDark ? const Color(0xFF0F172A) : null,
-                      side: BorderSide(color: selected ? _teal : (isDark ? const Color(0xFF334155) : Colors.grey.shade300)),
-                      checkmarkColor: Colors.white,
-                      labelStyle: TextStyle(color: selected ? Colors.white : (isDark ? const Color(0xFFCBD5E1) : Colors.black87)),
+                      backgroundColor: isDark ? SoftPalette.slate900 : null,
+                      side: BorderSide(color: selected ? _teal : (isDark ? SoftPalette.slate700 : SoftPalette.gray150)),
+                      checkmarkColor: SoftPalette.gray50,
+                      labelStyle: TextStyle(color: selected ? SoftPalette.gray50 : (isDark ? SoftPalette.slate200 : SoftPalette.gray900A87)),
                       materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                       onSelected: (_) {
                         setState(() {
@@ -5310,7 +5477,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                   const SizedBox(height: 12),
                   Text(widget.isPhysiotherapist ? 'Custom Physiotherapies' : 'Custom Tests',
                       style: TextStyle(
-                          fontSize: compact ? 13 : 16, fontWeight: FontWeight.bold, color: _teal)),
+                          fontSize: compact ? 13 : 16, fontWeight: FontWeight.bold, color: context.adapt(_teal))),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 6, runSpacing: 6,
@@ -5318,8 +5485,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                         .where((l) => !_currentQuickList.contains(l['name']))
                         .map((l) => Chip(
                               label: Text(l['name'], style: TextStyle(fontSize: compact ? 11 : 13)),
-                              backgroundColor: Colors.orange.shade600,
-                              labelStyle: const TextStyle(color: Colors.white),
+                              backgroundColor: SoftPalette.orange350,
+                              labelStyle: const TextStyle(color: SoftPalette.gray50),
                               onDeleted: () => setState(() => widget.labResults.remove(l)),
                               materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
                             ))
@@ -5339,8 +5506,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                     onPressed: widget.isSaving ? null : _savePrescriptionHiveFirst,
                     icon: widget.isSaving
                         ? const SizedBox(width: 18, height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                        : Icon(isVitalsOnly ? Icons.check_circle_outline : Icons.save, color: Colors.white),
+                            child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50))
+                        : Icon(isVitalsOnly ? Icons.check_circle_outline : Icons.save, color: SoftPalette.gray50),
                     label: Text(
                       widget.isSaving
                           ? 'Saving...'
@@ -5354,8 +5521,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
                           fontWeight: FontWeight.bold),
                     ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: isVitalsOnly ? Colors.purple.shade700 : _teal,
-                      foregroundColor: Colors.white,
+                      backgroundColor: isVitalsOnly ? SoftPalette.purple600 : _teal,
+                      foregroundColor: SoftPalette.gray50,
                       padding: EdgeInsets.symmetric(
                           horizontal: 24, vertical: compact ? 14 : 18),
                       shape: RoundedRectangleBorder(

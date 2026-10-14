@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:intl/intl.dart';
 import '../madrassa_strings.dart';
 import '../utils/madrassa_local_storage.dart';
@@ -37,11 +40,11 @@ class _HolidayManagementViewState extends State<HolidayManagementView> {
                     children: [
                       TextSpan(
                         text: context.t('Holiday Name'),
-                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black87),
+                        style: TextStyle(fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.gray900A87)),
                       ),
-                      const TextSpan(
+                      TextSpan(
                         text: ' *',
-                        style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+                        style: TextStyle(color: context.adapt(SoftPalette.red400), fontWeight: FontWeight.bold),
                       ),
                     ],
                   ),
@@ -64,11 +67,11 @@ class _HolidayManagementViewState extends State<HolidayManagementView> {
                     children: [
                       TextSpan(
                         text: context.t('Holiday Date'),
-                        style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.black87),
+                        style: TextStyle(fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.gray900A87)),
                       ),
-                      const TextSpan(
+                      TextSpan(
                         text: ' *',
-                        style: TextStyle(color: Colors.red, fontWeight: FontWeight.bold),
+                        style: TextStyle(color: context.adapt(SoftPalette.red400), fontWeight: FontWeight.bold),
                       ),
                     ],
                   ),
@@ -92,7 +95,7 @@ class _HolidayManagementViewState extends State<HolidayManagementView> {
                   child: Container(
                     padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                     decoration: BoxDecoration(
-                      border: Border.all(color: dateError != null ? Colors.red : Colors.grey),
+                      border: Border.all(color: dateError != null ? context.adapt(SoftPalette.red400) : context.adapt(SoftPalette.gray350)),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Row(
@@ -103,17 +106,17 @@ class _HolidayManagementViewState extends State<HolidayManagementView> {
                               ? context.t('Select Date')
                               : DateFormat('yyyy-MM-dd').format(selectedDate!),
                           style: TextStyle(
-                            color: selectedDate == null ? Colors.grey : Colors.black87,
+                            color: selectedDate == null ? context.adapt(SoftPalette.gray350) : context.adapt(SoftPalette.gray900A87),
                           ),
                         ),
-                        const Icon(Icons.calendar_today, size: 20, color: Color(0xFF008080)),
+                        Icon(Icons.calendar_today, size: 20, color: context.adapt(SoftPalette.teal550)),
                       ],
                     ),
                   ),
                 ),
                 if (dateError != null) ...[
                   const SizedBox(height: 4),
-                  Text(dateError!, style: const TextStyle(color: Colors.red, fontSize: 12)),
+                  Text(dateError!, style: TextStyle(color: context.adapt(SoftPalette.red400), fontSize: 12)),
                 ],
               ],
             ),
@@ -135,13 +138,13 @@ class _HolidayManagementViewState extends State<HolidayManagementView> {
                   }
 
                   if (!isValid) {
-                    ScaffoldMessenger.of(context).showSnackBar(
+                    AppToast.showSnackBar(context, 
                       SnackBar(
                         content: Text(
                           context.t('Please correct all validation errors to continue'),
                           style: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null),
                         ),
-                        backgroundColor: const Color(0xFFDC2626),
+                        backgroundColor: SoftPalette.red500,
                       ),
                     );
                     return;
@@ -156,8 +159,8 @@ class _HolidayManagementViewState extends State<HolidayManagementView> {
                   nav.pop();
                 },
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF008080),
-                  foregroundColor: Colors.white,
+                  backgroundColor: SoftPalette.teal550,
+                  foregroundColor: SoftPalette.gray50,
                 ),
                 child: Text(context.t('Add'), style: TextStyle(fontFamily: context.isUrdu ? 'Noori' : null)),
               ),
@@ -213,11 +216,11 @@ class _HolidayManagementViewState extends State<HolidayManagementView> {
               final hId = h['id']?.toString() ?? '';
 
               return ListTile(
-                leading: const Icon(Icons.event_note, color: Color(0xFF008080)),
+                leading: Icon(Icons.event_note, color: ctx.adapt(SoftPalette.teal550)),
                 title: Text(name),
                 subtitle: Text(displayDate),
                 trailing: IconButton(
-                  icon: const Icon(Icons.delete, color: Colors.red),
+                  icon: Icon(Icons.delete, color: ctx.adapt(SoftPalette.red400)),
                   onPressed: () => _deleteHoliday(hId),
                 ),
               );

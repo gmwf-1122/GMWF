@@ -1,5 +1,8 @@
 // lib/pages/dispensary/doctor/template_screen.dart
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:gmwf/services/local_storage_service.dart';
@@ -21,8 +24,8 @@ class TemplateScreen extends StatefulWidget {
 }
 
 class _TemplateScreenState extends State<TemplateScreen> {
-  static const Color _teal = Color(0xFF00695C);
-  static const Color _tealLight = Color(0xFFE0F2F1);
+  static const Color _teal = SoftPalette.teal600;
+  static const Color _tealLight = SoftPalette.teal100m;
 
   // Form State
   final TextEditingController _complaintCtrl = TextEditingController();
@@ -53,7 +56,7 @@ class _TemplateScreenState extends State<TemplateScreen> {
         'name': 'Viral Flu / URTI',
         'category': 'General',
         'icon': FontAwesomeIcons.headSideCough,
-        'color': Colors.teal,
+        'color': SoftPalette.teal500,
         'complaint': 'Fever, sore throat, running nose and body aches for 2 days.',
         'diagnosis': 'Acute Viral Upper Respiratory Tract Infection (URTI)',
         'defaultDays': 1,
@@ -95,7 +98,7 @@ class _TemplateScreenState extends State<TemplateScreen> {
         'name': 'Acute Gastroenteritis',
         'category': 'Gastro',
         'icon': FontAwesomeIcons.bacteria,
-        'color': Colors.amber.shade800,
+        'color': SoftPalette.orange350,
         'complaint': 'Watery diarrhea, vomiting, and abdominal cramps since morning.',
         'diagnosis': 'Acute Gastroenteritis with mild dehydration',
         'defaultDays': 1,
@@ -138,7 +141,7 @@ class _TemplateScreenState extends State<TemplateScreen> {
         'name': 'Acute Tonsillitis',
         'category': 'ENT',
         'icon': FontAwesomeIcons.temperatureHigh,
-        'color': Colors.purple,
+        'color': SoftPalette.purple550,
         'complaint': 'Severe throat pain, difficulty swallowing, high fever.',
         'diagnosis': 'Acute Follicular Tonsillitis',
         'defaultDays': 1,
@@ -169,7 +172,7 @@ class _TemplateScreenState extends State<TemplateScreen> {
         'name': 'Hypertension Review',
         'category': 'Cardio',
         'icon': FontAwesomeIcons.heartPulse,
-        'color': Colors.blueGrey,
+        'color': SoftPalette.slate500,
         'complaint': 'Routine monthly follow-up for high blood pressure. Mild morning headache.',
         'diagnosis': 'Essential Hypertension (Stage 1 / Controlled)',
         'defaultDays': 3,
@@ -268,10 +271,10 @@ class _TemplateScreenState extends State<TemplateScreen> {
       _prescriptions = medsToApply;
       _labResults = (template['labResults'] as List<dynamic>?)?.map((e) => Map<String, dynamic>.from(e as Map)).toList() ?? [];
     });
-    ScaffoldMessenger.of(context).showSnackBar(
+    AppToast.showSnackBar(context, 
       SnackBar(
         content: Text('⚡ Template "${template['name']}" applied!'),
-        backgroundColor: Colors.teal.shade800,
+        backgroundColor: SoftPalette.teal600,
         duration: const Duration(seconds: 2),
       ),
     );
@@ -279,8 +282,8 @@ class _TemplateScreenState extends State<TemplateScreen> {
 
   void _showSaveAsTemplateDialog() {
     if (_complaintCtrl.text.isEmpty && _diagnosisCtrl.text.isEmpty && _prescriptions.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please fill diagnosis or medicines first to save as template!'), backgroundColor: Colors.orange),
+      AppToast.showSnackBar(context, 
+        const SnackBar(content: Text('Please fill diagnosis or medicines first to save as template!'), backgroundColor: SoftPalette.amber300),
       );
       return;
     }
@@ -293,9 +296,9 @@ class _TemplateScreenState extends State<TemplateScreen> {
       builder: (ctx) => StatefulBuilder(
         builder: (context, setDlgState) => AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Row(
+          title: Row(
             children: [
-              Icon(Icons.bookmark_add_rounded, color: _teal, size: 24),
+              Icon(Icons.bookmark_add_rounded, color: context.adapt(_teal), size: 24),
               SizedBox(width: 8),
               Text('Save As Reusable Template', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
             ],
@@ -306,19 +309,19 @@ class _TemplateScreenState extends State<TemplateScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Template Name / Title:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+                Text('Template Name / Title:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.gray350))),
                 const SizedBox(height: 6),
                 TextField(
                   controller: titleCtrl,
                   decoration: InputDecoration(
                     hintText: 'e.g. Typhoid Fever Protocol',
                     filled: true,
-                    fillColor: Colors.grey.shade50,
+                    fillColor: context.adapt(SoftPalette.gray50),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
                 const SizedBox(height: 14),
-                const Text('Category:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.grey)),
+                Text('Category:', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.gray350))),
                 const SizedBox(height: 6),
                 DropdownButtonFormField<String>(
                   value: selectedCategory,
@@ -328,7 +331,7 @@ class _TemplateScreenState extends State<TemplateScreen> {
                   onChanged: (v) => setDlgState(() => selectedCategory = v ?? 'General'),
                   decoration: InputDecoration(
                     filled: true,
-                    fillColor: Colors.grey.shade50,
+                    fillColor: context.adapt(SoftPalette.gray50),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                 ),
@@ -336,12 +339,12 @@ class _TemplateScreenState extends State<TemplateScreen> {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: _tealLight,
+                    color: context.adapt(_tealLight),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Text(
                     'Includes: ${_prescriptions.length} Medicine(s) • ${_labResults.length} Lab Test(s) • Day: $_daysOfMedicine',
-                    style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _teal),
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: context.adapt(_teal)),
                   ),
                 ),
               ],
@@ -350,14 +353,14 @@ class _TemplateScreenState extends State<TemplateScreen> {
           actions: [
             TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: _teal, foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: _teal, foregroundColor: SoftPalette.gray50),
               onPressed: () {
                 final newTpl = {
                   'id': 'tpl_${DateTime.now().millisecondsSinceEpoch}',
                   'name': titleCtrl.text.trim(),
                   'category': selectedCategory,
                   'icon': Icons.medical_services,
-                  'color': Colors.teal.shade700,
+                  'color': SoftPalette.teal550,
                   'complaint': _complaintCtrl.text.trim(),
                   'diagnosis': _diagnosisCtrl.text.trim(),
                   'defaultDays': _daysOfMedicine,
@@ -369,8 +372,8 @@ class _TemplateScreenState extends State<TemplateScreen> {
                   _templates.insert(0, newTpl);
                 });
                 Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('⭐ Saved "${newTpl['name']}" template!'), backgroundColor: Colors.teal.shade800),
+                AppToast.showSnackBar(context, 
+                  SnackBar(content: Text('⭐ Saved "${newTpl['name']}" template!'), backgroundColor: SoftPalette.teal600),
                 );
               },
               child: const Text('Save Template'),
@@ -394,14 +397,14 @@ class _TemplateScreenState extends State<TemplateScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFF1F5F9),
+      backgroundColor: context.adapt(SoftPalette.slate100),
       appBar: AppBar(
         backgroundColor: _teal,
-        foregroundColor: Colors.white,
+        foregroundColor: SoftPalette.gray50,
         elevation: 2,
         title: const Row(
           children: [
-            Icon(Icons.bookmarks_rounded, color: Colors.white, size: 22),
+            Icon(Icons.bookmarks_rounded, color: SoftPalette.gray50, size: 22),
             SizedBox(width: 8),
             Text(
               'Doctor Prescription Templates',
@@ -412,8 +415,8 @@ class _TemplateScreenState extends State<TemplateScreen> {
         actions: [
           TextButton.icon(
             onPressed: _clearForm,
-            icon: const Icon(Icons.refresh, color: Colors.white, size: 16),
-            label: const Text('Reset Form', style: TextStyle(color: Colors.white, fontSize: 12)),
+            icon: const Icon(Icons.refresh, color: SoftPalette.gray50, size: 16),
+            label: const Text('Reset Form', style: TextStyle(color: SoftPalette.gray50, fontSize: 12)),
           ),
           const SizedBox(width: 8),
         ],
@@ -428,29 +431,29 @@ class _TemplateScreenState extends State<TemplateScreen> {
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
                 gradient: LinearGradient(
-                  colors: [Colors.teal.shade50, Colors.white],
+                  colors: [context.adapt(SoftPalette.teal100m), context.adapt(SoftPalette.gray50)],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
                 ),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: Colors.teal.shade200),
+                border: Border.all(color: context.adapt(SoftPalette.teal300)),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
-                      const Icon(Icons.bolt, color: Colors.amber, size: 20),
+                      const Icon(Icons.bolt, color: SoftPalette.amber200, size: 20),
                       const SizedBox(width: 6),
-                      const Text(
+                      Text(
                         'Disease Presets & Prescription Templates',
-                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: _teal),
+                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: context.adapt(_teal)),
                       ),
                       const Spacer(),
                       TextButton.icon(
                         onPressed: _showSaveAsTemplateDialog,
-                        icon: const Icon(Icons.bookmark_add, size: 15, color: _teal),
-                        label: const Text('Save Current as Template', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _teal)),
+                        icon: Icon(Icons.bookmark_add, size: 15, color: context.adapt(_teal)),
+                        label: Text('Save Current as Template', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: context.adapt(_teal))),
                       ),
                     ],
                   ),
@@ -460,8 +463,8 @@ class _TemplateScreenState extends State<TemplateScreen> {
                     runSpacing: 8,
                     children: _templates.map((tpl) {
                       return ActionChip(
-                        avatar: Icon(tpl['icon'] as IconData? ?? Icons.medical_services, size: 14, color: Colors.white),
-                        label: Text(tpl['name'], style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
+                        avatar: Icon(tpl['icon'] as IconData? ?? Icons.medical_services, size: 14, color: SoftPalette.gray50),
+                        label: Text(tpl['name'], style: const TextStyle(color: SoftPalette.gray50, fontSize: 12, fontWeight: FontWeight.w600)),
                         backgroundColor: tpl['color'] as Color? ?? _teal,
                         elevation: 2,
                         pressElevation: 4,
@@ -475,7 +478,7 @@ class _TemplateScreenState extends State<TemplateScreen> {
             const SizedBox(height: 18),
 
             // Complaint
-            const Text('Patient Condition / Complaints', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: _teal)),
+            Text('Patient Condition / Complaints', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: context.adapt(_teal))),
             const SizedBox(height: 6),
             TextField(
               controller: _complaintCtrl,
@@ -483,14 +486,14 @@ class _TemplateScreenState extends State<TemplateScreen> {
               decoration: InputDecoration(
                 hintText: 'e.g. High grade fever, vomiting...',
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: context.adapt(SoftPalette.gray50),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
               ),
             ),
             const SizedBox(height: 14),
 
             // Diagnosis
-            const Text('Diagnosis', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: _teal)),
+            Text('Diagnosis', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: context.adapt(_teal))),
             const SizedBox(height: 6),
             TextField(
               controller: _diagnosisCtrl,
@@ -498,7 +501,7 @@ class _TemplateScreenState extends State<TemplateScreen> {
               decoration: InputDecoration(
                 hintText: 'e.g. Acute Viral Gastroenteritis',
                 filled: true,
-                fillColor: Colors.white,
+                fillColor: context.adapt(SoftPalette.gray50),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
               ),
             ),
@@ -507,15 +510,15 @@ class _TemplateScreenState extends State<TemplateScreen> {
             // Prescribed Medicines
             Row(
               children: [
-                const FaIcon(FontAwesomeIcons.pills, color: _teal, size: 16),
+                FaIcon(FontAwesomeIcons.pills, color: context.adapt(_teal), size: 16),
                 const SizedBox(width: 8),
                 Text('Prescribed Medicines (${_prescriptions.length})',
-                    style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: _teal)),
+                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13.5, color: context.adapt(_teal))),
                 const Spacer(),
                 if (_prescriptions.isNotEmpty)
                   TextButton(
                     onPressed: () => setState(() => _prescriptions.clear()),
-                    child: const Text('Clear All', style: TextStyle(color: Colors.red, fontSize: 11)),
+                    child: Text('Clear All', style: TextStyle(color: context.adapt(SoftPalette.red400), fontSize: 11)),
                   ),
               ],
             ),
@@ -525,14 +528,14 @@ class _TemplateScreenState extends State<TemplateScreen> {
                 width: double.infinity,
                 padding: const EdgeInsets.all(24),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: context.adapt(SoftPalette.gray50),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: Colors.grey.shade200),
+                  border: Border.all(color: context.adapt(SoftPalette.gray100)),
                 ),
-                child: const Center(
+                child: Center(
                   child: Text(
                     '⚡ Click any Template above to auto-fill prescription medicines and diagnosis',
-                    style: TextStyle(color: Colors.grey, fontSize: 13),
+                    style: TextStyle(color: context.adapt(SoftPalette.gray350), fontSize: 13),
                   ),
                 ),
               )
@@ -543,19 +546,19 @@ class _TemplateScreenState extends State<TemplateScreen> {
                   margin: const EdgeInsets.only(bottom: 8),
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: context.adapt(SoftPalette.gray50),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.grey.shade300),
+                    border: Border.all(color: context.adapt(SoftPalette.gray150)),
                   ),
                   child: Row(
                     children: [
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: _tealLight,
+                          color: context.adapt(_tealLight),
                           borderRadius: BorderRadius.circular(8),
                         ),
-                        child: const FaIcon(FontAwesomeIcons.capsules, color: _teal, size: 16),
+                        child: FaIcon(FontAwesomeIcons.capsules, color: context.adapt(_teal), size: 16),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -566,13 +569,13 @@ class _TemplateScreenState extends State<TemplateScreen> {
                             const SizedBox(height: 2),
                             Text(
                               'Dose: ${m['dose']} • Freq: ${m['frequency']} • Duration: ${m['duration']} • ${m['instructions']}',
-                              style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700),
+                              style: TextStyle(fontSize: 11.5, color: context.adapt(SoftPalette.gray550)),
                             ),
                           ],
                         ),
                       ),
                       IconButton(
-                        icon: const Icon(Icons.delete_outline, color: Colors.red, size: 18),
+                        icon: Icon(Icons.delete_outline, color: context.adapt(SoftPalette.red400), size: 18),
                         onPressed: () => setState(() => _prescriptions.remove(m)),
                       ),
                     ],

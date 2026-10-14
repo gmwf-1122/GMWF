@@ -1,7 +1,10 @@
 // lib/pages/dispensary/dispensar/universal_proforma_sheet.dart
 
 import 'dart:async';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl/intl.dart';
@@ -40,17 +43,17 @@ class UniversalProformaSheetPage extends StatefulWidget {
 
 class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage> {
   // ── Palette ───────────────────────────────────────────────────────────────
-  static const _teal = Color(0xFF00695C);
-  static const _tealDark = Color(0xFF004D40);
-  static const _bg = Color(0xFFF4F7F6);
-  static const _white = Colors.white;
-  static const _headerBg = Color(0xFFE0F2F1);
-  static const _gridBorder = Color(0xFFB2DFDB);
-  static const _textDark = Color(0xFF1B2631);
-  static const _textMid = Color(0xFF4A5568);
-  static const _textLight = Color(0xFF718096);
-  static const _green600 = Color(0xFF2E7D32);
-  static const _red = Color(0xFFD32F2F);
+  static const _teal = SoftPalette.teal600;
+  static const _tealDark = SoftPalette.teal700;
+  static const _bg = SoftPalette.gray100;
+  static const _white = SoftPalette.gray50;
+  static const _headerBg = SoftPalette.teal100m;
+  static const _gridBorder = SoftPalette.teal200;
+  static const _textDark = SoftPalette.slate800;
+  static const _textMid = SoftPalette.slate600;
+  static const _textLight = SoftPalette.slate500;
+  static const _green600 = SoftPalette.green550;
+  static const _red = SoftPalette.red500;
 
   final TextEditingController _searchCtrl = TextEditingController();
   String _selectedTypeFilter = 'All';
@@ -171,7 +174,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
       context: context,
       builder: (dialogCtx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
-          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Row(
             children: [
@@ -183,7 +186,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                   style: TextStyle(
                     fontSize: 16,
                     fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : _textDark,
+                    color: isDark ? SoftPalette.gray50 : _textDark,
                   ),
                 ),
               ),
@@ -199,7 +202,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                   'Are you sure you want to permanently remove "$name" ($code) from the Universal Master Proforma Catalog?',
                   style: TextStyle(
                     fontSize: 13.5,
-                    color: isDark ? Colors.white70 : _textDark,
+                    color: isDark ? SoftPalette.gray50A70 : _textDark,
                   ),
                 ),
                 const SizedBox(height: 14),
@@ -208,19 +211,19 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                   style: TextStyle(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w600,
-                    color: isDark ? const Color(0xFFFF6B6B) : _red,
+                    color: isDark ? SoftPalette.red350 : _red,
                   ),
                 ),
                 const SizedBox(height: 4),
                 TextField(
                   controller: reasonCtrl,
                   maxLines: 2,
-                  style: TextStyle(color: isDark ? Colors.white : _textDark, fontSize: 13),
+                  style: TextStyle(color: isDark ? SoftPalette.gray50 : _textDark, fontSize: 13),
                   decoration: InputDecoration(
                     hintText: 'e.g. Discontinued formulation per Chairman / HQ decision',
-                    hintStyle: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey.shade400, fontSize: 12.5),
+                    hintStyle: TextStyle(color: isDark ? SoftPalette.slate550 : SoftPalette.gray300, fontSize: 12.5),
                     filled: true,
-                    fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                    fillColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                   ),
                 ),
@@ -235,13 +238,13 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: _red,
-                foregroundColor: Colors.white,
+                foregroundColor: SoftPalette.gray50,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
               onPressed: () async {
                 final reason = reasonCtrl.text.trim();
                 if (reason.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  AppToast.showSnackBar(context, 
                     const SnackBar(
                       content: Text('A mandatory reason is required to delete a master proforma item!'),
                       backgroundColor: _red,
@@ -283,10 +286,10 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
 
                 final ok = await MasterProformaService.deleteProformaItem(code: code, auditLog: auditLog);
                 if (ok && mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  AppToast.showSnackBar(context, 
                     SnackBar(
                       content: Text('Removed "$name" from Master Proforma Catalog!'),
-                      backgroundColor: const Color(0xFF00897B),
+                      backgroundColor: SoftPalette.teal500,
                     ),
                   );
                   _loadProformaData();
@@ -312,18 +315,18 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
       context: context,
       builder: (dialogCtx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
-          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Row(
             children: [
-              const Icon(Icons.add_circle, color: Color(0xFF00897B), size: 24),
+              const Icon(Icons.add_circle, color: SoftPalette.teal500, size: 24),
               const SizedBox(width: 10),
               Text(
                 'Register Medicine to Master Proforma',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
-                  color: isDark ? Colors.white : _textDark,
+                  color: isDark ? SoftPalette.gray50 : _textDark,
                 ),
               ),
             ],
@@ -339,22 +342,22 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                     'Note: Only Chairman and HQ Managers can add permanent catalog items. An audit log with mandatory reason will be permanently recorded.',
                     style: TextStyle(
                       fontSize: 12,
-                      color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
+                      color: isDark ? SoftPalette.slate350 : SoftPalette.gray500,
                     ),
                   ),
                   const SizedBox(height: 14),
 
                   // Formula Name
-                  Text('Medicine Formula / Generic Name *', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: isDark ? const Color(0xFF38BDF8) : _teal)),
+                  Text('Medicine Formula / Generic Name *', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.sky350 : _teal)),
                   const SizedBox(height: 4),
                   TextField(
                     controller: nameCtrl,
-                    style: TextStyle(color: isDark ? Colors.white : _textDark, fontSize: 13.5),
+                    style: TextStyle(color: isDark ? SoftPalette.gray50 : _textDark, fontSize: 13.5),
                     decoration: InputDecoration(
                       hintText: 'e.g. Paracetamol + Tramadol (Zaldiar)',
-                      hintStyle: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey.shade400, fontSize: 13),
+                      hintStyle: TextStyle(color: isDark ? SoftPalette.slate550 : SoftPalette.gray300, fontSize: 13),
                       filled: true,
-                      fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                      fillColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                     ),
@@ -368,15 +371,15 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Category / Type *', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: isDark ? const Color(0xFF38BDF8) : _teal)),
+                            Text('Category / Type *', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.sky350 : _teal)),
                             const SizedBox(height: 4),
                             DropdownButtonFormField<String>(
                               value: selectedType,
-                              dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
-                              style: TextStyle(color: isDark ? Colors.white : _textDark, fontSize: 13),
+                              dropdownColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+                              style: TextStyle(color: isDark ? SoftPalette.gray50 : _textDark, fontSize: 13),
                               decoration: InputDecoration(
                                 filled: true,
-                                fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                                fillColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                               ),
@@ -404,16 +407,16 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Text('Dose *', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: isDark ? const Color(0xFF38BDF8) : _teal)),
+                            Text('Dose *', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.sky350 : _teal)),
                             const SizedBox(height: 4),
                             TextField(
                               controller: doseCtrl,
-                              style: TextStyle(color: isDark ? Colors.white : _textDark, fontSize: 13.5),
+                              style: TextStyle(color: isDark ? SoftPalette.gray50 : _textDark, fontSize: 13.5),
                               decoration: InputDecoration(
                                 hintText: 'e.g. 500 mg, 15 ml',
-                                hintStyle: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey.shade400, fontSize: 13),
+                                hintStyle: TextStyle(color: isDark ? SoftPalette.slate550 : SoftPalette.gray300, fontSize: 13),
                                 filled: true,
-                                fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                                fillColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                                 contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                               ),
@@ -426,16 +429,16 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                   const SizedBox(height: 12),
 
                   // Barcode (Optional)
-                  Text('Item Code / Barcode (Optional)', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: isDark ? const Color(0xFF38BDF8) : _teal)),
+                  Text('Item Code / Barcode (Optional)', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.sky350 : _teal)),
                   const SizedBox(height: 4),
                   TextField(
                     controller: barcodeCtrl,
-                    style: TextStyle(color: isDark ? Colors.white : _textDark, fontSize: 13),
+                    style: TextStyle(color: isDark ? SoftPalette.gray50 : _textDark, fontSize: 13),
                     decoration: InputDecoration(
                       hintText: 'Leave empty to auto-generate (e.g. MED-GEN-1234)',
-                      hintStyle: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey.shade400, fontSize: 12),
+                      hintStyle: TextStyle(color: isDark ? SoftPalette.slate550 : SoftPalette.gray300, fontSize: 12),
                       filled: true,
-                      fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                      fillColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                     ),
@@ -443,21 +446,21 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                   const SizedBox(height: 14),
 
                   // Reason for Addition (MANDATORY)
-                  Text('Reason for Addition (Mandatory Audit Requirement) *', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFFF59E0B) : const Color(0xFFB45309))),
+                  Text('Reason for Addition (Mandatory Audit Requirement) *', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.amber300 : SoftPalette.orange500)),
                   const SizedBox(height: 4),
                   TextField(
                     controller: reasonCtrl,
                     maxLines: 2,
-                    style: TextStyle(color: isDark ? Colors.white : _textDark, fontSize: 13),
+                    style: TextStyle(color: isDark ? SoftPalette.gray50 : _textDark, fontSize: 13),
                     decoration: InputDecoration(
                       hintText: 'e.g. Added permanent formula per HQ / Chairman decision',
-                      hintStyle: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey.shade400, fontSize: 12),
+                      hintStyle: TextStyle(color: isDark ? SoftPalette.slate550 : SoftPalette.gray300, fontSize: 12),
                       filled: true,
-                      fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFFFFBEB),
+                      fillColor: isDark ? SoftPalette.slate900 : SoftPalette.yellow50m,
                       contentPadding: const EdgeInsets.all(10),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: Color(0xFFF59E0B)),
+                        borderSide: const BorderSide(color: SoftPalette.amber300),
                       ),
                     ),
                   ),
@@ -468,12 +471,12 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogCtx),
-              child: Text('Cancel', style: TextStyle(color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600)),
+              child: Text('Cancel', style: TextStyle(color: isDark ? SoftPalette.slate350 : SoftPalette.gray500)),
             ),
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF00897B),
-                foregroundColor: Colors.white,
+                backgroundColor: SoftPalette.teal500,
+                foregroundColor: SoftPalette.gray50,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
               onPressed: () async {
@@ -481,11 +484,11 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                 final dose = doseCtrl.text.trim();
                 final reason = reasonCtrl.text.trim();
                 if (name.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please enter medicine formula/name'), backgroundColor: Colors.red));
+                  AppToast.showSnackBar(context, const SnackBar(content: Text('Please enter medicine formula/name'), backgroundColor: SoftPalette.red400));
                   return;
                 }
                 if (reason.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Reason for adding to Master Proforma is required for audit recording.'), backgroundColor: Colors.red));
+                  AppToast.showSnackBar(context, const SnackBar(content: Text('Reason for adding to Master Proforma is required for audit recording.'), backgroundColor: SoftPalette.red400));
                   return;
                 }
 
@@ -533,10 +536,10 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                 if (ok) {
                   Navigator.pop(dialogCtx);
                   _loadProformaData();
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  AppToast.showSnackBar(context, 
                     SnackBar(
                       content: Text('Added "$cleanFormula" to Universal Master Proforma with Permanent Audit Log!'),
-                      backgroundColor: const Color(0xFF00897B),
+                      backgroundColor: SoftPalette.teal500,
                     ),
                   );
                 }
@@ -572,18 +575,18 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
       context: context,
       builder: (dialogCtx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
-          backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+          backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Row(
             children: [
-              const Icon(Icons.edit_note, color: Color(0xFF00897B), size: 24),
+              const Icon(Icons.edit_note, color: SoftPalette.teal500, size: 24),
               const SizedBox(width: 10),
               Text(
                 'Edit Master Proforma Medicine',
                 style: TextStyle(
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
-                  color: isDark ? Colors.white : _textDark,
+                  color: isDark ? SoftPalette.gray50 : _textDark,
                 ),
               ),
             ],
@@ -599,10 +602,10 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF334155) : Colors.grey.shade200,
+                      color: isDark ? SoftPalette.slate700 : SoftPalette.gray100,
                       borderRadius: BorderRadius.circular(6),
                     ),
-                    child: Text(code, style: TextStyle(fontFamily: 'monospace', fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFF7DD3FC) : _textDark)),
+                    child: Text(code, style: TextStyle(fontFamily: 'monospace', fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.sky300 : _textDark)),
                   ),
                   const SizedBox(height: 14),
 
@@ -610,21 +613,21 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF0F172A) : Colors.grey.shade50,
+                      color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: isDark ? const Color(0xFF334155) : Colors.grey.shade300),
+                      border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.gray150),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Current Values', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600)),
+                        Text('Current Values', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.slate350 : SoftPalette.gray500)),
                         const SizedBox(height: 4),
                         Row(children: [
-                          Chip(label: Text(currentType, style: const TextStyle(fontSize: 10, color: Colors.white, fontWeight: FontWeight.bold)), backgroundColor: _getTypeBadgeColor(currentType), visualDensity: VisualDensity.compact, padding: EdgeInsets.zero),
+                          Chip(label: Text(currentType, style: const TextStyle(fontSize: 10, color: SoftPalette.gray50, fontWeight: FontWeight.bold)), backgroundColor: _getTypeBadgeColor(currentType), visualDensity: VisualDensity.compact, padding: EdgeInsets.zero),
                           const SizedBox(width: 8),
-                          Text(currentDose.isNotEmpty ? currentDose : '-', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? Colors.white70 : _textMid)),
+                          Text(currentDose.isNotEmpty ? currentDose : '-', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50A70 : _textMid)),
                           const SizedBox(width: 8),
-                          Expanded(child: Text(currentName, style: TextStyle(fontSize: 12, color: isDark ? Colors.white70 : _textDark), overflow: TextOverflow.ellipsis)),
+                          Expanded(child: Text(currentName, style: TextStyle(fontSize: 12, color: isDark ? SoftPalette.gray50A70 : _textDark), overflow: TextOverflow.ellipsis)),
                         ]),
                       ],
                     ),
@@ -632,14 +635,14 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                   const SizedBox(height: 14),
 
                   // New Name
-                  Text('Formula Name *', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: isDark ? const Color(0xFF38BDF8) : _teal)),
+                  Text('Formula Name *', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.sky350 : _teal)),
                   const SizedBox(height: 4),
                   TextField(
                     controller: nameCtrl,
-                    style: TextStyle(color: isDark ? Colors.white : _textDark, fontSize: 13.5),
+                    style: TextStyle(color: isDark ? SoftPalette.gray50 : _textDark, fontSize: 13.5),
                     decoration: InputDecoration(
                       filled: true,
-                      fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                      fillColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                     ),
@@ -647,15 +650,15 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                   const SizedBox(height: 14),
 
                   // Type Dropdown
-                  Text('Type *', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: isDark ? const Color(0xFF38BDF8) : _teal)),
+                  Text('Type *', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.sky350 : _teal)),
                   const SizedBox(height: 4),
                   DropdownButtonFormField<String>(
                     value: selectedType,
-                    dropdownColor: isDark ? const Color(0xFF1E293B) : Colors.white,
-                    style: TextStyle(color: isDark ? Colors.white : _textDark, fontSize: 13),
+                    dropdownColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+                    style: TextStyle(color: isDark ? SoftPalette.gray50 : _textDark, fontSize: 13),
                     decoration: InputDecoration(
                       filled: true,
-                      fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                      fillColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                     ),
@@ -667,16 +670,16 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                   const SizedBox(height: 14),
 
                   // Dose
-                  Text('Dose', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: isDark ? const Color(0xFF38BDF8) : _teal)),
+                  Text('Dose', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.sky350 : _teal)),
                   const SizedBox(height: 4),
                   TextField(
                     controller: doseCtrl,
-                    style: TextStyle(color: isDark ? Colors.white : _textDark, fontSize: 13.5),
+                    style: TextStyle(color: isDark ? SoftPalette.gray50 : _textDark, fontSize: 13.5),
                     decoration: InputDecoration(
                       hintText: 'e.g. 500mg, 5ml, Standard',
-                      hintStyle: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey.shade400, fontSize: 12),
+                      hintStyle: TextStyle(color: isDark ? SoftPalette.slate550 : SoftPalette.gray300, fontSize: 12),
                       filled: true,
-                      fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                      fillColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                       border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
                     ),
@@ -684,21 +687,21 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                   const SizedBox(height: 14),
 
                   // Reason for Edit (MANDATORY)
-                  Text('Reason for Modification (Mandatory Audit) *', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFFF59E0B) : const Color(0xFFB45309))),
+                  Text('Reason for Modification (Mandatory Audit) *', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.amber300 : SoftPalette.orange500)),
                   const SizedBox(height: 4),
                   TextField(
                     controller: reasonCtrl,
                     maxLines: 2,
-                    style: TextStyle(color: isDark ? Colors.white : _textDark, fontSize: 13),
+                    style: TextStyle(color: isDark ? SoftPalette.gray50 : _textDark, fontSize: 13),
                     decoration: InputDecoration(
                       hintText: 'e.g. Corrected dose from 250mg to 500mg per HQ directive',
-                      hintStyle: TextStyle(color: isDark ? const Color(0xFF64748B) : Colors.grey.shade400, fontSize: 12),
+                      hintStyle: TextStyle(color: isDark ? SoftPalette.slate550 : SoftPalette.gray300, fontSize: 12),
                       filled: true,
-                      fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFFFFBEB),
+                      fillColor: isDark ? SoftPalette.slate900 : SoftPalette.yellow50m,
                       contentPadding: const EdgeInsets.all(10),
                       border: OutlineInputBorder(
                         borderRadius: BorderRadius.circular(8),
-                        borderSide: const BorderSide(color: Color(0xFFF59E0B)),
+                        borderSide: const BorderSide(color: SoftPalette.amber300),
                       ),
                     ),
                   ),
@@ -709,12 +712,12 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(dialogCtx),
-              child: Text('Cancel', style: TextStyle(color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600)),
+              child: Text('Cancel', style: TextStyle(color: isDark ? SoftPalette.slate350 : SoftPalette.gray500)),
             ),
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF00897B),
-                foregroundColor: Colors.white,
+                backgroundColor: SoftPalette.teal500,
+                foregroundColor: SoftPalette.gray50,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
               ),
               onPressed: () async {
@@ -723,11 +726,11 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                 final newType = selectedType;
                 final reason = reasonCtrl.text.trim();
                 if (newName.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Formula name cannot be empty'), backgroundColor: Colors.red));
+                  AppToast.showSnackBar(context, const SnackBar(content: Text('Formula name cannot be empty'), backgroundColor: SoftPalette.red400));
                   return;
                 }
                 if (reason.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Reason for modification is required for audit recording.'), backgroundColor: Colors.red));
+                  AppToast.showSnackBar(context, const SnackBar(content: Text('Reason for modification is required for audit recording.'), backgroundColor: SoftPalette.red400));
                   return;
                 }
 
@@ -765,10 +768,10 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                 if (ok) {
                   Navigator.pop(dialogCtx);
                   _loadProformaData();
-                  ScaffoldMessenger.of(context).showSnackBar(
+                  AppToast.showSnackBar(context, 
                     SnackBar(
                       content: Text('Updated "$currentName" → "$newName" ($newType / $newDose) with Audit Log!'),
-                      backgroundColor: const Color(0xFF00897B),
+                      backgroundColor: SoftPalette.teal500,
                     ),
                   );
                 }
@@ -791,11 +794,11 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
     showDialog(
       context: context,
       builder: (dialogCtx) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+        backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
-            const Icon(Icons.history_rounded, color: Color(0xFF00897B), size: 24),
+            const Icon(Icons.history_rounded, color: SoftPalette.teal500, size: 24),
             const SizedBox(width: 10),
             Expanded(
               child: Column(
@@ -806,14 +809,14 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                     style: TextStyle(
                       fontSize: 16,
                       fontWeight: FontWeight.bold,
-                      color: isDark ? Colors.white : _textDark,
+                      color: isDark ? SoftPalette.gray50 : _textDark,
                     ),
                   ),
                   Text(
                     '$name ($code)',
                     style: TextStyle(
                       fontSize: 12,
-                      color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600,
+                      color: isDark ? SoftPalette.slate350 : SoftPalette.gray500,
                     ),
                   ),
                 ],
@@ -830,11 +833,11 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.verified_outlined, size: 36, color: isDark ? const Color(0xFF64748B) : Colors.grey.shade400),
+                        Icon(Icons.verified_outlined, size: 36, color: isDark ? SoftPalette.slate550 : SoftPalette.gray300),
                         const SizedBox(height: 10),
                         Text(
                           'Standard Master Seed Item (No edits recorded)',
-                          style: TextStyle(fontSize: 13, color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
+                          style: TextStyle(fontSize: 13, color: isDark ? SoftPalette.slate350 : SoftPalette.gray500),
                         ),
                       ],
                     ),
@@ -863,8 +866,8 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                               decoration: BoxDecoration(
                                 color: action.contains('edit')
-                                    ? (isDark ? const Color(0xFF0284C7).withValues(alpha: 0.2) : Colors.blue.shade50)
-                                    : (isDark ? const Color(0xFF059669).withValues(alpha: 0.2) : Colors.green.shade50),
+                                    ? (isDark ? SoftPalette.sky500.withValues(alpha: 0.2) : SoftPalette.slate100)
+                                    : (isDark ? SoftPalette.emerald500.withValues(alpha: 0.2) : SoftPalette.green100m),
                                 borderRadius: BorderRadius.circular(4),
                               ),
                               child: Text(
@@ -873,8 +876,8 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                                   fontSize: 11.5,
                                   fontWeight: FontWeight.bold,
                                   color: action.contains('edit')
-                                      ? (isDark ? const Color(0xFF38BDF8) : Colors.blue.shade800)
-                                      : (isDark ? const Color(0xFF34D399) : Colors.green.shade800),
+                                      ? (isDark ? SoftPalette.sky350 : SoftPalette.blue550)
+                                      : (isDark ? SoftPalette.emerald300 : SoftPalette.green550),
                                 ),
                               ),
                             ),
@@ -882,7 +885,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                             if (time.isNotEmpty)
                               Text(
                                 time.length > 16 ? time.substring(0, 16).replaceAll('T', ' ') : time,
-                                style: TextStyle(fontSize: 11, color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade500),
+                                style: TextStyle(fontSize: 11, color: isDark ? SoftPalette.slate350 : SoftPalette.gray350),
                               ),
                           ],
                         ),
@@ -892,23 +895,23 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                           style: TextStyle(
                             fontSize: 12.5,
                             fontWeight: FontWeight.w600,
-                            color: isDark ? Colors.white : _textDark,
+                            color: isDark ? SoftPalette.gray50 : _textDark,
                           ),
                         ),
                         if (oldN != null && newN != null) ...[
                           const SizedBox(height: 3),
                           Text(
                             'Changed from "$oldN" to "$newN"',
-                            style: TextStyle(fontSize: 12, color: isDark ? const Color(0xFFCBD5E1) : Colors.grey.shade700),
+                            style: TextStyle(fontSize: 12, color: isDark ? SoftPalette.slate200 : SoftPalette.gray550),
                           ),
                         ],
                         const SizedBox(height: 6),
                         Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: isDark ? const Color(0xFF0F172A) : const Color(0xFFFFFBEB),
+                            color: isDark ? SoftPalette.slate900 : SoftPalette.yellow50m,
                             borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFFDE68A)),
+                            border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.yellow150),
                           ),
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -920,7 +923,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                                   style: TextStyle(
                                     fontSize: 12,
                                     fontStyle: FontStyle.italic,
-                                    color: isDark ? const Color(0xFFFBBF24) : const Color(0xFF92400E),
+                                    color: isDark ? SoftPalette.amber200 : SoftPalette.orange600,
                                   ),
                                 ),
                               ),
@@ -1127,7 +1130,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
 
       _filterData();
 
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: Text('Selected $count items with Quantity > 0'),
           backgroundColor: _teal,
@@ -1151,7 +1154,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
           data: Theme.of(context).copyWith(
             colorScheme: const ColorScheme.light(
               primary: _teal,
-              onPrimary: Colors.white,
+              onPrimary: SoftPalette.gray50,
               onSurface: _textDark,
             ),
           ),
@@ -1180,7 +1183,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
         final expDate = _expiryDates[code] ?? DateTime.now().add(const Duration(days: 365));
 
         if (qty < 0) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          AppToast.showSnackBar(context, 
             SnackBar(
               content: Text('Please enter a valid non-negative quantity for "${item['name']}"'),
               backgroundColor: _red,
@@ -1199,7 +1202,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
     }
 
     if (itemsToSave.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         const SnackBar(
           content: Text('No items selected! Check at least one medicine to add to inventory.'),
           backgroundColor: _red,
@@ -1492,7 +1495,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
           ),
           content: Text(
             'Successfully added/updated $totalNewCount proforma medicines ($totalAdded total pcs) in Branch Inventory!',
-            style: const TextStyle(fontSize: 14, color: _textDark),
+            style: TextStyle(fontSize: 14, color: context.adapt(_textDark)),
           ),
           actions: [
             ElevatedButton(
@@ -1508,7 +1511,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                   Navigator.of(context).pop(true);
                 }
               },
-              child: const Text('Back to Inventory', style: TextStyle(color: Colors.white)),
+              child: const Text('Back to Inventory', style: TextStyle(color: SoftPalette.gray50)),
             ),
           ],
         ),
@@ -1516,7 +1519,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
     } catch (e) {
       if (!mounted) return;
       setState(() => _isSavingBatch = false);
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(content: Text('Failed to save batch: $e'), backgroundColor: _red),
       );
     }
@@ -1535,18 +1538,18 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
   Widget build(BuildContext context) {
     final isDark = _isDark;
     return Scaffold(
-      backgroundColor: isDark ? const Color(0xFF0F172A) : _bg,
+      backgroundColor: isDark ? SoftPalette.slate900 : _bg,
       appBar: AppBar(
-        backgroundColor: isDark ? const Color(0xFF0F172A) : _tealDark,
+        backgroundColor: isDark ? SoftPalette.slate900 : _tealDark,
         elevation: 2,
         automaticallyImplyLeading: false,
         leading: (!widget.isEmbedded && Navigator.canPop(context))
-            ? AppBackButton(color: Colors.white)
+            ? AppBackButton(color: SoftPalette.gray50)
             : null,
-        iconTheme: const IconThemeData(color: Colors.white),
+        iconTheme: const IconThemeData(color: SoftPalette.gray50),
         title: Row(
           children: [
-            const Icon(FontAwesomeIcons.fileExcel, color: Colors.white, size: 22),
+            const Icon(FontAwesomeIcons.fileExcel, color: SoftPalette.gray50, size: 22),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -1555,11 +1558,11 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                 children: [
                   const Text(
                     'Universal Proforma Sheet',
-                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                    style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 18),
                   ),
                   const Text(
                     'Master Generic Formula Catalog (Universal)',
-                    style: TextStyle(color: Color(0xFF80CBC4), fontSize: 11.5, fontWeight: FontWeight.w600),
+                    style: TextStyle(color: SoftPalette.teal300, fontSize: 11.5, fontWeight: FontWeight.w600),
                   ),
                 ],
               ),
@@ -1572,20 +1575,20 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
               padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
               child: ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF00897B),
-                  foregroundColor: Colors.white,
+                  backgroundColor: SoftPalette.teal500,
+                  foregroundColor: SoftPalette.gray50,
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 0),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   elevation: 2,
                 ),
                 onPressed: _showAddMedicineDialog,
-                icon: const Icon(Icons.add_circle_outline, size: 16, color: Colors.white),
+                icon: const Icon(Icons.add_circle_outline, size: 16, color: SoftPalette.gray50),
                 label: const Text('Add Medicine', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12.5)),
               ),
             ),
           IconButton(
             tooltip: 'Auto-Select Items with Qty > 0',
-            icon: const Icon(FontAwesomeIcons.listCheck, color: Colors.white, size: 18),
+            icon: const Icon(FontAwesomeIcons.listCheck, color: SoftPalette.gray50, size: 18),
             onPressed: _selectItemsWithQty,
           ),
           const SizedBox(width: 8),
@@ -1617,7 +1620,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
   Widget _buildFilterHeader() {
     final isDark = _isDark;
     return Container(
-      color: isDark ? const Color(0xFF1E293B) : _white,
+      color: isDark ? SoftPalette.slate800 : _white,
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       child: Column(
         children: [
@@ -1626,27 +1629,27 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
               Expanded(
                 child: TextField(
                   controller: _searchCtrl,
-                  style: TextStyle(color: isDark ? Colors.white : _textDark),
+                  style: TextStyle(color: isDark ? SoftPalette.gray50 : _textDark),
                   decoration: InputDecoration(
                     hintText: 'Search Proforma by Name, Formula, Barcode...',
-                    hintStyle: TextStyle(color: isDark ? const Color(0xFF94A3B8) : _textLight),
-                    prefixIcon: Icon(Icons.search, color: isDark ? const Color(0xFF38BDF8) : _teal),
+                    hintStyle: TextStyle(color: isDark ? SoftPalette.slate350 : _textLight),
+                    prefixIcon: Icon(Icons.search, color: isDark ? SoftPalette.sky350 : _teal),
                     suffixIcon: _searchCtrl.text.isNotEmpty
                         ? IconButton(
-                            icon: Icon(Icons.clear, size: 18, color: isDark ? const Color(0xFF94A3B8) : Colors.grey),
+                            icon: Icon(Icons.clear, size: 18, color: isDark ? SoftPalette.slate350 : SoftPalette.gray350),
                             onPressed: () => _searchCtrl.clear(),
                           )
                         : null,
                     filled: true,
-                    fillColor: isDark ? const Color(0xFF0F172A) : _bg,
+                    fillColor: isDark ? SoftPalette.slate900 : _bg,
                     contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
                     border: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide(color: isDark ? const Color(0xFF334155) : _gridBorder),
+                      borderSide: BorderSide(color: isDark ? SoftPalette.slate700 : _gridBorder),
                     ),
                     focusedBorder: OutlineInputBorder(
                       borderRadius: BorderRadius.circular(10),
-                      borderSide: BorderSide(color: isDark ? const Color(0xFF38BDF8) : _teal, width: 2),
+                      borderSide: BorderSide(color: isDark ? SoftPalette.sky350 : _teal, width: 2),
                     ),
                   ),
                 ),
@@ -1654,8 +1657,8 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
               const SizedBox(width: 12),
               OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
-                  foregroundColor: isDark ? const Color(0xFF38BDF8) : _teal,
-                  side: BorderSide(color: isDark ? const Color(0xFF38BDF8) : _teal),
+                  foregroundColor: isDark ? SoftPalette.sky350 : _teal,
+                  side: BorderSide(color: isDark ? SoftPalette.sky350 : _teal),
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                 ),
@@ -1673,16 +1676,16 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF0F766E).withValues(alpha: 0.2) : _teal.withValues(alpha: 0.08),
+                  color: isDark ? SoftPalette.teal550.withValues(alpha: 0.2) : _teal.withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: isDark ? const Color(0xFF0F766E) : _teal.withValues(alpha: 0.2)),
+                  border: Border.all(color: isDark ? SoftPalette.teal550 : _teal.withValues(alpha: 0.2)),
                 ),
                 child: Text(
                   'Total Master Catalog: ${_proformaMasterList.length} Medicines',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
-                    color: isDark ? const Color(0xFF38BDF8) : _tealDark,
+                    color: isDark ? SoftPalette.sky350 : _tealDark,
                   ),
                 ),
               ),
@@ -1690,16 +1693,16 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF1E3A3A) : Colors.blue.shade50,
+                  color: isDark ? SoftPalette.teal750m : SoftPalette.slate100,
                   borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: isDark ? const Color(0xFF0284C7) : Colors.blue.shade200),
+                  border: Border.all(color: isDark ? SoftPalette.sky500 : SoftPalette.sky300),
                 ),
                 child: Text(
                   'Showing: ${_filteredList.length} Matching',
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
-                    color: isDark ? const Color(0xFF7DD3FC) : Colors.blue.shade900,
+                    color: isDark ? SoftPalette.sky300 : SoftPalette.blue600,
                   ),
                 ),
               ),
@@ -1708,13 +1711,13 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
                   color: _selectedCount > 0
-                      ? (isDark ? const Color(0xFF065F46) : Colors.green.shade50)
-                      : (isDark ? const Color(0xFF334155) : Colors.grey.shade100),
+                      ? (isDark ? SoftPalette.emerald600 : SoftPalette.green100m)
+                      : (isDark ? SoftPalette.slate700 : SoftPalette.gray100),
                   borderRadius: BorderRadius.circular(6),
                   border: Border.all(
                     color: _selectedCount > 0
-                        ? (isDark ? const Color(0xFF10B981) : Colors.green.shade300)
-                        : (isDark ? const Color(0xFF475569) : Colors.grey.shade300),
+                        ? (isDark ? SoftPalette.emerald350 : SoftPalette.green300)
+                        : (isDark ? SoftPalette.slate600 : SoftPalette.gray150),
                   ),
                 ),
                 child: Text(
@@ -1723,8 +1726,8 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                     fontSize: 12,
                     fontWeight: FontWeight.bold,
                     color: _selectedCount > 0
-                        ? (isDark ? const Color(0xFF34D399) : Colors.green.shade800)
-                        : (isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
+                        ? (isDark ? SoftPalette.emerald300 : SoftPalette.green550)
+                        : (isDark ? SoftPalette.slate350 : SoftPalette.gray500),
                   ),
                 ),
               ),
@@ -1743,18 +1746,18 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                 final cat = _typeCategories[idx];
                 final isSelected = _selectedTypeFilter == cat;
                 return ChoiceChip(
-                  checkmarkColor: Colors.white,
+                  checkmarkColor: SoftPalette.gray50,
                   label: Text(
                     cat,
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                      color: isSelected ? Colors.white : (isDark ? const Color(0xFFCBD5E1) : _textMid),
+                      color: isSelected ? SoftPalette.gray50 : (isDark ? SoftPalette.slate200 : _textMid),
                     ),
                   ),
                   selected: isSelected,
-                  selectedColor: isDark ? const Color(0xFF0F766E) : _teal,
-                  backgroundColor: isDark ? const Color(0xFF334155) : _bg,
+                  selectedColor: isDark ? SoftPalette.teal550 : _teal,
+                  backgroundColor: isDark ? SoftPalette.slate700 : _bg,
                   onSelected: (val) {
                     if (val) {
                       setState(() {
@@ -1776,22 +1779,22 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
     final isDark = _isDark;
     final double tableWidth = _canManageProforma ? 1360 : 1240;
 
-    final headerBg = isDark ? const Color(0xFF0F766E) : _headerBg;
-    final headerTextColor = isDark ? Colors.white : _tealDark;
-    final rowBgNormal = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final rowBgAlt = isDark ? const Color(0xFF0F172A) : const Color(0xFFFAFAFA);
-    final rowBgSelected = isDark ? const Color(0xFF1E3A3A) : _teal.withValues(alpha: 0.08);
-    final borderColor = isDark ? const Color(0xFF334155) : _gridBorder.withValues(alpha: 0.6);
-    final textColor = isDark ? Colors.white : _textDark;
+    final headerBg = isDark ? SoftPalette.teal550 : _headerBg;
+    final headerTextColor = isDark ? SoftPalette.gray50 : _tealDark;
+    final rowBgNormal = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final rowBgAlt = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+    final rowBgSelected = isDark ? SoftPalette.teal750m : _teal.withValues(alpha: 0.08);
+    final borderColor = isDark ? SoftPalette.slate700 : _gridBorder.withValues(alpha: 0.6);
+    final textColor = isDark ? SoftPalette.gray50 : _textDark;
 
     return Container(
       margin: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: rowBgNormal,
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: isDark ? const Color(0xFF334155) : _gridBorder),
+        border: Border.all(color: isDark ? SoftPalette.slate700 : _gridBorder),
         boxShadow: const [
-          BoxShadow(color: Color(0x10000000), blurRadius: 6, offset: Offset(0, 3)),
+          BoxShadow(color: SoftPalette.gray900A6, blurRadius: 6, offset: Offset(0, 3)),
         ],
       ),
       child: ClipRRect(
@@ -1896,10 +1899,10 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
                                   decoration: BoxDecoration(
-                                    color: isDark ? const Color(0xFF0C4A6E) : Colors.grey.shade100,
+                                    color: isDark ? SoftPalette.sky700 : SoftPalette.gray100,
                                     borderRadius: BorderRadius.circular(6),
                                     border: Border.all(
-                                      color: isDark ? const Color(0xFF0284C7) : Colors.grey.shade300,
+                                      color: isDark ? SoftPalette.sky500 : SoftPalette.gray150,
                                     ),
                                   ),
                                   child: Text(
@@ -1909,7 +1912,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                                       fontFamily: 'monospace',
                                       fontSize: 11.5,
                                       fontWeight: FontWeight.bold,
-                                      color: isDark ? const Color(0xFF7DD3FC) : _textDark,
+                                      color: isDark ? SoftPalette.sky300 : _textDark,
                                     ),
                                   ),
                                 ),
@@ -1940,15 +1943,15 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                         margin: const EdgeInsets.only(left: 6),
                                         decoration: BoxDecoration(
-                                          color: isDark ? const Color(0xFF065F46) : const Color(0xFFD1FAE5),
+                                          color: isDark ? SoftPalette.emerald600 : SoftPalette.emerald100,
                                           borderRadius: BorderRadius.circular(12),
-                                          border: Border.all(color: isDark ? const Color(0xFF059669) : const Color(0xFF10B981)),
+                                          border: Border.all(color: isDark ? SoftPalette.emerald500 : SoftPalette.emerald350),
                                         ),
                                         child: Text(
                                           'In Stock: $inStockQty',
                                           style: TextStyle(
                                             fontSize: 10.5,
-                                            color: isDark ? const Color(0xFF34D399) : const Color(0xFF065F46),
+                                            color: isDark ? SoftPalette.emerald300 : SoftPalette.emerald600,
                                             fontWeight: FontWeight.bold,
                                           ),
                                         ),
@@ -1966,7 +1969,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                                   mainAxisAlignment: MainAxisAlignment.center,
                                   children: [
                                     IconButton(
-                                      icon: Icon(Icons.edit_note_rounded, size: 20, color: isDark ? const Color(0xFF38BDF8) : _teal),
+                                      icon: Icon(Icons.edit_note_rounded, size: 20, color: isDark ? SoftPalette.sky350 : _teal),
                                       tooltip: 'Edit Formula Name (HQ/Chairman)',
                                       onPressed: () => _showEditMedicineNameDialog(item),
                                       padding: EdgeInsets.zero,
@@ -1982,7 +1985,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                                     ),
                                     const SizedBox(width: 8),
                                     IconButton(
-                                      icon: Icon(Icons.history_rounded, size: 18, color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade600),
+                                      icon: Icon(Icons.history_rounded, size: 18, color: isDark ? SoftPalette.slate350 : SoftPalette.gray500),
                                       tooltip: 'View Audit Log & Change Reasons',
                                       onPressed: () => _showAuditTrailDialog(item),
                                       padding: EdgeInsets.zero,
@@ -2002,7 +2005,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                                 child: Chip(
                                   label: Text(
                                     item['type'] as String? ?? 'Tablet',
-                                    style: const TextStyle(fontSize: 11, color: Colors.white, fontWeight: FontWeight.bold),
+                                    style: const TextStyle(fontSize: 11, color: SoftPalette.gray50, fontWeight: FontWeight.bold),
                                   ),
                                   backgroundColor: _getTypeBadgeColor(item['type'] as String? ?? 'Tablet'),
                                   visualDensity: VisualDensity.compact,
@@ -2020,7 +2023,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                                 child: Text(
                                   item['dose'] as String? ?? '-',
                                   overflow: TextOverflow.ellipsis,
-                                  style: TextStyle(color: isDark ? const Color(0xFFCBD5E1) : _textDark, fontSize: 13),
+                                  style: TextStyle(color: isDark ? SoftPalette.slate200 : _textDark, fontSize: 13),
                                 ),
                               ),
                             ),
@@ -2038,18 +2041,18 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                                     height: 38,
                                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                                     decoration: BoxDecoration(
-                                      border: Border.all(color: isDark ? const Color(0xFF38BDF8) : _teal.withValues(alpha: 0.5)),
+                                      border: Border.all(color: isDark ? SoftPalette.sky350 : _teal.withValues(alpha: 0.5)),
                                       borderRadius: BorderRadius.circular(6),
-                                      color: isDark ? const Color(0xFF334155) : _white,
+                                      color: isDark ? SoftPalette.slate700 : _white,
                                     ),
                                     child: Row(
                                       mainAxisAlignment: MainAxisAlignment.center,
                                       children: [
-                                        Icon(Icons.calendar_today, size: 13, color: isDark ? const Color(0xFF38BDF8) : _teal),
+                                        Icon(Icons.calendar_today, size: 13, color: isDark ? SoftPalette.sky350 : _teal),
                                         const SizedBox(width: 6),
                                         Text(
                                           DateFormat('yyyy-MM-dd').format(expDate),
-                                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? Colors.white : _tealDark),
+                                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50 : _tealDark),
                                         ),
                                       ],
                                     ),
@@ -2088,7 +2091,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                                         contentPadding: const EdgeInsets.symmetric(vertical: 8),
                                         border: OutlineInputBorder(borderRadius: BorderRadius.circular(6)),
                                         filled: isDark,
-                                        fillColor: isDark ? const Color(0xFF334155) : null,
+                                        fillColor: isDark ? SoftPalette.slate700 : null,
                                       ),
                                       onChanged: (val) {
                                         final qty = int.tryParse(val) ?? 0;
@@ -2135,11 +2138,11 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(FontAwesomeIcons.magnifyingGlass, size: 48, color: isDark ? const Color(0xFF64748B) : Colors.grey),
+          Icon(FontAwesomeIcons.magnifyingGlass, size: 48, color: isDark ? SoftPalette.slate550 : SoftPalette.gray350),
           const SizedBox(height: 16),
           Text(
             'No master proforma items matching "${_searchCtrl.text}"',
-            style: TextStyle(fontSize: 16, color: isDark ? const Color(0xFFCBD5E1) : _textMid),
+            style: TextStyle(fontSize: 16, color: isDark ? SoftPalette.slate200 : _textMid),
           ),
         ],
       ),
@@ -2152,10 +2155,10 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
-        border: Border(top: BorderSide(color: isDark ? const Color(0xFF334155) : Colors.grey.shade200)),
+        color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+        border: Border(top: BorderSide(color: isDark ? SoftPalette.slate700 : SoftPalette.gray100)),
         boxShadow: const [
-          BoxShadow(color: Color(0x1A000000), blurRadius: 10, offset: Offset(0, -4)),
+          BoxShadow(color: SoftPalette.gray900A10, blurRadius: 10, offset: Offset(0, -4)),
         ],
       ),
       child: Row(
@@ -2167,12 +2170,12 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
               children: [
                 Text(
                   '$count of ${_proformaMasterList.length} Medicines Selected',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? Colors.white : _tealDark),
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? SoftPalette.gray50 : _tealDark),
                 ),
                 const SizedBox(height: 2),
                 Text(
                   'Showing ${_filteredList.length} of ${_proformaMasterList.length} total catalog medicines • Specifications protected.',
-                  style: TextStyle(fontSize: 11.5, color: isDark ? const Color(0xFF94A3B8) : _textMid),
+                  style: TextStyle(fontSize: 11.5, color: isDark ? SoftPalette.slate350 : _textMid),
                 ),
               ],
             ),
@@ -2180,7 +2183,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
           const SizedBox(width: 16),
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
-              backgroundColor: count > 0 ? (isDark ? const Color(0xFF0F766E) : _teal) : Colors.grey,
+              backgroundColor: count > 0 ? (isDark ? SoftPalette.teal550 : _teal) : SoftPalette.gray350,
               padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               elevation: 4,
@@ -2190,12 +2193,12 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                 ? const SizedBox(
                     width: 18,
                     height: 18,
-                    child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                    child: CircularProgressIndicator(color: SoftPalette.gray50, strokeWidth: 2),
                   )
-                : const Icon(FontAwesomeIcons.floppyDisk, color: Colors.white, size: 16),
+                : const Icon(FontAwesomeIcons.floppyDisk, color: SoftPalette.gray50, size: 16),
             label: Text(
               _isSavingBatch ? 'Adding to Inventory...' : 'Add Selected to Stock',
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+              style: const TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 14),
             ),
           ),
         ],
@@ -2207,62 +2210,62 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
     if (_isDark) {
       switch (type.trim().toLowerCase()) {
         case 'tablet':
-          return const Color(0xFF1D4ED8);
+          return SoftPalette.blue550;
         case 'capsule':
-          return const Color(0xFF7E22CE);
+          return SoftPalette.violet550;
         case 'syrup':
-          return const Color(0xFFC2410C);
+          return SoftPalette.orange550;
         case 'injection':
-          return const Color(0xFFB91C1C);
+          return SoftPalette.red550;
         case 'drip':
-          return const Color(0xFF0F766E);
+          return SoftPalette.teal550;
         case 'drip set':
-          return const Color(0xFF0E7490);
+          return SoftPalette.sky550;
         case 'syringe':
-          return const Color(0xFFBE185D);
+          return SoftPalette.pink550;
         case 'cannula':
         case 'needle':
         case 'cannula & needle':
         case 'cannula / needle':
-          return const Color(0xFF9D174D);
+          return SoftPalette.pink600;
         case 'nebulization':
-          return const Color(0xFF4338CA);
+          return SoftPalette.indigo600;
         case 'dressing item':
-          return const Color(0xFF334155);
+          return SoftPalette.slate700;
         case 'consumables':
-          return const Color(0xFF0F766E);
+          return SoftPalette.teal550;
         default:
-          return const Color(0xFF334155);
+          return SoftPalette.slate700;
       }
     }
     switch (type.trim().toLowerCase()) {
       case 'tablet':
-        return const Color(0xFF1565C0);
+        return SoftPalette.blue550;
       case 'capsule':
-        return const Color(0xFF6A1B9A);
+        return SoftPalette.purple600;
       case 'syrup':
-        return const Color(0xFFE65100);
+        return SoftPalette.orange400;
       case 'injection':
-        return const Color(0xFFC62828);
+        return SoftPalette.red550;
       case 'drip':
-        return const Color(0xFF00695C);
+        return SoftPalette.teal600;
       case 'drip set':
-        return const Color(0xFF00838F);
+        return SoftPalette.cyan500;
       case 'syringe':
-        return const Color(0xFFAD1457);
+        return SoftPalette.pink550;
       case 'cannula':
       case 'needle':
       case 'cannula & needle':
       case 'cannula / needle':
-        return const Color(0xFF7B1FA2);
+        return SoftPalette.purple600;
       case 'nebulization':
-        return const Color(0xFF283593);
+        return SoftPalette.indigo700;
       case 'dressing item':
-        return const Color(0xFF455A64);
+        return SoftPalette.slate600;
       case 'consumables':
-        return const Color(0xFF00796B);
+        return SoftPalette.teal550;
       default:
-        return const Color(0xFF455A64);
+        return SoftPalette.slate600;
     }
   }
 }

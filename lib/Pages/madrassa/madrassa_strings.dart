@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:gmwf/services/user_language_service.dart';
 
 class MadrassaLocale {
   final String appName = 'Gulzar Madina';
@@ -734,9 +735,8 @@ class MadrassaLanguageProvider extends ChangeNotifier {
 
   Future<void> _loadLocale() async {
     try {
-      final prefs = await SharedPreferences.getInstance();
-      final savedCode = prefs.getString('madrassa_locale');
-      if (savedCode != null && savedCode != _localeCode) {
+      final savedCode = UserLanguageService.getLanguage();
+      if (savedCode != _localeCode) {
         _localeCode = savedCode;
         notifyListeners();
       }
@@ -748,21 +748,14 @@ class MadrassaLanguageProvider extends ChangeNotifier {
   MadrassaLocale get locale => _localeCode == 'ur' ? MStr.ur : MStr.en;
 
   Future<void> toggleLanguage() async {
-    _localeCode = _localeCode == 'en' ? 'ur' : 'en';
+    _localeCode = await UserLanguageService.toggleLanguage();
     notifyListeners();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('madrassa_locale', _localeCode);
-    } catch (_) {}
   }
 
   Future<void> setLanguage(String code) async {
     _localeCode = code;
     notifyListeners();
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('madrassa_locale', _localeCode);
-    } catch (_) {}
+    await UserLanguageService.setLanguage(code);
   }
 }
 

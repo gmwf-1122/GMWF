@@ -7,7 +7,7 @@
 // Usage:
 //   AppChip(label: 'Active', state: AppChipState.active)
 //   AppChip(label: 'Overdue', state: AppChipState.overdue, icon: Icons.warning_rounded)
-//   AppChip(label: 'Custom', color: Colors.purple)     // custom color
+//   AppChip(label: 'Custom', color: SoftPalette.purple550)     // custom color
 //   AppChip.dot(label: 'Online')                        // dot prefix variant
 // ─────────────────────────────────────────────────────────────────────────────
 

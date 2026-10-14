@@ -218,14 +218,14 @@ void main() {
   });
 
   group('6. Quota Service Safety & Force Sync Reset', () {
-    test('resetState clears quota exhaustion and backoff delay', () async {
-      // Simulate quota hit
-      QuotaService.recordQuotaExceeded(reason: 'unit_test');
-      expect(QuotaService.isQuotaExhausted, isTrue);
+    test('resetState clears a quota pause so a manual sync can retry immediately', () async {
+      // Simulate Firestore refusing a write for quota
+      QuotaService.pauseUntilDailyReset(reason: 'unit_test');
+      expect(QuotaService.isPausedForDailyReset, isTrue);
 
       // Force Sync invocation resets state
       QuotaService.resetState();
-      expect(QuotaService.isQuotaExhausted, isFalse, reason: 'resetState must allow manual force sync to proceed immediately');
+      expect(QuotaService.isPausedForDailyReset, isFalse, reason: 'resetState must allow manual force sync to proceed immediately');
     });
   });
 }

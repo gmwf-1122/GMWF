@@ -52,6 +52,7 @@
 //   ConnectionManager's own retry strategy. ConnectionManager's heartbeat
 //   remains a safety net but is no longer the primary recovery path.
 
+import 'package:gmwf/utils/ui_stall_monitor.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -670,12 +671,14 @@ class RealtimeManager {
   // ── Ping / pong ────────────────────────────────────────────────────────────
   void _startPingTimer() {
     _pingTimer?.cancel();
-    _pingTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+    _pingTimer = Timer.periodic(const Duration(seconds: 10), (_) {
       if (!_isConnected || _channel == null) return;
       final now = DateTime.now();
-      // If no pong has been received within 14 seconds (less than 3 missed pings), tear down dead socket immediately
-      if (_lastPong != null && now.difference(_lastPong!).inSeconds > 14) {
-        debugPrint('[RealtimeManager] ⚠️ Pong timeout (>14s) → tearing down half-dead socket');
+      // No pong for 45 s → treat the socket as dead. (It was 14 s: whenever the server's UI
+      // thread was busy for a moment, every client dropped and reconnected at once, and each
+      // reconnect asked for a full catch-up, which made the server even busier.)
+      if (_lastPong != null && now.difference(_lastPong!).inSeconds > 45) {
+        debugPrint('[RealtimeManager] ⚠️ Pong timeout (>45s) → tearing down half-dead socket');
         _recordHealthFailure();
         _handleDisconnect();
         return;
@@ -1221,6 +1224,7 @@ class RealtimeManager {
       return;
     }
 
+    UiStallMonitor.mark("lan in: ${decoded['event_type'] ?? '?'}");
     RealtimeRouter.routeMessage(decoded).catchError((e, st) {
       if (kDebugMode) print('[RealtimeManager] RealtimeRouter error: $e\n$st');
     });

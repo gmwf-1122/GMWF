@@ -5,8 +5,11 @@
 // Typography: Google Fonts – DM Serif Display (headings) + DM Sans (body)
 //
 import 'dart:async';
-import 'dart:convert';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:flutter/material.dart';
+import 'package:gmwf/utils/base64_image_cache.dart';
+import 'package:gmwf/design/components/decorative_image.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -38,44 +41,44 @@ import 'food_log_screen.dart';
 
 abstract class _DS {
   // Surfaces (Static Fallbacks)
-  static const Color bg       = Color(0xFFF4F7F6);
-  static const Color surface  = Color(0xFFFFFFFF);
-  static const Color surface2 = Color(0xFFEDF2F1);
-  static const Color border   = Color(0xFFE2ECEA);
-  static const Color border2  = Color(0xFFC8D9D6);
+  static const Color bg       = SoftPalette.gray100;
+  static const Color surface  = SoftPalette.gray50;
+  static const Color surface2 = SoftPalette.gray100;
+  static const Color border   = SoftPalette.teal150t;
+  static const Color border2  = SoftPalette.teal200m;
 
   // Dynamic Theme Helpers for Dark Mode
-  static Color getBg(bool isDark) => isDark ? const Color(0xFF0F172A) : const Color(0xFFF4F7F6);
-  static Color getSurface(bool isDark) => isDark ? const Color(0xFF1E293B) : const Color(0xFFFFFFFF);
-  static Color getSurface2(bool isDark) => isDark ? const Color(0xFF243044) : const Color(0xFFEDF2F1);
-  static Color getBorder(bool isDark) => isDark ? const Color(0xFF334155) : const Color(0xFFE2ECEA);
-  static Color getBorder2(bool isDark) => isDark ? const Color(0xFF475569) : const Color(0xFFC8D9D6);
-  static Color getInk(bool isDark) => isDark ? const Color(0xFFF8FAFC) : const Color(0xFF0A0F0E);
-  static Color getInk2(bool isDark) => isDark ? const Color(0xFFCBD5E1) : const Color(0xFF2D3B38);
-  static Color getInk3(bool isDark) => isDark ? const Color(0xFF94A3B8) : const Color(0xFF6B8480);
+  static Color getBg(bool isDark) => isDark ? SoftPalette.slate900 : SoftPalette.gray100;
+  static Color getSurface(bool isDark) => isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+  static Color getSurface2(bool isDark) => isDark ? SoftPalette.slate750 : SoftPalette.gray100;
+  static Color getBorder(bool isDark) => isDark ? SoftPalette.slate700 : SoftPalette.teal150t;
+  static Color getBorder2(bool isDark) => isDark ? SoftPalette.slate600 : SoftPalette.teal200m;
+  static Color getInk(bool isDark) => isDark ? SoftPalette.gray50 : SoftPalette.gray900;
+  static Color getInk2(bool isDark) => isDark ? SoftPalette.slate200 : SoftPalette.teal750m;
+  static Color getInk3(bool isDark) => isDark ? SoftPalette.slate350 : SoftPalette.teal500m;
 
   // Brand greens
-  static const Color sage     = Color(0xFF1A3530);
-  static const Color sage2    = Color(0xFF243D38);
-  static const Color mint     = Color(0xFF00C9A7);
-  static const Color mint2    = Color(0xFF00E8C1);
-  static const Color mintBg   = Color(0xFFE6FDF8);
+  static const Color sage     = SoftPalette.teal750m;
+  static const Color sage2    = SoftPalette.teal750m;
+  static const Color mint     = SoftPalette.teal350;
+  static const Color mint2    = SoftPalette.teal300;
+  static const Color mintBg   = SoftPalette.teal50;
 
   // Semantic
-  static const Color amber    = Color(0xFFD97706);
-  static const Color amberBg  = Color(0xFFFFFBEB);
-  static const Color green    = Color(0xFF1A9966);
-  static const Color greenBg  = Color(0xFFEAF7F0);
-  static const Color red      = Color(0xFFE04444);
-  static const Color redBg    = Color(0xFFFEF0F0);
-  static const Color purple   = Color(0xFF7C3AED);
-  static const Color purpleBg = Color(0xFFF0EBFE);
-  static const Color purpleDark = Color(0xFF2D1B69);
+  static const Color amber    = SoftPalette.orange400;
+  static const Color amberBg  = SoftPalette.yellow50m;
+  static const Color green    = SoftPalette.emerald500;
+  static const Color greenBg  = SoftPalette.emerald100m;
+  static const Color red      = SoftPalette.red500;
+  static const Color redBg    = SoftPalette.red100m;
+  static const Color purple   = SoftPalette.violet550;
+  static const Color purpleBg = SoftPalette.violet100;
+  static const Color purpleDark = SoftPalette.indigo750;
 
   // Text (Static Fallbacks)
-  static const Color ink      = Color(0xFF0A0F0E);
-  static const Color ink2     = Color(0xFF2D3B38);
-  static const Color ink3     = Color(0xFF6B8480);
+  static const Color ink      = SoftPalette.gray900;
+  static const Color ink2     = SoftPalette.teal750m;
+  static const Color ink3     = SoftPalette.teal500m;
 
   // Radius
   static const double r12 = 12;
@@ -210,7 +213,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
         vsync: this, duration: const Duration(milliseconds: 1600));
     _pulseAnim = Tween<double>(begin: 1.0, end: 1.03).animate(
         CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut));
-    _pulseCtrl.repeat(reverse: true);
+    if (!GDecor.reduceMotion) _pulseCtrl.repeat(reverse: true); // eye comfort: no endless pulse
 
     LocalStorageService.initForRoles([
       if (widget.role != null) widget.role!,
@@ -257,7 +260,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
     if (state == AppLifecycleState.paused || state == AppLifecycleState.inactive) {
       if (_pulseCtrl.isAnimating) _pulseCtrl.stop();
     } else if (state == AppLifecycleState.resumed) {
-      if (!_pulseCtrl.isAnimating) _pulseCtrl.repeat(reverse: true);
+      if (!GDecor.reduceMotion && !_pulseCtrl.isAnimating) _pulseCtrl.repeat(reverse: true);
     }
   }
 
@@ -753,17 +756,17 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
         builder: (dialogCtx, setS) {
           final qty = int.tryParse(reverseQtyCtrl.text) ?? 0;
           return AlertDialog(
-            backgroundColor: _DS.surface,
+            backgroundColor: dialogCtx.adapt(_DS.surface),
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_DS.r22)),
             title: Row(
               children: [
                 Container(
                   padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(color: _DS.redBg, borderRadius: BorderRadius.circular(10)),
+                  decoration: BoxDecoration(color: dialogCtx.adapt(_DS.redBg), borderRadius: BorderRadius.circular(10)),
                   child: const Icon(Icons.undo_rounded, color: _DS.red, size: 22),
                 ),
                 const SizedBox(width: 12),
-                Text('Reverse Food Tokens', style: GoogleFonts.dmSerifDisplay(fontSize: 20, color: _DS.ink)),
+                Text('Reverse Food Tokens', style: GoogleFonts.dmSerifDisplay(fontSize: 20, color: dialogCtx.adapt(_DS.ink))),
               ],
             ),
             content: Column(
@@ -772,10 +775,10 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
               children: [
                 Text(
                   'Unintentionally issued tokens can be voided. ${localUnserved.length} unserved token(s) available today.',
-                  style: GoogleFonts.dmSans(fontSize: 13, color: _DS.ink3),
+                  style: GoogleFonts.dmSans(fontSize: 13, color: dialogCtx.adapt(_DS.ink3)),
                 ),
                 const SizedBox(height: 16),
-                Text('TOKENS TO REVERSE', style: _TS.label(c: _DS.ink3)),
+                Text('TOKENS TO REVERSE', style: _TS.label(c: dialogCtx.adapt(_DS.ink3))),
                 const SizedBox(height: 8),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -786,10 +789,10 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         decoration: BoxDecoration(
-                          color: sel ? _DS.red : _DS.surface2,
+                          color: sel ? _DS.red : dialogCtx.adapt(_DS.surface2),
                           borderRadius: BorderRadius.circular(_DS.r12),
                         ),
-                        child: Text('$q', style: GoogleFonts.dmSans(color: sel ? Colors.white : _DS.ink, fontWeight: FontWeight.bold, fontSize: 13)),
+                        child: Text('$q', style: GoogleFonts.dmSans(color: sel ? SoftPalette.gray50 : dialogCtx.adapt(_DS.ink), fontWeight: FontWeight.bold, fontSize: 13)),
                       ),
                     );
                   }).toList(),
@@ -800,14 +803,14 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
                   keyboardType: TextInputType.number,
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                   onChanged: (_) => setS(() {}),
-                  style: GoogleFonts.dmSans(fontSize: 16, fontWeight: FontWeight.bold, color: _DS.ink),
+                  style: GoogleFonts.dmSans(fontSize: 16, fontWeight: FontWeight.bold, color: dialogCtx.adapt(_DS.ink)),
                   decoration: InputDecoration(
                     hintText: 'Custom quantity…',
-                    hintStyle: GoogleFonts.dmSans(fontSize: 13, color: _DS.ink3),
+                    hintStyle: GoogleFonts.dmSans(fontSize: 13, color: dialogCtx.adapt(_DS.ink3)),
                     suffixText: '= PKR ${(qty * _pricePerToken).toStringAsFixed(0)}',
                     suffixStyle: GoogleFonts.dmSans(color: _DS.red, fontWeight: FontWeight.bold, fontSize: 12),
                     filled: true,
-                    fillColor: _DS.surface2,
+                    fillColor: dialogCtx.adapt(_DS.surface2),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(_DS.r14), borderSide: BorderSide.none),
                   ),
                 ),
@@ -816,7 +819,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
-                child: Text('Cancel', style: GoogleFonts.dmSans(color: _DS.ink3, fontWeight: FontWeight.w600)),
+                child: Text('Cancel', style: GoogleFonts.dmSans(color: dialogCtx.adapt(_DS.ink3), fontWeight: FontWeight.w600)),
               ),
               ElevatedButton.icon(
                 onPressed: (qty <= 0 || qty > localUnserved.length)
@@ -826,7 +829,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
                 label: Text('Reverse $qty Token${qty != 1 ? "s" : ""}'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _DS.red,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_DS.r14)),
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                 ),
@@ -1031,17 +1034,17 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
     return Container(
       padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF161B22) : _DS.sage,
+        color: isDark ? SoftPalette.slate900 : _DS.sage,
         boxShadow: const [
           BoxShadow(
-            color: Colors.black12,
+            color: SoftPalette.gray900A12,
             blurRadius: 4,
             offset: Offset(0, 2),
           ),
         ],
         border: Border(
           bottom: BorderSide(
-            color: isDark ? const Color(0xFF30363D) : Colors.transparent,
+            color: isDark ? SoftPalette.slate750 : Colors.transparent,
             width: 1,
           ),
         ),
@@ -1053,7 +1056,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
             Container(
               padding: const EdgeInsets.all(3),
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: SoftPalette.gray50,
                 borderRadius: BorderRadius.circular(10),
               ),
               child: ClipRRect(
@@ -1075,7 +1078,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
                   Text(
                     'GMWF',
                     style: GoogleFonts.dmSans(
-                      color: Colors.white,
+                      color: SoftPalette.gray50,
                       fontSize: 18,
                       fontWeight: FontWeight.w900,
                       letterSpacing: 0.2,
@@ -1085,7 +1088,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
                   Text(
                     _effectiveUserName,
                     style: GoogleFonts.dmSans(
-                      color: Colors.white70,
+                      color: SoftPalette.gray50A70,
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
                     ),
@@ -1203,23 +1206,23 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
           child: Theme(
             data: isDark
                 ? ThemeData.dark().copyWith(
-                    scaffoldBackgroundColor: const Color(0xFF0F172A),
-                    cardColor: const Color(0xFF1E293B),
+                    scaffoldBackgroundColor: SoftPalette.slate900,
+                    cardColor: SoftPalette.slate800,
                     colorScheme: const ColorScheme.dark(
                       primary: _DS.mint,
-                      surface: Color(0xFF1E293B),
+                      surface: SoftPalette.slate800,
                     ),
                   )
                 : ThemeData.light().copyWith(
-                    scaffoldBackgroundColor: const Color(0xFFF4F7F6),
-                    cardColor: Colors.white,
+                    scaffoldBackgroundColor: SoftPalette.gray100,
+                    cardColor: SoftPalette.gray50,
                     colorScheme: const ColorScheme.light(
                       primary: _DS.sage,
-                      surface: Colors.white,
+                      surface: SoftPalette.gray50,
                     ),
                   ),
             child: Scaffold(
-              backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF4F7F6),
+              backgroundColor: isDark ? SoftPalette.slate900 : SoftPalette.gray100,
               body: Column(
                 children: [
                   _buildPersistentHeader(context),
@@ -1274,9 +1277,9 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
             child: const Text('Cancel'),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+            style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.red400),
             onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Sign Out', style: TextStyle(color: Colors.white)),
+            child: const Text('Sign Out', style: TextStyle(color: SoftPalette.gray50)),
           ),
         ],
       ),
@@ -1317,21 +1320,21 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
           ];
 
     final accentColor = isDark ? _DS.mint : _DS.sage;
-    final inactiveColor = isDark ? const Color(0xFF8B949E) : _DS.ink3;
+    final inactiveColor = isDark ? SoftPalette.slate400 : _DS.ink3;
 
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF161B22) : Colors.white,
+        color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.06),
+            color: SoftPalette.gray900.withValues(alpha: isDark ? 0.35 : 0.06),
             blurRadius: 14,
             offset: const Offset(0, -2),
           ),
         ],
         border: Border(
           top: BorderSide(
-            color: isDark ? const Color(0xFF30363D) : _DS.border,
+            color: isDark ? SoftPalette.slate750 : _DS.border,
             width: 1,
           ),
         ),
@@ -1568,8 +1571,8 @@ class _HomeScreen extends StatelessWidget {
                       const SizedBox(height: 10),
                       _ActionCardWide(
                         icon:      Icons.people_alt_rounded,
-                        iconColor: const Color(0xFF2563EB),
-                        iconBg:    const Color(0xFFEFF6FF),
+                        iconColor: SoftPalette.blue550,
+                        iconBg:    SoftPalette.slate100,
                         title:     'Donors Registry',
                         subtitle:  'Search database & historic donors',
                         urdu:      'رجسٹرڈ ڈونرز کی فہرست',
@@ -1579,8 +1582,8 @@ class _HomeScreen extends StatelessWidget {
                       const SizedBox(height: 10),
                       _ActionCardWide(
                         icon:      Icons.inventory_2_rounded,
-                        iconColor: const Color(0xFF0D9488),
-                        iconBg:    const Color(0xFFCCFBF1),
+                        iconColor: SoftPalette.teal500,
+                        iconBg:    SoftPalette.teal100,
                         title:     'Donation Boxes',
                         subtitle:  'Track & open charity collection boxes',
                         urdu:      'ڈبہ جات کا ریکارڈ',
@@ -1592,8 +1595,8 @@ class _HomeScreen extends StatelessWidget {
                       const SizedBox(height: 10),
                       _ActionCardWide(
                         icon:      Icons.restaurant_menu_rounded,
-                        iconColor: const Color(0xFFEA580C),
-                        iconBg:    const Color(0xFFFFEDD5),
+                        iconColor: SoftPalette.orange400,
+                        iconBg:    SoftPalette.amber100,
                         title:     'Food Details & Log',
                         subtitle:  'Record cooked meals & hotel procurement',
                         urdu:      'کھانے کی تفصیلات کا اندراج',
@@ -1614,8 +1617,8 @@ class _HomeScreen extends StatelessWidget {
                     const SizedBox(height: 10),
                     _ActionCardWide(
                       icon:      Icons.history_rounded,
-                      iconColor: const Color(0xFF0D9488),
-                      iconBg:    const Color(0xFFCCFBF1),
+                      iconColor: SoftPalette.teal500,
+                      iconBg:    SoftPalette.teal100,
                       title:     'History & Analytics',
                       subtitle:  'Daily tokens, revenue & audit trail',
                       urdu:      'روزانہ اور ماہانہ ریکارڈ',
@@ -1704,7 +1707,7 @@ class _HeroHeader extends StatelessWidget {
                             Text(
                               greeting,
                               style: GoogleFonts.dmSans(
-                                color: Colors.white.withValues(alpha: 0.60),
+                                color: SoftPalette.gray50.withValues(alpha: 0.60),
                                 fontSize: 13,
                                 fontWeight: FontWeight.w500,
                               ),
@@ -1713,7 +1716,7 @@ class _HeroHeader extends StatelessWidget {
                             Text(
                               userName,
                               style: GoogleFonts.dmSerifDisplay(
-                                color: Colors.white,
+                                color: SoftPalette.gray50,
                                 fontSize: 24,
                                 height: 1.15,
                               ),
@@ -1764,19 +1767,19 @@ class _HeroHeader extends StatelessWidget {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.12),
+                          color: SoftPalette.gray50.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(_DS.rPill),
-                          border: Border.all(color: Colors.white.withValues(alpha: 0.20), width: 0.8),
+                          border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.20), width: 0.8),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            const Icon(Icons.storefront_rounded, color: Colors.white70, size: 12),
+                            const Icon(Icons.storefront_rounded, color: SoftPalette.gray50A70, size: 12),
                             const SizedBox(width: 4),
                             Text(
                               branchName,
                               style: GoogleFonts.dmSans(
-                                color: Colors.white,
+                                color: SoftPalette.gray50,
                                 fontSize: 10,
                                 fontWeight: FontWeight.w600,
                               ),
@@ -1789,7 +1792,7 @@ class _HeroHeader extends StatelessWidget {
                       Text(
                         DateFormat('EEE, dd MMM yyyy').format(DateTime.now()),
                         style: GoogleFonts.dmSans(
-                          color: Colors.white.withValues(alpha: 0.50),
+                          color: SoftPalette.gray50.withValues(alpha: 0.50),
                           fontSize: 11,
                           fontWeight: FontWeight.w500,
                         ),
@@ -1821,13 +1824,13 @@ class _RefreshHeaderButton extends StatelessWidget {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.12),
+              color: SoftPalette.gray50.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(_DS.r12),
               border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.22), width: 0.5),
+                  color: SoftPalette.gray50.withValues(alpha: 0.22), width: 0.5),
             ),
             child: const Center(
-              child: Icon(Icons.refresh_rounded, color: Colors.white, size: 18),
+              child: Icon(Icons.refresh_rounded, color: SoftPalette.gray50, size: 18),
             ),
           ),
         ),
@@ -1849,13 +1852,13 @@ class _SettingsButton extends StatelessWidget {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.12),
+              color: SoftPalette.gray50.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(_DS.r12),
               border: Border.all(
-                  color: Colors.white.withValues(alpha: 0.22), width: 0.5),
+                  color: SoftPalette.gray50.withValues(alpha: 0.22), width: 0.5),
             ),
             child: const Center(
-              child: Icon(Icons.person_rounded, color: Colors.white, size: 20),
+              child: Icon(Icons.person_rounded, color: SoftPalette.gray50, size: 20),
             ),
           ),
         ),
@@ -1877,13 +1880,13 @@ class _LogoutButton extends StatelessWidget {
             width: 36,
             height: 36,
             decoration: BoxDecoration(
-              color: Colors.red.withValues(alpha: 0.18),
+              color: SoftPalette.red400.withValues(alpha: 0.18),
               borderRadius: BorderRadius.circular(_DS.r12),
               border: Border.all(
-                  color: Colors.red.withValues(alpha: 0.35), width: 0.5),
+                  color: SoftPalette.red400.withValues(alpha: 0.35), width: 0.5),
             ),
             child: const Center(
-              child: Icon(Icons.logout_rounded, color: Color(0xFFFCA5A5), size: 18),
+              child: Icon(Icons.logout_rounded, color: SoftPalette.red300, size: 18),
             ),
           ),
         ),
@@ -1907,7 +1910,7 @@ class _UserAvatar extends StatelessWidget {
       } else {
         try {
           final cleanBase64 = photoStr.contains(',') ? photoStr.split(',').last : photoStr;
-          imageProvider = MemoryImage(base64Decode(cleanBase64));
+          imageProvider = Base64ImageCache.of(cleanBase64);
         } catch (_) {}
       }
     }
@@ -1921,10 +1924,10 @@ class _UserAvatar extends StatelessWidget {
         height: 50,
         decoration: BoxDecoration(
           shape: BoxShape.circle,
-          border: Border.all(color: Colors.white.withValues(alpha: 0.35), width: 2),
+          border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.35), width: 2),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.15),
+              color: SoftPalette.gray900.withValues(alpha: 0.15),
               blurRadius: 8,
               offset: const Offset(0, 3),
             ),
@@ -1940,12 +1943,12 @@ class _UserAvatar extends StatelessWidget {
   }
 
   Widget _fallback(String initial) => Container(
-        color: Colors.white.withValues(alpha: 0.20),
+        color: SoftPalette.gray50.withValues(alpha: 0.20),
         alignment: Alignment.center,
         child: Text(
           initial,
           style: GoogleFonts.dmSans(
-            color: Colors.white,
+            color: SoftPalette.gray50,
             fontWeight: FontWeight.bold,
             fontSize: 20,
           ),
@@ -1974,15 +1977,15 @@ class _StatChip extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 10),
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
             borderRadius: BorderRadius.circular(_DS.r16),
             border: Border.all(
-              color: isDark ? const Color(0xFF334155) : _DS.border,
+              color: isDark ? SoftPalette.slate700 : _DS.border,
               width: 1,
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.03),
+                color: SoftPalette.gray900.withValues(alpha: isDark ? 0.25 : 0.03),
                 blurRadius: 8,
                 offset: const Offset(0, 2),
               ),
@@ -2019,7 +2022,7 @@ class _StatChip extends StatelessWidget {
                 style: GoogleFonts.dmSans(
                   fontSize: 9.5,
                   fontWeight: FontWeight.w700,
-                  color: isDark ? const Color(0xFF94A3B8) : _DS.ink3,
+                  color: isDark ? SoftPalette.slate350 : _DS.ink3,
                   letterSpacing: 0.5,
                 ),
               ),
@@ -2044,15 +2047,15 @@ class _DonationSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) => Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+          color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
           borderRadius: BorderRadius.circular(_DS.r22),
           border: Border.all(
-            color: isDark ? const Color(0xFF334155) : _DS.border,
+            color: isDark ? SoftPalette.slate700 : _DS.border,
             width: 1,
           ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.03),
+              color: SoftPalette.gray900.withValues(alpha: isDark ? 0.25 : 0.03),
               blurRadius: 8,
               offset: const Offset(0, 2),
             ),
@@ -2079,14 +2082,14 @@ class _DonationSummaryCard extends StatelessWidget {
                     style: GoogleFonts.dmSans(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
-                      color: isDark ? Colors.white : _DS.ink,
+                      color: isDark ? SoftPalette.gray50 : _DS.ink,
                     ),
                   ),
                   Text(
                     '$count contributions recorded',
                     style: GoogleFonts.dmSans(
                       fontSize: 11,
-                      color: isDark ? const Color(0xFF94A3B8) : _DS.ink3,
+                      color: isDark ? SoftPalette.slate350 : _DS.ink3,
                     ),
                   ),
                 ],
@@ -2136,7 +2139,7 @@ class _RevenueBand extends StatelessWidget {
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: isDark
-                ? const [Color(0xFF132A24), Color(0xFF1E3D35)]
+                ? const [SoftPalette.teal800m, SoftPalette.teal750m]
                 : const [_DS.sage, _DS.sage2],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
@@ -2147,7 +2150,7 @@ class _RevenueBand extends StatelessWidget {
               : null,
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.35 : 0.08),
+              color: SoftPalette.gray900.withValues(alpha: isDark ? 0.35 : 0.08),
               blurRadius: 10,
               offset: const Offset(0, 3),
             ),
@@ -2176,7 +2179,7 @@ class _RevenueBand extends StatelessWidget {
                     Text(
                       "Today's Food Revenue",
                       style: GoogleFonts.dmSans(
-                        color: Colors.white.withValues(alpha: 0.65),
+                        color: SoftPalette.gray50.withValues(alpha: 0.65),
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
                       ),
@@ -2185,7 +2188,7 @@ class _RevenueBand extends StatelessWidget {
                     Text(
                       'PKR ${revenue.toStringAsFixed(0)}',
                       style: GoogleFonts.dmSerifDisplay(
-                        color: Colors.white,
+                        color: SoftPalette.gray50,
                         fontSize: 24,
                       ),
                     ),
@@ -2239,7 +2242,7 @@ class _SectionLabel extends StatelessWidget {
           fontSize: 10.5,
           fontWeight: FontWeight.w800,
           letterSpacing: 1.2,
-          color: isDark ? const Color(0xFF94A3B8) : _DS.ink3,
+          color: isDark ? SoftPalette.slate350 : _DS.ink3,
         ),
       );
 }
@@ -2273,15 +2276,15 @@ class _ActionCardWide extends StatelessWidget {
         child: Container(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF1E293B) : Colors.white,
+            color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
             borderRadius: BorderRadius.circular(_DS.r22),
             border: Border.all(
-              color: isDark ? const Color(0xFF334155) : _DS.border,
+              color: isDark ? SoftPalette.slate700 : _DS.border,
               width: 1,
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.03),
+                color: SoftPalette.gray900.withValues(alpha: isDark ? 0.25 : 0.03),
                 blurRadius: 8,
                 offset: const Offset(0, 2),
               ),
@@ -2308,7 +2311,7 @@ class _ActionCardWide extends StatelessWidget {
                       style: GoogleFonts.dmSans(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
-                        color: isDark ? Colors.white : _DS.ink,
+                        color: isDark ? SoftPalette.gray50 : _DS.ink,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -2316,7 +2319,7 @@ class _ActionCardWide extends StatelessWidget {
                       subtitle,
                       style: GoogleFonts.dmSans(
                         fontSize: 11,
-                        color: isDark ? const Color(0xFF94A3B8) : _DS.ink3,
+                        color: isDark ? SoftPalette.slate350 : _DS.ink3,
                       ),
                     ),
                   ],
@@ -2331,14 +2334,14 @@ class _ActionCardWide extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 11,
                       fontWeight: FontWeight.bold,
-                      color: isDark ? const Color(0xFF64748B) : _DS.ink3,
+                      color: isDark ? SoftPalette.slate550 : _DS.ink3,
                     ),
                   ),
                   const SizedBox(height: 2),
                   Icon(
                     Icons.chevron_right_rounded,
                     size: 16,
-                    color: isDark ? const Color(0xFF64748B) : _DS.ink3,
+                    color: isDark ? SoftPalette.slate550 : _DS.ink3,
                   ),
                 ],
               ),
@@ -2409,27 +2412,27 @@ class _TokensScreenState extends State<_TokensScreen> {
       shortTitle: 'Breakfast',
       urdu: 'ناشتہ کا دسترخوان',
       icon: Icons.wb_sunny_rounded,
-      color: const Color(0xFFD97706),
-      bg: const Color(0xFFFFFBEB),
-      gradient: const [Color(0xFFB45309), Color(0xFFD97706)],
+      color: SoftPalette.orange400,
+      bg: SoftPalette.yellow50m,
+      gradient: const [SoftPalette.orange500, SoftPalette.orange400],
     ),
     'lunch': (
       title: 'Lunch (دوپہر)',
       shortTitle: 'Lunch',
       urdu: 'دوپہر کا دسترخوان',
       icon: Icons.sunny,
-      color: const Color(0xFF0D9488),
-      bg: const Color(0xFFE6FDF8),
-      gradient: const [Color(0xFF0F766E), Color(0xFF0D9488)],
+      color: SoftPalette.teal500,
+      bg: SoftPalette.teal50,
+      gradient: const [SoftPalette.teal550, SoftPalette.teal500],
     ),
     'dinner': (
       title: 'Dinner (رات)',
       shortTitle: 'Dinner',
       urdu: 'رات کا دسترخوان',
       icon: Icons.nightlight_round,
-      color: const Color(0xFF4F46E5),
-      bg: const Color(0xFFEEF2FF),
-      gradient: const [Color(0xFF3730A3), Color(0xFF4F46E5)],
+      color: SoftPalette.indigo550,
+      bg: SoftPalette.slate100,
+      gradient: const [SoftPalette.indigo700, SoftPalette.indigo550],
     ),
   };
 
@@ -2496,7 +2499,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                       child: InkWell(
                         borderRadius: BorderRadius.circular(_DS.r22),
                         onTap: widget.onGenerate,
-                        splashColor: Colors.white.withValues(alpha: 0.15),
+                        splashColor: SoftPalette.gray50.withValues(alpha: 0.15),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 20),
                           child: Row(
@@ -2506,13 +2509,13 @@ class _TokensScreenState extends State<_TokensScreen> {
                                 width: 34,
                                 height: 34,
                                 decoration: BoxDecoration(
-                                  color: Colors.white.withValues(alpha: 0.18),
+                                  color: SoftPalette.gray50.withValues(alpha: 0.18),
                                   shape: BoxShape.circle,
                                 ),
                                 child: Icon(
                                   meta.icon,
                                   size: 18,
-                                  color: Colors.white,
+                                  color: SoftPalette.gray50,
                                 ),
                               ),
                               const SizedBox(width: 14),
@@ -2526,7 +2529,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                                       style: GoogleFonts.dmSans(
                                         fontSize: 15,
                                         fontWeight: FontWeight.w700,
-                                        color: Colors.white,
+                                        color: SoftPalette.gray50,
                                         letterSpacing: -0.2,
                                       ),
                                     ),
@@ -2534,13 +2537,13 @@ class _TokensScreenState extends State<_TokensScreen> {
                                       'PKR ${(qty * widget.pricePerToken).toStringAsFixed(0)} · ${_sessionUrdu(widget.selectedSession)}',
                                       style: GoogleFonts.dmSans(
                                         fontSize: 11,
-                                        color: Colors.white.withValues(alpha: 0.85),
+                                        color: SoftPalette.gray50.withValues(alpha: 0.85),
                                       ),
                                     ),
                                   ],
                                 ),
                               ),
-                              const Icon(Icons.arrow_forward_rounded, color: Colors.white, size: 20),
+                              const Icon(Icons.arrow_forward_rounded, color: SoftPalette.gray50, size: 20),
                             ],
                           ),
                         ),
@@ -2589,8 +2592,8 @@ class _TokensScreenState extends State<_TokensScreen> {
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: isDark
-              ? const [Color(0xFF0F2620), Color(0xFF1E3D35), Color(0xFF162E27)]
-              : const [Color(0xFF143029), Color(0xFF1E433A), Color(0xFF1A3830)],
+              ? const [SoftPalette.teal800m, SoftPalette.teal750m, SoftPalette.teal800]
+              : const [SoftPalette.teal800, SoftPalette.teal700m, SoftPalette.teal750m],
         ),
       ),
       child: Stack(
@@ -2627,7 +2630,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                                   child: Text(
                                     'Food Tokens',
                                     style: GoogleFonts.dmSerifDisplay(
-                                      color: Colors.white,
+                                      color: SoftPalette.gray50,
                                       fontSize: 22,
                                       letterSpacing: -0.3,
                                     ),
@@ -2656,7 +2659,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                             Text(
                               'Meal Distribution · ${widget.displayFormat.format(DateTime.now())}',
                               style: GoogleFonts.dmSans(
-                                color: Colors.white.withValues(alpha: 0.55),
+                                color: SoftPalette.gray50.withValues(alpha: 0.55),
                                 fontSize: 11.5,
                               ),
                               overflow: TextOverflow.ellipsis,
@@ -2668,14 +2671,14 @@ class _TokensScreenState extends State<_TokensScreen> {
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.12),
+                          color: SoftPalette.gray50.withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(10),
-                          border: Border.all(color: Colors.white.withValues(alpha: 0.15)),
+                          border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.15)),
                         ),
                         child: Text(
                           'PKR ${widget.pricePerToken.toInt()} / token',
                           style: GoogleFonts.dmSans(
-                            color: const Color(0xFF80DEEA),
+                            color: SoftPalette.cyan200,
                             fontWeight: FontWeight.w700,
                             fontSize: 12,
                           ),
@@ -2689,9 +2692,9 @@ class _TokensScreenState extends State<_TokensScreen> {
                   Container(
                     padding: const EdgeInsets.all(4),
                     decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.25),
+                      color: SoftPalette.gray900.withValues(alpha: 0.25),
                       borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.1)),
+                      border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.1)),
                     ),
                     child: Row(
                       children: sessionsToRender.map((sKey) {
@@ -2719,10 +2722,10 @@ class _TokensScreenState extends State<_TokensScreen> {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.07),
+                      color: SoftPalette.gray50.withValues(alpha: 0.07),
                       borderRadius: BorderRadius.circular(16),
                       border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.12),
+                        color: SoftPalette.gray50.withValues(alpha: 0.12),
                         width: 0.8,
                       ),
                     ),
@@ -2735,7 +2738,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                                 Container(
                                   width: 1,
                                   height: 36,
-                                  color: Colors.white.withValues(alpha: 0.15),
+                                  color: SoftPalette.gray50.withValues(alpha: 0.15),
                                 ),
                               Expanded(
                                 child: Builder(
@@ -2757,7 +2760,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                           ],
                         ),
                         const SizedBox(height: 8),
-                        Divider(color: Colors.white.withValues(alpha: 0.1), height: 1),
+                        Divider(color: SoftPalette.gray50.withValues(alpha: 0.1), height: 1),
                         const SizedBox(height: 8),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -2765,13 +2768,13 @@ class _TokensScreenState extends State<_TokensScreen> {
                             Row(
                               children: [
                                 const Icon(Icons.receipt_long_rounded,
-                                    size: 13, color: Color(0xFF80DEEA)),
+                                    size: 13, color: SoftPalette.cyan200),
                                 const SizedBox(width: 5),
                                 Text(
                                   'Combined: $total Issued · ${total - served} Pending',
                                   style: GoogleFonts.dmSans(
                                     fontSize: 11,
-                                    color: Colors.white.withValues(alpha: 0.75),
+                                    color: SoftPalette.gray50.withValues(alpha: 0.75),
                                     fontWeight: FontWeight.w500,
                                   ),
                                 ),
@@ -2781,7 +2784,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                               'PKR ${(total * widget.pricePerToken).toStringAsFixed(0)}',
                               style: GoogleFonts.dmSans(
                                 fontSize: 12,
-                                color: const Color(0xFFA7F3D0),
+                                color: SoftPalette.emerald150,
                                 fontWeight: FontWeight.w700,
                               ),
                             ),
@@ -2840,7 +2843,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                 Icon(
                   icon,
                   size: 14,
-                  color: active ? Colors.white : Colors.white.withValues(alpha: 0.6),
+                  color: active ? SoftPalette.gray50 : SoftPalette.gray50.withValues(alpha: 0.6),
                 ),
                 const SizedBox(width: 5),
                 Flexible(
@@ -2849,7 +2852,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                     style: GoogleFonts.dmSans(
                       fontSize: 11.5,
                       fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-                      color: active ? Colors.white : Colors.white.withValues(alpha: 0.7),
+                      color: active ? SoftPalette.gray50 : SoftPalette.gray50.withValues(alpha: 0.7),
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -2863,7 +2866,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                 style: GoogleFonts.dmSans(
                   fontSize: 9.5,
                   fontWeight: active ? FontWeight.w600 : FontWeight.normal,
-                  color: active ? Colors.white.withValues(alpha: 0.9) : Colors.white.withValues(alpha: 0.45),
+                  color: active ? SoftPalette.gray50.withValues(alpha: 0.9) : SoftPalette.gray50.withValues(alpha: 0.45),
                 ),
                 overflow: TextOverflow.ellipsis,
               ),
@@ -2901,7 +2904,7 @@ class _TokensScreenState extends State<_TokensScreen> {
               style: GoogleFonts.dmSans(
                 fontSize: 15,
                 fontWeight: FontWeight.w800,
-                color: Colors.white,
+                color: SoftPalette.gray50,
               ),
             ),
             const SizedBox(width: 3),
@@ -2909,14 +2912,14 @@ class _TokensScreenState extends State<_TokensScreen> {
               'issued',
               style: GoogleFonts.dmSans(
                 fontSize: 9.5,
-                color: Colors.white.withValues(alpha: 0.4),
+                color: SoftPalette.gray50.withValues(alpha: 0.4),
               ),
             ),
             const SizedBox(width: 6),
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
               decoration: BoxDecoration(
-                color: Colors.amber.withValues(alpha: 0.2),
+                color: SoftPalette.amber200.withValues(alpha: 0.2),
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
@@ -2924,7 +2927,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                 style: GoogleFonts.dmSans(
                   fontSize: 8.5,
                   fontWeight: FontWeight.w700,
-                  color: Colors.amberAccent,
+                  color: SoftPalette.yellow200,
                 ),
               ),
             ),
@@ -3126,7 +3129,7 @@ class _TokensScreenState extends State<_TokensScreen> {
             border: Border.all(color: _DS.getBorder(isDark)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.02),
+                color: SoftPalette.gray900.withValues(alpha: isDark ? 0.2 : 0.02),
                 blurRadius: 8,
                 offset: const Offset(0, 2),
               ),
@@ -3249,7 +3252,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                       style: GoogleFonts.dmSans(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
-                        color: selected ? (isDark ? const Color(0xFF0F172A) : Colors.white) : _DS.getInk(isDark),
+                        color: selected ? (isDark ? SoftPalette.slate900 : SoftPalette.gray50) : _DS.getInk(isDark),
                       ),
                     ),
                   ),
@@ -3594,7 +3597,7 @@ class _TokensScreenState extends State<_TokensScreen> {
           style: GoogleFonts.dmSans(
             fontSize: 10,
             fontWeight: FontWeight.w700,
-            color: sel ? (isDark ? const Color(0xFF0F172A) : Colors.white) : _DS.getInk3(isDark),
+            color: sel ? (isDark ? SoftPalette.slate900 : SoftPalette.gray50) : _DS.getInk3(isDark),
           ),
         ),
       ),
@@ -3643,14 +3646,14 @@ class _ReverseButton extends StatelessWidget {
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                Icon(Icons.undo_rounded, size: 17, color: isDark ? const Color(0xFFF87171) : _DS.red),
+                Icon(Icons.undo_rounded, size: 17, color: isDark ? SoftPalette.red350 : _DS.red),
                 const SizedBox(width: 8),
                 Text(
                   'Reverse / Void Issued Tokens',
                   style: GoogleFonts.dmSans(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
-                    color: isDark ? const Color(0xFFF87171) : _DS.red,
+                    color: isDark ? SoftPalette.red350 : _DS.red,
                   ),
                 ),
               ],
@@ -4087,12 +4090,12 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                         Text(
                           _isMonthView ? 'Monthly History' : 'Daily History',
                           style: GoogleFonts.dmSerifDisplay(
-                              color: Colors.white, fontSize: 22),
+                              color: SoftPalette.gray50, fontSize: 22),
                         ),
                         Text(
                           _isMonthView ? 'Cumulative tokens, boxes & donations' : 'Tokens, boxes & donations by date',
                           style: GoogleFonts.dmSans(
-                              color: Colors.white.withValues(alpha: 0.50),
+                              color: SoftPalette.gray50.withValues(alpha: 0.50),
                               fontSize: 11),
                         ),
                       ],
@@ -4101,7 +4104,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                     Container(
                       padding: const EdgeInsets.all(3),
                       decoration: BoxDecoration(
-                        color: Colors.white.withValues(alpha: 0.12),
+                        color: SoftPalette.gray50.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Row(
@@ -4113,7 +4116,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                               duration: const Duration(milliseconds: 180),
                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                               decoration: BoxDecoration(
-                                color: !_isMonthView ? Colors.white : Colors.transparent,
+                                color: !_isMonthView ? SoftPalette.gray50 : Colors.transparent,
                                 borderRadius: BorderRadius.circular(16),
                               ),
                               child: Text(
@@ -4121,7 +4124,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                 style: GoogleFonts.dmSans(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w700,
-                                  color: !_isMonthView ? _DS.sage : Colors.white70,
+                                  color: !_isMonthView ? _DS.sage : SoftPalette.gray50A70,
                                 ),
                               ),
                             ),
@@ -4132,7 +4135,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                               duration: const Duration(milliseconds: 180),
                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                               decoration: BoxDecoration(
-                                color: _isMonthView ? Colors.white : Colors.transparent,
+                                color: _isMonthView ? SoftPalette.gray50 : Colors.transparent,
                                 borderRadius: BorderRadius.circular(16),
                               ),
                               child: Text(
@@ -4140,7 +4143,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                 style: GoogleFonts.dmSans(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w700,
-                                  color: _isMonthView ? _DS.sage : Colors.white70,
+                                  color: _isMonthView ? _DS.sage : SoftPalette.gray50A70,
                                 ),
                               ),
                             ),
@@ -4155,10 +4158,10 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                 Container(
                   padding: const EdgeInsets.all(4),
                   decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.10),
+                    color: SoftPalette.gray50.withValues(alpha: 0.10),
                     borderRadius: BorderRadius.circular(_DS.r14),
                     border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.15),
+                        color: SoftPalette.gray50.withValues(alpha: 0.15),
                         width: 0.5),
                   ),
                   child: Row(children: [
@@ -4200,14 +4203,14 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
                               const Icon(Icons.calendar_today_rounded,
-                                  color: Colors.white, size: 13),
+                                  color: SoftPalette.gray50, size: 13),
                               const SizedBox(width: 7),
                               Text(
                                 _isMonthView
                                     ? monthLabel
                                     : (isToday ? 'Today · $displayDate' : displayDate),
                                 style: GoogleFonts.dmSans(
-                                    color: Colors.white,
+                                    color: SoftPalette.gray50,
                                     fontWeight: FontWeight.w600,
                                     fontSize: 13),
                               ),
@@ -4255,7 +4258,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
             if (snap.hasError) {
               return Center(
                   child: Text('Error: ${snap.error}',
-                      style: _TS.body(c: _DS.ink3)));
+                      style: _TS.body(c: context.adapt(_DS.ink3))));
             }
             final d              = snap.data!;
             final totalTokens   = d['totalTokens']    as int;
@@ -4287,7 +4290,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                       style: GoogleFonts.dmSans(
                           fontSize: 14,
                           fontWeight: FontWeight.w500,
-                          color: _DS.ink3),
+                          color: context.adapt(_DS.ink3)),
                     ),
                   ],
                 ),
@@ -4310,15 +4313,15 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                     ]),
                     const SizedBox(height: 8),
                     Row(children: [
-                      _HistStatTile('☀️ Day (Lunch)', '$dayTokens ($dayServed served)', const Color(0xFF0284C7), smallVal: true),
+                      _HistStatTile('☀️ Day (Lunch)', '$dayTokens ($dayServed served)', SoftPalette.sky500, smallVal: true),
                       const SizedBox(width: 8),
-                      _HistStatTile('🌙 Night (Dinner)', '$nightTokens ($nightServed served)', const Color(0xFF7C3AED), smallVal: true),
+                      _HistStatTile('🌙 Night (Dinner)', '$nightTokens ($nightServed served)', SoftPalette.violet550, smallVal: true),
                     ]),
                     const SizedBox(height: 8),
                     Row(children: [
                       _HistStatTile('Pending', '${totalTokens - servedTokens}', _DS.amber),
                       const SizedBox(width: 8),
-                      _HistStatTile('Revenue', 'PKR ${totalRevenue.toStringAsFixed(0)}', const Color(0xFF0D9488), smallVal: true),
+                      _HistStatTile('Revenue', 'PKR ${totalRevenue.toStringAsFixed(0)}', SoftPalette.teal500, smallVal: true),
                     ]),
                     const SizedBox(height: 14),
                     // Progress
@@ -4329,7 +4332,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                             style: GoogleFonts.dmSans(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w500,
-                                color: _DS.ink3)),
+                                color: context.adapt(_DS.ink3))),
                         Text(
                           totalTokens > 0
                               ? '${((servedTokens / totalTokens) * 100).toStringAsFixed(0)}%'
@@ -4358,14 +4361,14 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                 // Physical Box Openings Section
                 _HistSectionCard(
                   icon: Icons.inventory_2_rounded,
-                  color: const Color(0xFF0D9488),
+                  color: SoftPalette.teal500,
                   title: 'Donation Boxes (${boxOpenings.length})',
                   child: boxOpenings.isEmpty
                       ? Padding(
                           padding: const EdgeInsets.symmetric(vertical: 6),
                           child: Text(
                             'No donation boxes opened on this date.',
-                            style: GoogleFonts.dmSans(color: _DS.ink3, fontSize: 13),
+                            style: GoogleFonts.dmSans(color: context.adapt(_DS.ink3), fontSize: 13),
                           ),
                         )
                       : Column(
@@ -4374,7 +4377,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                               width: double.infinity,
                               padding: const EdgeInsets.all(12),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFCCFBF1),
+                                color: context.adapt(SoftPalette.teal100),
                                 borderRadius: BorderRadius.circular(_DS.r12),
                               ),
                               child: Row(
@@ -4384,13 +4387,13 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                     'Total Box Collections',
                                     style: GoogleFonts.dmSans(
                                         fontWeight: FontWeight.w600,
-                                        color: const Color(0xFF0F766E),
+                                        color: context.adapt(SoftPalette.teal550),
                                         fontSize: 13),
                                   ),
                                   Text(
                                     'PKR ${totalBoxAmount.toStringAsFixed(0)}',
                                     style: GoogleFonts.dmSerifDisplay(
-                                        color: const Color(0xFF0F766E),
+                                        color: context.adapt(SoftPalette.teal550),
                                         fontSize: 18),
                                   ),
                                 ],
@@ -4406,12 +4409,12 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                       width: 36,
                                       height: 36,
                                       decoration: BoxDecoration(
-                                        color: const Color(0xFFE6FFFA),
+                                        color: context.adapt(SoftPalette.teal50),
                                         borderRadius: BorderRadius.circular(10),
-                                        border: Border.all(color: const Color(0xFF99F6E4)),
+                                        border: Border.all(color: context.adapt(SoftPalette.teal150)),
                                       ),
                                       child: const Center(
-                                        child: Icon(Icons.inventory_2_rounded, size: 16, color: Color(0xFF0D9488)),
+                                        child: Icon(Icons.inventory_2_rounded, size: 16, color: SoftPalette.teal500),
                                       ),
                                     ),
                                     const SizedBox(width: 10),
@@ -4424,13 +4427,13 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                             style: GoogleFonts.dmSans(
                                                 fontSize: 13,
                                                 fontWeight: FontWeight.w700,
-                                                color: _DS.ink),
+                                                color: context.adapt(_DS.ink)),
                                           ),
                                           Text(
                                             'Collected by ${op.collectedBy}',
                                             style: GoogleFonts.dmSans(
                                                 fontSize: 11,
-                                                color: _DS.ink3),
+                                                color: context.adapt(_DS.ink3)),
                                           ),
                                         ],
                                       ),
@@ -4440,7 +4443,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                       style: GoogleFonts.dmSans(
                                         fontSize: 13,
                                         fontWeight: FontWeight.w700,
-                                        color: const Color(0xFF0D9488),
+                                        color: SoftPalette.teal500,
                                       ),
                                     ),
                                   ],
@@ -4456,7 +4459,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                 if (!_isMonthView && tokenList.isNotEmpty)
                   _HistSectionCard(
                     icon:  Icons.list_alt_rounded,
-                    color: _DS.ink3,
+                    color: context.adapt(_DS.ink3),
                     title: 'Tokens (${tokenList.length})',
                     child: Column(
                       children: tokenList.take(30).map((t) {
@@ -4468,7 +4471,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                             Container(
                               width: 34, height: 34,
                               decoration: BoxDecoration(
-                                color: served ? _DS.greenBg : _DS.amberBg,
+                                color: served ? context.adapt(_DS.greenBg) : context.adapt(_DS.amberBg),
                                 borderRadius: BorderRadius.circular(10),
                               ),
                               child: Center(
@@ -4487,14 +4490,14 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                     : 'Issued',
                                 style: GoogleFonts.dmSans(
                                     fontSize: 12,
-                                    color: _DS.ink3),
+                                    color: context.adapt(_DS.ink3)),
                               ),
                             ),
                             Container(
                               padding: const EdgeInsets.symmetric(
                                   horizontal: 8, vertical: 3),
                               decoration: BoxDecoration(
-                                color: served ? _DS.greenBg : _DS.amberBg,
+                                color: served ? context.adapt(_DS.greenBg) : context.adapt(_DS.amberBg),
                                 borderRadius: BorderRadius.circular(6),
                               ),
                               child: Text(
@@ -4516,7 +4519,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                 // Donations
                 _HistSectionCard(
                   icon:  Icons.volunteer_activism_rounded,
-                  color: const Color(0xFF0D9488),
+                  color: SoftPalette.teal500,
                   title: 'Donations (${donationList.length})',
                   child: donationList.isEmpty
                       ? Padding(
@@ -4524,7 +4527,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                           child: Text(
                             'No donations recorded for this period.',
                             style: GoogleFonts.dmSans(
-                                color: _DS.ink3, fontSize: 13),
+                                color: context.adapt(_DS.ink3), fontSize: 13),
                           ),
                         )
                       : Column(children: [
@@ -4532,7 +4535,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                             width: double.infinity,
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFCCFBF1),
+                              color: context.adapt(SoftPalette.teal100),
                               borderRadius: BorderRadius.circular(_DS.r12),
                             ),
                             child: Row(
@@ -4541,12 +4544,12 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                 Text('Total Donations',
                                     style: GoogleFonts.dmSans(
                                         fontWeight: FontWeight.w600,
-                                        color: const Color(0xFF0F766E),
+                                        color: context.adapt(SoftPalette.teal550),
                                         fontSize: 13)),
                                 Text(
                                   'PKR ${totalDonations.toStringAsFixed(0)}',
                                   style: GoogleFonts.dmSerifDisplay(
-                                      color: const Color(0xFF0F766E),
+                                      color: context.adapt(SoftPalette.teal550),
                                       fontSize: 18),
                                 ),
                               ],
@@ -4558,17 +4561,17 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                             final isApproved = status == 'approved';
                             final isRejected = status == 'rejected';
                             final statusBg = isApproved
-                                ? _DS.greenBg
+                                ? context.adapt(_DS.greenBg)
                                 : isRejected
-                                    ? _DS.redBg
-                                    : _DS.amberBg;
+                                    ? context.adapt(_DS.redBg)
+                                    : context.adapt(_DS.amberBg);
                             return Padding(
                               padding: const EdgeInsets.only(bottom: 8),
                               child: Row(children: [
                                 Container(
                                   width: 34, height: 34,
-                                  decoration: const BoxDecoration(
-                                    color: Color(0xFFCCFBF1),
+                                  decoration: BoxDecoration(
+                                    color: context.adapt(SoftPalette.teal100),
                                     shape: BoxShape.circle,
                                   ),
                                   child: Center(
@@ -4579,7 +4582,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                       style: GoogleFonts.dmSans(
                                           fontSize: 13,
                                           fontWeight: FontWeight.w600,
-                                          color: const Color(0xFF0F766E)),
+                                          color: context.adapt(SoftPalette.teal550)),
                                     ),
                                   ),
                                 ),
@@ -4593,13 +4596,13 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                         style: GoogleFonts.dmSans(
                                             fontSize: 13,
                                             fontWeight: FontWeight.w600,
-                                            color: _DS.ink),
+                                            color: context.adapt(_DS.ink)),
                                       ),
                                       Text(
                                         '${don['type'] ?? 'General'} · PKR ${(don['amount'] as num? ?? 0).toDouble().toStringAsFixed(0)}',
                                         style: GoogleFonts.dmSans(
                                             fontSize: 11,
-                                            color: _DS.ink3),
+                                            color: context.adapt(_DS.ink3)),
                                       ),
                                     ],
                                   ),
@@ -4654,13 +4657,13 @@ class _DateNavBtn extends StatelessWidget {
           decoration: BoxDecoration(
             color: disabled
                 ? Colors.transparent
-                : Colors.white.withValues(alpha: 0.12),
+                : SoftPalette.gray50.withValues(alpha: 0.12),
             borderRadius: BorderRadius.circular(_DS.r12),
           ),
           child: Icon(icon,
               color: disabled
-                  ? Colors.white.withValues(alpha: 0.25)
-                  : Colors.white,
+                  ? SoftPalette.gray50.withValues(alpha: 0.25)
+                  : SoftPalette.gray50,
               size: 20),
         ),
       );

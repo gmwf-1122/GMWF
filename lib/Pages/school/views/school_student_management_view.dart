@@ -1,6 +1,8 @@
 // lib/pages/school/views/school_student_management_view.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../../widgets/media_upload_tile.dart';
 import '../../../services/image_upload_service.dart';
@@ -104,9 +106,9 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
       onChanged: (_) => setState(() {}),
       decoration: InputDecoration(
         hintText: 'Search student by name, roll no, father name or CNIC / B-Form...',
-        prefixIcon: const Icon(Icons.search_rounded, color: SchoolTheme.primary),
+        prefixIcon: Icon(Icons.search_rounded, color: context.adapt(SchoolTheme.primary)),
         filled: true,
-        fillColor: const Color(0xFFF8FAFC),
+        fillColor: context.adapt(SoftPalette.gray50),
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
           borderSide: BorderSide.none,
@@ -119,7 +121,7 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         decoration: BoxDecoration(
-          color: const Color(0xFFF1F5F9),
+          color: context.adapt(SoftPalette.slate100),
           borderRadius: BorderRadius.circular(10),
         ),
         child: DropdownButton<String>(
@@ -138,7 +140,7 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
         decoration: BoxDecoration(
-          color: const Color(0xFFF1F5F9),
+          color: context.adapt(SoftPalette.slate100),
           borderRadius: BorderRadius.circular(10),
         ),
         child: DropdownButton<String>(
@@ -162,7 +164,7 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
       label: const Text('New Admission / داخلہ نیا طالب علم', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
       style: ElevatedButton.styleFrom(
         backgroundColor: SchoolTheme.primary,
-        foregroundColor: Colors.white,
+        foregroundColor: SoftPalette.gray50,
         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
         elevation: 0,
@@ -174,7 +176,7 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
         // Search & Action Bar
         Container(
           padding: EdgeInsets.all(isMobile ? 12 : 16),
-          color: Colors.white,
+          color: context.adapt(SoftPalette.gray50),
           child: isMobile
               ? Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -247,19 +249,19 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
                     children: [
-                      Icon(Icons.school_outlined, size: 64, color: Colors.grey.shade300),
+                      Icon(Icons.school_outlined, size: 64, color: context.adapt(SoftPalette.gray150)),
                       const SizedBox(height: 12),
                       Text(
                         _isTeacher
                             ? 'No students found in your assigned class roster ($_selectedGradeFilter).'
                             : 'No school students found / کوئی طالب علم موجود نہیں',
-                        style: const TextStyle(color: SchoolTheme.textMid, fontSize: 15, fontWeight: FontWeight.bold),
+                        style: TextStyle(color: context.adapt(SchoolTheme.textMid), fontSize: 15, fontWeight: FontWeight.bold),
                       ),
                       if (!_isTeacher) ...[
                         const SizedBox(height: 6),
-                        const Text(
+                        Text(
                           'Click "+ New Admission" to enroll a student.',
-                          style: TextStyle(color: Colors.grey),
+                          style: TextStyle(color: context.adapt(SoftPalette.gray350)),
                         ),
                       ],
                     ],
@@ -288,23 +290,23 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
     if (bytes != null && bytes.isNotEmpty) {
       return CircleAvatar(
         radius: 26,
-        backgroundColor: SchoolTheme.primary.withValues(alpha: 0.1),
+        backgroundColor: context.adapt(SchoolTheme.primary).withValues(alpha: 0.1),
         backgroundImage: MemoryImage(bytes),
       );
     } else if (student.photoUrl.startsWith('http')) {
       return CircleAvatar(
         radius: 26,
-        backgroundColor: SchoolTheme.primary.withValues(alpha: 0.1),
+        backgroundColor: context.adapt(SchoolTheme.primary).withValues(alpha: 0.1),
         backgroundImage: NetworkImage(student.photoUrl),
       );
     }
     return CircleAvatar(
       radius: 26,
-      backgroundColor: SchoolTheme.primary.withValues(alpha: 0.1),
+      backgroundColor: context.adapt(SchoolTheme.primary).withValues(alpha: 0.1),
       child: Text(
         student.rollNo.isNotEmpty ? student.rollNo : 'N/A',
-        style: const TextStyle(
-          color: SchoolTheme.primary,
+        style: TextStyle(
+          color: context.adapt(SchoolTheme.primary),
           fontWeight: FontWeight.bold,
           fontSize: 14,
         ),
@@ -324,7 +326,7 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
-            const Icon(Icons.folder_shared_rounded, color: SchoolTheme.primary),
+            Icon(Icons.folder_shared_rounded, color: context.adapt(SchoolTheme.primary)),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -342,25 +344,25 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
               mainAxisSize: MainAxisSize.min,
               children: [
                 if (student.photoUrl.isNotEmpty) ...[
-                  const Text('Student Profile Photo / تصویر طالب علم:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF475569))),
+                  Text('Student Profile Photo / تصویر طالب علم:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: context.adapt(SoftPalette.slate600))),
                   const SizedBox(height: 6),
                   MediaUploadTile(label: 'Student Photo (Avatar)', icon: Icons.person_outlined, initialValue: student.photoUrl, readOnly: true),
                   const SizedBox(height: 12),
                 ],
                 if (student.guardianCnicUrl.isNotEmpty) ...[
-                  const Text("Father's CNIC Document / شناختی کارڈ والد:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF475569))),
+                  Text("Father's CNIC Document / شناختی کارڈ والد:", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: context.adapt(SoftPalette.slate600))),
                   const SizedBox(height: 6),
                   MediaUploadTile(label: "Father's CNIC Document", icon: Icons.badge_outlined, isDocument: true, initialValue: student.guardianCnicUrl, readOnly: true),
                   const SizedBox(height: 12),
                 ],
                 if (student.bformUrl.isNotEmpty) ...[
-                  const Text('B-Form / Birth Certificate / ب فارم یا برتھ سرٹیفکیٹ:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF475569))),
+                  Text('B-Form / Birth Certificate / ب فارم یا برتھ سرٹیفکیٹ:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: context.adapt(SoftPalette.slate600))),
                   const SizedBox(height: 6),
                   MediaUploadTile(label: 'B-Form / Birth Certificate Document', icon: Icons.description_outlined, isDocument: true, initialValue: student.bformUrl, readOnly: true),
                   const SizedBox(height: 12),
                 ],
                 if (student.additionalDocuments.isNotEmpty) ...[
-                  const Text('Custom Attached Documents / دیگر دستاویزات:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF475569))),
+                  Text('Custom Attached Documents / دیگر دستاویزات:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: context.adapt(SoftPalette.slate600))),
                   const SizedBox(height: 6),
                   ...student.additionalDocuments.map((doc) => Padding(
                         padding: const EdgeInsets.only(bottom: 8.0),
@@ -374,9 +376,9 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
                       )),
                 ],
                 if (docCount == 0)
-                  const Padding(
+                  Padding(
                     padding: EdgeInsets.all(20),
-                    child: Center(child: Text('No documents uploaded for this student yet.', style: TextStyle(color: Colors.grey))),
+                    child: Center(child: Text('No documents uploaded for this student yet.', style: TextStyle(color: context.adapt(SoftPalette.gray350)))),
                   ),
               ],
             ),
@@ -406,9 +408,9 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
                 Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: Colors.white,
+                    color: SoftPalette.gray50,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFF0F172A), width: 1.8),
+                    border: Border.all(color: SoftPalette.slate900, width: 1.8),
                   ),
                   child: Column(
                     children: [
@@ -416,14 +418,14 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
                         'تعلیم و تربیت سکول سسٹم',
                         textAlign: TextAlign.center,
                         textDirection: TextDirection.rtl,
-                        style: GoogleFonts.notoSansArabic(fontSize: 22, fontWeight: FontWeight.bold, color: const Color(0xFF0F172A)),
+                        style: GoogleFonts.notoSansArabic(fontSize: 22, fontWeight: FontWeight.bold, color: SoftPalette.slate900),
                       ),
                       const SizedBox(height: 2),
                       Text(
                         'گلزار مدینہ ویلفیئر فاؤنڈیشن گلزار مدینہ روڈ گجرات 0334-4687928',
                         textAlign: TextAlign.center,
                         textDirection: TextDirection.rtl,
-                        style: GoogleFonts.notoSansArabic(fontSize: 12.5, fontWeight: FontWeight.w600, color: const Color(0xFF334155)),
+                        style: GoogleFonts.notoSansArabic(fontSize: 12.5, fontWeight: FontWeight.w600, color: SoftPalette.slate700),
                       ),
                       const SizedBox(height: 6),
                       Row(
@@ -438,11 +440,11 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
                           Text(
                             'داخلہ فارم',
                             textDirection: TextDirection.rtl,
-                            style: GoogleFonts.notoSansArabic(fontSize: 18, fontWeight: FontWeight.bold, color: const Color(0xFF0F172A)),
+                            style: GoogleFonts.notoSansArabic(fontSize: 18, fontWeight: FontWeight.bold, color: SoftPalette.slate900),
                           ),
                         ],
                       ),
-                      const Divider(color: Color(0xFF0F172A), thickness: 1.2),
+                      const Divider(color: SoftPalette.slate900, thickness: 1.2),
                       const SizedBox(height: 8),
 
                       // Meta row
@@ -474,8 +476,8 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
-                            Text('دستخط والدین', textDirection: TextDirection.rtl, style: GoogleFonts.notoSansArabic(fontSize: 14, fontWeight: FontWeight.bold, color: const Color(0xFF0F172A))),
-                            const SizedBox(width: 120, child: Divider(color: Color(0xFF0F172A), thickness: 1.2)),
+                            Text('دستخط والدین', textDirection: TextDirection.rtl, style: GoogleFonts.notoSansArabic(fontSize: 14, fontWeight: FontWeight.bold, color: SoftPalette.slate900)),
+                            const SizedBox(width: 120, child: Divider(color: SoftPalette.slate900, thickness: 1.2)),
                           ],
                         ),
                       ),
@@ -495,8 +497,8 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
                       icon: const Icon(Icons.print_rounded, size: 16),
                       label: const Text('Print / Download PDF (پرنٹ / پی ڈی ایف)'),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: SchoolTheme.primary,
-                        side: const BorderSide(color: SchoolTheme.primary, width: 1.2),
+                        foregroundColor: context.adapt(SchoolTheme.primary),
+                        side: BorderSide(color: context.adapt(SchoolTheme.primary), width: 1.2),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -508,7 +510,7 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
                         },
                         icon: const Icon(Icons.edit_rounded, size: 16),
                         label: const Text('Edit Admission Form'),
-                        style: ElevatedButton.styleFrom(backgroundColor: SchoolTheme.primary, foregroundColor: Colors.white),
+                        style: ElevatedButton.styleFrom(backgroundColor: SchoolTheme.primary, foregroundColor: SoftPalette.gray50),
                       ),
                   ],
                 ),
@@ -530,13 +532,13 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
             width: 220,
             child: Text(
               label,
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: Color(0xFF475569)),
+              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 12, color: SoftPalette.slate600),
             ),
           ),
           Expanded(
             child: Text(
               value,
-              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: Color(0xFF0F172A)),
+              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: SoftPalette.slate900),
             ),
           ),
         ],
@@ -560,12 +562,12 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
       return Container(
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: context.adapt(SoftPalette.gray50),
           borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: Colors.grey.shade200),
+          border: Border.all(color: context.adapt(SoftPalette.gray100)),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.02),
+              color: SoftPalette.gray900.withValues(alpha: 0.02),
               blurRadius: 8,
               offset: const Offset(0, 3),
             ),
@@ -589,22 +591,22 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
                               student.name,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
+                              style: TextStyle(
                                 fontWeight: FontWeight.bold,
                                 fontSize: 14.5,
-                                color: Color(0xFF0F172A),
+                                color: context.adapt(SoftPalette.slate900),
                               ),
                             ),
                           ),
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                             decoration: BoxDecoration(
-                              color: SchoolTheme.primary.withValues(alpha: 0.1),
+                              color: context.adapt(SchoolTheme.primary).withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(
                               'Roll: ${student.rollNo}',
-                              style: const TextStyle(color: SchoolTheme.primary, fontSize: 11, fontWeight: FontWeight.bold),
+                              style: TextStyle(color: context.adapt(SchoolTheme.primary), fontSize: 11, fontWeight: FontWeight.bold),
                             ),
                           ),
                         ],
@@ -630,7 +632,7 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
                           const SizedBox(width: 6),
                           Text(
                             'Sec ${student.section}',
-                            style: TextStyle(color: Colors.grey.shade600, fontSize: 11.5),
+                            style: TextStyle(color: context.adapt(SoftPalette.gray500), fontSize: 11.5),
                           ),
                           const Spacer(),
                           Container(
@@ -656,7 +658,7 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
               ],
             ),
             const SizedBox(height: 8),
-            Divider(height: 1, color: Colors.grey.shade100),
+            Divider(height: 1, color: context.adapt(SoftPalette.gray100)),
             const SizedBox(height: 8),
             Row(
               children: [
@@ -665,12 +667,12 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
                     'Father: ${student.guardianName}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12, color: Color(0xFF334155)),
+                    style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.slate700)),
                   ),
                 ),
                 Text(
                   student.guardianPhone,
-                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600, fontWeight: FontWeight.w500),
+                  style: TextStyle(fontSize: 11.5, color: context.adapt(SoftPalette.gray500), fontWeight: FontWeight.w500),
                 ),
               ],
             ),
@@ -680,8 +682,8 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
               children: [
                 TextButton.icon(
                   onPressed: () => _showAdmissionSlipDialog(student),
-                  icon: const Icon(Icons.receipt_long_rounded, size: 14, color: SchoolTheme.primary),
-                  label: const Text('Slip', style: TextStyle(fontSize: 11, color: SchoolTheme.primary)),
+                  icon: Icon(Icons.receipt_long_rounded, size: 14, color: context.adapt(SchoolTheme.primary)),
+                  label: Text('Slip', style: TextStyle(fontSize: 11, color: context.adapt(SchoolTheme.primary))),
                   style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
                 ),
                 TextButton.icon(
@@ -689,15 +691,15 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
                   icon: Badge(
                     label: Text('$docCount'),
                     isLabelVisible: docCount > 0,
-                    child: const Icon(Icons.folder_shared_rounded, size: 14, color: Color(0xFF1B4965)),
+                    child: Icon(Icons.folder_shared_rounded, size: 14, color: context.adapt(SoftPalette.sky700)),
                   ),
-                  label: const Text('Docs', style: TextStyle(fontSize: 11, color: Color(0xFF1B4965))),
+                  label: Text('Docs', style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.sky700))),
                   style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
                 ),
                 if (!_isTeacher)
                   IconButton(
                     tooltip: 'Edit Profile',
-                    icon: const Icon(Icons.edit_rounded, size: 16, color: Color(0xFF64748B)),
+                    icon: Icon(Icons.edit_rounded, size: 16, color: context.adapt(SoftPalette.slate550)),
                     onPressed: () => _openEnrollmentDialog(student),
                     visualDensity: VisualDensity.compact,
                   ),
@@ -711,12 +713,12 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.adapt(SoftPalette.gray50),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(color: context.adapt(SoftPalette.gray100)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.02),
+            color: SoftPalette.gray900.withValues(alpha: 0.02),
             blurRadius: 8,
             offset: const Offset(0, 3),
           ),
@@ -738,22 +740,22 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
                   children: [
                     Text(
                       student.name,
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 15,
-                        color: Color(0xFF0F172A),
+                        color: context.adapt(SoftPalette.slate900),
                       ),
                     ),
                     const SizedBox(width: 8),
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
-                        color: SchoolTheme.primary.withValues(alpha: 0.1),
+                        color: context.adapt(SchoolTheme.primary).withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
                         'Roll: ${student.rollNo}',
-                        style: const TextStyle(color: SchoolTheme.primary, fontSize: 11, fontWeight: FontWeight.bold),
+                        style: TextStyle(color: context.adapt(SchoolTheme.primary), fontSize: 11, fontWeight: FontWeight.bold),
                       ),
                     ),
                   ],
@@ -761,7 +763,7 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
                 const SizedBox(height: 3),
                 Text(
                   'Father: ${student.guardianName} ${student.fatherProfession.isNotEmpty ? "(${student.fatherProfession})" : ""}',
-                  style: const TextStyle(fontSize: 12.5, color: Color(0xFF334155)),
+                  style: TextStyle(fontSize: 12.5, color: context.adapt(SoftPalette.slate700)),
                 ),
                 const SizedBox(height: 4),
                 Row(
@@ -784,7 +786,7 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
                     const SizedBox(width: 6),
                     Text(
                       'Sec ${student.section} • ${student.academicGroup}',
-                      style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                      style: TextStyle(color: context.adapt(SoftPalette.gray500), fontSize: 12),
                     ),
                   ],
                 ),
@@ -801,27 +803,27 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
                 if (student.bformNo.isNotEmpty)
                   Text(
                     'B-Form: ${student.bformNo}',
-                    style: const TextStyle(fontSize: 12, color: Color(0xFF334155), fontWeight: FontWeight.w600),
+                    style: TextStyle(fontSize: 12, color: context.adapt(SoftPalette.slate700), fontWeight: FontWeight.w600),
                   ),
                 if (student.guardianCnic.isNotEmpty)
                   Text(
                     'CNIC: ${student.guardianCnic}',
-                    style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700),
+                    style: TextStyle(fontSize: 11.5, color: context.adapt(SoftPalette.gray550)),
                   ),
                 Text(
                   'Phone: ${student.guardianPhone}',
-                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+                  style: TextStyle(fontSize: 11.5, color: context.adapt(SoftPalette.gray500)),
                 ),
                 if (student.biometricPin.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(top: 2.0),
                     child: Row(
                       children: [
-                        const Icon(Icons.fingerprint_rounded, size: 13, color: SchoolTheme.primary),
+                        Icon(Icons.fingerprint_rounded, size: 13, color: context.adapt(SchoolTheme.primary)),
                         const SizedBox(width: 4),
                         Text(
                           'PIN: ${student.biometricPin}',
-                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: SchoolTheme.primary),
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: context.adapt(SchoolTheme.primary)),
                         ),
                       ],
                     ),
@@ -851,7 +853,7 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
           // View Admission Slip Action
           IconButton(
             tooltip: 'View / Print Admission Form (داخلہ فارم)',
-            icon: const Icon(Icons.receipt_long_rounded, color: SchoolTheme.primary),
+            icon: Icon(Icons.receipt_long_rounded, color: context.adapt(SchoolTheme.primary)),
             onPressed: () => _showAdmissionSlipDialog(student),
           ),
 
@@ -861,7 +863,7 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
             icon: Badge(
               label: Text('$docCount'),
               isLabelVisible: docCount > 0,
-              child: const Icon(Icons.folder_shared_rounded, color: Color(0xFF1B4965)),
+              child: Icon(Icons.folder_shared_rounded, color: context.adapt(SoftPalette.sky700)),
             ),
             onPressed: () => _showStudentDocumentsDialog(student),
           ),
@@ -870,7 +872,7 @@ class _SchoolStudentManagementViewState extends State<SchoolStudentManagementVie
           if (!_isTeacher)
             IconButton(
               tooltip: 'Edit Profile & Admission',
-              icon: const Icon(Icons.edit_rounded, color: Color(0xFF64748B)),
+              icon: Icon(Icons.edit_rounded, color: context.adapt(SoftPalette.slate550)),
               onPressed: () => _openEnrollmentDialog(student),
             ),
         ],

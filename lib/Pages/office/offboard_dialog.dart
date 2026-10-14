@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/design_system.dart';
 import 'package:intl/intl.dart';
 import '../../services/finance_local_storage.dart';
 
@@ -124,14 +125,14 @@ class _OffboardDialogState extends State<OffboardDialog> {
   Future<void> _handleConfirm() async {
     final detailed = _detailedReasonCtrl.text.trim();
     if (detailed.isEmpty && _selectedReason == 'Other') {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         const SnackBar(content: Text('Please provide specific remarks for the offboarding reason.')),
       );
       return;
     }
 
     if (!_isClearanceConfirmed) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         const SnackBar(content: Text('Please check the confirmation box to complete offboarding.')),
       );
       return;
@@ -168,7 +169,7 @@ class _OffboardDialogState extends State<OffboardDialog> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(content: Text('Failed to complete offboarding: $e')),
         );
       }
@@ -180,11 +181,11 @@ class _OffboardDialogState extends State<OffboardDialog> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgDialog = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final bgCard = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC);
-    final textColor = isDark ? Colors.white : const Color(0xFF0F172A);
-    final subtextColor = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
-    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
+    final bgDialog = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final bgCard = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+    final textColor = isDark ? SoftPalette.gray50 : SoftPalette.slate900;
+    final subtextColor = isDark ? SoftPalette.slate350 : SoftPalette.slate550;
+    final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.slate150;
 
     final empName = widget.employeeData['name']?.toString() ??
         widget.employeeData['fullName']?.toString() ??
@@ -226,10 +227,10 @@ class _OffboardDialogState extends State<OffboardDialog> {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: Colors.redAccent.withValues(alpha: 0.12),
+                      color: SoftPalette.red400.withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Icon(Icons.person_off_rounded, color: Colors.redAccent, size: 24),
+                    child: const Icon(Icons.person_off_rounded, color: SoftPalette.red400, size: 24),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -279,10 +280,10 @@ class _OffboardDialogState extends State<OffboardDialog> {
                         children: [
                           CircleAvatar(
                             radius: 20,
-                            backgroundColor: Colors.redAccent.withValues(alpha: 0.15),
+                            backgroundColor: SoftPalette.red400.withValues(alpha: 0.15),
                             child: Text(
                               empName.isNotEmpty ? empName[0].toUpperCase() : 'E',
-                              style: const TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold, fontSize: 16),
+                              style: const TextStyle(color: SoftPalette.red400, fontWeight: FontWeight.bold, fontSize: 16),
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -300,7 +301,7 @@ class _OffboardDialogState extends State<OffboardDialog> {
                                     Container(
                                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                       decoration: BoxDecoration(
-                                        color: Colors.blueGrey.withValues(alpha: 0.15),
+                                        color: SoftPalette.slate500.withValues(alpha: 0.15),
                                         borderRadius: BorderRadius.circular(4),
                                       ),
                                       child: Text(
@@ -326,7 +327,7 @@ class _OffboardDialogState extends State<OffboardDialog> {
                     // ── Section 1: Details about Last Recorded Data ──
                     Row(
                       children: [
-                        const Icon(Icons.history_rounded, size: 16, color: Colors.blueAccent),
+                        const Icon(Icons.history_rounded, size: 16, color: SoftPalette.blue400),
                         const SizedBox(width: 6),
                         Text(
                           'Last Recorded System Data & Status Audit',
@@ -340,13 +341,13 @@ class _OffboardDialogState extends State<OffboardDialog> {
                       decoration: BoxDecoration(
                         color: bgCard,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.blueAccent.withValues(alpha: 0.2)),
+                        border: Border.all(color: SoftPalette.blue400.withValues(alpha: 0.2)),
                       ),
                       child: Column(
                         children: [
                           _buildAuditRow(
                             icon: Icons.fingerprint_rounded,
-                            iconColor: Colors.teal,
+                            iconColor: SoftPalette.teal500,
                             label: 'Last Attendance / Punch:',
                             value: lastAtt,
                             textColor: textColor,
@@ -355,7 +356,7 @@ class _OffboardDialogState extends State<OffboardDialog> {
                           const Divider(height: 16, thickness: 0.6),
                           _buildAuditRow(
                             icon: Icons.devices_rounded,
-                            iconColor: Colors.indigo,
+                            iconColor: context.adapt(SoftPalette.indigo600),
                             label: 'Last App / System Activity:',
                             value: lastAct,
                             textColor: textColor,
@@ -367,7 +368,7 @@ class _OffboardDialogState extends State<OffboardDialog> {
                               Expanded(
                                 child: _buildAuditRow(
                                   icon: Icons.payments_rounded,
-                                  iconColor: Colors.amber,
+                                  iconColor: SoftPalette.amber200,
                                   label: 'Active Base Salary:',
                                   value: 'PKR ${NumberFormat('#,##0').format(salaryNum)}',
                                   textColor: textColor,
@@ -377,7 +378,7 @@ class _OffboardDialogState extends State<OffboardDialog> {
                               Expanded(
                                 child: _buildAuditRow(
                                   icon: Icons.account_balance_wallet_rounded,
-                                  iconColor: loanNum > 0 ? Colors.redAccent : Colors.green,
+                                  iconColor: loanNum > 0 ? SoftPalette.red400 : SoftPalette.green400,
                                   label: 'Advance / Loan Balance:',
                                   value: 'PKR ${NumberFormat('#,##0').format(loanNum)} ${loanNum > 0 ? '(Outstanding)' : '(Cleared)'}',
                                   textColor: textColor,
@@ -390,7 +391,7 @@ class _OffboardDialogState extends State<OffboardDialog> {
                             const Divider(height: 16, thickness: 0.6),
                             _buildAuditRow(
                               icon: Icons.event_available_rounded,
-                              iconColor: Colors.purple,
+                              iconColor: SoftPalette.purple550,
                               label: 'Joining / Service Record:',
                               value: 'Joined: $joinDateStr',
                               textColor: textColor,
@@ -405,7 +406,7 @@ class _OffboardDialogState extends State<OffboardDialog> {
                     // ── Section 2: Offboarding Reasons ──
                     Row(
                       children: [
-                        const Icon(Icons.assignment_late_rounded, size: 16, color: Colors.orangeAccent),
+                        const Icon(Icons.assignment_late_rounded, size: 16, color: SoftPalette.amber300),
                         const SizedBox(width: 6),
                         Text(
                           'Offboarding Reasons & Justification',
@@ -458,7 +459,7 @@ class _OffboardDialogState extends State<OffboardDialog> {
                     // ── Section 3: Exact Timing From When It Will Be Offboarded ──
                     Row(
                       children: [
-                        const Icon(Icons.access_time_filled_rounded, size: 16, color: Colors.teal),
+                        const Icon(Icons.access_time_filled_rounded, size: 16, color: SoftPalette.teal500),
                         const SizedBox(width: 6),
                         Text(
                           'Exact Effective Timing & Shift Cutoff',
@@ -494,7 +495,7 @@ class _OffboardDialogState extends State<OffboardDialog> {
                                         DateFormat('dd MMM yyyy').format(_effectiveDate),
                                         style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: textColor),
                                       ),
-                                      const Icon(Icons.calendar_today_rounded, size: 16, color: Colors.teal),
+                                      const Icon(Icons.calendar_today_rounded, size: 16, color: SoftPalette.teal500),
                                     ],
                                   ),
                                 ),
@@ -528,7 +529,7 @@ class _OffboardDialogState extends State<OffboardDialog> {
                                         _formatTimeOfDay(_effectiveTime),
                                         style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: textColor),
                                       ),
-                                      const Icon(Icons.schedule_rounded, size: 16, color: Colors.teal),
+                                      const Icon(Icons.schedule_rounded, size: 16, color: SoftPalette.teal500),
                                     ],
                                   ),
                                 ),
@@ -551,14 +552,14 @@ class _OffboardDialogState extends State<OffboardDialog> {
                         return ChoiceChip(
                           label: Text(m),
                           selected: isSel,
-                          selectedColor: Colors.teal.withValues(alpha: 0.2),
+                          selectedColor: SoftPalette.teal500.withValues(alpha: 0.2),
                           labelStyle: TextStyle(
                             fontSize: 11,
                             fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
-                            color: isSel ? (isDark ? Colors.white : Colors.teal) : subtextColor,
+                            color: isSel ? (isDark ? SoftPalette.gray50 : SoftPalette.teal500) : subtextColor,
                           ),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                          side: BorderSide(color: isSel ? Colors.teal : borderColor),
+                          side: BorderSide(color: isSel ? SoftPalette.teal500 : borderColor),
                           backgroundColor: bgCard,
                           onSelected: (_) => setState(() => _shiftMilestone = m),
                         );
@@ -570,16 +571,16 @@ class _OffboardDialogState extends State<OffboardDialog> {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: Colors.red.withValues(alpha: 0.08),
+                        color: SoftPalette.red400.withValues(alpha: 0.08),
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: Colors.redAccent.withValues(alpha: 0.25)),
+                        border: Border.all(color: SoftPalette.red400.withValues(alpha: 0.25)),
                       ),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Checkbox(
                             value: _isClearanceConfirmed,
-                            activeColor: Colors.redAccent,
+                            activeColor: SoftPalette.red400,
                             onChanged: (val) => setState(() => _isClearanceConfirmed = val ?? false),
                           ),
                           Expanded(
@@ -587,7 +588,7 @@ class _OffboardDialogState extends State<OffboardDialog> {
                               padding: const EdgeInsets.only(top: 10),
                               child: Text(
                                 'I verify that the last recorded data has been audited, departmental assets/credentials are handed over, and active salary calculations should be stopped effective immediately.',
-                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: isDark ? Colors.white70 : const Color(0xFF1E293B)),
+                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.gray50A70 : SoftPalette.slate800),
                               ),
                             ),
                           ),
@@ -616,12 +617,12 @@ class _OffboardDialogState extends State<OffboardDialog> {
                   ElevatedButton.icon(
                     onPressed: _isProcessing ? null : _handleConfirm,
                     icon: _isProcessing
-                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50))
                         : const Icon(Icons.person_off_rounded, size: 18),
                     label: Text(_isProcessing ? 'Processing Offboarding...' : 'Confirm Offboarding & Terminate'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.redAccent,
-                      foregroundColor: Colors.white,
+                      backgroundColor: SoftPalette.red400,
+                      foregroundColor: SoftPalette.gray50,
                       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       elevation: 1,

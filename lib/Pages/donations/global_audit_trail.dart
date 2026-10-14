@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import '../../models/donation_models.dart';
@@ -60,12 +62,12 @@ class _GlobalAuditTrailScreenState extends State<GlobalAuditTrailScreen> {
     final isAuthorized = widget.role.isChairman || widget.role.isHqManager;
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF1F5F9),
+      backgroundColor: context.adapt(SoftPalette.slate100),
       body: !isAuthorized 
         ? _buildUnauthorizedView()
         : Container(
-            decoration: const BoxDecoration(
-              color: Color(0xFFF8FAFC),
+            decoration: BoxDecoration(
+              color: context.adapt(SoftPalette.gray50),
             ),
             child: Column(
               children: [
@@ -81,11 +83,11 @@ class _GlobalAuditTrailScreenState extends State<GlobalAuditTrailScreen> {
   Widget _buildHeader(BuildContext context) {
     return Container(
       padding: const EdgeInsets.fromLTRB(32, 48, 24, 24),
-      decoration: const BoxDecoration(
-        color: Colors.white,
+      decoration: BoxDecoration(
+        color: context.adapt(SoftPalette.gray50),
         borderRadius: BorderRadius.vertical(bottom: Radius.circular(32)),
         boxShadow: [
-          BoxShadow(color: Color(0x0A000000), blurRadius: 20, offset: Offset(0, 10)),
+          BoxShadow(color: SoftPalette.gray900A4, blurRadius: 20, offset: Offset(0, 10)),
         ],
       ),
       child: Row(
@@ -93,25 +95,25 @@ class _GlobalAuditTrailScreenState extends State<GlobalAuditTrailScreen> {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: const Color(0xFFE65100).withValues(alpha: 0.1),
+              color: SoftPalette.orange400.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(16),
             ),
-            child: const Icon(Icons.history_toggle_off_rounded, color: Color(0xFFE65100), size: 28),
+            child: const Icon(Icons.history_toggle_off_rounded, color: SoftPalette.orange400, size: 28),
           ),
           const SizedBox(width: 20),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text('Global Audit Trail', 
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: Color(0xFF0F172A), letterSpacing: -0.5)),
+                Text('Global Audit Trail', 
+                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: context.adapt(SoftPalette.slate900), letterSpacing: -0.5)),
                 const SizedBox(height: 4),
                 Row(
                   children: [
-                    Container(width: 8, height: 8, decoration: const BoxDecoration(color: Color(0xFF10B981), shape: BoxShape.circle)),
+                    Container(width: 8, height: 8, decoration: const BoxDecoration(color: SoftPalette.emerald350, shape: BoxShape.circle)),
                     const SizedBox(width: 8),
-                    const Text('AUTHORIZED SYSTEM ACCESS', 
-                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: Color(0xFF64748B), letterSpacing: 1)),
+                    Text('AUTHORIZED SYSTEM ACCESS', 
+                      style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: context.adapt(SoftPalette.slate550), letterSpacing: 1)),
                   ],
                 ),
               ],
@@ -119,7 +121,7 @@ class _GlobalAuditTrailScreenState extends State<GlobalAuditTrailScreen> {
           ),
           IconButton(
             onPressed: () => Navigator.pop(context),
-            icon: const Icon(Icons.close_rounded, color: Color(0xFF94A3B8), size: 28),
+            icon: Icon(Icons.close_rounded, color: context.adapt(SoftPalette.slate350), size: 28),
           ),
         ],
       ),
@@ -131,17 +133,17 @@ class _GlobalAuditTrailScreenState extends State<GlobalAuditTrailScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.lock_person_rounded, size: 80, color: Colors.red.withValues(alpha: 0.1)),
+          Icon(Icons.lock_person_rounded, size: 80, color: SoftPalette.red400.withValues(alpha: 0.1)),
           const SizedBox(height: 24),
-          const Text('Access Restricted', 
-            style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: Color(0xFF0F172A))),
+          Text('Access Restricted', 
+            style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900, color: context.adapt(SoftPalette.slate900))),
           const SizedBox(height: 8),
-          const Text('Only Chairman and HQ Manager can view global audit logs.',
-            style: TextStyle(color: Color(0xFF64748B)), textAlign: TextAlign.center),
+          Text('Only Chairman and HQ Manager can view global audit logs.',
+            style: TextStyle(color: context.adapt(SoftPalette.slate550)), textAlign: TextAlign.center),
           const SizedBox(height: 32),
           ElevatedButton(
             onPressed: () => Navigator.pop(context),
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F172A), foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(backgroundColor: context.adapt(SoftPalette.slate900), foregroundColor: context.adapt(SoftPalette.gray50)),
             child: const Text('Go Back'),
           ),
         ],
@@ -236,11 +238,11 @@ class _GlobalAuditTrailScreenState extends State<GlobalAuditTrailScreen> {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 32, vertical: 8),
       padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.orange.shade200)),
+      decoration: BoxDecoration(color: context.adapt(SoftPalette.amber100m), borderRadius: BorderRadius.circular(12), border: Border.all(color: context.adapt(SoftPalette.amber200))),
       child: Row(children: [
-        const Icon(Icons.warning_amber_rounded, size: 16, color: Colors.orange),
+        const Icon(Icons.warning_amber_rounded, size: 16, color: SoftPalette.amber300),
         const SizedBox(width: 12),
-        const Expanded(child: Text('Live updates paused. Showing cached data.', style: TextStyle(fontSize: 12, color: Colors.orange, fontWeight: FontWeight.bold))),
+        const Expanded(child: Text('Live updates paused. Showing cached data.', style: TextStyle(fontSize: 12, color: SoftPalette.amber300, fontWeight: FontWeight.bold))),
       ]),
     );
   }
@@ -252,25 +254,25 @@ class _GlobalAuditTrailScreenState extends State<GlobalAuditTrailScreen> {
       child: Center(
         child: Container(
           padding: const EdgeInsets.all(32),
-          decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(24)),
+          decoration: BoxDecoration(color: context.adapt(SoftPalette.gray50), borderRadius: BorderRadius.circular(24)),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.warning_amber_rounded, size: 48, color: Colors.orange),
+              const Icon(Icons.warning_amber_rounded, size: 48, color: SoftPalette.amber300),
               const SizedBox(height: 20),
-              const Text('Database Index Required', 
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: Color(0xFF0F172A))),
+              Text('Database Index Required', 
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: context.adapt(SoftPalette.slate900))),
               const SizedBox(height: 12),
               Text(
                 isIndexError 
                   ? 'This view requires a simple index for "global_audit_logs".\n\n1. Go to Firebase Console\n2. Firestore -> Indexes\n3. Add Index\n4. Collection: global_audit_logs\n5. Field: timestamp (Descending)'
                   : 'Error: $error',
                 textAlign: TextAlign.center,
-                style: const TextStyle(color: Color(0xFF64748B), height: 1.5),
+                style: TextStyle(color: context.adapt(SoftPalette.slate550), height: 1.5),
               ),
               const SizedBox(height: 24),
-              const Text('Data will appear here automatically once the index is ready.', 
-                style: TextStyle(fontSize: 11, color: Colors.grey, fontStyle: FontStyle.italic), textAlign: TextAlign.center),
+              Text('Data will appear here automatically once the index is ready.', 
+                style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.gray350), fontStyle: FontStyle.italic), textAlign: TextAlign.center),
             ],
           ),
         ),
@@ -283,9 +285,9 @@ class _GlobalAuditTrailScreenState extends State<GlobalAuditTrailScreen> {
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(Icons.assignment_turned_in_rounded, size: 64, color: Colors.grey.shade300),
+          Icon(Icons.assignment_turned_in_rounded, size: 64, color: context.adapt(SoftPalette.gray150)),
           const SizedBox(height: 16),
-          const Text('No activity logs found', style: TextStyle(color: Color(0xFF94A3B8), fontWeight: FontWeight.w600)),
+          Text('No activity logs found', style: TextStyle(color: context.adapt(SoftPalette.slate350), fontWeight: FontWeight.w600)),
         ],
       ),
     );
@@ -307,17 +309,17 @@ class _FilterTab extends StatelessWidget {
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         decoration: BoxDecoration(
-          color: isActive ? const Color(0xFF6366F1) : Colors.white,
+          color: isActive ? SoftPalette.indigo500 : context.adapt(SoftPalette.gray50),
           borderRadius: BorderRadius.circular(10),
-          border: Border.all(color: isActive ? const Color(0xFF6366F1) : const Color(0xFFE2E8F0)),
-          boxShadow: isActive ? [BoxShadow(color: const Color(0xFF6366F1).withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 4))] : [],
+          border: Border.all(color: isActive ? SoftPalette.indigo500 : context.adapt(SoftPalette.slate150)),
+          boxShadow: isActive ? [BoxShadow(color: SoftPalette.indigo500.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 4))] : [],
         ),
         child: Text(
           label,
           style: TextStyle(
             fontSize: 11,
             fontWeight: FontWeight.w800,
-            color: isActive ? Colors.white : const Color(0xFF64748B),
+            color: isActive ? SoftPalette.gray50 : context.adapt(SoftPalette.slate550),
             letterSpacing: 0.5,
           ),
         ),
@@ -339,11 +341,11 @@ class _AuditLogCard extends StatelessWidget {
     return Container(
       margin: const EdgeInsets.only(bottom: 20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: context.adapt(SoftPalette.gray50),
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: const Color(0xFFE2E8F0).withValues(alpha: 0.6)),
+        border: Border.all(color: context.adapt(SoftPalette.slate150).withValues(alpha: 0.6)),
         boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.02), blurRadius: 15, offset: const Offset(0, 8)),
+          BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.02), blurRadius: 15, offset: const Offset(0, 8)),
         ],
       ),
       child: Column(
@@ -352,8 +354,8 @@ class _AuditLogCard extends StatelessWidget {
           // Header
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-            decoration: const BoxDecoration(
-              color: Color(0xFFF8FAFC),
+            decoration: BoxDecoration(
+              color: context.adapt(SoftPalette.gray50),
               borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
             ),
             child: Row(
@@ -361,7 +363,7 @@ class _AuditLogCard extends StatelessWidget {
               children: [
                 _buildActionBadge(),
                 Text('$dateStr • $timeStr', 
-                  style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF94A3B8))),
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.adapt(SoftPalette.slate350))),
               ],
             ),
           ),
@@ -376,11 +378,11 @@ class _AuditLogCard extends StatelessWidget {
                     Container(
                       width: 32,
                       height: 32,
-                      decoration: const BoxDecoration(color: Color(0xFF0F172A), shape: BoxShape.circle),
+                      decoration: BoxDecoration(color: context.adapt(SoftPalette.slate900), shape: BoxShape.circle),
                       child: Center(
                         child: Text(
                           entry.username.trim().isNotEmpty ? entry.username.trim()[0].toUpperCase() : 'U',
-                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                          style: TextStyle(color: context.adapt(SoftPalette.gray50), fontWeight: FontWeight.bold, fontSize: 12),
                         ),
                       ),
                     ),
@@ -391,14 +393,14 @@ class _AuditLogCard extends StatelessWidget {
                         children: [
                           Text(
                             entry.username.trim().isNotEmpty ? entry.username : 'System User',
-                            style: const TextStyle(fontWeight: FontWeight.w900, color: Color(0xFF0F172A), fontSize: 15),
+                            style: TextStyle(fontWeight: FontWeight.w900, color: context.adapt(SoftPalette.slate900), fontSize: 15),
                           ),
                           Row(
                             children: [
-                              Text('User ID: ${entry.userId.trim().isNotEmpty ? entry.userId : 'system'}', style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                              Text('User ID: ${entry.userId.trim().isNotEmpty ? entry.userId : 'system'}', style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.slate550))),
                               if (entry.branchName.isNotEmpty) ...[
-                                const Text(' • ', style: TextStyle(fontSize: 11, color: Color(0xFFCBD5E1))),
-                                Text(entry.branchName.toUpperCase(), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF6366F1), letterSpacing: 0.5)),
+                                Text(' • ', style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.slate200))),
+                                Text(entry.branchName.toUpperCase(), style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: SoftPalette.indigo500, letterSpacing: 0.5)),
                               ]
                             ],
                           ),
@@ -408,14 +410,14 @@ class _AuditLogCard extends StatelessWidget {
                   ],
                 ),
                 const SizedBox(height: 20),
-                _buildDescription(),
+                _buildDescription(context),
                 if (entry.reason != null && entry.reason!.isNotEmpty) ...[
                   const SizedBox(height: 16),
                   _buildReasonPanel(),
                 ],
                 if (entry.action == 'update' && entry.oldData != null && entry.newData != null) ...[
                   const SizedBox(height: 20),
-                  _buildDiffView(),
+                  _buildDiffView(context),
                 ],
               ],
             ),
@@ -432,23 +434,23 @@ class _AuditLogCard extends StatelessWidget {
 
     switch (entry.action) {
       case 'create':
-        color = const Color(0xFF10B981);
+        color = SoftPalette.emerald350;
         label = 'CREATED';
         icon = Icons.add_circle_outline_rounded;
         break;
       case 'update':
-        color = const Color(0xFF6366F1);
+        color = SoftPalette.indigo500;
         label = 'EDITED';
         icon = Icons.edit_note_rounded;
         break;
       case 'delete':
       case 'delete_donation':
-        color = const Color(0xFFEF4444);
+        color = SoftPalette.red400;
         label = 'DELETED';
         icon = Icons.delete_outline_rounded;
         break;
       default:
-        color = const Color(0xFF64748B);
+        color = SoftPalette.slate550;
         label = 'ACTIVITY';
         icon = Icons.info_outline_rounded;
     }
@@ -463,7 +465,7 @@ class _AuditLogCard extends StatelessWidget {
     );
   }
 
-  Widget _buildDescription() {
+  Widget _buildDescription(BuildContext context) {
     final oldD = entry.oldData ?? {};
     final newD = entry.newData ?? {};
     final combined = {...oldD, ...newD};
@@ -483,18 +485,18 @@ class _AuditLogCard extends StatelessWidget {
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: const Color(0xFFF1F5F9).withValues(alpha: 0.5),
+          color: context.adapt(SoftPalette.slate100).withValues(alpha: 0.5),
           borderRadius: BorderRadius.circular(16),
         ),
         child: RichText(
           text: TextSpan(
-            style: const TextStyle(fontSize: 14, color: Color(0xFF334155), height: 1.5),
+            style: TextStyle(fontSize: 14, color: context.adapt(SoftPalette.slate700), height: 1.5),
             children: [
               const TextSpan(text: 'Donation Box '),
-              TextSpan(text: '#$boxNo', style: const TextStyle(fontWeight: FontWeight.w900, color: Color(0xFF0F172A), fontFamily: 'monospace')),
+              TextSpan(text: '#$boxNo', style: TextStyle(fontWeight: FontWeight.w900, color: context.adapt(SoftPalette.slate900), fontFamily: 'monospace')),
               if (holder.toString().isNotEmpty) ...[
                 const TextSpan(text: ' for '),
-                TextSpan(text: holder.toString(), style: const TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF0F172A))),
+                TextSpan(text: holder.toString(), style: TextStyle(fontWeight: FontWeight.w800, color: context.adapt(SoftPalette.slate900))),
               ],
               if (area.toString().isNotEmpty) ...[
                 TextSpan(text: ' (${area.toString()})'),
@@ -516,24 +518,24 @@ class _AuditLogCard extends StatelessWidget {
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: const Color(0xFFF1F5F9).withValues(alpha: 0.5),
+          color: context.adapt(SoftPalette.slate100).withValues(alpha: 0.5),
           borderRadius: BorderRadius.circular(16),
         ),
         child: RichText(
           text: TextSpan(
-            style: const TextStyle(fontSize: 14, color: Color(0xFF334155), height: 1.5),
+            style: TextStyle(fontSize: 14, color: context.adapt(SoftPalette.slate700), height: 1.5),
             children: [
               const TextSpan(text: 'Donation record '),
               if (receipt.isNotEmpty) ...[
-                TextSpan(text: '($receipt) ', style: const TextStyle(fontWeight: FontWeight.w900, color: Color(0xFF6366F1), fontFamily: 'monospace')),
+                TextSpan(text: '($receipt) ', style: const TextStyle(fontWeight: FontWeight.w900, color: SoftPalette.indigo500, fontFamily: 'monospace')),
               ],
               const TextSpan(text: 'for '),
-              TextSpan(text: donor.toString(), style: const TextStyle(fontWeight: FontWeight.w900, color: Color(0xFF0F172A))),
+              TextSpan(text: donor.toString(), style: TextStyle(fontWeight: FontWeight.w900, color: context.adapt(SoftPalette.slate900))),
               if (amount > 0) ...[
                 const TextSpan(text: ' with value of '),
                 TextSpan(
                   text: 'PKR ${NumberFormat('#,###').format(amount)}',
-                  style: const TextStyle(fontWeight: FontWeight.w900, color: Color(0xFF047857), fontFamily: 'monospace'),
+                  style: const TextStyle(fontWeight: FontWeight.w900, color: SoftPalette.emerald550, fontFamily: 'monospace'),
                 ),
               ],
               if (category.isNotEmpty) ...[
@@ -557,18 +559,18 @@ class _AuditLogCard extends StatelessWidget {
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: const Color(0xFFF1F5F9).withValues(alpha: 0.5),
+          color: context.adapt(SoftPalette.slate100).withValues(alpha: 0.5),
           borderRadius: BorderRadius.circular(16),
         ),
         child: RichText(
           text: TextSpan(
-            style: const TextStyle(fontSize: 14, color: Color(0xFF334155), height: 1.5),
+            style: TextStyle(fontSize: 14, color: context.adapt(SoftPalette.slate700), height: 1.5),
             children: [
               TextSpan(text: '$logType Daily Log ', style: const TextStyle(fontWeight: FontWeight.bold)),
               const TextSpan(text: 'for '),
-              TextSpan(text: branch.toString(), style: const TextStyle(fontWeight: FontWeight.w900, color: Color(0xFF0F172A))),
+              TextSpan(text: branch.toString(), style: TextStyle(fontWeight: FontWeight.w900, color: context.adapt(SoftPalette.slate900))),
               const TextSpan(text: ' on '),
-              TextSpan(text: date.toString(), style: const TextStyle(fontWeight: FontWeight.w800, color: Color(0xFF6366F1))),
+              TextSpan(text: date.toString(), style: const TextStyle(fontWeight: FontWeight.w800, color: SoftPalette.indigo500)),
               TextSpan(text: ' was $actionText.'),
             ],
           ),
@@ -586,15 +588,15 @@ class _AuditLogCard extends StatelessWidget {
       return Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: const Color(0xFFF1F5F9).withValues(alpha: 0.5),
+          color: context.adapt(SoftPalette.slate100).withValues(alpha: 0.5),
           borderRadius: BorderRadius.circular(16),
         ),
         child: RichText(
           text: TextSpan(
-            style: const TextStyle(fontSize: 14, color: Color(0xFF334155), height: 1.5),
+            style: TextStyle(fontSize: 14, color: context.adapt(SoftPalette.slate700), height: 1.5),
             children: [
               const TextSpan(text: 'Donor Profile for '),
-              TextSpan(text: name.toString(), style: const TextStyle(fontWeight: FontWeight.w900, color: Color(0xFF0F172A))),
+              TextSpan(text: name.toString(), style: TextStyle(fontWeight: FontWeight.w900, color: context.adapt(SoftPalette.slate900))),
               if (phone.toString().isNotEmpty) TextSpan(text: ' (${phone.toString()})'),
               TextSpan(text: ' was $actionText.'),
             ],
@@ -610,15 +612,15 @@ class _AuditLogCard extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFFF1F5F9).withValues(alpha: 0.5),
+        color: context.adapt(SoftPalette.slate100).withValues(alpha: 0.5),
         borderRadius: BorderRadius.circular(16),
       ),
       child: RichText(
         text: TextSpan(
-          style: const TextStyle(fontSize: 14, color: Color(0xFF334155), height: 1.5),
+          style: TextStyle(fontSize: 14, color: context.adapt(SoftPalette.slate700), height: 1.5),
           children: [
             TextSpan(text: '$collName record '),
-            TextSpan(text: '#$identifier ', style: const TextStyle(fontWeight: FontWeight.w900, color: Color(0xFF0F172A))),
+            TextSpan(text: '#$identifier ', style: TextStyle(fontWeight: FontWeight.w900, color: context.adapt(SoftPalette.slate900))),
             TextSpan(text: 'was $actionText.'),
           ],
         ),
@@ -631,26 +633,26 @@ class _AuditLogCard extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [const Color(0xFFF59E0B).withValues(alpha: 0.15), const Color(0xFFF59E0B).withValues(alpha: 0.05)],
+          colors: [SoftPalette.amber300.withValues(alpha: 0.15), SoftPalette.amber300.withValues(alpha: 0.05)],
         ),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.2)),
+        border: Border.all(color: SoftPalette.amber300.withValues(alpha: 0.2)),
       ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Icon(Icons.info_outline_rounded, size: 16, color: Color(0xFFB45309)),
+          const Icon(Icons.info_outline_rounded, size: 16, color: SoftPalette.orange500),
           const SizedBox(width: 12),
           Expanded(
             child: Text(entry.reason!, 
-              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Color(0xFFB45309), fontStyle: FontStyle.italic)),
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: SoftPalette.orange500, fontStyle: FontStyle.italic)),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildDiffView() {
+  Widget _buildDiffView(BuildContext context) {
     final oldData = entry.oldData ?? {};
     final newData = entry.newData ?? {};
     
@@ -669,7 +671,7 @@ class _AuditLogCard extends StatelessWidget {
       final oldVal = oldData[k]?.toString() ?? 'None';
       final newVal = newData[k]?.toString() ?? 'None';
       if (oldVal != newVal) {
-        changes.add(_buildDiffRow(_formatFieldLabel(k), oldVal, newVal));
+        changes.add(_buildDiffRow(context, _formatFieldLabel(k), oldVal, newVal));
       }
     }
 
@@ -678,8 +680,8 @@ class _AuditLogCard extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('MODIFICATIONS', 
-          style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: Color(0xFF94A3B8), letterSpacing: 1.2)),
+        Text('MODIFICATIONS', 
+          style: TextStyle(fontSize: 9, fontWeight: FontWeight.w900, color: context.adapt(SoftPalette.slate350), letterSpacing: 1.2)),
         const SizedBox(height: 12),
         ...changes,
       ],
@@ -694,22 +696,22 @@ class _AuditLogCard extends StatelessWidget {
         .toUpperCase();
   }
 
-  Widget _buildDiffRow(String field, String oldVal, String newVal) {
+  Widget _buildDiffRow(BuildContext context, String field, String oldVal, String newVal) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 8),
       child: Row(
         children: [
           SizedBox(width: 110, 
-            child: Text(field, style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Color(0xFF64748B)), overflow: TextOverflow.ellipsis)),
+            child: Text(field, style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate550)), overflow: TextOverflow.ellipsis)),
           Expanded(
             child: Wrap(
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
-                Text(oldVal, style: const TextStyle(fontSize: 11, color: Color(0xFFEF4444), decoration: TextDecoration.lineThrough)),
+                Text(oldVal, style: const TextStyle(fontSize: 11, color: SoftPalette.red400, decoration: TextDecoration.lineThrough)),
                 const SizedBox(width: 8),
-                const Icon(Icons.east_rounded, size: 12, color: Color(0xFFCBD5E1)),
+                Icon(Icons.east_rounded, size: 12, color: context.adapt(SoftPalette.slate200)),
                 const SizedBox(width: 8),
-                Text(newVal, style: const TextStyle(fontSize: 11, color: Color(0xFF10B981), fontWeight: FontWeight.w900)),
+                Text(newVal, style: const TextStyle(fontSize: 11, color: SoftPalette.emerald350, fontWeight: FontWeight.w900)),
               ],
             ),
           ),

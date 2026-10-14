@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:flutter/services.dart';
 import 'package:collection/collection.dart';
@@ -45,11 +48,11 @@ extension UserRoleX on UserRole {
 
   Color get roleColor {
     switch (this) {
-      case UserRole.chairman:  return const Color(0xFFF59E0B);
-      case UserRole.hqManager: return const Color(0xFF047857);
-      case UserRole.manager:   return const Color(0xFF10B981);
-      case UserRole.officeBoy: return const Color(0xFF60A5FA);
-      case UserRole.staff:     return const Color(0xFF94A3B8);
+      case UserRole.chairman:  return SoftPalette.amber300;
+      case UserRole.hqManager: return SoftPalette.emerald550;
+      case UserRole.manager:   return SoftPalette.emerald350;
+      case UserRole.officeBoy: return SoftPalette.blue350;
+      case UserRole.staff:     return SoftPalette.slate350;
     }
   }
 
@@ -109,64 +112,64 @@ extension UserRoleX on UserRole {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class DS {
-  static const navy900 = Color(0xFF0B1426);
-  static const navy800 = Color(0xFF112244);
-  static const navy700 = Color(0xFF163567);
-  static const navy600 = Color(0xFF1B4280);
-  static const navy100 = Color(0xFFE8EEF7);
+  static const navy900 = SoftPalette.slate900;
+  static const navy800 = SoftPalette.blue800;
+  static const navy700 = SoftPalette.blue750;
+  static const navy600 = SoftPalette.blue700;
+  static const navy100 = SoftPalette.slate150;
 
-  static const emerald700 = Color(0xFF065F46);
-  static const emerald600 = Color(0xFF047857);
-  static const emerald500 = Color(0xFF059669);
-  static const emerald100 = Color(0xFFD1FAE5);
+  static const emerald700 = SoftPalette.emerald600;
+  static const emerald600 = SoftPalette.emerald550;
+  static const emerald500 = SoftPalette.emerald500;
+  static const emerald100 = SoftPalette.emerald100;
 
-  static const sapphire700 = Color(0xFF1E3A8A);
-  static const sapphire500 = Color(0xFF3B82F6);
-  static const sapphire100 = Color(0xFFDBEAFE);
+  static const sapphire700 = SoftPalette.blue700;
+  static const sapphire500 = SoftPalette.blue500;
+  static const sapphire100 = SoftPalette.slate150;
 
-  static const plum700 = Color(0xFF6B21A8);
-  static const plum500 = Color(0xFFA855F7);
-  static const plum100 = Color(0xFFF3E8FF);
+  static const plum700 = SoftPalette.violet600;
+  static const plum500 = SoftPalette.violet400;
+  static const plum100 = SoftPalette.purple150;
 
-  static const gold700 = Color(0xFF92400E);
-  static const gold600 = Color(0xFFB45309);
-  static const gold500 = Color(0xFFD97706);
-  static const gold400 = Color(0xFFFBBF24);
-  static const gold100 = Color(0xFFFEF3C7);
+  static const gold700 = SoftPalette.orange600;
+  static const gold600 = SoftPalette.orange500;
+  static const gold500 = SoftPalette.orange400;
+  static const gold400 = SoftPalette.amber200;
+  static const gold100 = SoftPalette.yellow100;
 
-  static const crimson700 = Color(0xFF9B1C1C);
-  static const crimson500 = Color(0xFFEF4444);
-  static const crimson100 = Color(0xFFFEE2E2);
+  static const crimson700 = SoftPalette.red600;
+  static const crimson500 = SoftPalette.red400;
+  static const crimson100 = SoftPalette.red150m;
 
-  static const statusPending       = Color(0xFF64748B);
-  static const statusPendingBg     = Color(0xFFF1F5F9);
-  static const statusPendingBorder = Color(0xFFCBD5E1);
-  static const statusApproved      = Color(0xFF059669);
-  static const statusRejected      = Color(0xFFDC2626);
-  static const statusReceived      = Color(0xFF0284C7);
-  static const statusReceivedBg    = Color(0xFFE0F2FE);
-  static const statusReceivedBorder= Color(0xFF7DD3FC);
+  static const statusPending       = SoftPalette.slate550;
+  static const statusPendingBg     = SoftPalette.slate100;
+  static const statusPendingBorder = SoftPalette.slate200;
+  static const statusApproved      = SoftPalette.emerald500;
+  static const statusRejected      = SoftPalette.red500;
+  static const statusReceived      = SoftPalette.sky500;
+  static const statusReceivedBg    = SoftPalette.slate100;
+  static const statusReceivedBorder= SoftPalette.sky300;
 
-  static const amberAccent = Color(0xFFD97706);
+  static const amberAccent = SoftPalette.orange400;
 
-  static const ink900 = Color(0xFF111827);
-  static const ink700 = Color(0xFF374151);
-  static const ink500 = Color(0xFF6B7280);
-  static const ink300 = Color(0xFFD1D5DB);
-  static const ink200 = Color(0xFFE5E7EB);
-  static const ink100 = Color(0xFFF3F4F6);
-  static const ink50  = Color(0xFFF9FAFB);
+  static const ink900 = SoftPalette.slate900;
+  static const ink700 = SoftPalette.slate700;
+  static const ink500 = SoftPalette.slate550;
+  static const ink300 = SoftPalette.slate200;
+  static const ink200 = SoftPalette.gray150;
+  static const ink100 = SoftPalette.gray100;
+  static const ink50  = SoftPalette.gray50;
 
   static List<BoxShadow> get shadowSm => [
-    const BoxShadow(color: Color(0x0C000000), blurRadius: 6, offset: Offset(0, 2)),
+    const BoxShadow(color: SoftPalette.gray900A5, blurRadius: 6, offset: Offset(0, 2)),
   ];
   static List<BoxShadow> get shadowMd => [
-    const BoxShadow(color: Color(0x10000000), blurRadius: 16, offset: Offset(0, 4)),
-    const BoxShadow(color: Color(0x06000000), blurRadius: 4, offset: Offset(0, 1)),
+    const BoxShadow(color: SoftPalette.gray900A6, blurRadius: 16, offset: Offset(0, 4)),
+    const BoxShadow(color: SoftPalette.gray900A2, blurRadius: 4, offset: Offset(0, 1)),
   ];
   static List<BoxShadow> get shadowLg => [
-    const BoxShadow(color: Color(0x16000000), blurRadius: 32, offset: Offset(0, 8)),
-    const BoxShadow(color: Color(0x08000000), blurRadius: 8, offset: Offset(0, 2)),
+    const BoxShadow(color: SoftPalette.gray900A9, blurRadius: 32, offset: Offset(0, 8)),
+    const BoxShadow(color: SoftPalette.gray900A3, blurRadius: 8, offset: Offset(0, 2)),
   ];
   static List<BoxShadow> get shadowXl => shadowLg;
 
@@ -400,9 +403,9 @@ extension DonationCategoryX on DonationCategory {
       case DonationCategory.all:
         return [DS.navy800, DS.navy700, DS.navy600];
       case DonationCategory.jamia: 
-        return [DS.sapphire700, const Color(0xFF1E40AF), DS.sapphire500];
+        return [DS.sapphire700, SoftPalette.blue600, DS.sapphire500];
       case DonationCategory.gmwf:  
-        return [DS.emerald700, const Color(0xFF059669), DS.emerald500];
+        return [DS.emerald700, SoftPalette.emerald500, DS.emerald500];
     }
   }
   PdfColor get pdfPrimary {
@@ -517,9 +520,9 @@ extension GmwfSubCategoryX on GmwfSubCategory {
       case GmwfSubCategory.dasterkhwaan: return DS.gold600;
       case GmwfSubCategory.dispensary:   return DS.crimson500;
       case GmwfSubCategory.madrisa:      return DS.plum700;
-      case GmwfSubCategory.school:       return const Color(0xFF3B82F6);
-      case GmwfSubCategory.libaas:       return const Color(0xFF0891B2);
-      case GmwfSubCategory.rashan:       return const Color(0xFF65A30D);
+      case GmwfSubCategory.school:       return SoftPalette.blue500;
+      case GmwfSubCategory.libaas:       return SoftPalette.cyan500;
+      case GmwfSubCategory.rashan:       return SoftPalette.lime400;
       case GmwfSubCategory.general:      return DS.emerald600;
     }
   }
@@ -528,20 +531,20 @@ extension GmwfSubCategoryX on GmwfSubCategory {
       case GmwfSubCategory.dasterkhwaan: return DS.gold100;
       case GmwfSubCategory.dispensary:   return DS.crimson100;
       case GmwfSubCategory.madrisa:      return DS.plum100;
-      case GmwfSubCategory.school:       return const Color(0xFFDBEAFE);
-      case GmwfSubCategory.libaas:       return const Color(0xFFCFFAFE);
-      case GmwfSubCategory.rashan:       return const Color(0xFFECFCCB);
+      case GmwfSubCategory.school:       return SoftPalette.slate150;
+      case GmwfSubCategory.libaas:       return SoftPalette.slate100;
+      case GmwfSubCategory.rashan:       return SoftPalette.lime100;
       case GmwfSubCategory.general:      return DS.emerald100;
     }
   }
   List<Color> get gradient {
     switch (this) {
-      case GmwfSubCategory.dasterkhwaan: return [const Color(0xFF92400E), DS.gold600, const Color(0xFFD97706)];
-      case GmwfSubCategory.dispensary:   return [const Color(0xFF991B1B), DS.crimson500, const Color(0xFFEF4444)];
-      case GmwfSubCategory.madrisa:      return [const Color(0xFF581C87), DS.plum700, const Color(0xFF9333EA)];
-      case GmwfSubCategory.school:       return [const Color(0xFF1E3A8A), const Color(0xFF3B82F6), const Color(0xFF60A5FA)];
-      case GmwfSubCategory.libaas:       return [const Color(0xFF155E75), const Color(0xFF0891B2), const Color(0xFF06B6D4)];
-      case GmwfSubCategory.rashan:       return [const Color(0xFF3F6212), const Color(0xFF65A30D), const Color(0xFF84CC16)];
+      case GmwfSubCategory.dasterkhwaan: return [SoftPalette.orange600, DS.gold600, SoftPalette.orange400];
+      case GmwfSubCategory.dispensary:   return [SoftPalette.red600, DS.crimson500, SoftPalette.red400];
+      case GmwfSubCategory.madrisa:      return [SoftPalette.violet700, DS.plum700, SoftPalette.violet500];
+      case GmwfSubCategory.school:       return [SoftPalette.blue700, SoftPalette.blue500, SoftPalette.blue350];
+      case GmwfSubCategory.libaas:       return [SoftPalette.sky600, SoftPalette.cyan500, SoftPalette.cyan350];
+      case GmwfSubCategory.rashan:       return [SoftPalette.lime600, SoftPalette.lime400, SoftPalette.lime300];
       case GmwfSubCategory.general:      return [DS.emerald700, DS.emerald600, DS.emerald500];
     }
   }
@@ -626,7 +629,7 @@ extension DonationSubtypeX on DonationSubtype {
       case DonationSubtype.maintenance:  return DS.sapphire500;
       case DonationSubtype.iftar:        return DS.gold600;
       case DonationSubtype.zakat:        return DS.emerald700;
-      case DonationSubtype.sadqaWajiba:  return const Color(0xFFDB2777);
+      case DonationSubtype.sadqaWajiba:  return SoftPalette.pink500;
       case DonationSubtype.sadqaAtyaat:  return DS.plum700;
       case DonationSubtype.general:      return DS.ink500;
       case DonationSubtype.fitrana:      return DS.emerald600;
@@ -635,15 +638,15 @@ extension DonationSubtypeX on DonationSubtype {
   }
   List<Color> get gradient {
     switch (this) {
-      case DonationSubtype.construction: return [DS.sapphire700, const Color(0xFF1D4ED8), DS.sapphire500];
-      case DonationSubtype.maintenance:  return [const Color(0xFF1E40AF), DS.sapphire500, const Color(0xFF3B82F6)];
-      case DonationSubtype.iftar:        return [const Color(0xFF92400E), DS.gold600, const Color(0xFFD97706)];
-      case DonationSubtype.zakat:        return [const Color(0xFF065F46), DS.emerald700, const Color(0xFF059669)];
-      case DonationSubtype.sadqaWajiba:  return [const Color(0xFF9D174D), const Color(0xFFDB2777), const Color(0xFFEC4899)];
-      case DonationSubtype.sadqaAtyaat:  return [const Color(0xFF6B21A8), DS.plum700, const Color(0xFFA855F7)];
-      case DonationSubtype.general:      return [const Color(0xFF1F2937), DS.ink500, const Color(0xFF6B7280)];
-      case DonationSubtype.fitrana:      return [const Color(0xFF059669), DS.emerald600, const Color(0xFF34D399)];
-      case DonationSubtype.fidya:        return [const Color(0xFFB45309), DS.gold600, const Color(0xFFFBBF24)];
+      case DonationSubtype.construction: return [DS.sapphire700, SoftPalette.blue550, DS.sapphire500];
+      case DonationSubtype.maintenance:  return [SoftPalette.blue600, DS.sapphire500, SoftPalette.blue500];
+      case DonationSubtype.iftar:        return [SoftPalette.orange600, DS.gold600, SoftPalette.orange400];
+      case DonationSubtype.zakat:        return [SoftPalette.emerald600, DS.emerald700, SoftPalette.emerald500];
+      case DonationSubtype.sadqaWajiba:  return [SoftPalette.pink600, SoftPalette.pink500, SoftPalette.pink400];
+      case DonationSubtype.sadqaAtyaat:  return [SoftPalette.violet600, DS.plum700, SoftPalette.violet400];
+      case DonationSubtype.general:      return [SoftPalette.slate800, DS.ink500, SoftPalette.slate550];
+      case DonationSubtype.fitrana:      return [SoftPalette.emerald500, DS.emerald600, SoftPalette.emerald300];
+      case DonationSubtype.fidya:        return [SoftPalette.orange500, DS.gold600, SoftPalette.amber200];
     }
   }
 }
@@ -1344,7 +1347,7 @@ Future<void> downloadTransactionsLedgerPdf(List<DonationRecord> donations, Strin
       final file = File(outputFile);
       await file.writeAsBytes(bytes);
       if (context.mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Ledger saved to: $outputFile'), backgroundColor: Colors.green));
+        AppToast.showSnackBar(context, SnackBar(content: Text('Ledger saved to: $outputFile'), backgroundColor: SoftPalette.green400));
       }
     }
   } catch (e) {
@@ -1523,18 +1526,18 @@ void _showPdfLoadingDialog(BuildContext context, String message) {
         child: Container(
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
-            color: Colors.white,
+            color: ctx.adapt(SoftPalette.gray50),
             borderRadius: BorderRadius.circular(16),
-            boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1), blurRadius: 20)],
+            boxShadow: [BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.1), blurRadius: 20)],
           ),
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
               const CircularProgressIndicator(color: AppColors.primary, strokeWidth: 3),
               const SizedBox(height: 20),
-              Text(message, style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: AppColors.gray900)),
+              Text(message, style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: ctx.adapt(AppColors.gray900))),
               const SizedBox(height: 8),
-              const Text('Please wait a moment...', style: TextStyle(fontSize: 13, color: AppColors.gray500)),
+              Text('Please wait a moment...', style: TextStyle(fontSize: 13, color: ctx.adapt(AppColors.gray500))),
             ],
           ),
         ),
@@ -1544,7 +1547,7 @@ void _showPdfLoadingDialog(BuildContext context, String message) {
 }
 
 void _showPdfErrorSnackBar(BuildContext context, String error) {
-  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+  AppToast.showSnackBar(context, SnackBar(
     content: Text(error, style: const TextStyle(fontWeight: FontWeight.w600)),
     backgroundColor: DS.statusRejected,
     behavior: SnackBarBehavior.floating,
@@ -2556,7 +2559,7 @@ Future<void> directWhatsAppPdf(BuildContext context, Map<String, dynamic> donati
   } catch (e) {
     if (context.mounted) {
       Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('PDF Error: $e'), backgroundColor: Colors.red));
+      AppToast.showSnackBar(context, SnackBar(content: Text('PDF Error: $e'), backgroundColor: SoftPalette.red400));
     }
   }
 }
@@ -2617,7 +2620,7 @@ void showReceiptShareSheet(
               await Clipboard.setData(ClipboardData(text: msg));
               
               if (context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(
+                AppToast.showSnackBar(context, 
                   const SnackBar(
                     content: Text('PDF Saved & Message copied to clipboard!'),
                     backgroundColor: AppColors.primary,
@@ -2647,8 +2650,8 @@ void showReceiptShareSheet(
         }
 
         return Container(
-          decoration: const BoxDecoration(
-            color: Colors.white,
+          decoration: BoxDecoration(
+            color: context.adapt(SoftPalette.gray50),
             borderRadius: BorderRadius.vertical(top: Radius.circular(32)),
           ),
           padding: EdgeInsets.fromLTRB(24, 12, 24, MediaQuery.of(context).padding.bottom + 24),
@@ -2658,17 +2661,17 @@ void showReceiptShareSheet(
               Container(
                 width: 40, height: 4,
                 margin: const EdgeInsets.only(bottom: 24),
-                decoration: BoxDecoration(color: AppColors.gray200, borderRadius: BorderRadius.circular(2)),
+                decoration: BoxDecoration(color: context.adapt(AppColors.gray200), borderRadius: BorderRadius.circular(2)),
               ),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   Image.asset('assets/logo/gmwf-1.webp', height: 32),
-                  const Text('Share Receipt', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: AppColors.gray900)),
+                  Text('Share Receipt', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: context.adapt(AppColors.gray900))),
                   IconButton(
                     onPressed: () => Navigator.pop(context),
-                    icon: const Icon(Icons.close_rounded, color: AppColors.gray400),
-                    style: IconButton.styleFrom(backgroundColor: AppColors.gray100),
+                    icon: Icon(Icons.close_rounded, color: context.adapt(AppColors.gray400)),
+                    style: IconButton.styleFrom(backgroundColor: context.adapt(AppColors.gray100)),
                   ),
                 ],
               ),
@@ -2679,21 +2682,21 @@ void showReceiptShareSheet(
                 width: double.infinity,
                 padding: const EdgeInsets.symmetric(vertical: 20),
                 decoration: BoxDecoration(
-                  color: AppColors.gray50,
+                  color: context.adapt(AppColors.gray50),
                   borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: AppColors.gray100),
+                  border: Border.all(color: context.adapt(AppColors.gray100)),
                 ),
                 child: Column(
                   children: [
                     Text(donorName.toUpperCase(), 
-                        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: AppColors.gray500, letterSpacing: 1)),
+                        style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: context.adapt(AppColors.gray500), letterSpacing: 1)),
                     const SizedBox(height: 8),
                     if (isGoods)
                       Text(goodsItem.isNotEmpty ? goodsItem : 'Goods Donation',
-                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppColors.gray900))
+                          style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: context.adapt(AppColors.gray900)))
                     else
                       Text('PKR ${NumberFormat('#,##0').format(amount)}',
-                          style: GoogleFonts.dmMono(fontSize: 32, fontWeight: FontWeight.w900, color: AppColors.gray900)),
+                          style: GoogleFonts.dmMono(fontSize: 32, fontWeight: FontWeight.w900, color: context.adapt(AppColors.gray900))),
                     const SizedBox(height: 4),
                     Text('Receipt #$receiptNo', style: GoogleFonts.dmMono(fontSize: 12, color: AppColors.primary, fontWeight: FontWeight.w700)),
                   ],
@@ -2705,16 +2708,16 @@ void showReceiptShareSheet(
               Container(
                 padding: const EdgeInsets.symmetric(vertical: 20, horizontal: 12),
                 decoration: BoxDecoration(
-                  color: AppColors.gray50.withValues(alpha: 0.5),
+                  color: context.adapt(AppColors.gray50).withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(24),
-                  border: Border.all(color: AppColors.gray100),
+                  border: Border.all(color: context.adapt(AppColors.gray100)),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
                     _premiumShareBtn(
                       label: 'WhatsApp',
-                      color: const Color(0xFF25D366),
+                      color: SoftPalette.green350,
                       asset: 'assets/icons/WA.webp',
                       onTap: () async {
                         final msg = buildThankYouMessage(
@@ -2737,7 +2740,7 @@ void showReceiptShareSheet(
                     ),
                     _premiumShareBtn(
                       label: 'SMS',
-                      color: const Color(0xFF3B82F6),
+                      color: SoftPalette.blue500,
                       icon: Icons.chat_bubble_rounded,
                       onTap: () async {
                         final body = buildThankYouMessage(
@@ -2759,14 +2762,14 @@ void showReceiptShareSheet(
                     ),
                     _premiumShareBtn(
                       label: 'Print',
-                      color: const Color(0xFF6366F1),
+                      color: SoftPalette.indigo500,
                       icon: Icons.print_rounded,
                       onTap: printPdf,
                       isLoading: generating,
                     ),
                     _premiumShareBtn(
                       label: 'Copy',
-                      color: const Color(0xFF64748B),
+                      color: SoftPalette.slate550,
                       icon: Icons.content_copy_rounded,
                       onTap: () async {
                         final msg = buildThankYouMessage(
@@ -2783,7 +2786,7 @@ void showReceiptShareSheet(
                         );
                         await Clipboard.setData(ClipboardData(text: msg));
                         if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Copied to clipboard'), backgroundColor: AppColors.primary));
+                          AppToast.showSnackBar(context, const SnackBar(content: Text('Copied to clipboard'), backgroundColor: AppColors.primary));
                         }
                       },
                     ),
@@ -2794,7 +2797,7 @@ void showReceiptShareSheet(
                 Padding(
                   padding: const EdgeInsets.only(top: 20),
                   child: Text('Add a phone number to enable messaging',
-                      style: TextStyle(fontSize: 11, color: AppColors.gray400, fontWeight: FontWeight.w600)),
+                      style: TextStyle(fontSize: 11, color: context.adapt(AppColors.gray400), fontWeight: FontWeight.w600)),
                 ),
             ],
           ),
@@ -2818,7 +2821,7 @@ Future<void> _handlePdfShare(BuildContext context, Map<String, dynamic> donation
   } catch (e) {
     if (context.mounted) {
       Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('PDF Error: $e'), backgroundColor: Colors.red));
+      AppToast.showSnackBar(context, SnackBar(content: Text('PDF Error: $e'), backgroundColor: SoftPalette.red400));
     }
   }
 }
@@ -2840,7 +2843,7 @@ Future<void> _handlePrint(BuildContext context, Map<String, dynamic> donationDat
   } catch (e) {
     if (context.mounted) {
       Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Print Error: $e'), backgroundColor: Colors.red));
+      AppToast.showSnackBar(context, SnackBar(content: Text('Print Error: $e'), backgroundColor: SoftPalette.red400));
     }
   }
 }
@@ -2852,11 +2855,11 @@ void _showLoading(BuildContext context, String title) {
     builder: (ctx) => Center(
       child: Container(
         padding: const EdgeInsets.all(24),
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(16)),
+        decoration: BoxDecoration(color: ctx.adapt(SoftPalette.gray50), borderRadius: BorderRadius.circular(16)),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const CircularProgressIndicator(color: Color(0xFF047857)),
+            const CircularProgressIndicator(color: SoftPalette.emerald550),
             const SizedBox(height: 20),
             Text(title, style: const TextStyle(fontWeight: FontWeight.bold)),
           ],

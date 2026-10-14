@@ -1,6 +1,8 @@
 // lib/widgets/department_activity_widget.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/utils/debounced_box_listenable.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -27,35 +29,35 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
       'id': 'dispensary',
       'title': 'Dispensary & OPD',
       'icon': Icons.local_hospital_rounded,
-      'color': Color(0xFF10B981),
+      'color': SoftPalette.emerald350,
       'roles': ['receptionist', 'doctor', 'dispenser', 'pharmacist', 'supervisor'],
     },
     {
       'id': 'madrassa',
       'title': 'Madrassa Department',
       'icon': Icons.school_rounded,
-      'color': Color(0xFF3B82F6),
+      'color': SoftPalette.blue500,
       'roles': ['teacher', 'faculty', 'madrassa', 'madrassa admin'],
     },
     {
       'id': 'school',
       'title': 'School & Library',
       'icon': Icons.local_library_rounded,
-      'color': Color(0xFF8B5CF6),
+      'color': SoftPalette.violet500,
       'roles': ['school', 'school admin', 'library'],
     },
     {
       'id': 'finance',
       'title': 'Finance & Accounts',
       'icon': Icons.account_balance_rounded,
-      'color': Color(0xFFF59E0B),
+      'color': SoftPalette.amber300,
       'roles': ['finance manager', 'finance', 'donations', 'global accounts'],
     },
     {
       'id': 'dasterkhwaan',
       'title': 'Welfare & Kitchen',
       'icon': Icons.soup_kitchen_rounded,
-      'color': Color(0xFFEF4444),
+      'color': SoftPalette.red400,
       'roles': ['dasterkhwaan', 'attendance', 'kitchen'],
     },
   ];
@@ -144,10 +146,10 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
         // Department Selection TabBar
         Container(
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF0F172A) : Colors.white,
+            color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
             border: Border(
               bottom: BorderSide(
-                color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                color: isDark ? SoftPalette.slate800 : SoftPalette.slate150,
                 width: 1,
               ),
             ),
@@ -155,10 +157,10 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
           child: TabBar(
             controller: _tabController,
             isScrollable: true,
-            indicatorColor: const Color(0xFF10B981),
+            indicatorColor: SoftPalette.emerald350,
             indicatorWeight: 3,
-            labelColor: isDark ? Colors.white : const Color(0xFF0F172A),
-            unselectedLabelColor: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+            labelColor: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
+            unselectedLabelColor: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
             labelStyle: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
             tabs: _departments.map((dept) {
               return Tab(
@@ -178,10 +180,10 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
         Expanded(
           child: !Hive.isBoxOpen(LocalStorageService.entriesBox)
               ? const Center(
-                  child: CircularProgressIndicator(color: Color(0xFF10B981)),
+                  child: CircularProgressIndicator(color: SoftPalette.emerald350),
                 )
               : ValueListenableBuilder(
-                  valueListenable: Hive.box(LocalStorageService.entriesBox).listenable(),
+                  valueListenable: DebouncedBoxListenable.shared(Hive.box(LocalStorageService.entriesBox)),
                   builder: (context, Box box, _) {
               return TabBarView(
                 controller: _tabController,
@@ -225,12 +227,12 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                             Container(
                               padding: const EdgeInsets.all(20),
                               decoration: BoxDecoration(
-                                color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                                color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                                 borderRadius: BorderRadius.circular(16),
-                                border: Border.all(color: isDark ? deptColor.withValues(alpha: 0.3) : const Color(0xFFE2E8F0)),
+                                border: Border.all(color: isDark ? deptColor.withValues(alpha: 0.3) : SoftPalette.slate150),
                                 boxShadow: isDark ? [] : [
                                   BoxShadow(
-                                    color: Colors.black.withOpacity(0.04),
+                                    color: SoftPalette.gray900.withOpacity(0.04),
                                     blurRadius: 10,
                                     offset: const Offset(0, 2),
                                   ),
@@ -254,7 +256,7 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                                         Text(
                                           dept['title'] as String,
                                           style: TextStyle(
-                                            color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                            color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                                             fontSize: 18,
                                             fontWeight: FontWeight.bold,
                                           ),
@@ -263,7 +265,7 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                                         Text(
                                           'Active Department Staff & Data Routing Log',
                                           style: TextStyle(
-                                            color: isDark ? Colors.white60 : const Color(0xFF64748B),
+                                            color: isDark ? SoftPalette.gray50A60 : SoftPalette.slate550,
                                             fontSize: 12,
                                           ),
                                         ),
@@ -271,7 +273,7 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                                     ),
                                   ),
                                   // Metric Pills
-                                  _metricPill('Active Staff', '$activeUsersCount / ${deptUsers.length}', Colors.blueAccent, isDark),
+                                  _metricPill('Active Staff', '$activeUsersCount / ${deptUsers.length}', SoftPalette.blue400, isDark),
                                   const SizedBox(width: 12),
                                   _metricPill('Total Actions', '$totalTransactions', deptColor, isDark),
                                 ],
@@ -283,7 +285,7 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                             Text(
                               'Department Staff Members & Progress Timeline',
                               style: TextStyle(
-                                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                                 fontSize: 15,
                                 fontWeight: FontWeight.bold,
                               ),
@@ -295,15 +297,15 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                                 width: double.infinity,
                                 padding: const EdgeInsets.all(32),
                                 decoration: BoxDecoration(
-                                  color: isDark ? const Color(0xFF1E293B).withValues(alpha: 0.5) : Colors.white,
+                                  color: isDark ? SoftPalette.slate800.withValues(alpha: 0.5) : SoftPalette.gray50,
                                   borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                                  border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
                                 ),
                                 child: Center(
                                   child: Text(
                                     'No staff members or data logged for this department yet.',
                                     style: TextStyle(
-                                      color: isDark ? Colors.white54 : const Color(0xFF94A3B8),
+                                      color: isDark ? SoftPalette.gray50A54 : SoftPalette.slate350,
                                       fontSize: 14,
                                     ),
                                   ),
@@ -347,30 +349,30 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                                     decoration: BoxDecoration(
                                       gradient: isChairman
                                           ? const LinearGradient(
-                                              colors: [Color(0xFF1E112A), Color(0xFF2A1706), Color(0xFF170F2A)],
+                                              colors: [SoftPalette.purple900, SoftPalette.orange900, SoftPalette.violet900],
                                               begin: Alignment.topLeft,
                                               end: Alignment.bottomRight,
                                             )
                                           : null,
-                                      color: isChairman ? null : (isDark ? const Color(0xFF1E293B) : Colors.white),
+                                      color: isChairman ? null : (isDark ? SoftPalette.slate800 : SoftPalette.gray50),
                                       borderRadius: BorderRadius.circular(14),
                                       border: Border.all(
                                         color: isChairman
-                                            ? const Color(0xFFFBBF24)
-                                            : (isDark ? (isOnline ? Colors.greenAccent.withValues(alpha: 0.3) : const Color(0xFF334155)) : const Color(0xFFE2E8F0)),
+                                            ? SoftPalette.amber200
+                                            : (isDark ? (isOnline ? SoftPalette.emerald200.withValues(alpha: 0.3) : SoftPalette.slate700) : SoftPalette.slate150),
                                         width: isChairman ? 2.0 : 1.0,
                                       ),
                                       boxShadow: isChairman
                                           ? [
                                               const BoxShadow(
-                                                color: Color(0x66F59E0B),
+                                                color: SoftPalette.amber300A40,
                                                 blurRadius: 18,
                                                 spreadRadius: 1.5,
                                               )
                                             ]
                                           : (isDark ? [] : [
                                               BoxShadow(
-                                                color: Colors.black.withOpacity(0.03),
+                                                color: SoftPalette.gray900.withOpacity(0.03),
                                                 blurRadius: 8,
                                                 offset: const Offset(0, 2),
                                               ),
@@ -379,9 +381,9 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                                     child: ExpansionTile(
                                       shape: Border.all(color: Colors.transparent),
                                       leading: CircleAvatar(
-                                        backgroundColor: isChairman ? const Color(0xFF92400E) : deptColor.withValues(alpha: 0.2),
+                                        backgroundColor: isChairman ? SoftPalette.orange600 : deptColor.withValues(alpha: 0.2),
                                         child: isChairman
-                                            ? const Icon(Icons.workspace_premium_rounded, color: Color(0xFFFCD34D), size: 20)
+                                            ? const Icon(Icons.workspace_premium_rounded, color: SoftPalette.yellow200, size: 20)
                                             : Text(
                                                 name.isNotEmpty ? name[0].toUpperCase() : 'U',
                                                 style: TextStyle(color: deptColor, fontWeight: FontWeight.bold),
@@ -393,7 +395,7 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                                             child: Text(
                                               name,
                                               style: TextStyle(
-                                                color: isChairman ? const Color(0xFFFFFBEB) : (isDark ? Colors.white : const Color(0xFF0F172A)),
+                                                color: isChairman ? SoftPalette.yellow50m : (isDark ? SoftPalette.gray50 : SoftPalette.slate900),
                                                 fontWeight: FontWeight.bold,
                                                 fontSize: 15,
                                                 letterSpacing: isChairman ? 0.3 : 0,
@@ -404,21 +406,21 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                             decoration: BoxDecoration(
                                               color: isOnline
-                                                  ? (isDark ? Colors.greenAccent.withValues(alpha: 0.15) : const Color(0xFFECFDF5))
-                                                  : (isDark ? Colors.grey.withValues(alpha: 0.2) : const Color(0xFFF1F5F9)),
+                                                  ? (isDark ? SoftPalette.emerald200.withValues(alpha: 0.15) : SoftPalette.emerald50)
+                                                  : (isDark ? SoftPalette.gray350.withValues(alpha: 0.2) : SoftPalette.slate100),
                                               borderRadius: BorderRadius.circular(8),
                                               border: Border.all(
-                                                color: isOnline ? const Color(0xFF10B981) : (isDark ? Colors.grey : const Color(0xFFCBD5E1)),
+                                                color: isOnline ? SoftPalette.emerald350 : (isDark ? SoftPalette.gray350 : SoftPalette.slate200),
                                               ),
                                             ),
                                             child: Row(
                                               children: [
-                                                Icon(Icons.circle, size: 7, color: isOnline ? const Color(0xFF10B981) : const Color(0xFF94A3B8)),
+                                                Icon(Icons.circle, size: 7, color: isOnline ? SoftPalette.emerald350 : SoftPalette.slate350),
                                                 const SizedBox(width: 4),
                                                 Text(
                                                   isOnline ? 'ONLINE' : 'OFFLINE',
                                                   style: TextStyle(
-                                                    color: isOnline ? (isDark ? const Color(0xFF34D399) : const Color(0xFF065F46)) : (isDark ? Colors.white54 : const Color(0xFF64748B)),
+                                                    color: isOnline ? (isDark ? SoftPalette.emerald300 : SoftPalette.emerald600) : (isDark ? SoftPalette.gray50A54 : SoftPalette.slate550),
                                                     fontSize: 9.5,
                                                     fontWeight: FontWeight.bold,
                                                   ),
@@ -435,24 +437,24 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                                               ? '👑 CHAIRMAN · SUPREME AUTHORITY • $deviceSummary • App $appVer'
                                               : '$role • $deviceSummary • App $appVer • (${userActions.length} Actions Saved)',
                                           style: TextStyle(
-                                            color: isChairman ? const Color(0xFFFDE68A) : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                                            color: isChairman ? SoftPalette.yellow150 : (isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                                             fontSize: 11.5,
                                             fontWeight: isChairman ? FontWeight.bold : FontWeight.normal,
                                           ),
                                         ),
                                       ),
                                       children: [
-                                        Divider(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0), height: 1),
+                                        Divider(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150, height: 1),
                                         Padding(
                                           padding: const EdgeInsets.all(16),
                                           child: userActions.isEmpty
-                                              ? Text('No data actions recorded for this user today.', style: TextStyle(color: isDark ? Colors.white38 : const Color(0xFF94A3B8), fontSize: 13))
+                                              ? Text('No data actions recorded for this user today.', style: TextStyle(color: isDark ? SoftPalette.gray50A38 : SoftPalette.slate350, fontSize: 13))
                                               : Column(
                                                   crossAxisAlignment: CrossAxisAlignment.start,
                                                   children: [
                                                     Text(
                                                       'USER ACTION HISTORY TIMELINE:',
-                                                      style: TextStyle(color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B), fontSize: 11, fontWeight: FontWeight.bold),
+                                                      style: TextStyle(color: isDark ? SoftPalette.slate350 : SoftPalette.slate550, fontSize: 11, fontWeight: FontWeight.bold),
                                                     ),
                                                     const SizedBox(height: 8),
                                                     ListView.builder(
@@ -477,27 +479,27 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
                                                           padding: const EdgeInsets.symmetric(vertical: 4),
                                                           child: Row(
                                                             children: [
-                                                              const Icon(Icons.check_circle_outline_rounded, size: 14, color: Color(0xFF10B981)),
+                                                              const Icon(Icons.check_circle_outline_rounded, size: 14, color: SoftPalette.emerald350),
                                                               const SizedBox(width: 8),
-                                                              Text('#$serial', style: const TextStyle(color: Color(0xFF0284C7), fontWeight: FontWeight.bold, fontSize: 12)),
+                                                              Text('#$serial', style: const TextStyle(color: SoftPalette.sky500, fontWeight: FontWeight.bold, fontSize: 12)),
                                                               const SizedBox(width: 8),
                                                               Expanded(
                                                                 child: Text(
                                                                   patient,
-                                                                  style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A), fontSize: 13),
+                                                                  style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.slate900, fontSize: 13),
                                                                   overflow: TextOverflow.ellipsis,
                                                                 ),
                                                               ),
                                                               Text(
                                                                 status.toUpperCase(),
                                                                 style: TextStyle(
-                                                                  color: status == 'completed' ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                                                                  color: status == 'completed' ? SoftPalette.emerald350 : SoftPalette.amber300,
                                                                   fontSize: 10,
                                                                   fontWeight: FontWeight.bold,
                                                                 ),
                                                               ),
                                                               const SizedBox(width: 12),
-                                                              Text(timeDisplay, style: TextStyle(color: isDark ? Colors.white38 : const Color(0xFF94A3B8), fontSize: 11)),
+                                                              Text(timeDisplay, style: TextStyle(color: isDark ? SoftPalette.gray50A38 : SoftPalette.slate350, fontSize: 11)),
                                                             ],
                                                           ),
                                                         );
@@ -527,16 +529,16 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
 
   Widget _buildUnassignedEntriesCard(List<Map<String, dynamic>> entries, Color color, bool isDark) {
     return Card(
-      color: isDark ? const Color(0xFF1E293B) : Colors.white,
+      color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(16),
-        side: BorderSide(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+        side: BorderSide(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Text(
           '${entries.length} department records processed.',
-          style: TextStyle(color: isDark ? Colors.white70 : const Color(0xFF0F172A)),
+          style: TextStyle(color: isDark ? SoftPalette.gray50A70 : SoftPalette.slate900),
         ),
       ),
     );
@@ -558,7 +560,7 @@ class _DepartmentActivityWidgetState extends State<DepartmentActivityWidget> wit
           Text(
             value,
             style: TextStyle(
-              color: isDark ? Colors.white : const Color(0xFF0F172A),
+              color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
               fontSize: 15,
               fontWeight: FontWeight.bold,
             ),

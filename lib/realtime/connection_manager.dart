@@ -245,7 +245,6 @@ class ConnectionManager {
     }
 
     // ── Fast-path 1: Try last-known server (instant sub-second connection) ─────
-    bool savedFailed = false;
     final saved = _getSavedServer();
     if (saved != null) {
       debugPrint('[ConnectionManager] Trying saved server: ${saved.$1}:${saved.$2}');
@@ -254,25 +253,24 @@ class ConnectionManager {
         final ok = await _connectTo(saved.$1, saved.$2);
         if (ok) return;
       }
-      // Saved IP is stale (DHCP gave the server a new address). Forget it so
-      // we never hammer a dead / foreign device again.
-      savedFailed = true;
-      debugPrint('[ConnectionManager] Saved server ${saved.$1} not responding → clearing and rediscovering');
-      _clearSavedServer();
+      // Retain saved server across transient network drops (DHCP lease remains valid)
+      debugPrint('[ConnectionManager] Saved server ${saved.$1} not responding on quick probe — retaining saved IP and continuing full discovery');
     }
 
     final now = DateTime.now();
     final canProbeFirestore = _isFirebaseReady &&
-        (savedFailed || _lastFirestoreProbeTime == null || now.difference(_lastFirestoreProbeTime!).inMinutes >= 5);
+        (_lastFirestoreProbeTime == null || now.difference(_lastFirestoreProbeTime!).inMinutes >= 15);
     Future<bool> probeFirestoreServer() async {
     if (canProbeFirestore) {
       _lastFirestoreProbeTime = now;
       final candidates = <String>[
         if (_branchId != null && _branchId!.isNotEmpty && _branchId != 'all' && _branchId != 'global') _branchId!,
       ];
-      // Add all known branches from local cache for broader server discovery
+      // Other branches' servers are only looked up when this PC's own branch is unknown
+      // (e.g. HQ). A PC can only reach its own branch's LAN server, and reading every
+      // known branch document every few minutes cost ~1,000 reads a day per searching PC.
       try {
-        if (Hive.isBoxOpen('local_branches')) {
+        if (candidates.isEmpty && Hive.isBoxOpen('local_branches')) {
           final box = Hive.box('local_branches');
           for (final val in box.values) {
             if (val is Map) {
@@ -400,6 +398,14 @@ class ConnectionManager {
     if (found == null) {
       // LAN scan failed → last resort: server IP published in Firestore.
       if (await probeFirestoreServer()) return;
+
+      // Final fallback before giving up: direct connect attempt to last-known saved server
+      if (saved != null) {
+        debugPrint('[ConnectionManager] Full discovery found nothing → retrying direct connect to saved server ${saved.$1}:${saved.$2}');
+        final ok = await _connectTo(saved.$1, saved.$2);
+        if (ok) return;
+      }
+
       _emit(const ConnectionStatus(
         state: LanConnectionState.disconnected,
         message: 'Server not found. Ensure all devices are on the same WiFi/LAN '
@@ -554,12 +560,14 @@ class ConnectionManager {
     _heartbeatTimer?.cancel();
     _reconnectTimer?.cancel();
 
-    const delays = [2, 3, 5, 5, 5];
+    const delays = [2, 3, 5, 10, 15, 30, 45, 60];
     final delay =
         delays[_reconnectAttempts.clamp(0, delays.length - 1)];
     _reconnectAttempts++;
 
-    debugPrint('[ConnectionManager] Reconnect in ${delay}s (attempt $_reconnectAttempts)');
+    if (_reconnectAttempts <= 5 || _reconnectAttempts % 5 == 0) {
+      debugPrint('[ConnectionManager] Reconnect in ${delay}s (attempt $_reconnectAttempts)');
+    }
     _reconnectTimer = Timer(Duration(seconds: delay), _tryConnect);
   }
 
@@ -621,7 +629,7 @@ class ConnectionManager {
     return null;
   }
 
-  void _clearSavedServer() {
+  void clearSavedServer() {
     try {
       if (Hive.isBoxOpen('app_settings')) {
         final box = Hive.box('app_settings');
@@ -646,6 +654,10 @@ class ConnectionManager {
   // ── Emit ───────────────────────────────────────────────────────────────────
   void _emit(ConnectionStatus s) {
     if (_disposed) return;
+    // Skip repeats: every listening desk screen rebuilds itself on each status event, and
+    // reconnect cycles emitted the same status several times in a row.
+    final prev = _current;
+    if (prev.state == s.state && prev.ip == s.ip && prev.port == s.port && prev.message == s.message) return;
     _current = s;
     if (!_statusController.isClosed) _statusController.add(s);
   }

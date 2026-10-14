@@ -298,7 +298,7 @@ packages:
     source: hosted
     version: "6.4.1"
   cloud_firestore_platform_interface:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: cloud_firestore_platform_interface
       sha256: "17719eef8703c5f6b311d114d4bab278721f05523505c2a93b8332042042c263"

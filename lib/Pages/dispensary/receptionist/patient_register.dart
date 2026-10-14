@@ -1,6 +1,7 @@
 // lib/pages/dispensary/receptionist/patient_register.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/services.dart';
 import 'package:dropdown_button2/dropdown_button2.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -646,13 +647,13 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
   Widget _buildGuardianNotice(bool isMobile) {
     final forced = _autoSwitchedToChild;
     final accent = forced
-        ? (_isDark ? const Color(0xFFF59E0B) : const Color(0xFFE65100))
-        : (_isDark ? const Color(0xFF34D399) : const Color(0xFF2E7D32));
+        ? (_isDark ? SoftPalette.amber300 : SoftPalette.orange400)
+        : (_isDark ? SoftPalette.emerald300 : SoftPalette.green550);
     final bg = forced
-        ? (_isDark ? const Color(0xFF451A03).withValues(alpha: 0.55) : const Color(0xFFFFF3E0))
-        : (_isDark ? const Color(0xFF064E3B).withValues(alpha: 0.45) : const Color(0xFFE8F5E9));
-    final titleColor = _isDark ? Colors.white : (forced ? const Color(0xFF4E2600) : const Color(0xFF004D40));
-    final bodyColor = _isDark ? const Color(0xFFE2E8F0) : (forced ? const Color(0xFF6D4C41) : const Color(0xFF2E7D32));
+        ? (_isDark ? SoftPalette.orange800.withValues(alpha: 0.55) : SoftPalette.amber100m)
+        : (_isDark ? SoftPalette.emerald700.withValues(alpha: 0.45) : SoftPalette.green100m);
+    final titleColor = _isDark ? SoftPalette.gray50 : (forced ? SoftPalette.orange750 : SoftPalette.teal700);
+    final bodyColor = _isDark ? SoftPalette.slate150 : (forced ? SoftPalette.orange600m : SoftPalette.green550);
 
     final card = Container(
       padding: const EdgeInsets.fromLTRB(12, 12, 8, 12),
@@ -806,9 +807,9 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
               margin: EdgeInsets.symmetric(horizontal: isMobile ? 16 : 0),
               padding: EdgeInsets.all(isMobile ? 16 : 20),
               decoration: BoxDecoration(
-                color: _isDark ? const Color(0xFF1E293B) : Colors.white,
+                color: _isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: _isDark ? const Color(0xFF334155) : const Color(0xFF80CBC4), width: 1.5),
+                border: Border.all(color: _isDark ? SoftPalette.slate700 : SoftPalette.teal300, width: 1.5),
               ),
               child: Form(
                 key: _formKey,
@@ -824,7 +825,7 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                       style: TextStyle(
                           fontSize:   isMobile ? 20 : 24,
                           fontWeight: FontWeight.bold,
-                          color:      _isDark ? Colors.white : const Color(0xFF004D40)),
+                          color:      _isDark ? SoftPalette.gray50 : SoftPalette.teal700),
                     ),
                     const SizedBox(height: 24),
 
@@ -832,21 +833,21 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                       decoration: BoxDecoration(
-                        color: _isDark ? const Color(0xFF0F172A) : const Color(0xFFE0F2F1),
+                        color: _isDark ? SoftPalette.slate900 : SoftPalette.teal100m,
                         borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: _isDark ? const Color(0xFF334155) : const Color(0xFF80CBC4)),
+                        border: Border.all(color: _isDark ? SoftPalette.slate700 : SoftPalette.teal300),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(children: [
                             Icon(Icons.person_add,
-                                color: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF004D40),
+                                color: _isDark ? SoftPalette.sky350 : SoftPalette.teal700,
                                 size: isMobile ? 18 : 20),
                             SizedBox(width: isMobile ? 4 : 8),
                             Text('Registration Type',
                                 style: TextStyle(
-                                    color:    _isDark ? const Color(0xFF94A3B8) : const Color(0xFF00796B),
+                                    color:    _isDark ? SoftPalette.slate350 : SoftPalette.teal550,
                                     fontSize: isMobile ? 12 : 14)),
                           ]),
                           const SizedBox(height: 8),
@@ -856,11 +857,11 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                               contentPadding: EdgeInsets.zero,
                               title: Text('Adult',
                                   style: TextStyle(
-                                      color:    _isDark ? Colors.white : const Color(0xFF004D40),
+                                      color:    _isDark ? SoftPalette.gray50 : SoftPalette.teal700,
                                       fontSize: fontSize)),
                               value:      false,
                               groupValue: _isChild,
-                              activeColor: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF00695C),
+                              activeColor: _isDark ? SoftPalette.sky350 : SoftPalette.teal600,
                               onChanged: (v) {
                                 final clean = _cnicController.text.replaceAll(RegExp(r'[^0-9]'), '');
                                 if (clean.length == 13) {
@@ -886,11 +887,11 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                               contentPadding: EdgeInsets.zero,
                               title: Text('Child',
                                   style: TextStyle(
-                                      color:    _isDark ? Colors.white : const Color(0xFF004D40),
+                                      color:    _isDark ? SoftPalette.gray50 : SoftPalette.teal700,
                                       fontSize: fontSize)),
                               value:      true,
                               groupValue: _isChild,
-                              activeColor: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF00695C),
+                              activeColor: _isDark ? SoftPalette.sky350 : SoftPalette.teal600,
                               onChanged: (v) {
                                 setState(() => _isChild = v!);
                                 _handleCnicChanged();
@@ -969,9 +970,9 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                             key: _ageKey,
                             controller: _ageController,
                             focusNode: _ageNode,
-                            cursorColor: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF004D40),
+                            cursorColor: _isDark ? SoftPalette.sky350 : SoftPalette.teal700,
                             style: TextStyle(
-                              color: _isDark ? Colors.white : const Color(0xFF004D40),
+                              color: _isDark ? SoftPalette.gray50 : SoftPalette.teal700,
                               fontSize: fontSize - 2,
                               fontWeight: FontWeight.bold,
                             ),
@@ -1006,9 +1007,9 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                             key: _dobKey,
                             controller: _dobController,
                             focusNode: _dobNode,
-                            cursorColor: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF004D40),
+                            cursorColor: _isDark ? SoftPalette.sky350 : SoftPalette.teal700,
                             style: TextStyle(
-                              color: _isDark ? Colors.white : const Color(0xFF004D40),
+                              color: _isDark ? SoftPalette.gray50 : SoftPalette.teal700,
                               fontSize: fontSize - 2,
                             ),
                             decoration: _inputDecoration(
@@ -1018,7 +1019,7 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                                 tooltip: 'Pick Date of Birth from Calendar',
                                 icon: Icon(
                                   Icons.calendar_month_rounded,
-                                  color: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF00695C),
+                                  color: _isDark ? SoftPalette.sky350 : SoftPalette.teal600,
                                   size: 22,
                                 ),
                                 onPressed: _pickDobDate,
@@ -1113,21 +1114,21 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 12, vertical: 8),
                         decoration: BoxDecoration(
-                          color: _isDark ? const Color(0xFF0F172A) : const Color(0xFFE0F2F1),
+                          color: _isDark ? SoftPalette.slate900 : SoftPalette.teal100m,
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: _isDark ? const Color(0xFF334155) : const Color(0xFF80CBC4)),
+                          border: Border.all(color: _isDark ? SoftPalette.slate700 : SoftPalette.teal300),
                         ),
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Row(children: [
                               Icon(Icons.mosque,
-                                  color: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF004D40),
+                                  color: _isDark ? SoftPalette.sky350 : SoftPalette.teal700,
                                   size: isMobile ? 18 : 20),
                               SizedBox(width: isMobile ? 4 : 8),
                               Text('Visit Type',
                                   style: TextStyle(
-                                      color:    _isDark ? const Color(0xFF94A3B8) : const Color(0xFF00796B),
+                                      color:    _isDark ? SoftPalette.slate350 : SoftPalette.teal550,
                                       fontSize: isMobile ? 12 : 14)),
                             ]),
                             const SizedBox(height: 8),
@@ -1137,11 +1138,11 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                                 contentPadding: EdgeInsets.zero,
                                 title: Text(_isKarachi ? 'PKR 20 Token' : 'Zakat',
                                     style: TextStyle(
-                                        color: _isDark ? Colors.white : const Color(0xFF004D40),
+                                        color: _isDark ? SoftPalette.gray50 : SoftPalette.teal700,
                                         fontSize: fontSize)),
                                 value:       'Zakat',
                                 groupValue:  _visitType,
-                                activeColor: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF00695C),
+                                activeColor: _isDark ? SoftPalette.sky350 : SoftPalette.teal600,
                                 onChanged:   (v) => setState(() => _visitType = v!),
                               )),
                               Expanded(child: RadioListTile<String>(
@@ -1149,11 +1150,11 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                                 contentPadding: EdgeInsets.zero,
                                 title: Text(_isKarachi ? 'PKR 100 (Disabled)' : 'Non-Zakat',
                                     style: TextStyle(
-                                        color: _isKarachi ? Colors.grey : (_isDark ? Colors.white : const Color(0xFF004D40)),
+                                        color: _isKarachi ? SoftPalette.gray350 : (_isDark ? SoftPalette.gray50 : SoftPalette.teal700),
                                         fontSize: fontSize)),
                                 value:       'Non-Zakat',
                                 groupValue:  _visitType,
-                                activeColor: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF00695C),
+                                activeColor: _isDark ? SoftPalette.sky350 : SoftPalette.teal600,
                                 onChanged:   _isKarachi ? null : (v) => setState(() => _visitType = v!),
                               )),
                               Expanded(child: RadioListTile<String>(
@@ -1161,11 +1162,11 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                                 contentPadding: EdgeInsets.zero,
                                 title: Text('GMWF',
                                     style: TextStyle(
-                                        color: _isDark ? Colors.white : const Color(0xFF004D40),
+                                        color: _isDark ? SoftPalette.gray50 : SoftPalette.teal700,
                                         fontSize: fontSize)),
                                 value:       'GMWF',
                                 groupValue:  _visitType,
-                                activeColor: _isDark ? const Color(0xFF38BDF8) : const Color(0xFF00695C),
+                                activeColor: _isDark ? SoftPalette.sky350 : SoftPalette.teal600,
                                 onChanged:   (v) => setState(() => _visitType = v!),
                               )),
                             ]),
@@ -1183,19 +1184,19 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                           gradient: _isSaving
                               ? null
                               : const LinearGradient(
-                                  colors: [Color(0xFF00A86B), Color(0xFF00875A)],
+                                  colors: [SoftPalette.emerald400, SoftPalette.emerald550],
                                   begin: Alignment.topLeft,
                                   end: Alignment.bottomRight,
                                 ),
                           color: _isSaving
-                              ? (_isDark ? const Color(0xFF334155) : Colors.grey[400])
+                              ? (_isDark ? SoftPalette.slate700 : SoftPalette.gray300)
                               : null,
                           borderRadius: BorderRadius.circular(14),
                           boxShadow: _isSaving
                               ? null
                               : [
                                   BoxShadow(
-                                    color: const Color(0xFF00A86B).withValues(alpha: 0.3),
+                                    color: SoftPalette.emerald400.withValues(alpha: 0.3),
                                     blurRadius: 10,
                                     offset: const Offset(0, 3),
                                   ),
@@ -1207,7 +1208,7 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                               ? const SizedBox(
                                   width: 20, height: 20,
                                   child: CircularProgressIndicator(
-                                      color: Colors.white, strokeWidth: 2))
+                                      color: SoftPalette.gray50, strokeWidth: 2))
                               : const Icon(Icons.person_add_alt_1_rounded, size: 20),
                           label: Text(
                             _isSaving ? 'Saving...' : 'Register Patient',
@@ -1219,7 +1220,7 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
                           ),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: Colors.transparent,
-                            foregroundColor: Colors.white,
+                            foregroundColor: SoftPalette.gray50,
                             shadowColor: Colors.transparent,
                             shape: RoundedRectangleBorder(
                                 borderRadius: BorderRadius.circular(14)),
@@ -1264,8 +1265,8 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
       key:            key,
       controller:     controller,
       focusNode:      focusNode,
-      cursorColor:    isDark ? const Color(0xFF38BDF8) : const Color(0xFF004D40),
-      style: TextStyle(color: isDark ? Colors.white : const Color(0xFF004D40), fontSize: isMobile ? 14 : 16),
+      cursorColor:    isDark ? SoftPalette.sky350 : SoftPalette.teal700,
+      style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.teal700, fontSize: isMobile ? 14 : 16),
       decoration:     _inputDecoration(label, icon),
       validator:      validator,
       inputFormatters: inputFormatters,
@@ -1304,7 +1305,7 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
       value:      value,
       dropdownStyleData: DropdownStyleData(
         decoration: BoxDecoration(
-          color: isDark ? const Color(0xFF1E293B) : Colors.white,
+          color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
           borderRadius: BorderRadius.circular(8),
         ),
       ),
@@ -1312,12 +1313,12 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
           .map((e) => DropdownMenuItem<String>(
               value: e,
               child: Text(e,
-                  style: TextStyle(color: isDark ? Colors.white : const Color(0xFF004D40)))))
+                  style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.teal700))))
           .toList(),
       onChanged:  onChanged,
       decoration: _inputDecoration(label, icon),
       validator:  validator ?? ((val) => val == null ? 'Select $label' : null),
-      style: TextStyle(color: isDark ? Colors.white : const Color(0xFF004D40), fontSize: isMobile ? 14 : 16),
+      style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.teal700, fontSize: isMobile ? 14 : 16),
     );
   }
 
@@ -1325,17 +1326,17 @@ class PatientRegisterPageState extends State<PatientRegisterPage> {
     final isDark = _isDark;
     return InputDecoration(
       labelText:  label,
-      labelStyle: TextStyle(color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF00695C)),
-      prefixIcon: Icon(icon, color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF004D40)),
+      labelStyle: TextStyle(color: isDark ? SoftPalette.slate350 : SoftPalette.teal600),
+      prefixIcon: Icon(icon, color: isDark ? SoftPalette.sky350 : SoftPalette.teal700),
       suffixIcon: suffixIcon,
       filled:     true,
-      fillColor:  isDark ? const Color(0xFF334155) : const Color(0xFFE0F2F1),
+      fillColor:  isDark ? SoftPalette.slate700 : SoftPalette.teal100m,
       enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: isDark ? const Color(0xFF475569) : const Color(0xFF00695C))),
+          borderSide: BorderSide(color: isDark ? SoftPalette.slate600 : SoftPalette.teal600)),
       focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
-          borderSide: BorderSide(color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF00695C), width: 1.8)),
+          borderSide: BorderSide(color: isDark ? SoftPalette.sky350 : SoftPalette.teal600, width: 1.8)),
       contentPadding:
           const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
     );

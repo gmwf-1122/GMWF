@@ -25,6 +25,8 @@
 //           to branches/{branchId}/employee_attendance/{dateKey}/records/{employeeId}.
 
 import '../utils/ui_stall_monitor.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import '../widgets/lazy_indexed_stack.dart';
 import 'dart:async';
 import 'dart:convert';
@@ -32,6 +34,7 @@ import 'dart:io' as io;
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:intl/intl.dart';
@@ -60,6 +63,7 @@ import '../widgets/lan_hardware_status_widget.dart';
 import '../services/multi_server_service.dart';
 import '../services/zkteco_network_service.dart';
 import '../services/python_runner_service.dart';
+import 'package:gmwf/design/design_system.dart';
 import '../services/system_metrics_service.dart';
 import '../services/user_theme_service.dart';
 import '../services/network_health_service.dart';
@@ -129,18 +133,18 @@ class ConnectedClient {
 
   Color get color {
     final r = role.toLowerCase();
-    if (r.contains('rec+dis') || r.contains('hybrid') || r.contains('+') || r.contains('_dis') || r.contains('rec_')) return const Color(0xFF00BCD4);
-    if (r.contains('receptionist') || r == 'rec') return const Color(0xFF2196F3);
-    if (r.contains('doctor') || r == 'doc') return const Color(0xFF4CAF50);
-    if (r.contains('dispenser') || r.contains('pharmacist') || r == 'dis') return const Color(0xFFFF9800);
-    if (r.contains('supervisor') || r.contains('admin')) return const Color(0xFFE91E63);
-    if (r.contains('finance') || r.contains('donations')) return const Color(0xFF009688);
-    if (r.contains('teacher') || r.contains('faculty') || r.contains('madrassa') || r.contains('school')) return const Color(0xFF3F51B5);
-    if (r.contains('library')) return const Color(0xFF795548);
-    if (r.contains('dasterkhwaan')) return const Color(0xFFFF5722);
-    if (r.contains('attendance')) return const Color(0xFF673AB7);
-    if (r.contains('server')) return const Color(0xFF9C27B0);
-    return const Color(0xFF607D8B);
+    if (r.contains('rec+dis') || r.contains('hybrid') || r.contains('+') || r.contains('_dis') || r.contains('rec_')) return SoftPalette.cyan350;
+    if (r.contains('receptionist') || r == 'rec') return SoftPalette.blue400;
+    if (r.contains('doctor') || r == 'doc') return SoftPalette.green400;
+    if (r.contains('dispenser') || r.contains('pharmacist') || r == 'dis') return SoftPalette.amber300;
+    if (r.contains('supervisor') || r.contains('admin')) return SoftPalette.red500;
+    if (r.contains('finance') || r.contains('donations')) return SoftPalette.teal500;
+    if (r.contains('teacher') || r.contains('faculty') || r.contains('madrassa') || r.contains('school')) return SoftPalette.indigo600;
+    if (r.contains('library')) return SoftPalette.orange600m;
+    if (r.contains('dasterkhwaan')) return SoftPalette.red400;
+    if (r.contains('attendance')) return SoftPalette.violet600;
+    if (r.contains('server')) return SoftPalette.purple550;
+    return SoftPalette.slate500;
   }
 
   String get displayName {
@@ -207,6 +211,7 @@ class _ServerDashboardWithSyncState
   final Map<String, DateTime> _otherServerSeen = {};
   Set<String> _localIps = {};
   Timer? _overviewTicker;
+  StreamSubscription? _healthSub;
   // [epoch ms, total LAN messages (in + out), total LAN bytes (in + out)] sampled every 5 s.
   final List<List<num>> _lanSamples = [];
   bool _isFirewallBannerDismissed = false;
@@ -221,6 +226,7 @@ class _ServerDashboardWithSyncState
   StreamSubscription<SystemSnapshot>? _metricsSubscription;
   ServerSyncManager? _syncManager;
   LanServer? _server;
+  final ScrollController _runningScrollController = ScrollController();
 
   @override
   void initState() {
@@ -237,7 +243,8 @@ class _ServerDashboardWithSyncState
     _initializeSync();
     _checkConnectivity();
     _startBeaconWatch();
-    _overviewTicker = Timer.periodic(const Duration(seconds: 5), (_) {
+    // 15 s (was 5): each tick rebuilds the whole dashboard.
+    _overviewTicker = Timer.periodic(const Duration(seconds: 15), (_) {
       final now = DateTime.now().millisecondsSinceEpoch;
       _lanSamples.add([
         now,
@@ -252,21 +259,22 @@ class _ServerDashboardWithSyncState
         _autoStartServer();
       }
     });
-    _autoStartServer();
 
     _connectivitySub =
         Connectivity().onConnectivityChanged.listen((results) {
-      final online = results.any((r) => r != ConnectivityResult.none) || NetworkHealthService().isStableOnline;
+      final hasInterface = results.any((r) => r != ConnectivityResult.none);
+      final online = hasInterface && NetworkHealthService().isStableOnline;
       setState(() => _isOnline = online);
       if (online && _syncManager != null) {
         _addLog('📡 Back online - triggering sync');
         _syncManager!.triggerSync();
       } else if (!online) {
-        _addLog('⚠️ Offline - queuing changes');
+        _addLog('⚠️ Offline - operating in local LAN mode (changes safely queued)');
       }
     });
 
-    NetworkHealthService().onHealthChanged.listen((state) {
+    _healthSub?.cancel(); // was never cancelled: one more listener per dashboard open
+    _healthSub = NetworkHealthService().onHealthChanged.listen((state) {
       if (mounted) {
         final online = state == NetworkQualityState.onlineStable;
         setState(() => _isOnline = online);
@@ -335,6 +343,10 @@ class _ServerDashboardWithSyncState
       ]);
       
       final alreadyAdded = checkRes.exitCode == 0 && checkRes.stdout.toString().contains('GMWF_LAN_Server');
+      if (alreadyAdded) {
+        _addLog('ℹ️ Firewall rules already verified active for ports $port, 8088, and 4370');
+        return;
+      }
 
       // 1. Local LAN Sync Websocket (53281)
       await io.Process.run('netsh', [
@@ -390,11 +402,7 @@ class _ServerDashboardWithSyncState
         'localport=4370',
       ]);
 
-      if (alreadyAdded) {
-        _addLog('ℹ️ Firewall rules already verified active for ports $port, 8088, and 4370');
-      } else {
-        _addLog('🔓 Firewall rules added for ports $port, 8088 (ADMS TCP), and 4370 (ZKTeco UDP)');
-      }
+      _addLog('🔓 Firewall rules added for ports $port, 8088 (ADMS TCP), and 4370 (ZKTeco UDP)');
     } catch (e) {
       _addLog('⚠️ Could not add firewall rule automatically: $e');
       if (mounted) {
@@ -430,9 +438,9 @@ class _ServerDashboardWithSyncState
       if (!Hive.isBoxOpen(LocalStorageService.syncBox)) {
         await Hive.openBox(LocalStorageService.syncBox);
       }
-      LocalStorageService.purgePhantomUnknownTokens(widget.branchId);
-      LocalStorageService.healAndRestorePatientCnics(widget.branchId);
-      LocalStorageService.purgeBloatedSyncQueue();
+      unawaited(LocalStorageService.purgePhantomUnknownTokens(widget.branchId));
+      unawaited(LocalStorageService.healAndRestorePatientCnics(widget.branchId));
+      unawaited(LocalStorageService.purgeBloatedSyncQueue());
     } catch (e) {
       debugPrint('Hive init error: $e');
     }
@@ -491,7 +499,7 @@ class _ServerDashboardWithSyncState
       }
     }
 
-    await _openFirewallPort();
+    unawaited(_openFirewallPort());
 
     try {
       _server = LanServer(port: AppNetwork.websocketPort);
@@ -698,7 +706,9 @@ class _ServerDashboardWithSyncState
       _addLog('⚠️ UDP broadcast socket bind error: $e');
     }
 
-    _udpBroadcastTimer = Timer.periodic(const Duration(seconds: 2), (_) async {
+    // Backup beacon every 10 s: LanServer already announces itself every 5 s (this one also
+    // ran every 2 s, doubling the broadcast traffic on the LAN).
+    _udpBroadcastTimer = Timer.periodic(const Duration(seconds: 10), (_) async {
       if (!_isRunning || _serverIp == null || _serverIp!.isEmpty) return;
       try {
         if (_serverUdpSocket == null) {
@@ -850,11 +860,11 @@ class _ServerDashboardWithSyncState
       _addLog('✅ Catch-Up Complete: Pushed $entries tokens, $stock stock items, $requests requests to $clients connected workstation(s)');
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Row(
               children: [
-                const Icon(Icons.bolt_rounded, color: Colors.white, size: 22),
+                const Icon(Icons.bolt_rounded, color: SoftPalette.gray50, size: 22),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -866,7 +876,7 @@ class _ServerDashboardWithSyncState
                 ),
               ],
             ),
-            backgroundColor: const Color(0xFF0D9488),
+            backgroundColor: SoftPalette.teal500,
             duration: const Duration(seconds: 4),
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
@@ -902,17 +912,17 @@ class _ServerDashboardWithSyncState
             final breakdown = _syncManager!.getQueueBreakdown();
 
             return AlertDialog(
-              backgroundColor: isDark ? const Color(0xFF1E1B2E) : Colors.white,
+              backgroundColor: isDark ? SoftPalette.violet900 : SoftPalette.gray50,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
               title: Row(
                 children: [
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF10B981).withValues(alpha: 0.15),
+                      color: SoftPalette.emerald350.withValues(alpha: 0.15),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Icons.auto_awesome, color: Color(0xFF10B981), size: 22),
+                    child: const Icon(Icons.auto_awesome, color: SoftPalette.emerald350, size: 22),
                   ),
                   const SizedBox(width: 12),
                   Expanded(
@@ -924,14 +934,14 @@ class _ServerDashboardWithSyncState
                           style: GoogleFonts.outfit(
                             fontWeight: FontWeight.bold,
                             fontSize: 18,
-                            color: isDark ? Colors.white : const Color(0xFF0F172A),
+                            color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                           ),
                         ),
                         Text(
                           'Zero-maintenance background synchronization & self-healing',
                           style: GoogleFonts.inter(
                             fontSize: 11,
-                            color: isDark ? Colors.white60 : Colors.black54,
+                            color: isDark ? SoftPalette.gray50A60 : SoftPalette.gray900A54,
                           ),
                         ),
                       ],
@@ -949,13 +959,13 @@ class _ServerDashboardWithSyncState
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF0F291E) : const Color(0xFFECFDF5),
+                        color: isDark ? SoftPalette.emerald800 : SoftPalette.emerald50,
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.3)),
+                        border: Border.all(color: SoftPalette.emerald350.withValues(alpha: 0.3)),
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.verified_user_rounded, color: Color(0xFF10B981), size: 18),
+                          const Icon(Icons.verified_user_rounded, color: SoftPalette.emerald350, size: 18),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Column(
@@ -963,11 +973,11 @@ class _ServerDashboardWithSyncState
                               children: [
                                 Text(
                                   'Smart Auto-Healing Active',
-                                  style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 12, color: const Color(0xFF10B981)),
+                                  style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 12, color: SoftPalette.emerald350),
                                 ),
                                 Text(
                                   'Heartbeats and noise are automatically dropped. Duplicate token updates are auto-compacted into the latest state without manual intervention.',
-                                  style: GoogleFonts.inter(fontSize: 11, color: isDark ? Colors.white70 : const Color(0xFF065F46)),
+                                  style: GoogleFonts.inter(fontSize: 11, color: isDark ? SoftPalette.gray50A70 : SoftPalette.emerald600),
                                 ),
                               ],
                             ),
@@ -979,7 +989,7 @@ class _ServerDashboardWithSyncState
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF130F26) : const Color(0xFFF1F5F9),
+                        color: isDark ? SoftPalette.slate900 : SoftPalette.slate100,
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Row(
@@ -988,25 +998,25 @@ class _ServerDashboardWithSyncState
                           Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text('Queued For Cloud Sync:', style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: isDark ? Colors.white70 : Colors.black87)),
-                              Text('Legitimate offline operations buffered for Firestore', style: GoogleFonts.inter(fontSize: 11, color: isDark ? Colors.white38 : Colors.black45)),
+                              Text('Queued For Cloud Sync:', style: GoogleFonts.inter(fontWeight: FontWeight.w600, color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87)),
+                              Text('Legitimate offline operations buffered for Firestore', style: GoogleFonts.inter(fontSize: 11, color: isDark ? SoftPalette.gray50A38 : SoftPalette.gray900A45)),
                             ],
                           ),
-                          Text('$total items', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: total > 0 ? const Color(0xFF38BDF8) : const Color(0xFF10B981))),
+                          Text('$total items', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: total > 0 ? SoftPalette.sky350 : SoftPalette.emerald350)),
                         ],
                       ),
                     ),
                     const SizedBox(height: 12),
-                    Text('Buffered Operations Breakdown:', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? Colors.white60 : Colors.black54)),
+                    Text('Buffered Operations Breakdown:', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50A60 : SoftPalette.gray900A54)),
                     const SizedBox(height: 6),
                     if (breakdown.isEmpty)
                       Padding(
                         padding: const EdgeInsets.symmetric(vertical: 8),
                         child: Row(
                           children: [
-                            const Icon(Icons.check_circle_rounded, color: Color(0xFF10B981), size: 16),
+                            const Icon(Icons.check_circle_rounded, color: SoftPalette.emerald350, size: 16),
                             const SizedBox(width: 6),
-                            Text('All local operations are synchronized with the cloud.', style: GoogleFonts.inter(fontSize: 13, color: const Color(0xFF10B981))),
+                            Text('All local operations are synchronized with the cloud.', style: GoogleFonts.inter(fontSize: 13, color: SoftPalette.emerald350)),
                           ],
                         ),
                       )
@@ -1023,15 +1033,15 @@ class _ServerDashboardWithSyncState
                                 children: [
                                   Row(
                                     children: [
-                                      const Icon(Icons.sync_rounded, size: 14, color: Color(0xFF38BDF8)),
+                                      const Icon(Icons.sync_rounded, size: 14, color: SoftPalette.sky350),
                                       const SizedBox(width: 6),
                                       Text(
                                         e.key,
-                                        style: GoogleFonts.firaCode(fontSize: 12, color: isDark ? Colors.white : Colors.black87),
+                                        style: GoogleFonts.firaCode(fontSize: 12, color: isDark ? SoftPalette.gray50 : SoftPalette.gray900A87),
                                       ),
                                     ],
                                   ),
-                                  Text('${e.value}', style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 13, color: isDark ? Colors.white70 : Colors.black87)),
+                                  Text('${e.value}', style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 13, color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87)),
                                 ],
                               ),
                             );
@@ -1043,8 +1053,8 @@ class _ServerDashboardWithSyncState
               ),
               actions: [
                 TextButton.icon(
-                  icon: const Icon(Icons.auto_fix_high_rounded, size: 16, color: Color(0xFF10B981)),
-                  label: const Text('Auto-Optimize Queue', style: TextStyle(color: Color(0xFF10B981))),
+                  icon: const Icon(Icons.auto_fix_high_rounded, size: 16, color: SoftPalette.emerald350),
+                  label: const Text('Auto-Optimize Queue', style: TextStyle(color: SoftPalette.emerald350)),
                   onPressed: () {
                     final removed = _syncManager!.purgeInvalidQueue();
                     _addLog('🧹 Auto-compacted & cleaned $removed stale/redundant items from sync queue');
@@ -1054,18 +1064,18 @@ class _ServerDashboardWithSyncState
                   },
                 ),
                 TextButton.icon(
-                  icon: const Icon(Icons.local_fire_department_rounded, size: 16, color: Color(0xFFEF4444)),
-                  label: const Text('Clear Flooded Queue', style: TextStyle(color: Color(0xFFEF4444))),
+                  icon: const Icon(Icons.local_fire_department_rounded, size: 16, color: SoftPalette.red400),
+                  label: const Text('Clear Flooded Queue', style: TextStyle(color: SoftPalette.red400)),
                   onPressed: () async {
                     final confirm = await showDialog<bool>(
                       context: ctx,
                       builder: (c) => AlertDialog(
-                        backgroundColor: isDark ? const Color(0xFF1E1B2E) : Colors.white,
+                        backgroundColor: isDark ? SoftPalette.violet900 : SoftPalette.gray50,
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                         title: Row(children: [
-                          const Icon(Icons.warning_amber_rounded, color: Color(0xFFF59E0B), size: 22),
+                          const Icon(Icons.warning_amber_rounded, color: SoftPalette.amber300, size: 22),
                           const SizedBox(width: 10),
-                          Text('Clear Flooded Queue?', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? Colors.white : const Color(0xFF0F172A))),
+                          Text('Clear Flooded Queue?', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? SoftPalette.gray50 : SoftPalette.slate900)),
                         ]),
                         content: Text(
                           'This will remove:\n'
@@ -1075,14 +1085,14 @@ class _ServerDashboardWithSyncState
                           '  • Failed items with ≥3 retries older than 12h\n'
                           '  • Phantom items with no data\n\n'
                           'Legitimate unsynced records are kept safe.',
-                          style: GoogleFonts.inter(fontSize: 13, color: isDark ? Colors.white70 : Colors.black87),
+                          style: GoogleFonts.inter(fontSize: 13, color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
                         ),
                         actions: [
                           TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Cancel')),
                           ElevatedButton(
-                            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFEF4444)),
+                            style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.red400),
                             onPressed: () => Navigator.pop(c, true),
-                            child: const Text('Clear Flooded', style: TextStyle(color: Colors.white)),
+                            child: const Text('Clear Flooded', style: TextStyle(color: SoftPalette.gray50)),
                           ),
                         ],
                       ),
@@ -1098,18 +1108,18 @@ class _ServerDashboardWithSyncState
                   },
                 ),
                 ElevatedButton.icon(
-                  icon: const Icon(Icons.bolt_rounded, size: 16, color: Colors.white),
-                  label: const Text('Catch-Up LAN Devices', style: TextStyle(color: Colors.white)),
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0D9488)),
+                  icon: const Icon(Icons.bolt_rounded, size: 16, color: SoftPalette.gray50),
+                  label: const Text('Catch-Up LAN Devices', style: TextStyle(color: SoftPalette.gray50)),
+                  style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.teal500),
                   onPressed: () async {
                     Navigator.of(ctx).pop();
                     await _triggerCatchUpAndFixMismatch();
                   },
                 ),
                 ElevatedButton.icon(
-                  icon: const Icon(Icons.cloud_upload_outlined, size: 16, color: Colors.white),
-                  label: const Text('Force Cloud Sync', style: TextStyle(color: Colors.white)),
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF3B82F6)),
+                  icon: const Icon(Icons.cloud_upload_outlined, size: 16, color: SoftPalette.gray50),
+                  label: const Text('Force Cloud Sync', style: TextStyle(color: SoftPalette.gray50)),
+                  style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.blue500),
                   onPressed: () async {
                     _addLog('🚀 Triggered Cloud Sync from Queue Manager');
                     Navigator.of(ctx).pop();
@@ -1160,104 +1170,24 @@ class _ServerDashboardWithSyncState
 
   void _showError(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    AppToast.showSnackBar(context, SnackBar(
         content: Text(msg),
-        backgroundColor: Colors.red,
+        backgroundColor: SoftPalette.red400,
         behavior: SnackBarBehavior.floating));
   }
 
   void _showSuccess(String msg) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    AppToast.showSnackBar(context, SnackBar(
         content: Text(msg),
-        backgroundColor: Colors.green,
+        backgroundColor: SoftPalette.green400,
         behavior: SnackBarBehavior.floating));
   }
 
   Future<void> _showLogoutDialog(BuildContext context) async {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
-        shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(16)),
-        title: Row(children: [
-          Icon(Icons.logout_rounded, color: Colors.orange.shade600),
-          const SizedBox(width: 12),
-          Text(
-            'Confirm Logout',
-            style: TextStyle(
-              fontWeight: FontWeight.bold,
-              color: isDark ? Colors.white : Colors.black87,
-            ),
-          ),
-        ]),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Are you sure you want to logout?',
-              style: TextStyle(
-                color: isDark ? const Color(0xFFCBD5E1) : Colors.black87,
-                fontSize: 14,
-              ),
-            ),
-            if (_isRunning) ...[
-              const SizedBox(height: 16),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-                decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF451A03) : const Color(0xFFFFFBEB),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(
-                    color: isDark ? const Color(0xFFB45309) : const Color(0xFFFDE68A),
-                    width: 1.2,
-                  ),
-                ),
-                child: Row(children: [
-                  Icon(
-                    Icons.warning_amber_rounded,
-                    color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706),
-                    size: 22,
-                  ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      'Server is currently running and will be stopped.',
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? const Color(0xFFFDE68A) : const Color(0xFF92400E),
-                      ),
-                    ),
-                  ),
-                ]),
-              ),
-            ],
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            style: TextButton.styleFrom(
-              foregroundColor: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700,
-            ),
-            child: const Text('Cancel'),
-          ),
-          ElevatedButton.icon(
-            onPressed: () => Navigator.of(context).pop(true),
-            icon: const Icon(Icons.logout_rounded, size: 18),
-            label: const Text('Logout'),
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red.shade600,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
-          ),
-        ],
-      ),
+    final confirmed = await showLogoutDialog(
+      context,
+      warningNotice: _isRunning ? 'Server is currently running and will be stopped.' : null,
     );
     if (confirmed == true) await _logout();
   }
@@ -1379,7 +1309,9 @@ class _ServerDashboardWithSyncState
     if (!kIsWeb && PythonRunnerService.instance.isRunning) {
       PythonRunnerService.instance.stopProcess().catchError((_) {});
     }
+    _healthSub?.cancel();
     ZkTecoNetworkService.stopServer().catchError((_) {});
+    _runningScrollController.dispose();
     super.dispose();
   }
 
@@ -1399,11 +1331,11 @@ class _ServerDashboardWithSyncState
       builder: (context, box, _) {
         final isDark = box.get('is_dark_mode', defaultValue: false) == true;
 
-        final scaffoldBg  = isDark ? const Color(0xFF070D18) : const Color(0xFFF8FAFC);
-        final cardBg      = isDark ? const Color(0xFF090F1D) : Colors.white;
-        final cardBorder  = isDark ? const Color(0xFF10B981).withValues(alpha: 0.3) : const Color(0xFFE2E8F0);
-        final titleText   = isDark ? Colors.white : const Color(0xFF064E3B);
-        final subtitleText= isDark ? const Color(0xFF94A3B8) : const Color(0xFF4B5563);
+        final scaffoldBg  = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+        final cardBg      = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+        final cardBorder  = isDark ? SoftPalette.emerald350.withValues(alpha: 0.3) : SoftPalette.slate150;
+        final titleText   = isDark ? SoftPalette.gray50 : SoftPalette.emerald700;
+        final subtitleText= isDark ? SoftPalette.slate350 : SoftPalette.slate600;
 
         final themeData = isDark ? ThemeData.dark() : ThemeData.light();
 
@@ -1413,7 +1345,7 @@ class _ServerDashboardWithSyncState
             cardTheme: CardThemeData(
               color: cardBg,
               elevation: isDark ? 0 : 2,
-              shadowColor: isDark ? Colors.black45 : const Color(0xFF047857).withValues(alpha: 0.08),
+              shadowColor: isDark ? SoftPalette.gray900A45 : SoftPalette.emerald550.withValues(alpha: 0.08),
               shape: RoundedRectangleBorder(
                 borderRadius: const BorderRadius.all(Radius.circular(16)),
                 side: BorderSide(color: cardBorder),
@@ -1477,8 +1409,8 @@ class _ServerDashboardWithSyncState
 
   // ── Sleek Desktop Server Sidebar ──────────────────────────────────────────
   Widget _buildServerSidebar(bool isDark) {
-    final sidebarBg = isDark ? const Color(0xFF080E1A) : Colors.white;
-    final borderColor = isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0);
+    final sidebarBg = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+    final borderColor = isDark ? SoftPalette.slate800 : SoftPalette.slate150;
     final serverIpStr = _serverIp ?? 'Detecting...';
 
     return Container(
@@ -1488,7 +1420,7 @@ class _ServerDashboardWithSyncState
         border: Border(right: BorderSide(color: borderColor, width: 1.2)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.35 : 0.04),
+            color: SoftPalette.gray900.withOpacity(isDark ? 0.35 : 0.04),
             blurRadius: 10,
             offset: const Offset(2, 0),
           ),
@@ -1505,7 +1437,7 @@ class _ServerDashboardWithSyncState
                 Container(
                   padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                    color: isDark ? SoftPalette.slate900 : SoftPalette.slate100,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: borderColor),
                   ),
@@ -1523,7 +1455,7 @@ class _ServerDashboardWithSyncState
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
                           letterSpacing: 0.5,
-                          color: isDark ? Colors.white : const Color(0xFF0F172A),
+                          color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                         ),
                       ),
                       Text(
@@ -1531,7 +1463,7 @@ class _ServerDashboardWithSyncState
                         style: GoogleFonts.inter(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
-                          color: const Color(0xFF10B981),
+                          color: SoftPalette.emerald350,
                         ),
                       ),
                     ],
@@ -1547,12 +1479,12 @@ class _ServerDashboardWithSyncState
             child: Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF0D1525) : const Color(0xFFF8FAFC),
+                color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(
                   color: _isRunning
-                      ? const Color(0xFF10B981).withOpacity(0.4)
-                      : const Color(0xFFF59E0B).withOpacity(0.4),
+                      ? SoftPalette.emerald350.withOpacity(0.4)
+                      : SoftPalette.amber300.withOpacity(0.4),
                 ),
               ),
               child: Column(
@@ -1565,10 +1497,10 @@ class _ServerDashboardWithSyncState
                         height: 8,
                         decoration: BoxDecoration(
                           shape: BoxShape.circle,
-                          color: _isRunning ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                          color: _isRunning ? SoftPalette.emerald350 : SoftPalette.amber300,
                           boxShadow: [
                             BoxShadow(
-                              color: (_isRunning ? const Color(0xFF10B981) : const Color(0xFFF59E0B)).withOpacity(0.6),
+                              color: (_isRunning ? SoftPalette.emerald350 : SoftPalette.amber300).withOpacity(0.6),
                               blurRadius: 6,
                             ),
                           ],
@@ -1581,7 +1513,7 @@ class _ServerDashboardWithSyncState
                           fontSize: 10.5,
                           fontWeight: FontWeight.bold,
                           letterSpacing: 0.4,
-                          color: _isRunning ? const Color(0xFF34D399) : const Color(0xFFFBBF24),
+                          color: _isRunning ? SoftPalette.emerald300 : SoftPalette.amber200,
                         ),
                       ),
                     ],
@@ -1591,10 +1523,10 @@ class _ServerDashboardWithSyncState
                     onTap: () {
                       if (_serverIp != null && _serverIp!.isNotEmpty) {
                         Clipboard.setData(ClipboardData(text: _serverIp!));
-                        ScaffoldMessenger.of(context).showSnackBar(
+                        AppToast.showSnackBar(context, 
                           SnackBar(
                             content: Text('Server IP "$_serverIp" copied to clipboard!'),
-                            backgroundColor: const Color(0xFF10B981),
+                            backgroundColor: SoftPalette.emerald350,
                             duration: const Duration(seconds: 2),
                           ),
                         );
@@ -1604,12 +1536,12 @@ class _ServerDashboardWithSyncState
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                        color: isDark ? SoftPalette.slate800 : SoftPalette.slate150,
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Row(
                         children: [
-                          Icon(Icons.wifi_tethering_rounded, size: 13, color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7)),
+                          Icon(Icons.wifi_tethering_rounded, size: 13, color: isDark ? SoftPalette.sky350 : SoftPalette.sky500),
                           const SizedBox(width: 6),
                           Expanded(
                             child: Text(
@@ -1617,12 +1549,12 @@ class _ServerDashboardWithSyncState
                               style: GoogleFonts.firaCode(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w600,
-                                color: isDark ? Colors.white70 : const Color(0xFF1E293B),
+                                color: isDark ? SoftPalette.gray50A70 : SoftPalette.slate800,
                               ),
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                          Icon(Icons.copy_rounded, size: 12, color: isDark ? Colors.white54 : Colors.black45),
+                          Icon(Icons.copy_rounded, size: 12, color: isDark ? SoftPalette.gray50A54 : SoftPalette.gray900A45),
                           const SizedBox(width: 6),
                           InkWell(
                             onTap: () => _showFirewallStatusAndNextStepsDialog(alreadyAdded: true),
@@ -1631,7 +1563,7 @@ class _ServerDashboardWithSyncState
                               message: 'Firewall & Port Setup Guide',
                               child: Padding(
                                 padding: const EdgeInsets.all(1.5),
-                                child: Icon(Icons.security_rounded, size: 13, color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7)),
+                                child: Icon(Icons.security_rounded, size: 13, color: isDark ? SoftPalette.sky350 : SoftPalette.sky500),
                               ),
                             ),
                           ),
@@ -1689,8 +1621,8 @@ class _ServerDashboardWithSyncState
                       style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 12.5),
                     ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: _isRunning ? const Color(0xFFEF4444) : const Color(0xFF059669),
-                      foregroundColor: Colors.white,
+                      backgroundColor: _isRunning ? SoftPalette.red400 : SoftPalette.emerald500,
+                      foregroundColor: SoftPalette.gray50,
                       padding: const EdgeInsets.symmetric(vertical: 10),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                     ),
@@ -1704,15 +1636,15 @@ class _ServerDashboardWithSyncState
                     child: ElevatedButton.icon(
                       onPressed: !_isCatchingUp ? _triggerCatchUpAndFixMismatch : null,
                       icon: _isCatchingUp
-                          ? const SizedBox(width: 13, height: 13, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          ? const SizedBox(width: 13, height: 13, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50))
                           : const Icon(Icons.bolt_rounded, size: 15),
                       label: Text(
                         _isCatchingUp ? 'Catching Up...' : 'Catch-Up & Fix Mismatch',
                         style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 11.5),
                       ),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0D9488),
-                        foregroundColor: Colors.white,
+                        backgroundColor: SoftPalette.teal500,
+                        foregroundColor: SoftPalette.gray50,
                         padding: const EdgeInsets.symmetric(vertical: 9),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         elevation: 0,
@@ -1732,11 +1664,11 @@ class _ServerDashboardWithSyncState
                         child: OutlinedButton.icon(
                           onPressed: _isManualSyncing ? null : _manualSync,
                           icon: _isManualSyncing
-                              ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF10B981)))
-                              : const Icon(Icons.sync_rounded, size: 15, color: Color(0xFF10B981)),
+                              ? const SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.emerald350))
+                              : const Icon(Icons.sync_rounded, size: 15, color: SoftPalette.emerald350),
                           label: Text(
                             'Sync',
-                            style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: isDark ? Colors.white70 : const Color(0xFF1E293B)),
+                            style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.gray50A70 : SoftPalette.slate800),
                           ),
                           style: OutlinedButton.styleFrom(
                             side: BorderSide(color: borderColor),
@@ -1762,7 +1694,7 @@ class _ServerDashboardWithSyncState
                           child: Icon(
                             isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
                             size: 16,
-                            color: isDark ? const Color(0xFFFBBF24) : const Color(0xFF0F172A),
+                            color: isDark ? SoftPalette.amber200 : SoftPalette.slate900,
                           ),
                         ),
                       ),
@@ -1777,11 +1709,11 @@ class _ServerDashboardWithSyncState
                         child: Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            border: Border.all(color: const Color(0xFFEF4444).withOpacity(0.4)),
+                            border: Border.all(color: SoftPalette.red400.withOpacity(0.4)),
                             borderRadius: BorderRadius.circular(8),
-                            color: const Color(0xFFEF4444).withOpacity(0.1),
+                            color: SoftPalette.red400.withOpacity(0.1),
                           ),
-                          child: const Icon(Icons.power_settings_new_rounded, size: 16, color: Color(0xFFEF4444)),
+                          child: const Icon(Icons.power_settings_new_rounded, size: 16, color: SoftPalette.red400),
                         ),
                       ),
                     ),
@@ -1804,7 +1736,7 @@ class _ServerDashboardWithSyncState
           fontSize: 10,
           fontWeight: FontWeight.w800,
           letterSpacing: 0.8,
-          color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+          color: isDark ? SoftPalette.slate550 : SoftPalette.slate350,
         ),
       ),
     );
@@ -1812,9 +1744,9 @@ class _ServerDashboardWithSyncState
 
   Widget _sidebarItem(int index, String title, String subtitle, IconData icon, bool isDark) {
     final isSelected = _selectedTab == index;
-    final activeBg = isDark ? const Color(0xFF0F766E).withOpacity(0.28) : const Color(0xFFECFDF5);
-    final activeBorder = const Color(0xFF10B981);
-    final inactiveHover = isDark ? const Color(0xFF1E293B).withOpacity(0.4) : const Color(0xFFF8FAFC);
+    final activeBg = isDark ? SoftPalette.teal550.withOpacity(0.28) : SoftPalette.emerald50;
+    final activeBorder = SoftPalette.emerald350;
+    final inactiveHover = isDark ? SoftPalette.slate800.withOpacity(0.4) : SoftPalette.gray50;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 4),
@@ -1840,16 +1772,16 @@ class _ServerDashboardWithSyncState
                   padding: const EdgeInsets.all(6),
                   decoration: BoxDecoration(
                     color: isSelected
-                        ? const Color(0xFF10B981).withOpacity(0.2)
-                        : (isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
+                        ? SoftPalette.emerald350.withOpacity(0.2)
+                        : (isDark ? SoftPalette.slate800 : SoftPalette.slate100),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Icon(
                     icon,
                     size: 16,
                     color: isSelected
-                        ? const Color(0xFF10B981)
-                        : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                        ? SoftPalette.emerald350
+                        : (isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -1863,15 +1795,15 @@ class _ServerDashboardWithSyncState
                           fontSize: 12.5,
                           fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
                           color: isSelected
-                              ? (isDark ? Colors.white : const Color(0xFF065F46))
-                              : (isDark ? const Color(0xFFE2E8F0) : const Color(0xFF334155)),
+                              ? (isDark ? SoftPalette.gray50 : SoftPalette.emerald600)
+                              : (isDark ? SoftPalette.slate150 : SoftPalette.slate700),
                         ),
                       ),
                       Text(
                         subtitle,
                         style: GoogleFonts.inter(
                           fontSize: 10,
-                          color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+                          color: isDark ? SoftPalette.slate550 : SoftPalette.slate350,
                         ),
                       ),
                     ],
@@ -1883,7 +1815,7 @@ class _ServerDashboardWithSyncState
                     height: 5,
                     decoration: const BoxDecoration(
                       shape: BoxShape.circle,
-                      color: Color(0xFF10B981),
+                      color: SoftPalette.emerald350,
                     ),
                   ),
               ],
@@ -1896,8 +1828,8 @@ class _ServerDashboardWithSyncState
 
   // ── Server Top Header Bar with Live Telemetry ──────────────────────────────
   Widget _buildServerTopHeader(bool isDark) {
-    final headerBg = isDark ? const Color(0xFF080E1A) : Colors.white;
-    final borderColor = isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0);
+    final headerBg = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+    final borderColor = isDark ? SoftPalette.slate800 : SoftPalette.slate150;
 
     final tabTitles = [
       'Command Matrix',
@@ -1945,14 +1877,14 @@ class _ServerDashboardWithSyncState
                           style: GoogleFonts.outfit(
                             fontSize: 17,
                             fontWeight: FontWeight.bold,
-                            color: isDark ? Colors.white : const Color(0xFF0F172A),
+                            color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                           ),
                         ),
                         const SizedBox(width: 10),
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                           decoration: BoxDecoration(
-                            color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                            color: isDark ? SoftPalette.slate800 : SoftPalette.slate100,
                             borderRadius: BorderRadius.circular(6),
                             border: Border.all(color: borderColor),
                           ),
@@ -1962,7 +1894,7 @@ class _ServerDashboardWithSyncState
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
                               letterSpacing: 0.3,
-                              color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                              color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
                             ),
                           ),
                         ),
@@ -1971,20 +1903,20 @@ class _ServerDashboardWithSyncState
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF0D9488).withOpacity(0.15),
+                              color: SoftPalette.teal500.withOpacity(0.15),
                               borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: const Color(0xFF0D9488).withOpacity(0.4)),
+                              border: Border.all(color: SoftPalette.teal500.withOpacity(0.4)),
                             ),
                             child: Row(
                               children: [
-                                const Icon(Icons.timer_outlined, size: 11, color: Color(0xFF2DD4BF)),
+                                const Icon(Icons.timer_outlined, size: 11, color: SoftPalette.teal300),
                                 const SizedBox(width: 4),
                                 Text(
                                   _formatUptime(),
                                   style: GoogleFonts.inter(
                                     fontSize: 10.5,
                                     fontWeight: FontWeight.bold,
-                                    color: const Color(0xFF2DD4BF),
+                                    color: SoftPalette.teal300,
                                   ),
                                 ),
                               ],
@@ -1997,7 +1929,7 @@ class _ServerDashboardWithSyncState
                       currentSub,
                       style: GoogleFonts.inter(
                         fontSize: 11,
-                        color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+                        color: isDark ? SoftPalette.slate550 : SoftPalette.slate350,
                       ),
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -2018,17 +1950,17 @@ class _ServerDashboardWithSyncState
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4.5),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF064E3B).withOpacity(0.3) : const Color(0xFFECFDF5),
+                  color: isDark ? SoftPalette.emerald700.withOpacity(0.3) : SoftPalette.emerald50,
                   borderRadius: BorderRadius.circular(8),
-                  border: Border.all(color: const Color(0xFF10B981).withOpacity(0.4)),
+                  border: Border.all(color: SoftPalette.emerald350.withOpacity(0.4)),
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.cloud_done_rounded, size: 13, color: Color(0xFF10B981)),
+                    const Icon(Icons.cloud_done_rounded, size: 13, color: SoftPalette.emerald350),
                     const SizedBox(width: 5),
                     Text(
                       '$_syncedToday Synced',
-                      style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: const Color(0xFF10B981)),
+                      style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: SoftPalette.emerald350),
                     ),
                   ],
                 ),
@@ -2040,11 +1972,11 @@ class _ServerDashboardWithSyncState
                 padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4.5),
                 decoration: BoxDecoration(
                   color: _syncQueueSize > 0
-                      ? (isDark ? const Color(0xFF78350F).withOpacity(0.3) : const Color(0xFFFFFBEB))
-                      : (isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9)),
+                      ? (isDark ? SoftPalette.orange700.withOpacity(0.3) : SoftPalette.yellow50m)
+                      : (isDark ? SoftPalette.slate800 : SoftPalette.slate100),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color: _syncQueueSize > 0 ? const Color(0xFFF59E0B).withOpacity(0.5) : borderColor,
+                    color: _syncQueueSize > 0 ? SoftPalette.amber300.withOpacity(0.5) : borderColor,
                   ),
                 ),
                 child: Row(
@@ -2052,7 +1984,7 @@ class _ServerDashboardWithSyncState
                     Icon(
                       Icons.pending_actions_rounded,
                       size: 13,
-                      color: _syncQueueSize > 0 ? const Color(0xFFF59E0B) : (isDark ? Colors.white38 : Colors.black38),
+                      color: _syncQueueSize > 0 ? SoftPalette.amber300 : (isDark ? SoftPalette.gray50A38 : SoftPalette.gray900A38),
                     ),
                     const SizedBox(width: 5),
                     Text(
@@ -2060,7 +1992,7 @@ class _ServerDashboardWithSyncState
                       style: GoogleFonts.inter(
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
-                        color: _syncQueueSize > 0 ? const Color(0xFFF59E0B) : (isDark ? Colors.white60 : Colors.black54),
+                        color: _syncQueueSize > 0 ? SoftPalette.amber300 : (isDark ? SoftPalette.gray50A60 : SoftPalette.gray900A54),
                       ),
                     ),
                   ],
@@ -2074,11 +2006,11 @@ class _ServerDashboardWithSyncState
                 padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4.5),
                 decoration: BoxDecoration(
                   color: _isOnline
-                      ? (isDark ? const Color(0xFF047857).withOpacity(0.25) : const Color(0xFFF0FDF4))
-                      : (isDark ? const Color(0xFF334155).withOpacity(0.3) : const Color(0xFFF8FAFC)),
+                      ? (isDark ? SoftPalette.emerald550.withOpacity(0.25) : SoftPalette.emerald50m)
+                      : (isDark ? SoftPalette.slate700.withOpacity(0.3) : SoftPalette.gray50),
                   borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color: _isOnline ? const Color(0xFF10B981).withOpacity(0.4) : borderColor,
+                    color: _isOnline ? SoftPalette.emerald350.withOpacity(0.4) : borderColor,
                   ),
                 ),
                 child: Row(
@@ -2086,7 +2018,7 @@ class _ServerDashboardWithSyncState
                     Icon(
                       _isOnline ? Icons.cloud_rounded : Icons.cloud_off_rounded,
                       size: 13,
-                      color: _isOnline ? const Color(0xFF10B981) : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                      color: _isOnline ? SoftPalette.emerald350 : (isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                     ),
                     const SizedBox(width: 5),
                     Text(
@@ -2094,7 +2026,7 @@ class _ServerDashboardWithSyncState
                       style: GoogleFonts.inter(
                         fontSize: 11,
                         fontWeight: FontWeight.bold,
-                        color: _isOnline ? const Color(0xFF10B981) : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                        color: _isOnline ? SoftPalette.emerald350 : (isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                       ),
                     ),
                   ],
@@ -2111,7 +2043,7 @@ class _ServerDashboardWithSyncState
                   return Container(
                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4.5),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                      color: isDark ? SoftPalette.slate800 : SoftPalette.slate100,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(color: borderColor),
                     ),
@@ -2120,7 +2052,7 @@ class _ServerDashboardWithSyncState
                       style: GoogleFonts.inter(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
-                        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                        color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
                       ),
                     ),
                   );
@@ -2137,7 +2069,7 @@ class _ServerDashboardWithSyncState
                         ? const SizedBox(
                             width: 12,
                             height: 12,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                            child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50),
                           )
                         : const Icon(Icons.bolt_rounded, size: 14),
                     label: Text(
@@ -2145,8 +2077,8 @@ class _ServerDashboardWithSyncState
                       style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold),
                     ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF0D9488),
-                      foregroundColor: Colors.white,
+                      backgroundColor: SoftPalette.teal500,
+                      foregroundColor: SoftPalette.gray50,
                       elevation: 0,
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -2165,10 +2097,10 @@ class _ServerDashboardWithSyncState
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: _isRunning ? const Color(0xFF064E3B).withOpacity(0.4) : const Color(0xFF7F1D1D).withOpacity(0.4),
+        color: _isRunning ? SoftPalette.emerald700.withOpacity(0.4) : SoftPalette.red700.withOpacity(0.4),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: _isRunning ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+          color: _isRunning ? SoftPalette.emerald350 : SoftPalette.red400,
           width: 0.8,
         ),
       ),
@@ -2180,10 +2112,10 @@ class _ServerDashboardWithSyncState
             height: 7,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: _isRunning ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+              color: _isRunning ? SoftPalette.emerald350 : SoftPalette.red400,
               boxShadow: [
                 BoxShadow(
-                  color: (_isRunning ? const Color(0xFF10B981) : const Color(0xFFEF4444)).withOpacity(0.6),
+                  color: (_isRunning ? SoftPalette.emerald350 : SoftPalette.red400).withOpacity(0.6),
                   blurRadius: 6,
                 )
               ],
@@ -2195,7 +2127,7 @@ class _ServerDashboardWithSyncState
             style: GoogleFonts.inter(
               fontWeight: FontWeight.bold,
               fontSize: 11,
-              color: _isRunning ? const Color(0xFF34D399) : const Color(0xFFF87171),
+              color: _isRunning ? SoftPalette.emerald300 : SoftPalette.red350,
               letterSpacing: 0.5,
             ),
           ),
@@ -2267,7 +2199,7 @@ class _ServerDashboardWithSyncState
     if (!mounted || _stressTestOpen) return true;
     final server = _server;
     if (!_isRunning || server == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         const SnackBar(content: Text('Start the LAN server first, then press the shortcut again.')),
       );
       return true;
@@ -2282,10 +2214,10 @@ class _ServerDashboardWithSyncState
 
   /// Ring colour by how full the resource is: green normally, amber above 70%, red above 90%.
   Color _levelColor(double? p) {
-    if (p == null) return const Color(0xFF94A3B8);
-    if (p >= 0.9) return const Color(0xFFDC2626);
-    if (p >= 0.7) return const Color(0xFFD97706);
-    return const Color(0xFF10B981);
+    if (p == null) return SoftPalette.slate350;
+    if (p >= 0.9) return SoftPalette.red500;
+    if (p >= 0.7) return SoftPalette.orange400;
+    return SoftPalette.emerald350;
   }
 
   /// Real LAN traffic over the last ~minute: ring value (0..1 of 50 msg/s) and a readable summary.
@@ -2324,47 +2256,66 @@ class _ServerDashboardWithSyncState
             ))
         .toList();
 
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          ServerOverviewPanel(
-            isDark: isDark,
-            isRunning: _isRunning,
-            hasInternet: _isOnline,
-            branchName: LocalStorageService.getBranchName(widget.branchId),
-            address: '${_serverIp ?? "—"}:${AppNetwork.websocketPort}',
-            startedAt: _startTime,
-            lastCloudSync: _lastSyncTime,
-            queueSize: _syncQueueSize,
-            clients: rows,
-            lanNote: 'LAN traffic: ${_lanStats().text}',
-            roleCounts: _roleCounts(),
-            onViewAll: _showAllNodesDialog,
-            otherServers: _otherServers,
-            firewallMissing: showFirewall,
-            isSyncing: _isManualSyncing,
-            onRetrySync: () {
-              if (!_isManualSyncing) _manualSync();
-            },
-            onCopyAddress: () {
-              Clipboard.setData(ClipboardData(text: '${_serverIp ?? ""}:${AppNetwork.websocketPort}'));
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Server address copied'), duration: Duration(seconds: 2)),
-              );
-            },
-            onFixFirewall: _openFirewallPort,
-            onOpenQueue: _showQueueManagementDialog,
-          ),
-          const SizedBox(height: 16),
+    return ScrollConfiguration(
+      behavior: ScrollConfiguration.of(context).copyWith(
+        dragDevices: {
+          ui.PointerDeviceKind.touch,
+          ui.PointerDeviceKind.mouse,
+          ui.PointerDeviceKind.trackpad,
+          ui.PointerDeviceKind.stylus,
+        },
+      ),
+      child: Scrollbar(
+        controller: _runningScrollController,
+        thumbVisibility: true,
+        interactive: true,
+        thickness: 8.0,
+        radius: const Radius.circular(4),
+        child: SingleChildScrollView(
+          controller: _runningScrollController,
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              ServerOverviewPanel(
+                isDark: isDark,
+                isRunning: _isRunning,
+                hasInternet: _isOnline,
+                branchName: LocalStorageService.getBranchName(widget.branchId),
+                address: '${_serverIp ?? "—"}:${AppNetwork.websocketPort}',
+                startedAt: _startTime,
+                lastCloudSync: _lastSyncTime,
+                queueSize: _syncQueueSize,
+                clients: rows,
+                lanNote: 'LAN traffic: ${_lanStats().text}',
+                roleCounts: _roleCounts(),
+                onViewAll: _showAllNodesDialog,
+                otherServers: _otherServers,
+                firewallMissing: showFirewall,
+                isSyncing: _isManualSyncing,
+                onRetrySync: () {
+                  if (!_isManualSyncing) _manualSync();
+                },
+                onCopyAddress: () {
+                  Clipboard.setData(ClipboardData(text: '${_serverIp ?? ""}:${AppNetwork.websocketPort}'));
+                  AppToast.showSnackBar(context, 
+                    const SnackBar(content: Text('Server address copied'), duration: Duration(seconds: 2)),
+                  );
+                },
+                onFixFirewall: _openFirewallPort,
+                onOpenQueue: _showQueueManagementDialog,
+              ),
+              const SizedBox(height: 16),
 
-          // System health, then the live log, each full width.
-          _buildSystemHealthOverview(isDark),
-          const SizedBox(height: 16),
-          _buildLiveLogsCard(isDark),
-          const SizedBox(height: 24),
-        ],
+              // System health, then the live log, each full width.
+              _buildSystemHealthOverview(isDark),
+              const SizedBox(height: 16),
+              _buildLiveLogsCard(isDark),
+              const SizedBox(height: 24),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -2382,19 +2333,19 @@ class _ServerDashboardWithSyncState
       decoration: BoxDecoration(
         gradient: LinearGradient(
           colors: isDark
-              ? const [Color(0xFF071B24), Color(0xFF0B2533), Color(0xFF091F2C)]
-              : const [Color(0xFFF0FDF4), Color(0xFFE0F2FE), Colors.white],
+              ? const [SoftPalette.slate900, SoftPalette.slate800, SoftPalette.slate900]
+              : const [SoftPalette.emerald50m, SoftPalette.slate100, SoftPalette.gray50],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isDark ? const Color(0xFF0D9488).withOpacity(0.35) : const Color(0xFFCBD5E1),
+          color: isDark ? SoftPalette.teal500.withOpacity(0.35) : SoftPalette.slate200,
           width: 1.2,
         ),
         boxShadow: [
           BoxShadow(
-            color: isDark ? const Color(0x20000000) : const Color(0x0A000000),
+            color: isDark ? SoftPalette.gray900A13 : SoftPalette.gray900A4,
             blurRadius: 16,
             offset: const Offset(0, 4),
           ),
@@ -2419,9 +2370,9 @@ class _ServerDashboardWithSyncState
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3.5),
                         decoration: BoxDecoration(
-                          color: isDark ? const Color(0xFF064E3B).withOpacity(0.6) : const Color(0xFFD1FAE5),
+                          color: isDark ? SoftPalette.emerald700.withOpacity(0.6) : SoftPalette.emerald100,
                           borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: const Color(0xFF10B981).withOpacity(0.5)),
+                          border: Border.all(color: SoftPalette.emerald350.withOpacity(0.5)),
                         ),
                         child: Row(
                           mainAxisSize: MainAxisSize.min,
@@ -2429,7 +2380,7 @@ class _ServerDashboardWithSyncState
                             Container(
                               width: 6,
                               height: 6,
-                              decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFF10B981)),
+                              decoration: const BoxDecoration(shape: BoxShape.circle, color: SoftPalette.emerald350),
                             ),
                             const SizedBox(width: 5),
                             Text(
@@ -2437,7 +2388,7 @@ class _ServerDashboardWithSyncState
                               style: GoogleFonts.inter(
                                 fontSize: 10,
                                 fontWeight: FontWeight.w800,
-                                color: isDark ? const Color(0xFF34D399) : const Color(0xFF065F46),
+                                color: isDark ? SoftPalette.emerald300 : SoftPalette.emerald600,
                                 letterSpacing: 0.5,
                               ),
                             ),
@@ -2448,16 +2399,16 @@ class _ServerDashboardWithSyncState
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
                         decoration: BoxDecoration(
-                          color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                          color: isDark ? SoftPalette.slate800 : SoftPalette.slate100,
                           borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
+                          border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate200),
                         ),
                         child: Text(
                           'PORT 53281',
                           style: GoogleFonts.firaCode(
                             fontSize: 9.5,
                             fontWeight: FontWeight.bold,
-                            color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7),
+                            color: isDark ? SoftPalette.sky350 : SoftPalette.sky500,
                           ),
                         ),
                       ),
@@ -2469,7 +2420,7 @@ class _ServerDashboardWithSyncState
                     style: GoogleFonts.outfit(
                       fontWeight: FontWeight.bold,
                       fontSize: 22,
-                      color: isDark ? Colors.white : const Color(0xFF0F172A),
+                      color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                       letterSpacing: 0.2,
                     ),
                   ),
@@ -2478,7 +2429,7 @@ class _ServerDashboardWithSyncState
                     'Dedicated branch gateway orchestrating real-time local sync & hardware push services.',
                     style: GoogleFonts.inter(
                       fontSize: 12,
-                      color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                      color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
                       height: 1.3,
                     ),
                   ),
@@ -2504,10 +2455,10 @@ class _ServerDashboardWithSyncState
           width: isCompact ? double.infinity : 280,
           padding: const EdgeInsets.all(14),
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF06141D).withOpacity(0.7) : Colors.white,
+            color: isDark ? SoftPalette.slate900.withOpacity(0.7) : SoftPalette.gray50,
             borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: isDark ? const Color(0xFF1E3A4B) : const Color(0xFFE2E8F0)),
-            boxShadow: isDark ? [] : [const BoxShadow(color: Color(0x08000000), blurRadius: 8)],
+            border: Border.all(color: isDark ? SoftPalette.slate750 : SoftPalette.slate150),
+            boxShadow: isDark ? [] : [const BoxShadow(color: SoftPalette.gray900A3, blurRadius: 8)],
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2517,10 +2468,10 @@ class _ServerDashboardWithSyncState
                   Container(
                     padding: const EdgeInsets.all(6),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF064E3B).withOpacity(0.5) : const Color(0xFFD1FAE5),
+                      color: isDark ? SoftPalette.emerald700.withOpacity(0.5) : SoftPalette.emerald100,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: const Icon(Icons.shield_outlined, color: Color(0xFF10B981), size: 16),
+                    child: const Icon(Icons.shield_outlined, color: SoftPalette.emerald350, size: 16),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
@@ -2529,11 +2480,11 @@ class _ServerDashboardWithSyncState
                       children: [
                         Text(
                           'SECURE & STABLE CONNECTION',
-                          style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w800, color: const Color(0xFF10B981)),
+                          style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.w800, color: SoftPalette.emerald350),
                         ),
                         Text(
                           'Your server is running smoothly',
-                          style: GoogleFonts.inter(fontSize: 10.5, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                          style: GoogleFonts.inter(fontSize: 10.5, color: isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                         ),
                       ],
                     ),
@@ -2547,7 +2498,7 @@ class _ServerDashboardWithSyncState
                 child: CustomPaint(
                   painter: HeartbeatWavePainter(
                     animationValue: _pulseTick,
-                    color: const Color(0xFF10B981),
+                    color: SoftPalette.emerald350,
                   ),
                   size: const Size(double.infinity, 32),
                 ),
@@ -2560,15 +2511,15 @@ class _ServerDashboardWithSyncState
                     child: ElevatedButton.icon(
                       onPressed: (_isRunning && !_isCatchingUp) ? _triggerCatchUpAndFixMismatch : null,
                       icon: _isCatchingUp
-                          ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50))
                           : const Icon(Icons.bolt_rounded, size: 16),
                       label: Text(
                         _isCatchingUp ? 'Catching Up...' : 'Catch-Up & Fix Mismatch',
                         style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 12),
                       ),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0D9488),
-                        foregroundColor: Colors.white,
+                        backgroundColor: SoftPalette.teal500,
+                        foregroundColor: SoftPalette.gray50,
                         padding: const EdgeInsets.symmetric(vertical: 10),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         elevation: 0,
@@ -2580,15 +2531,15 @@ class _ServerDashboardWithSyncState
                     child: ElevatedButton.icon(
                       onPressed: (_isOnline && !_isManualSyncing) ? _manualSync : null,
                       icon: _isManualSyncing
-                          ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                          ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50))
                           : const Icon(Icons.cloud_sync_rounded, size: 16),
                       label: Text(
                         _isManualSyncing ? 'Syncing...' : 'Force Cloud Sync',
                         style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 12),
                       ),
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF0284C7),
-                        foregroundColor: Colors.white,
+                        backgroundColor: SoftPalette.sky500,
+                        foregroundColor: SoftPalette.gray50,
                         padding: const EdgeInsets.symmetric(vertical: 10),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                         elevation: 0,
@@ -2601,10 +2552,10 @@ class _ServerDashboardWithSyncState
                     child: InkWell(
                       onTap: () {
                         Clipboard.setData(ClipboardData(text: 'http://$serverIpStr:53281'));
-                        ScaffoldMessenger.of(context).showSnackBar(
+                        AppToast.showSnackBar(context, 
                           const SnackBar(
                             content: Text('Copied Gateway URL to clipboard!'),
-                            backgroundColor: Color(0xFF10B981),
+                            backgroundColor: SoftPalette.emerald350,
                             duration: Duration(seconds: 2),
                           ),
                         );
@@ -2613,14 +2564,14 @@ class _ServerDashboardWithSyncState
                       child: Container(
                         padding: const EdgeInsets.all(9),
                         decoration: BoxDecoration(
-                          color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                          color: isDark ? SoftPalette.slate800 : SoftPalette.slate100,
                           borderRadius: BorderRadius.circular(8),
-                          border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
+                          border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate200),
                         ),
                         child: Icon(
                           Icons.copy_rounded,
                           size: 16,
-                          color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7),
+                          color: isDark ? SoftPalette.sky350 : SoftPalette.sky500,
                         ),
                       ),
                     ),
@@ -2658,14 +2609,14 @@ class _ServerDashboardWithSyncState
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 13, color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8)),
+        Icon(icon, size: 13, color: isDark ? SoftPalette.slate550 : SoftPalette.slate350),
         const SizedBox(width: 5),
         Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(label, style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8), letterSpacing: 0.5)),
-            Text(value, style: GoogleFonts.inter(fontSize: 11.5, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF0F172A))),
+            Text(label, style: GoogleFonts.inter(fontSize: 9, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.slate550 : SoftPalette.slate350, letterSpacing: 0.5)),
+            Text(value, style: GoogleFonts.inter(fontSize: 11.5, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.slate200 : SoftPalette.slate900)),
           ],
         ),
       ],
@@ -2679,14 +2630,14 @@ class _ServerDashboardWithSyncState
       height: 86,
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFF0F172A), Color(0xFF1E293B)],
+          colors: [SoftPalette.slate900, SoftPalette.slate800],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF0284C7).withOpacity(0.4)),
+        border: Border.all(color: SoftPalette.sky500.withOpacity(0.4)),
         boxShadow: const [
-          BoxShadow(color: Color(0x40000000), blurRadius: 10, offset: Offset(2, 4)),
+          BoxShadow(color: SoftPalette.gray900A25, blurRadius: 10, offset: Offset(2, 4)),
         ],
       ),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
@@ -2705,9 +2656,9 @@ class _ServerDashboardWithSyncState
     return Container(
       height: 18,
       decoration: BoxDecoration(
-        color: const Color(0xFF090D16),
+        color: SoftPalette.slate900,
         borderRadius: BorderRadius.circular(4),
-        border: Border.all(color: const Color(0xFF334155), width: 0.8),
+        border: Border.all(color: SoftPalette.slate700, width: 0.8),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 5),
       child: Row(
@@ -2717,8 +2668,8 @@ class _ServerDashboardWithSyncState
             height: 4,
             decoration: BoxDecoration(
               shape: BoxShape.circle,
-              color: isActive ? const Color(0xFF10B981) : const Color(0xFF64748B),
-              boxShadow: isActive ? [const BoxShadow(color: Color(0xFF10B981), blurRadius: 4)] : null,
+              color: isActive ? SoftPalette.emerald350 : SoftPalette.slate550,
+              boxShadow: isActive ? [const BoxShadow(color: SoftPalette.emerald350, blurRadius: 4)] : null,
             ),
           ),
           const SizedBox(width: 5),
@@ -2726,7 +2677,7 @@ class _ServerDashboardWithSyncState
             child: Container(
               height: 2,
               decoration: BoxDecoration(
-                color: const Color(0xFF1E293B),
+                color: SoftPalette.slate800,
                 borderRadius: BorderRadius.circular(1),
               ),
             ),
@@ -2736,9 +2687,9 @@ class _ServerDashboardWithSyncState
             width: 14,
             height: 5,
             decoration: BoxDecoration(
-              color: const Color(0xFF0284C7).withOpacity(0.8),
+              color: SoftPalette.sky500.withOpacity(0.8),
               borderRadius: BorderRadius.circular(1.5),
-              boxShadow: const [BoxShadow(color: Color(0xFF0284C7), blurRadius: 3)],
+              boxShadow: const [BoxShadow(color: SoftPalette.sky500, blurRadius: 3)],
             ),
           ),
         ],
@@ -2758,15 +2709,15 @@ class _ServerDashboardWithSyncState
           value: '$serverIpStr:53281',
           subtitle: 'Tap to copy LAN address',
           icon: Icons.dns_rounded,
-          glowColor: const Color(0xFF06B6D4),
-          bgGradient: isDark ? const [Color(0xFF04202C), Color(0xFF051720)] : const [Colors.white, Color(0xFFF8FAFC)],
+          glowColor: SoftPalette.cyan350,
+          bgGradient: isDark ? const [SoftPalette.slate900, SoftPalette.slate900] : const [SoftPalette.gray50, SoftPalette.gray50],
           isDark: isDark,
           onTap: () {
             Clipboard.setData(ClipboardData(text: 'http://$serverIpStr:53281'));
-            ScaffoldMessenger.of(context).showSnackBar(
+            AppToast.showSnackBar(context, 
               SnackBar(
                 content: Text('Copied LAN Endpoint: http://$serverIpStr:53281'),
-                backgroundColor: const Color(0xFF06B6D4),
+                backgroundColor: SoftPalette.cyan350,
                 duration: const Duration(seconds: 2),
               ),
             );
@@ -2777,8 +2728,8 @@ class _ServerDashboardWithSyncState
           value: _formatUptime(),
           subtitle: 'Stable Gateway Operation',
           icon: Icons.timer_outlined,
-          glowColor: const Color(0xFF8B5CF6),
-          bgGradient: isDark ? const [Color(0xFF18132D), Color(0xFF100C22)] : const [Colors.white, Color(0xFFF8FAFC)],
+          glowColor: SoftPalette.violet500,
+          bgGradient: isDark ? const [SoftPalette.violet900, SoftPalette.slate900] : const [SoftPalette.gray50, SoftPalette.gray50],
           isDark: isDark,
         ),
         _buildMetricKpiCard(
@@ -2786,8 +2737,8 @@ class _ServerDashboardWithSyncState
           value: '${_connectedClients.length} Online',
           subtitle: _connectedClients.isEmpty ? 'Awaiting LAN clients' : '${_connectedClients.length} nodes communicating',
           icon: Icons.devices_rounded,
-          glowColor: const Color(0xFF10B981),
-          bgGradient: isDark ? const [Color(0xFF04241B), Color(0xFF031812)] : const [Colors.white, Color(0xFFF8FAFC)],
+          glowColor: SoftPalette.emerald350,
+          bgGradient: isDark ? const [SoftPalette.emerald900, SoftPalette.emerald900] : const [SoftPalette.gray50, SoftPalette.gray50],
           isDark: isDark,
           onTap: _showAllNodesDialog,
         ),
@@ -2796,8 +2747,8 @@ class _ServerDashboardWithSyncState
           value: '$_syncedToday Synced',
           subtitle: '$_syncQueueSize Ops in Queue (Manage)',
           icon: Icons.cloud_sync_outlined,
-          glowColor: const Color(0xFFF59E0B),
-          bgGradient: isDark ? const [Color(0xFF241A06), Color(0xFF181203)] : const [Colors.white, Color(0xFFF8FAFC)],
+          glowColor: SoftPalette.amber300,
+          bgGradient: isDark ? const [SoftPalette.amber900, SoftPalette.yellow900] : const [SoftPalette.gray50, SoftPalette.gray50],
           isDark: isDark,
           onTap: _showQueueManagementDialog,
         ),
@@ -2845,12 +2796,12 @@ class _ServerDashboardWithSyncState
         gradient: LinearGradient(colors: bgGradient, begin: Alignment.topLeft, end: Alignment.bottomRight),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isDark ? glowColor.withOpacity(0.35) : const Color(0xFFCBD5E1),
+          color: isDark ? glowColor.withOpacity(0.35) : SoftPalette.slate200,
           width: 1,
         ),
         boxShadow: [
           BoxShadow(
-            color: isDark ? glowColor.withOpacity(0.04) : const Color(0x06000000),
+            color: isDark ? glowColor.withOpacity(0.04) : SoftPalette.gray900A2,
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),
@@ -2886,7 +2837,7 @@ class _ServerDashboardWithSyncState
               style: GoogleFonts.outfit(
                 fontSize: 22,
                 fontWeight: FontWeight.w800,
-                color: isDark ? Colors.white : const Color(0xFF0F172A),
+                color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                 letterSpacing: 0.2,
               ),
             ),
@@ -2894,7 +2845,7 @@ class _ServerDashboardWithSyncState
           const SizedBox(height: 2),
           Text(
             subtitle,
-            style: GoogleFonts.inter(fontSize: 11, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B), fontWeight: FontWeight.w500),
+            style: GoogleFonts.inter(fontSize: 11, color: isDark ? SoftPalette.slate350 : SoftPalette.slate550, fontWeight: FontWeight.w500),
           ),
         ],
       ),
@@ -2918,10 +2869,10 @@ class _ServerDashboardWithSyncState
   Widget _buildLiveLogsCard(bool isDark) {
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF090F1D) : Colors.white,
+        color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: isDark ? const Color(0xFF1E293B) : const Color(0xFFCBD5E1)),
-        boxShadow: isDark ? [] : [const BoxShadow(color: Color(0x06000000), blurRadius: 8)],
+        border: Border.all(color: isDark ? SoftPalette.slate800 : SoftPalette.slate200),
+        boxShadow: isDark ? [] : [const BoxShadow(color: SoftPalette.gray900A2, blurRadius: 8)],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2931,11 +2882,11 @@ class _ServerDashboardWithSyncState
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
             child: Row(
               children: [
-                const Icon(Icons.terminal_rounded, size: 16, color: Color(0xFF0284C7)),
+                const Icon(Icons.terminal_rounded, size: 16, color: SoftPalette.sky500),
                 const SizedBox(width: 8),
                 Text(
                   'Live Network System Log Stream',
-                  style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 14, color: isDark ? Colors.white : const Color(0xFF0F172A)),
+                  style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 14, color: isDark ? SoftPalette.gray50 : SoftPalette.slate900),
                 ),
                 const Spacer(),
                 Tooltip(
@@ -2944,15 +2895,15 @@ class _ServerDashboardWithSyncState
                     onTap: () {
                       if (_activityLog.isNotEmpty) {
                         Clipboard.setData(ClipboardData(text: _activityLog.join('\n')));
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Logs copied!'), backgroundColor: Color(0xFF10B981), duration: Duration(seconds: 1)),
+                        AppToast.showSnackBar(context, 
+                          const SnackBar(content: Text('Logs copied!'), backgroundColor: SoftPalette.emerald350, duration: Duration(seconds: 1)),
                         );
                       }
                     },
                     borderRadius: BorderRadius.circular(4),
                     child: Padding(
                       padding: const EdgeInsets.all(4),
-                      child: Icon(Icons.copy_rounded, size: 15, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                      child: Icon(Icons.copy_rounded, size: 15, color: isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                     ),
                   ),
                 ),
@@ -2964,7 +2915,7 @@ class _ServerDashboardWithSyncState
                     borderRadius: BorderRadius.circular(4),
                     child: Padding(
                       padding: const EdgeInsets.all(4),
-                      child: Icon(Icons.clear_all_rounded, size: 16, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                      child: Icon(Icons.clear_all_rounded, size: 16, color: isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                     ),
                   ),
                 ),
@@ -2972,36 +2923,36 @@ class _ServerDashboardWithSyncState
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF064E3B).withOpacity(0.5) : const Color(0xFFD1FAE5),
+                    color: isDark ? SoftPalette.emerald700.withOpacity(0.5) : SoftPalette.emerald100,
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFF10B981).withOpacity(0.5)),
+                    border: Border.all(color: SoftPalette.emerald350.withOpacity(0.5)),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Container(width: 5, height: 5, decoration: const BoxDecoration(shape: BoxShape.circle, color: Color(0xFF10B981))),
+                      Container(width: 5, height: 5, decoration: const BoxDecoration(shape: BoxShape.circle, color: SoftPalette.emerald350)),
                       const SizedBox(width: 4),
-                      Text('LIVE', style: GoogleFonts.inter(fontSize: 9.5, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFF34D399) : const Color(0xFF065F46))),
+                      Text('LIVE', style: GoogleFonts.inter(fontSize: 9.5, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.emerald300 : SoftPalette.emerald600)),
                     ],
                   ),
                 ),
               ],
             ),
           ),
-          Divider(height: 1, color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0)),
+          Divider(height: 1, color: isDark ? SoftPalette.slate800 : SoftPalette.slate150),
 
           // Terminal Stream Box
           Container(
             height: 205,
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF070D18) : const Color(0xFFF8FAFC),
+              color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
             ),
             child: _activityLog.isEmpty
                 ? Center(
                     child: Text(
                       'Waiting for network logs and events...',
-                      style: GoogleFonts.firaCode(fontSize: 11, color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8)),
+                      style: GoogleFonts.firaCode(fontSize: 11, color: isDark ? SoftPalette.slate550 : SoftPalette.slate350),
                     ),
                   )
                 : ListView.builder(
@@ -3009,13 +2960,13 @@ class _ServerDashboardWithSyncState
                     reverse: false,
                     itemBuilder: (context, idx) {
                       final log = _activityLog[idx];
-                      Color textColor = isDark ? const Color(0xFF10B981) : const Color(0xFF047857);
+                      Color textColor = isDark ? SoftPalette.emerald350 : SoftPalette.emerald550;
                       if (log.contains('❌') || log.contains('ERROR') || log.contains('Failed')) {
-                        textColor = isDark ? const Color(0xFFF87171) : const Color(0xFFDC2626);
+                        textColor = isDark ? SoftPalette.red350 : SoftPalette.red500;
                       } else if (log.contains('⚠️') || log.contains('Queued') || log.contains('warning')) {
-                        textColor = isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706);
+                        textColor = isDark ? SoftPalette.amber200 : SoftPalette.orange400;
                       } else if (log.contains('ℹ️') || log.contains('Waiting')) {
-                        textColor = isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7);
+                        textColor = isDark ? SoftPalette.sky350 : SoftPalette.sky500;
                       }
                       return Padding(
                         padding: const EdgeInsets.symmetric(vertical: 2.5),
@@ -3027,7 +2978,7 @@ class _ServerDashboardWithSyncState
                     },
                   ),
           ),
-          Divider(height: 1, color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0)),
+          Divider(height: 1, color: isDark ? SoftPalette.slate800 : SoftPalette.slate150),
 
           // Footer Action
           InkWell(
@@ -3038,9 +2989,9 @@ class _ServerDashboardWithSyncState
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text('View Full Log', style: GoogleFonts.inter(fontSize: 11.5, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569), fontWeight: FontWeight.w600)),
+                  Text('View Full Log', style: GoogleFonts.inter(fontSize: 11.5, color: isDark ? SoftPalette.slate350 : SoftPalette.slate600, fontWeight: FontWeight.w600)),
                   const SizedBox(width: 4),
-                  Icon(Icons.arrow_forward_rounded, size: 13, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569)),
+                  Icon(Icons.arrow_forward_rounded, size: 13, color: isDark ? SoftPalette.slate350 : SoftPalette.slate600),
                 ],
               ),
             ),
@@ -3079,10 +3030,10 @@ class _ServerDashboardWithSyncState
 
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF090F1D) : Colors.white,
+        color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: isDark ? const Color(0xFF1E293B) : const Color(0xFFCBD5E1)),
-        boxShadow: isDark ? [] : [const BoxShadow(color: Color(0x06000000), blurRadius: 8)],
+        border: Border.all(color: isDark ? SoftPalette.slate800 : SoftPalette.slate200),
+        boxShadow: isDark ? [] : [const BoxShadow(color: SoftPalette.gray900A2, blurRadius: 8)],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -3092,24 +3043,24 @@ class _ServerDashboardWithSyncState
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
             child: Row(
               children: [
-                const Icon(Icons.hub_rounded, size: 16, color: Color(0xFF0284C7)),
+                const Icon(Icons.hub_rounded, size: 16, color: SoftPalette.sky500),
                 const SizedBox(width: 8),
                 Text(
                   'Active Branch Network Nodes',
-                  style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 14, color: isDark ? Colors.white : const Color(0xFF0F172A)),
+                  style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 14, color: isDark ? SoftPalette.gray50 : SoftPalette.slate900),
                 ),
                 const Spacer(),
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                   decoration: BoxDecoration(
                     color: _connectedClients.isNotEmpty
-                        ? const Color(0xFF10B981).withOpacity(0.15)
-                        : const Color(0xFF0284C7).withOpacity(0.12),
+                        ? SoftPalette.emerald350.withOpacity(0.15)
+                        : SoftPalette.sky500.withOpacity(0.12),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
                       color: _connectedClients.isNotEmpty
-                          ? const Color(0xFF10B981).withOpacity(0.4)
-                          : const Color(0xFF0284C7).withOpacity(0.3),
+                          ? SoftPalette.emerald350.withOpacity(0.4)
+                          : SoftPalette.sky500.withOpacity(0.3),
                     ),
                   ),
                   child: Text(
@@ -3118,15 +3069,15 @@ class _ServerDashboardWithSyncState
                       fontSize: 10,
                       fontWeight: FontWeight.bold,
                       color: _connectedClients.isNotEmpty
-                          ? (isDark ? const Color(0xFF34D399) : const Color(0xFF065F46))
-                          : (isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7)),
+                          ? (isDark ? SoftPalette.emerald300 : SoftPalette.emerald600)
+                          : (isDark ? SoftPalette.sky350 : SoftPalette.sky500),
                     ),
                   ),
                 ),
               ],
             ),
           ),
-          Divider(height: 1, color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0)),
+          Divider(height: 1, color: isDark ? SoftPalette.slate800 : SoftPalette.slate150),
 
           // Body: Connected Clients list or Awaiting Status Banner
           Padding(
@@ -3148,18 +3099,18 @@ class _ServerDashboardWithSyncState
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                     margin: const EdgeInsets.only(bottom: 10),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF1E293B).withOpacity(0.4) : const Color(0xFFF8FAFC),
+                      color: isDark ? SoftPalette.slate800.withOpacity(0.4) : SoftPalette.gray50,
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                      border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate150),
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.wifi_tethering_rounded, size: 15, color: isDark ? const Color(0xFF38BDF8) : const Color(0xFF0284C7)),
+                        Icon(Icons.wifi_tethering_rounded, size: 15, color: isDark ? SoftPalette.sky350 : SoftPalette.sky500),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             'Awaiting client workstations to connect on LAN (Port 53281).',
-                            style: GoogleFonts.inter(fontSize: 11, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                            style: GoogleFonts.inter(fontSize: 11, color: isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                           ),
                         ),
                       ],
@@ -3187,7 +3138,7 @@ class _ServerDashboardWithSyncState
               ],
             ),
           ),
-          Divider(height: 1, color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0)),
+          Divider(height: 1, color: isDark ? SoftPalette.slate800 : SoftPalette.slate150),
 
           // Footer Action
           InkWell(
@@ -3198,9 +3149,9 @@ class _ServerDashboardWithSyncState
               child: Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Text('View All Nodes', style: GoogleFonts.inter(fontSize: 11.5, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569), fontWeight: FontWeight.w600)),
+                  Text('View All Nodes', style: GoogleFonts.inter(fontSize: 11.5, color: isDark ? SoftPalette.slate350 : SoftPalette.slate600, fontWeight: FontWeight.w600)),
                   const SizedBox(width: 4),
-                  Icon(Icons.arrow_forward_rounded, size: 13, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569)),
+                  Icon(Icons.arrow_forward_rounded, size: 13, color: isDark ? SoftPalette.slate350 : SoftPalette.slate600),
                 ],
               ),
             ),
@@ -3216,11 +3167,11 @@ class _ServerDashboardWithSyncState
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: hasActive
-            ? (isDark ? const Color(0xFF0F766E).withOpacity(0.3) : const Color(0xFFECFDF5))
-            : (isDark ? const Color(0xFF1E293B).withOpacity(0.4) : const Color(0xFFF1F5F9)),
+            ? (isDark ? SoftPalette.teal550.withOpacity(0.3) : SoftPalette.emerald50)
+            : (isDark ? SoftPalette.slate800.withOpacity(0.4) : SoftPalette.slate100),
         borderRadius: BorderRadius.circular(6),
         border: Border.all(
-          color: hasActive ? const Color(0xFF10B981) : (isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
+          color: hasActive ? SoftPalette.emerald350 : (isDark ? SoftPalette.slate700 : SoftPalette.slate200),
           width: 0.8,
         ),
       ),
@@ -3232,8 +3183,8 @@ class _ServerDashboardWithSyncState
             style: GoogleFonts.inter(
               fontSize: 10.5,
               color: hasActive
-                  ? (isDark ? Colors.white : const Color(0xFF065F46))
-                  : (isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569)),
+                  ? (isDark ? SoftPalette.gray50 : SoftPalette.emerald600)
+                  : (isDark ? SoftPalette.slate350 : SoftPalette.slate600),
               fontWeight: hasActive ? FontWeight.bold : FontWeight.w500,
             ),
           ),
@@ -3241,12 +3192,12 @@ class _ServerDashboardWithSyncState
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 4.5, vertical: 1),
             decoration: BoxDecoration(
-              color: hasActive ? const Color(0xFF10B981) : (isDark ? const Color(0xFF334155) : const Color(0xFF94A3B8)),
+              color: hasActive ? SoftPalette.emerald350 : (isDark ? SoftPalette.slate700 : SoftPalette.slate350),
               borderRadius: BorderRadius.circular(3),
             ),
             child: Text(
               '$count',
-              style: GoogleFonts.inter(fontSize: 9.5, fontWeight: FontWeight.bold, color: Colors.white),
+              style: GoogleFonts.inter(fontSize: 9.5, fontWeight: FontWeight.bold, color: SoftPalette.gray50),
             ),
           ),
         ],
@@ -3269,10 +3220,10 @@ class _ServerDashboardWithSyncState
 
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF090F1D) : Colors.white,
+        color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: isDark ? const Color(0xFF1E293B) : const Color(0xFFCBD5E1)),
-        boxShadow: isDark ? [] : [const BoxShadow(color: Color(0x06000000), blurRadius: 8)],
+        border: Border.all(color: isDark ? SoftPalette.slate800 : SoftPalette.slate200),
+        boxShadow: isDark ? [] : [const BoxShadow(color: SoftPalette.gray900A2, blurRadius: 8)],
       ),
       padding: const EdgeInsets.all(16),
       child: Column(
@@ -3280,22 +3231,22 @@ class _ServerDashboardWithSyncState
         children: [
           Row(
             children: [
-              const Icon(Icons.monitor_heart_outlined, size: 16, color: Color(0xFF10B981)),
+              const Icon(Icons.monitor_heart_outlined, size: 16, color: SoftPalette.emerald350),
               const SizedBox(width: 8),
               Text(
                 'System Health Overview',
-                style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 14, color: isDark ? Colors.white : const Color(0xFF0F172A)),
+                style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 14, color: isDark ? SoftPalette.gray50 : SoftPalette.slate900),
               ),
               const Spacer(),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                  color: isDark ? SoftPalette.slate800 : SoftPalette.slate100,
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
                   'Process RAM: ${snap.appProcessRamMb.toStringAsFixed(0)} MB',
-                  style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.bold, color: const Color(0xFF0284C7)),
+                  style: GoogleFonts.inter(fontSize: 10, fontWeight: FontWeight.bold, color: SoftPalette.sky500),
                 ),
               ),
             ],
@@ -3309,10 +3260,10 @@ class _ServerDashboardWithSyncState
                   snap.ramKnown ? '${snap.usedRamGb} / ${snap.totalRamGb} GB' : 'Not available', _levelColor(snap.ramKnown ? snap.ramPercent : null), isDark),
               _buildRadialGauge('Disk ${snap.diskDrive}'.trim(), snap.diskKnown ? snap.diskPercent : null,
                   snap.diskKnown ? '${snap.usedDiskGb} / ${snap.totalDiskGb} GB' : 'Not available', _levelColor(snap.diskKnown ? snap.diskPercent : null), isDark),
-              _buildRadialGauge('LAN load', lanLoad, lanSubtext, const Color(0xFF0D9488), isDark),
+              _buildRadialGauge('LAN load', lanLoad, lanSubtext, SoftPalette.teal500, isDark),
               _buildRadialGauge('Cloud queue', cloudLoad,
                   cloudWaiting == 0 ? 'All uploaded' : '$cloudWaiting waiting',
-                  cloudWaiting == 0 ? const Color(0xFF10B981) : const Color(0xFFB45309), isDark,
+                  cloudWaiting == 0 ? SoftPalette.emerald350 : SoftPalette.orange500, isDark,
                   '$cloudWaiting'),
             ],
           ),
@@ -3327,7 +3278,7 @@ class _ServerDashboardWithSyncState
       children: [
         Text(
           title,
-          style: GoogleFonts.inter(fontSize: 11, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF475569), fontWeight: FontWeight.w600),
+          style: GoogleFonts.inter(fontSize: 11, color: isDark ? SoftPalette.slate350 : SoftPalette.slate600, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 10),
         SizedBox(
@@ -3339,12 +3290,12 @@ class _ServerDashboardWithSyncState
               CircularProgressIndicator(
                 value: percentage ?? 0,
                 strokeWidth: 6,
-                backgroundColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.slate150,
                 valueColor: AlwaysStoppedAnimation<Color>(color),
               ),
               Text(
                 centerText ?? (percentage == null ? 'n/a' : '${(percentage * 100).round()}%'),
-                style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 15, color: isDark ? Colors.white : const Color(0xFF0F172A)),
+                style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 15, color: isDark ? SoftPalette.gray50 : SoftPalette.slate900),
               ),
             ],
           ),
@@ -3352,7 +3303,7 @@ class _ServerDashboardWithSyncState
         const SizedBox(height: 8),
         Text(
           subtext,
-          style: GoogleFonts.inter(fontSize: 10, color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8), fontWeight: FontWeight.w500),
+          style: GoogleFonts.inter(fontSize: 10, color: isDark ? SoftPalette.slate550 : SoftPalette.slate350, fontWeight: FontWeight.w500),
         ),
       ],
     );
@@ -3365,10 +3316,10 @@ class _ServerDashboardWithSyncState
 
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF090F1D) : Colors.white,
+        color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: isDark ? const Color(0xFF1E293B) : const Color(0xFFCBD5E1)),
-        boxShadow: isDark ? [] : [const BoxShadow(color: Color(0x06000000), blurRadius: 8)],
+        border: Border.all(color: isDark ? SoftPalette.slate800 : SoftPalette.slate200),
+        boxShadow: isDark ? [] : [const BoxShadow(color: SoftPalette.gray900A2, blurRadius: 8)],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -3378,11 +3329,11 @@ class _ServerDashboardWithSyncState
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
             child: Row(
               children: [
-                const Icon(Icons.dns_rounded, size: 16, color: Color(0xFF8B5CF6)),
+                const Icon(Icons.dns_rounded, size: 16, color: SoftPalette.violet500),
                 const SizedBox(width: 8),
                 Text(
                   'LAN Hardware & Devices',
-                  style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 14, color: isDark ? Colors.white : const Color(0xFF0F172A)),
+                  style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 14, color: isDark ? SoftPalette.gray50 : SoftPalette.slate900),
                 ),
                 const Spacer(),
                 TextButton(
@@ -3390,18 +3341,18 @@ class _ServerDashboardWithSyncState
                     setState(() => _selectedTab = 4);
                   },
                   style: TextButton.styleFrom(
-                    backgroundColor: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+                    backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.slate100,
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                   ),
-                  child: Text('View All Devices', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFFE2E8F0) : const Color(0xFF0F172A))),
+                  child: Text('View All Devices', style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.slate150 : SoftPalette.slate900)),
                 ),
               ],
             ),
           ),
-          Divider(height: 1, color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0)),
+          Divider(height: 1, color: isDark ? SoftPalette.slate800 : SoftPalette.slate150),
 
           // Data Table in bounded scroll container for vertical balance
           Container(
@@ -3416,8 +3367,8 @@ class _ServerDashboardWithSyncState
                   dataRowMaxHeight: 40,
                   horizontalMargin: 16,
                   columnSpacing: 18,
-                  headingTextStyle: GoogleFonts.inter(fontSize: 10.5, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFF64748B) : const Color(0xFF475569)),
-                  dataTextStyle: GoogleFonts.inter(fontSize: 11.5, color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF1E293B)),
+                  headingTextStyle: GoogleFonts.inter(fontSize: 10.5, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.slate550 : SoftPalette.slate600),
+                  dataTextStyle: GoogleFonts.inter(fontSize: 11.5, color: isDark ? SoftPalette.slate200 : SoftPalette.slate800),
                   columns: const [
                     DataColumn(label: Text('DEVICE NAME')),
                     DataColumn(label: Text('IP ADDRESS')),
@@ -3428,15 +3379,15 @@ class _ServerDashboardWithSyncState
                   rows: [
                     // 1. Primary Server Node
                     DataRow(cells: [
-                      DataCell(Text('GMWF-Server', style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? Colors.white : const Color(0xFF0F172A)))),
+                      DataCell(Text('GMWF-Server', style: TextStyle(fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50 : SoftPalette.slate900))),
                       DataCell(Text(serverIpStr, style: const TextStyle(fontFamily: 'monospace'))),
                       const DataCell(Text('Primary Node')),
                       const DataCell(Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.circle, size: 8, color: Color(0xFF10B981)),
+                          Icon(Icons.circle, size: 8, color: SoftPalette.emerald350),
                           SizedBox(width: 5),
-                          Text('Online', style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold)),
+                          Text('Online', style: TextStyle(color: SoftPalette.emerald350, fontWeight: FontWeight.bold)),
                         ],
                       )),
                       const DataCell(Text('Just now')),
@@ -3449,17 +3400,17 @@ class _ServerDashboardWithSyncState
                           ? _formatDeviceTimeAgo(dev.lastHeartbeat!)
                           : (isOnline ? 'Just now' : 'Offline');
                       return DataRow(cells: [
-                        DataCell(Text(dev.deviceName.isNotEmpty ? dev.deviceName : 'ZKTeco Scanner', style: TextStyle(color: isDark ? Colors.white : const Color(0xFF0F172A)))),
+                        DataCell(Text(dev.deviceName.isNotEmpty ? dev.deviceName : 'ZKTeco Scanner', style: TextStyle(color: isDark ? SoftPalette.gray50 : SoftPalette.slate900))),
                         DataCell(Text(dev.ipAddress, style: const TextStyle(fontFamily: 'monospace'))),
                         const DataCell(Text('Biometric Device')),
                         DataCell(Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.circle, size: 8, color: isOnline ? const Color(0xFF10B981) : const Color(0xFFEF4444)),
+                            Icon(Icons.circle, size: 8, color: isOnline ? SoftPalette.emerald350 : SoftPalette.red400),
                             SizedBox(width: 5),
                             Text(
                               isOnline ? 'Online' : 'Offline',
-                              style: TextStyle(color: isOnline ? const Color(0xFF10B981) : const Color(0xFFEF4444), fontWeight: FontWeight.bold),
+                              style: TextStyle(color: isOnline ? SoftPalette.emerald350 : SoftPalette.red400, fontWeight: FontWeight.bold),
                             ),
                           ],
                         )),
@@ -3476,9 +3427,9 @@ class _ServerDashboardWithSyncState
                         DataCell(Row(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.circle, size: 8, color: Color(0xFF10B981)),
+                            Icon(Icons.circle, size: 8, color: SoftPalette.emerald350),
                             SizedBox(width: 5),
-                            Text('Online', style: TextStyle(color: Color(0xFF34D399), fontWeight: FontWeight.bold)),
+                            Text('Online', style: TextStyle(color: SoftPalette.emerald300, fontWeight: FontWeight.bold)),
                           ],
                         )),
                         DataCell(Text('1m ago')),
@@ -3498,13 +3449,13 @@ class _ServerDashboardWithSyncState
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF0F172A),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Color(0xFF334155))),
+        backgroundColor: SoftPalette.slate900,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: SoftPalette.slate700)),
         title: Row(
           children: [
-            const Icon(Icons.terminal_rounded, color: Color(0xFF0284C7), size: 20),
+            const Icon(Icons.terminal_rounded, color: SoftPalette.sky500, size: 20),
             const SizedBox(width: 10),
-            Text('Full Network System Log', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white)),
+            Text('Full Network System Log', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16, color: SoftPalette.gray50)),
           ],
         ),
         content: SizedBox(
@@ -3513,17 +3464,17 @@ class _ServerDashboardWithSyncState
           child: Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: const Color(0xFF070D18),
+              color: SoftPalette.slate900,
               borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFF1E293B)),
+              border: Border.all(color: SoftPalette.slate800),
             ),
             child: _activityLog.isEmpty
-                ? Center(child: Text('No activity logs recorded yet.', style: GoogleFonts.firaCode(color: Colors.white38)))
+                ? Center(child: Text('No activity logs recorded yet.', style: GoogleFonts.firaCode(color: SoftPalette.gray50A38)))
                 : ListView.builder(
                     itemCount: _activityLog.length,
                     itemBuilder: (_, i) => Padding(
                       padding: const EdgeInsets.symmetric(vertical: 2),
-                      child: Text(_activityLog[i], style: GoogleFonts.firaCode(fontSize: 11, color: const Color(0xFF34D399))),
+                      child: Text(_activityLog[i], style: GoogleFonts.firaCode(fontSize: 11, color: SoftPalette.emerald300)),
                     ),
                   ),
           ),
@@ -3532,14 +3483,14 @@ class _ServerDashboardWithSyncState
           TextButton(
             onPressed: () {
               Clipboard.setData(ClipboardData(text: _activityLog.join('\n')));
-              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Logs copied to clipboard!'), backgroundColor: Color(0xFF10B981)));
+              AppToast.showSnackBar(context, const SnackBar(content: Text('Logs copied to clipboard!'), backgroundColor: SoftPalette.emerald350));
             },
-            child: const Text('Copy All Logs', style: TextStyle(color: Color(0xFF38BDF8))),
+            child: const Text('Copy All Logs', style: TextStyle(color: SoftPalette.sky350)),
           ),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx),
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0284C7)),
-            child: const Text('Close', style: TextStyle(color: Colors.white)),
+            style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.sky500),
+            child: const Text('Close', style: TextStyle(color: SoftPalette.gray50)),
           ),
         ],
       ),
@@ -3550,13 +3501,13 @@ class _ServerDashboardWithSyncState
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF0F172A),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: Color(0xFF334155))),
+        backgroundColor: SoftPalette.slate900,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: SoftPalette.slate700)),
         title: Row(
           children: [
-            const Icon(Icons.hub_rounded, color: Color(0xFF0284C7), size: 20),
+            const Icon(Icons.hub_rounded, color: SoftPalette.sky500, size: 20),
             const SizedBox(width: 10),
-            Text('Connected Network Nodes (${_connectedClients.length})', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white)),
+            Text('Connected Network Nodes (${_connectedClients.length})', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16, color: SoftPalette.gray50)),
           ],
         ),
         content: SizedBox(
@@ -3567,11 +3518,11 @@ class _ServerDashboardWithSyncState
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      const Icon(Icons.radar_rounded, size: 48, color: Color(0xFF475569)),
+                      const Icon(Icons.radar_rounded, size: 48, color: SoftPalette.slate600),
                       const SizedBox(height: 12),
-                      Text('No Client Nodes Currently Connected', style: GoogleFonts.inter(color: Colors.white70, fontWeight: FontWeight.bold)),
+                      Text('No Client Nodes Currently Connected', style: GoogleFonts.inter(color: SoftPalette.gray50A70, fontWeight: FontWeight.bold)),
                       const SizedBox(height: 4),
-                      Text('When client devices open the app on the LAN, they appear here.', style: GoogleFonts.inter(color: const Color(0xFF64748B), fontSize: 12)),
+                      Text('When client devices open the app on the LAN, they appear here.', style: GoogleFonts.inter(color: SoftPalette.slate550, fontSize: 12)),
                     ],
                   ),
                 )
@@ -3582,8 +3533,8 @@ class _ServerDashboardWithSyncState
         actions: [
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx),
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0284C7)),
-            child: const Text('Close', style: TextStyle(color: Colors.white)),
+            style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.sky500),
+            child: const Text('Close', style: TextStyle(color: SoftPalette.gray50)),
           ),
         ],
       ),
@@ -3592,7 +3543,7 @@ class _ServerDashboardWithSyncState
 
   Widget _buildWebUnsupportedMessage() {
     return Scaffold(
-      backgroundColor: const Color(0xFF0B0F19),
+      backgroundColor: SoftPalette.slate900,
       appBar: AppBar(backgroundColor: Colors.transparent, elevation: 0),
       body: Center(
         child: Container(
@@ -3601,21 +3552,21 @@ class _ServerDashboardWithSyncState
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.cloud_off_rounded, size: 100, color: Colors.blueAccent.withOpacity(0.5)),
+              Icon(Icons.cloud_off_rounded, size: 100, color: SoftPalette.blue400.withOpacity(0.5)),
               const SizedBox(height: 32),
-              const Text('Platform Incompatible', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white)),
+              const Text('Platform Incompatible', style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: SoftPalette.gray50)),
               const SizedBox(height: 16),
               const Text(
                 'Server hosting requires native socket access. Please run the application on Windows, macOS, or Linux to establish a LAN node.',
                 textAlign: TextAlign.center,
-                style: TextStyle(height: 1.5, color: Colors.white60, fontSize: 16),
+                style: TextStyle(height: 1.5, color: SoftPalette.gray50A60, fontSize: 16),
               ),
               const SizedBox(height: 40),
               ElevatedButton.icon(
                 onPressed: () => Navigator.of(context).pop(),
                 icon: const Icon(Icons.arrow_back),
                 label: const Text('Return'),
-                style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent, padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16)),
+                style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.blue400, padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16)),
               ),
             ],
           ),
@@ -3626,13 +3577,13 @@ class _ServerDashboardWithSyncState
 
   Widget _buildNotAuthenticatedMessage() {
     return Scaffold(
-      backgroundColor: const Color(0xFF0B0F19),
+      backgroundColor: SoftPalette.slate900,
       body: Center(
         child: Container(
           constraints: const BoxConstraints(maxWidth: 500),
           child: Card(
-            color: const Color(0xFF1F2937).withOpacity(0.8),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: BorderSide(color: Colors.white.withOpacity(0.05))),
+            color: SoftPalette.slate800.withOpacity(0.8),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: BorderSide(color: SoftPalette.gray50.withOpacity(0.05))),
             child: Padding(
               padding: const EdgeInsets.all(40),
               child: Column(
@@ -3640,19 +3591,19 @@ class _ServerDashboardWithSyncState
                 children: [
                   Container(
                     padding: const EdgeInsets.all(20),
-                    decoration: BoxDecoration(shape: BoxShape.circle, color: Colors.orangeAccent.withOpacity(0.1)),
-                    child: const Icon(Icons.lock_outline, size: 60, color: Colors.orangeAccent),
+                    decoration: BoxDecoration(shape: BoxShape.circle, color: SoftPalette.amber300.withOpacity(0.1)),
+                    child: const Icon(Icons.lock_outline, size: 60, color: SoftPalette.amber300),
                   ),
                   const SizedBox(height: 32),
-                  const Text('Access Denied', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.white)),
+                  const Text('Access Denied', style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: SoftPalette.gray50)),
                   const SizedBox(height: 16),
-                  const Text('Server level clearance required. Please authenticate with a Server role.', textAlign: TextAlign.center, style: TextStyle(color: Colors.white60)),
+                  const Text('Server level clearance required. Please authenticate with a Server role.', textAlign: TextAlign.center, style: TextStyle(color: SoftPalette.gray50A60)),
                   const SizedBox(height: 40),
                   ElevatedButton.icon(
                     onPressed: () => Navigator.of(context).pop(),
                     icon: const Icon(Icons.arrow_back),
                     label: const Text('Go Back'),
-                    style: ElevatedButton.styleFrom(backgroundColor: Colors.orangeAccent, foregroundColor: Colors.black, padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16)),
+                    style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.amber300, foregroundColor: SoftPalette.gray900, padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16)),
                   ),
                 ],
               ),
@@ -3664,10 +3615,10 @@ class _ServerDashboardWithSyncState
   }
 
   Widget _buildStoppedView([bool isDark = false]) {
-    final cardBg = isDark ? const Color(0xFF0F172A) : Colors.white;
-    final borderColor = isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0);
-    final textPrimary = isDark ? Colors.white : const Color(0xFF0F172A);
-    final textSecondary = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
+    final cardBg = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+    final borderColor = isDark ? SoftPalette.slate800 : SoftPalette.slate150;
+    final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.slate900;
+    final textSecondary = isDark ? SoftPalette.slate350 : SoftPalette.slate550;
     final serverIpStr = _serverIp ?? 'Detecting...';
 
     return SingleChildScrollView(
@@ -3684,19 +3635,19 @@ class _ServerDashboardWithSyncState
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: isDark
-                        ? [const Color(0xFF091E2A), const Color(0xFF0F172A)]
-                        : [const Color(0xFFEFF6FF), Colors.white],
+                        ? [SoftPalette.slate900, SoftPalette.slate900]
+                        : [SoftPalette.slate100, SoftPalette.gray50],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
                   ),
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
-                    color: isDark ? const Color(0xFF0284C7).withOpacity(0.3) : const Color(0xFFBAE6FD),
+                    color: isDark ? SoftPalette.sky500.withOpacity(0.3) : SoftPalette.slate150,
                     width: 1.2,
                   ),
                   boxShadow: [
                     BoxShadow(
-                      color: const Color(0xFF0284C7).withOpacity(isDark ? 0.12 : 0.06),
+                      color: SoftPalette.sky500.withOpacity(isDark ? 0.12 : 0.06),
                       blurRadius: 20,
                       offset: const Offset(0, 8),
                     ),
@@ -3707,17 +3658,17 @@ class _ServerDashboardWithSyncState
                     Container(
                       padding: const EdgeInsets.all(18),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF0284C7).withOpacity(0.12),
+                        color: SoftPalette.sky500.withOpacity(0.12),
                         shape: BoxShape.circle,
                         border: Border.all(
-                          color: const Color(0xFF0284C7).withOpacity(0.3),
+                          color: SoftPalette.sky500.withOpacity(0.3),
                           width: 1.5,
                         ),
                       ),
                       child: const Icon(
                         Icons.settings_input_antenna_rounded,
                         size: 38,
-                        color: Color(0xFF0284C7),
+                        color: SoftPalette.sky500,
                       ),
                     ),
                     const SizedBox(width: 22),
@@ -3739,7 +3690,7 @@ class _ServerDashboardWithSyncState
                               Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                 decoration: BoxDecoration(
-                                  color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                                  color: isDark ? SoftPalette.slate800 : SoftPalette.slate150,
                                   borderRadius: BorderRadius.circular(6),
                                   border: Border.all(color: borderColor),
                                 ),
@@ -3785,7 +3736,7 @@ class _ServerDashboardWithSyncState
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.fact_check_rounded, size: 18, color: Color(0xFF10B981)),
+                        const Icon(Icons.fact_check_rounded, size: 18, color: SoftPalette.emerald350),
                         const SizedBox(width: 8),
                         Text(
                           'Pre-Flight System Check',
@@ -3801,7 +3752,7 @@ class _ServerDashboardWithSyncState
                           style: GoogleFonts.inter(
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
-                            color: const Color(0xFF10B981),
+                            color: SoftPalette.emerald350,
                           ),
                         ),
                       ],
@@ -3812,7 +3763,7 @@ class _ServerDashboardWithSyncState
                       title: 'Local Hive Data Vault',
                       desc: 'Authoritative offline database ready with zero cloud dependency',
                       status: 'READY',
-                      statusColor: const Color(0xFF10B981),
+                      statusColor: SoftPalette.emerald350,
                       isDark: isDark,
                     ),
                     const Divider(height: 16),
@@ -3821,7 +3772,7 @@ class _ServerDashboardWithSyncState
                       title: 'Network Interface & Host IP',
                       desc: '$serverIpStr (Binding port 8080/8088)',
                       status: 'BOUND',
-                      statusColor: const Color(0xFF0284C7),
+                      statusColor: SoftPalette.sky500,
                       isDark: isDark,
                     ),
                     const Divider(height: 16),
@@ -3830,7 +3781,7 @@ class _ServerDashboardWithSyncState
                       title: 'Biometric UDP Service (Port 4370)',
                       desc: 'ZKTeco real-time punch daemon ready to listen',
                       status: 'CONFIGURED',
-                      statusColor: const Color(0xFF0284C7),
+                      statusColor: SoftPalette.sky500,
                       isDark: isDark,
                     ),
                     const Divider(height: 16),
@@ -3839,7 +3790,7 @@ class _ServerDashboardWithSyncState
                       title: 'Cloud Replication Bridge',
                       desc: _isOnline ? 'Firebase mesh connected & authenticated' : 'Operating in offline local-only mode',
                       status: _isOnline ? 'ONLINE' : 'STANDBY',
-                      statusColor: _isOnline ? const Color(0xFF10B981) : const Color(0xFFF59E0B),
+                      statusColor: _isOnline ? SoftPalette.emerald350 : SoftPalette.amber300,
                       isDark: isDark,
                     ),
                   ],
@@ -3873,10 +3824,10 @@ class _ServerDashboardWithSyncState
                           ),
                         ),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF059669),
-                          foregroundColor: Colors.white,
+                          backgroundColor: SoftPalette.emerald500,
+                          foregroundColor: SoftPalette.gray50,
                           elevation: 3,
-                          shadowColor: const Color(0xFF059669).withOpacity(0.4),
+                          shadowColor: SoftPalette.emerald500.withOpacity(0.4),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
                       ),
@@ -3887,16 +3838,16 @@ class _ServerDashboardWithSyncState
                       children: [
                         TextButton.icon(
                           onPressed: () => _showFirewallStatusAndNextStepsDialog(alreadyAdded: true),
-                          icon: const Icon(Icons.security_rounded, size: 16, color: Color(0xFF0284C7)),
+                          icon: const Icon(Icons.security_rounded, size: 16, color: SoftPalette.sky500),
                           label: Text(
                             'Firewall Setup Guide',
-                            style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: const Color(0xFF0284C7)),
+                            style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: SoftPalette.sky500),
                           ),
                         ),
                         const SizedBox(width: 12),
                         TextButton.icon(
                           onPressed: () => setState(() => _selectedTab = 6),
-                          icon: const Icon(Icons.storage_rounded, size: 16, color: Color(0xFF64748B)),
+                          icon: Icon(Icons.storage_rounded, size: 16, color: context.adapt(SoftPalette.slate550)),
                           label: Text(
                             'Inspect Data Vault',
                             style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: textSecondary),
@@ -3905,10 +3856,10 @@ class _ServerDashboardWithSyncState
                         const SizedBox(width: 12),
                         TextButton.icon(
                           onPressed: () => _showLogoutDialog(context),
-                          icon: const Icon(Icons.logout_rounded, size: 16, color: Color(0xFFEF4444)),
+                          icon: const Icon(Icons.logout_rounded, size: 16, color: SoftPalette.red400),
                           label: Text(
                             'Logout',
-                            style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: const Color(0xFFEF4444)),
+                            style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: SoftPalette.red400),
                           ),
                         ),
                       ],
@@ -3951,14 +3902,14 @@ class _ServerDashboardWithSyncState
                 style: GoogleFonts.inter(
                   fontSize: 13,
                   fontWeight: FontWeight.w600,
-                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                 ),
               ),
               Text(
                 desc,
                 style: GoogleFonts.inter(
                   fontSize: 11,
-                  color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+                  color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
                 ),
               ),
             ],
@@ -3985,12 +3936,12 @@ class _ServerDashboardWithSyncState
   }
 
   Widget _buildClientRow(ConnectedClient client, [bool isDark = false]) {
-    final Color cColor = client.color == const Color(0xFF607D8B) ? Colors.teal : client.color;
+    final Color cColor = client.color == SoftPalette.slate500 ? SoftPalette.teal500 : client.color;
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF1E293B).withOpacity(0.5),
+        color: SoftPalette.slate800.withOpacity(0.5),
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: cColor.withOpacity(0.3)),
       ),
@@ -4002,8 +3953,8 @@ class _ServerDashboardWithSyncState
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(client.displayName, style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: Colors.white, fontSize: 13)),
-                Text('${client.deviceOs} • IP: ${client.ipAddress}', style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF94A3B8))),
+                Text(client.displayName, style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: SoftPalette.gray50, fontSize: 13)),
+                Text('${client.deviceOs} • IP: ${client.ipAddress}', style: GoogleFonts.inter(fontSize: 11, color: SoftPalette.slate350)),
               ],
             ),
           ),
@@ -4020,11 +3971,11 @@ class _ServerDashboardWithSyncState
   // ── Windows Firewall Banner & Guide (Theme-Adaptive & Collapsible) ──────────
   Widget _buildFirewallBanner([bool isDark = false]) {
     if (kIsWeb || !io.Platform.isWindows || _isFirewallBannerDismissed) return const SizedBox.shrink();
-    final bannerBg = isDark ? const Color(0xFF1E170A) : const Color(0xFFFFFBEB);
-    final borderColor = isDark ? const Color(0xFF78350F) : const Color(0xFFFDE68A);
-    const accentColor = Color(0xFFD97706);
-    final titleColor = isDark ? const Color(0xFFFDE68A) : const Color(0xFF92400E);
-    final subtitleColor = isDark ? const Color(0xFFD4D4D8) : const Color(0xFF78350F);
+    final bannerBg = isDark ? SoftPalette.amber900m : SoftPalette.yellow50m;
+    final borderColor = isDark ? SoftPalette.orange700 : SoftPalette.yellow150;
+    const accentColor = SoftPalette.orange400;
+    final titleColor = isDark ? SoftPalette.yellow150 : SoftPalette.orange600;
+    final subtitleColor = isDark ? SoftPalette.gray200 : SoftPalette.orange700;
 
     const cmd1 = 'netsh advfirewall firewall add rule name="GMWF_LAN" dir=in action=allow protocol=TCP localport=53281,8088';
     const cmd2 = 'netsh advfirewall firewall add rule name="GMWF_ZKTeco_UDP" dir=in action=allow protocol=UDP localport=4370';
@@ -4038,7 +3989,7 @@ class _ServerDashboardWithSyncState
         border: Border.all(color: borderColor, width: 1.2),
         boxShadow: [
           BoxShadow(
-            color: isDark ? const Color(0x30000000) : const Color(0x08000000),
+            color: isDark ? SoftPalette.gray900A19 : SoftPalette.gray900A3,
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -4098,7 +4049,7 @@ class _ServerDashboardWithSyncState
                 label: const Text('Auto-Fix All'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: accentColor,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                   padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
                   elevation: 0,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -4120,7 +4071,7 @@ class _ServerDashboardWithSyncState
               const SizedBox(width: 4),
               IconButton(
                 onPressed: () => setState(() => _isFirewallBannerDismissed = true),
-                icon: Icon(Icons.close_rounded, size: 16, color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B)),
+                icon: Icon(Icons.close_rounded, size: 16, color: isDark ? SoftPalette.slate350 : SoftPalette.slate550),
                 tooltip: 'Dismiss firewall banner',
                 padding: EdgeInsets.zero,
                 constraints: const BoxConstraints(),
@@ -4149,39 +4100,39 @@ class _ServerDashboardWithSyncState
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF070D18) : Colors.white,
+        color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0)),
+        border: Border.all(color: isDark ? SoftPalette.slate800 : SoftPalette.slate150),
       ),
       child: Row(
         children: [
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF1F5F9),
+              color: isDark ? SoftPalette.slate800 : SoftPalette.slate100,
               borderRadius: BorderRadius.circular(4),
             ),
             child: Text(
               label,
-              style: GoogleFonts.inter(fontSize: 9.5, fontWeight: FontWeight.bold, color: const Color(0xFF0284C7)),
+              style: GoogleFonts.inter(fontSize: 9.5, fontWeight: FontWeight.bold, color: SoftPalette.sky500),
             ),
           ),
           const SizedBox(width: 8),
           Expanded(
             child: SelectableText(
               command,
-              style: GoogleFonts.firaCode(fontSize: 10, color: isDark ? const Color(0xFF34D399) : const Color(0xFF065F46)),
+              style: GoogleFonts.firaCode(fontSize: 10, color: isDark ? SoftPalette.emerald300 : SoftPalette.emerald600),
             ),
           ),
           const SizedBox(width: 8),
           IconButton(
-            icon: const Icon(Icons.copy, size: 14, color: Color(0xFF64748B)),
+            icon: Icon(Icons.copy, size: 14, color: context.adapt(SoftPalette.slate550)),
             onPressed: () {
               Clipboard.setData(ClipboardData(text: command));
-              ScaffoldMessenger.of(context).showSnackBar(
+              AppToast.showSnackBar(context, 
                 SnackBar(
-                  content: Text('Copied: $label', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                  backgroundColor: const Color(0xFF10B981),
+                  content: Text('Copied: $label', style: const TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold)),
+                  backgroundColor: SoftPalette.emerald350,
                   behavior: SnackBarBehavior.floating,
                   duration: const Duration(seconds: 2),
                 ),
@@ -4201,22 +4152,22 @@ class _ServerDashboardWithSyncState
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF0F172A),
+        backgroundColor: SoftPalette.slate900,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: alreadyAdded ? const Color(0xFF0284C7) : const Color(0xFF10B981), width: 1.2),
+          side: BorderSide(color: alreadyAdded ? SoftPalette.sky500 : SoftPalette.emerald350, width: 1.2),
         ),
         title: Row(
           children: [
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: (alreadyAdded ? const Color(0xFF0284C7) : const Color(0xFF10B981)).withOpacity(0.15),
+                color: (alreadyAdded ? SoftPalette.sky500 : SoftPalette.emerald350).withOpacity(0.15),
                 shape: BoxShape.circle,
               ),
               child: Icon(
                 alreadyAdded ? Icons.verified_user_rounded : Icons.check_circle_rounded,
-                color: alreadyAdded ? const Color(0xFF38BDF8) : const Color(0xFF34D399),
+                color: alreadyAdded ? SoftPalette.sky350 : SoftPalette.emerald300,
                 size: 22,
               ),
             ),
@@ -4227,11 +4178,11 @@ class _ServerDashboardWithSyncState
                 children: [
                   Text(
                     alreadyAdded ? 'Rules Already Added & Active' : 'Firewall Rules Successfully Configured',
-                    style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.white),
+                    style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16, color: SoftPalette.gray50),
                   ),
                   Text(
                     'Ports 53281 (TCP), 8088 (TCP), and 4370 (UDP) are open',
-                    style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF94A3B8)),
+                    style: GoogleFonts.inter(fontSize: 11, color: SoftPalette.slate350),
                   ),
                 ],
               ),
@@ -4247,20 +4198,20 @@ class _ServerDashboardWithSyncState
               Container(
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF070D18),
+                  color: SoftPalette.slate900,
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFF1E293B)),
+                  border: Border.all(color: SoftPalette.slate800),
                 ),
                 child: Row(
                   children: [
-                    const Icon(Icons.info_outline_rounded, color: Color(0xFF38BDF8), size: 18),
+                    const Icon(Icons.info_outline_rounded, color: SoftPalette.sky350, size: 18),
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
                         alreadyAdded
                             ? 'Windows Defender Firewall is already allowing all LAN Sync and ZKTeco Biometric connections on this machine.'
                             : 'All required firewall rules for LAN clients and biometric hardware have been registered.',
-                        style: GoogleFonts.inter(fontSize: 12, color: const Color(0xFFCBD5E1)),
+                        style: GoogleFonts.inter(fontSize: 12, color: SoftPalette.slate200),
                       ),
                     ),
                   ],
@@ -4269,7 +4220,7 @@ class _ServerDashboardWithSyncState
               const SizedBox(height: 16),
               Text(
                 'WHAT TO DO NEXT:',
-                style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: const Color(0xFFF59E0B), letterSpacing: 0.5),
+                style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: SoftPalette.amber300, letterSpacing: 0.5),
               ),
               const SizedBox(height: 10),
               _buildNextStepRow(
@@ -4296,10 +4247,10 @@ class _ServerDashboardWithSyncState
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx),
             style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF0284C7),
+              backgroundColor: SoftPalette.sky500,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
             ),
-            child: const Text('Got It, Thanks!', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            child: const Text('Got It, Thanks!', style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -4315,20 +4266,20 @@ class _ServerDashboardWithSyncState
           height: 22,
           alignment: Alignment.center,
           decoration: BoxDecoration(
-            color: const Color(0xFF1E293B),
+            color: SoftPalette.slate800,
             shape: BoxShape.circle,
-            border: Border.all(color: const Color(0xFF0284C7)),
+            border: Border.all(color: SoftPalette.sky500),
           ),
-          child: Text(stepNum, style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: const Color(0xFF38BDF8))),
+          child: Text(stepNum, style: GoogleFonts.inter(fontSize: 11, fontWeight: FontWeight.bold, color: SoftPalette.sky350)),
         ),
         const SizedBox(width: 10),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(title, style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 12.5, color: Colors.white)),
+              Text(title, style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 12.5, color: SoftPalette.gray50)),
               const SizedBox(height: 2),
-              Text(description, style: GoogleFonts.inter(fontSize: 11, color: const Color(0xFF94A3B8), height: 1.35)),
+              Text(description, style: GoogleFonts.inter(fontSize: 11, color: SoftPalette.slate350, height: 1.35)),
             ],
           ),
         ),
@@ -4733,15 +4684,19 @@ class ServerSyncManager {
 
   DateTime? _lastTokenDownloadTime;
   DateTime? _lastSweepTime;
+  /// Re-enables the old built-in batch uploader (see triggerSync).
+  static bool legacyUploaderEnabled = false;
 
   // Per-socket catch-up cooldown: multiple screens / sync buttons on one
   // station must not trigger repeated full-day pushes on the same socket.
   final Map<String, DateTime> _lastCatchUpPerSocket = {};
-  static const Duration _catchUpCooldown = Duration(seconds: 3);
+  static const Duration _catchUpCooldown = Duration(seconds: 30);
+  final Map<String, DateTime> _lastFullCatchUpPerSocket = {};
 
   Future<void> _downloadTodayTokens({bool force = false}) async {
     final now = DateTime.now();
-    if (!force && _lastTokenDownloadTime != null && now.difference(_lastTokenDownloadTime!).inSeconds < 30) {
+    // 10 min: it reads every token of today from Firestore and rewrites them all to Hive.
+    if (!force && _lastTokenDownloadTime != null && now.difference(_lastTokenDownloadTime!).inMinutes < 10) {
       return;
     }
     _lastTokenDownloadTime = now;
@@ -4788,13 +4743,15 @@ class ServerSyncManager {
       _clientSeenSerials.remove(socketId);
       _clientSeenStock.remove(socketId);
       _lastCatchUpPerSocket.remove(socketId);
+      _lastFullCatchUpPerSocket.remove(socketId);
       _prevOnClientDisconnected?.call(socketId);
     };
 
     server.onMessageReceived = _handleIncomingMessage;
 
-    // ── Periodic catch-up: push to all connected clients every 2 minutes ────
-    _catchUpTimer = Timer.periodic(const Duration(minutes: 2), (_) {
+    // ── Periodic catch-up to all connected clients every 5 minutes (live changes are pushed
+    // instantly; this is only a safety net and scans entries + stock per client) ──
+    _catchUpTimer = Timer.periodic(const Duration(minutes: 5), (_) {
       _periodicCatchUpAll();
     });
 
@@ -4803,8 +4760,8 @@ class ServerSyncManager {
       triggerSync();
     });
 
-    // ── Autonomous queue compaction & deduplication every 60 seconds ────────
-    _compactionTimer = Timer.periodic(const Duration(minutes: 1), (_) {
+    // ── Queue compaction & deduplication every 10 minutes (full scans; was every minute) ──
+    _compactionTimer = Timer.periodic(const Duration(minutes: 10), (_) {
       purgeInvalidQueue();
     });
 
@@ -4838,7 +4795,16 @@ class ServerSyncManager {
           return;
         }
         _lastCatchUpPerSocket[socketId] = now;
-        _clientSeenSerials.remove(socketId); // Clear seen set so forced catchup works
+        // A routine catch-up only sends what this client has not acknowledged yet. Re-sending
+        // the whole day (and re-downloading it from Firestore) on every request was the core
+        // of the CPU/RAM/network loop with the doctor PCs. Only an explicit full LAN sync does that.
+        // (Status changes the client missed are still covered: at most every 5 min a request
+        // gets the full re-send.)
+        final lastFull = _lastFullCatchUpPerSocket[socketId];
+        final fullResync = eventType == 'request_full_lan_sync' ||
+            lastFull == null || now.difference(lastFull) > const Duration(minutes: 5);
+        if (fullResync) _lastFullCatchUpPerSocket[socketId] = now;
+        if (fullResync) _clientSeenSerials.remove(socketId);
         final clients = server.getConnectedClients();
         Map<String, dynamic>? info;
         for (final c in clients) {
@@ -4855,10 +4821,10 @@ class ServerSyncManager {
         };
         debugPrint('[SSM] Catch-up requested by $socketId');
         // 1. Immediately push local tokens and unseen inventory over LAN (0ms delay)
-        _pushCatchUpToSocket(socketId, clientInfo, forceAll: true);
+        _pushCatchUpToSocket(socketId, clientInfo, forceAll: fullResync);
         _pushInventoryCatchUpToSocket(socketId, clientInfo);
 
-        // 2. Fetch today tokens from cloud in background without blocking LAN response
+        // 2. Refresh today's tokens from the cloud (rate-limited to every 10 min) without blocking
         _downloadTodayTokens().then((_) {
           _pushCatchUpToSocket(socketId, clientInfo);
           _pushInventoryCatchUpToSocket(socketId, clientInfo);
@@ -5388,18 +5354,26 @@ class ServerSyncManager {
           final dk = (e['dateKey'] ?? '').toString().trim();
           final serial = (e['serial'] ?? e['id'] ?? '').toString().trim();
           final serialDk = CampSessionService.getDateKeyFromSerial(serial);
-          bool isToday = (dk == today || dk.startsWith(today) || serialDk == today || serialDk.startsWith(today));
-          if (!isToday) {
+          final status = (e['status'] ?? '').toString().toLowerCase().trim();
+          final dispenseStatus = (e['dispenseStatus'] ?? '').toString().toLowerCase().trim();
+          final isWaitingOrActive = status == 'waiting' || status == 'in_consultation' || status == 'skipped' || (dispenseStatus != 'dispensed');
+
+          bool shouldInclude = (dk == today || dk.startsWith(today) || serialDk == today || serialDk.startsWith(today));
+          if (!shouldInclude) {
             final createdAt = (e['createdAt'] ?? e['timestamp'] ?? '').toString().trim();
             if (createdAt.isNotEmpty) {
               final parsed = DateTime.tryParse(createdAt);
               if (parsed != null) {
                 final entryDk = CampSessionService.resolveShiftAndDateKey(parsed, branchId).dateKey;
-                if (entryDk == today) isToday = true;
+                if (entryDk == today || DateTime.now().difference(parsed).inHours.abs() < 24) {
+                  shouldInclude = true;
+                }
               }
+            } else if (isWaitingOrActive) {
+              shouldInclude = true;
             }
           }
-          if (isToday && serial.isNotEmpty) {
+          if (shouldInclude && serial.isNotEmpty) {
             dedupedEntries[serial.toUpperCase()] = e;
           }
         }
@@ -6109,6 +6083,20 @@ class ServerSyncManager {
         final isSynced = (data['synced'] == true || data['syncStatus'] == 'synced') && data['pendingSync'] != true;
         if (isSynced) continue;
 
+        // Auto-heal old or completed historical entries so they are permanently marked synced and never loop
+        final rawCreated = data['createdAt'] ?? data['time'] ?? data['timestamp'] ?? data['date'];
+        final dt = rawCreated != null ? DateTime.tryParse(rawCreated.toString()) : null;
+        final isOld = dt != null && DateTime.now().difference(dt).inHours > 48;
+        final isCompleted = (data['status'] ?? '').toString().toLowerCase() == 'completed' ||
+            (data['dispenseStatus'] ?? '').toString().toLowerCase() == 'dispensed';
+
+        if (data['pendingSync'] != true && (isOld || isCompleted)) {
+          data['syncStatus'] = 'synced';
+          data['synced'] = true;
+          await entriesBox.put(key, data);
+          continue;
+        }
+
         // Skip phantom entries fabricated by old migrations
         final pCnic = (data['patientCnic'] ?? data['cnic'] ?? '').toString().trim();
         final pName = (data['patientName'] ?? data['name'] ?? '').toString().trim().toLowerCase();
@@ -6292,14 +6280,33 @@ class ServerSyncManager {
         if (raw == null || raw is! Map) continue;
         final data = Map<String, dynamic>.from(raw);
 
-        final isPending = data['syncStatus'] != 'synced' ||
-            data['synced'] == false ||
-            data['pendingSync'] == true;
-        if (!isPending) continue;
+        // Same rule as SyncService: uploaded records only got syncStatus='synced' (synced
+        // stayed false), so `synced == false` re-queued them on every backfill.
+        final isSynced = (data['synced'] == true || data['syncStatus'] == 'synced') && data['pendingSync'] != true;
+        if (isSynced) continue;
+
+        final flagsBox = Hive.isBoxOpen('app_flags') ? Hive.box('app_flags') : null;
+        final flagSynced = flagsBox?.get('attendance_synced_$key') == true;
+        if (flagSynced && data['pendingSync'] != true) continue;
+
+        if (data['receivedViaLan'] == true || key.toString().startsWith('att_')) continue;
 
         final employeeId = (data['employeeId'] ?? data['empId'] ?? data['userId'])?.toString();
         final dateStr = (data['date'] ?? data['dateKey'] ?? DateFormat('yyyy-MM-dd').format(DateTime.now())).toString();
         if (employeeId == null || employeeId.isEmpty) continue;
+
+        final flagEmpSynced = flagsBox?.get('attendance_synced_${employeeId}_$dateStr') == true;
+        if (flagEmpSynced && data['pendingSync'] != true) continue;
+
+        final rawDate = data['date'] ?? data['timestamp'] ?? data['punchTime'] ?? data['createdAt'];
+        final dt = rawDate != null ? DateTime.tryParse(rawDate.toString()) : null;
+        final isOld = dt != null && DateTime.now().difference(dt).inHours > 48;
+        if (isOld && data['pendingSync'] != true) {
+          data['syncStatus'] = 'synced';
+          data['synced'] = true;
+          await attBox.put(key, data);
+          continue;
+        }
 
         final queueKey = '${employeeId}_$dateStr';
         if (alreadyQueued.contains(queueKey)) continue;
@@ -6310,6 +6317,7 @@ class ServerSyncManager {
           'branchId': branchId,
           'date': dateStr,
           'employeeId': employeeId,
+          'localKey': key,
           'data': data,
           'createdAt': DateTime.now().toIso8601String(),
           'attempts': 0,
@@ -6361,8 +6369,23 @@ class ServerSyncManager {
         }
 
         final flagSynced = flagsBox?.get('patient_synced_$pid') == true;
+        final isExplicitlySynced = (data['syncStatus'] == 'synced' || data['synced'] == true || flagSynced) && data['pendingSync'] != true;
+        if (isExplicitlySynced) continue;
+
+        if (data['pendingSync'] != true && (data['id'] != null || data['mrNo'] != null || data['firestoreId'] != null)) {
+          data['syncStatus'] = 'synced';
+          data['synced'] = true;
+          await pBox.put(key, data);
+          if (flagsBox != null) {
+            await flagsBox.put('patient_synced_$pid', true);
+            final c = pCnic.replaceAll(RegExp(r'[^0-9]'), '');
+            if (c.isNotEmpty) await flagsBox.put('patient_synced_$c', true);
+          }
+          continue;
+        }
+
         final isPending = data['pendingSync'] == true ||
-            (data['syncStatus'] != 'synced' && !flagSynced);
+            (data['syncStatus'] != 'synced' && data['synced'] != true && !flagSynced);
         if (!isPending) continue;
 
         final targetKey = 'sync_${branchId}_pat_$pid';
@@ -6447,14 +6470,15 @@ class ServerSyncManager {
     }
 
     // Periodic sweep for missing offline tokens and donations:
-    // Run on force OR every 3 minutes so offline entries are automatically backfilled
-    // into the sync queue without requiring a manual button click.
+    // Run on force OR every 15 minutes (was 3: each sweep walks every box on the PC that
+    // has to stay responsive; new records are queued when they are saved anyway).
     final now = DateTime.now();
     final bool shouldSweep = force ||
         _lastSweepTime == null ||
-        now.difference(_lastSweepTime!).inMinutes >= 3;
+        now.difference(_lastSweepTime!).inMinutes >= 15;
     if (shouldSweep) {
       _lastSweepTime = now;
+      await LocalStorageService.healLegacyHistoricalData();
       await _enqueueMissingEntries();
       await _enqueueMissingDonations();
       await _enqueueMissingEmployees();
@@ -6468,6 +6492,18 @@ class ServerSyncManager {
     final box = Hive.box(LocalStorageService.syncBox);
     if (box.isEmpty) return;
 
+    // Upload through SyncService, the same quota-aware uploader every other PC uses. This
+    // second uploader worked the same queue every 30 s without timeouts, without the
+    // hand-off marks (it re-sent writes already waiting in Firestore) and without the
+    // backlog budget. Set legacyUploaderEnabled = true to go back to it.
+    if (!legacyUploaderEnabled) {
+      final before = box.length;
+      await SyncService().triggerUpload(force: force);
+      final uploaded = before - (box.isOpen ? box.length : before);
+      if (uploaded > 0) onSyncComplete(uploaded);
+      return;
+    }
+
     _isSyncing = true;
     _syncedThisRun = 0;
     ServerSyncCoordinator.markStarted(isServer: true);
@@ -6477,18 +6513,17 @@ class ServerSyncManager {
       purgeInvalidQueue();
 
       // Desktop-resilient online verification:
-      // Only abort if the host is completely offline (no network interface).
-      // Even under degraded/unstable connectivity, attempt Firestore delta writes with timeouts.
+      // Abort cloud upload pass if internet is unreachable so server stays responsive on local LAN.
       bool isOnline = true;
       try {
-        if (NetworkHealthService().isOffline) {
+        if (NetworkHealthService().isOffline || !NetworkHealthService().isStableOnline) {
           isOnline = false;
         } else if (!kIsWeb && (io.Platform.isAndroid || io.Platform.isIOS)) {
           final connectivity = await Connectivity().checkConnectivity();
           isOnline = connectivity.any((r) => r != ConnectivityResult.none);
         }
       } catch (_) {
-        isOnline = true;
+        isOnline = false;
       }
 
       if (!isOnline && !force) {
@@ -6505,6 +6540,7 @@ class ServerSyncManager {
         // Process in high-throughput WriteBatch chunks of up to 35 items
         const chunkSize = 35;
         for (int i = 0; i < keys.length; i += chunkSize) {
+          ServerSyncCoordinator.touch();
           final chunk = keys.sublist(i, math.min(i + chunkSize, keys.length));
           final batch = FirebaseFirestore.instance.batch();
           final List<dynamic> stagedKeys = [];
@@ -6519,7 +6555,7 @@ class ServerSyncManager {
 
           if (stagedKeys.isNotEmpty) {
             try {
-              await batch.commit();
+              await batch.commit().timeout(const Duration(seconds: 12));
               for (final cb in postCommitCallbacks) {
                 try { await cb(); } catch (_) {}
               }
@@ -6528,7 +6564,18 @@ class ServerSyncManager {
                 _syncedThisRun++;
               }
             } catch (batchErr) {
-              debugPrint('[SSM] WriteBatch commit notice: $batchErr — falling back to single execution');
+              debugPrint('[SSM] WriteBatch commit notice: $batchErr — evaluating failure');
+              final errStr = batchErr.toString().toLowerCase();
+              final isNetworkFailure = errStr.contains('network') ||
+                  errStr.contains('socket') ||
+                  errStr.contains('timeout') ||
+                  errStr.contains('unavailable') ||
+                  errStr.contains('deadline') ||
+                  errStr.contains('connection');
+              if (isNetworkFailure) {
+                debugPrint('[SSM] 🌐 Cloud connection unreachable during batch write. Pausing cloud upload pass (items safely preserved in Hive).');
+                break;
+              }
               // Safe fallback: run individually so any single bad record gets isolated
               await Future.wait(stagedKeys.map((k) => _processSyncItem(box, k)));
             }
@@ -6629,24 +6676,39 @@ class ServerSyncManager {
         final item = box.get(key);
         if (item is Map) {
           final updated = Map<String, dynamic>.from(item);
-          final attempts = ((updated['attempts'] as int?) ?? 0) + 1;
-          updated['attempts'] = attempts;
-          updated['lastError'] = e.toString();
-          if (attempts >= 5) {
-            debugPrint('[SSM] 🛡️ Quarantining unrecoverable item after 5 failures: ${updated['type']} — $e');
-            try {
-              if (!Hive.isBoxOpen('dead_letter_queue')) {
-                await LocalStorageService.openBoxSafe('dead_letter_queue');
-              }
-              final dlq = Hive.box('dead_letter_queue');
-              await dlq.put('dlq_${DateTime.now().millisecondsSinceEpoch}_$key', {
-                ...updated,
-                'fatalError': e.toString(),
-                'quarantinedAt': DateTime.now().toIso8601String(),
-              });
-            } catch (_) {}
-            await box.delete(key);
+          final errStr = e.toString().toLowerCase();
+          final isNetworkError = errStr.contains('network') ||
+              errStr.contains('socket') ||
+              errStr.contains('timeout') ||
+              errStr.contains('unavailable') ||
+              errStr.contains('connection') ||
+              errStr.contains('deadline') ||
+              errStr.contains('host');
+
+          // Never increment failure attempts or quarantine valid items on network drops
+          if (!isNetworkError) {
+            final attempts = ((updated['attempts'] as int?) ?? 0) + 1;
+            updated['attempts'] = attempts;
+            updated['lastError'] = e.toString();
+            if (attempts >= 5) {
+              debugPrint('[SSM] 🛡️ Quarantining unrecoverable item after 5 failures: ${updated['type']} — $e');
+              try {
+                if (!Hive.isBoxOpen('dead_letter_queue')) {
+                  await LocalStorageService.openBoxSafe('dead_letter_queue');
+                }
+                final dlq = Hive.box('dead_letter_queue');
+                await dlq.put('dlq_${DateTime.now().millisecondsSinceEpoch}_$key', {
+                  ...updated,
+                  'fatalError': e.toString(),
+                  'quarantinedAt': DateTime.now().toIso8601String(),
+                });
+              } catch (_) {}
+              await box.delete(key);
+            } else {
+              await box.put(key, updated);
+            }
           } else {
+            updated['lastError'] = 'Network unreachable ($e)';
             await box.put(key, updated);
           }
         }
@@ -6675,7 +6737,7 @@ class ServerSyncManager {
       if (batch != null) {
         batch.set(ref, docData, SetOptions(merge: merge));
       } else {
-        await ref.set(docData, SetOptions(merge: merge));
+        await ref.set(docData, SetOptions(merge: merge)).timeout(const Duration(seconds: 10));
       }
     }
 
@@ -6683,7 +6745,7 @@ class ServerSyncManager {
       if (batch != null) {
         batch.delete(ref);
       } else {
-        await ref.delete();
+        await ref.delete().timeout(const Duration(seconds: 10));
       }
     }
 
@@ -6809,7 +6871,8 @@ class ServerSyncManager {
         final updateMap = <String, dynamic>{
           'status':         'completed',
           'completedAt':    cleanData['completedAt'] ?? DateTime.now().toIso8601String(),
-          'dispenseStatus': cleanData['dispenseStatus'] ?? 'pending',
+          // Only ever write 'dispensed': the doctor's 'pending' (merge) overwrote dispenses in the cloud.
+          if ((cleanData['dispenseStatus'] ?? '').toString().toLowerCase() == 'dispensed') 'dispenseStatus': 'dispensed',
         };
         for (final f in ['doctorName', 'doctorId', 'daysOfMedicine', 'extraCharge', 'vitals', 'prescription', 'medicines', 'diagnosis', 'complaints']) {
           if (cleanData.containsKey(f) && cleanData[f] != null) {
@@ -7513,7 +7576,18 @@ class ServerSyncManager {
       case 'save_madrassa_daily_log':
       case 'save_madrassa_log':
       case 'save_madrassa_attendance':
-        final dateKey = (cleanData['dateKey'] ?? cleanData['id'] ?? '').toString().trim();
+      case 'enrollment':
+      case 'status_change':
+      case 'ptm_reschedule':
+        final dateKey = (cleanData['dateKey'] ??
+                cleanData['datePart'] ??
+                cleanData['date'] ??
+                cleanData['data']?['dateKey'] ??
+                cleanData['data']?['date'] ??
+                cleanData['id'] ??
+                DateFormat('yyyy-MM-dd').format(DateTime.now()))
+            .toString()
+            .trim();
         final logData = cleanData['data'] is Map
             ? Map<String, dynamic>.from(cleanData['data'])
             : (cleanData['logData'] is Map ? Map<String, dynamic>.from(cleanData['logData']) : cleanData);

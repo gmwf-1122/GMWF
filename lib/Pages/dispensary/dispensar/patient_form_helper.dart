@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:pdf/pdf.dart';
@@ -26,9 +27,9 @@ class PatientFormHelper {
   }
 
   // ====================== COLORS ======================
-  static const Color primaryGreen = Color(0xFF4CAF50);
-  static const Color primaryRed = Color(0xFFFF0000);
-  static const Color textBlack = Colors.black87;
+  static const Color primaryGreen = SoftPalette.green400;
+  static const Color primaryRed = SoftPalette.red400;
+  static const Color textBlack = SoftPalette.gray900A87;
 
   // ====================== TEXT STYLES (Flutter UI) ======================
   static TextStyle robotoRegular({double size = 16, Color color = textBlack}) =>
@@ -45,12 +46,20 @@ class PatientFormHelper {
   // ====================== TIMING & MEDICINE HELPERS ======================
   static List<int> parseTiming(String timing) {
     if (timing.isEmpty) return [0, 0, 0];
+    final t = timing.trim().toLowerCase();
+    if (t == 'od' || t == 'qd') return [1, 0, 0];
+    if (t == 'bd' || t == 'bid') return [1, 0, 1];
+    if (t == 'tds' || t == 'tid') return [1, 1, 1];
+    if (t == 'qid') return [1, 1, 1, 1];
+    if (t == 'hs' || t == 'bedtime') return [0, 0, 1];
+    if (t == 'sos' || t == 'prn') return [0, 0, 0];
+    final clean = timing.replaceAll('/', '+').replaceAll('-', '+').replaceAll(' ', '');
     final parts =
-        timing.split('+').map((s) => int.tryParse(s.trim()) ?? 0).toList();
+        clean.split('+').map((s) => int.tryParse(s.trim()) ?? 0).toList();
     while (parts.length < 3) {
       parts.add(0);
     }
-    return parts.sublist(0, 3);
+    return parts.length > 3 && parts[3] > 0 ? parts.sublist(0, 4) : parts.sublist(0, 3);
   }
 
   static int totalPerDay(String timing) =>
@@ -173,6 +182,34 @@ class PatientFormHelper {
     }
 
     return timing.isNotEmpty ? timing : 'Qty: $quantity';
+  }
+
+  /// English meal label (After Meal / Before Meal / Empty Stomach / Bedtime / With Meal).
+  static String getMealEnglish(String rawMeal) {
+    final meal = rawMeal.trim();
+    final lower = meal.toLowerCase();
+    if (lower.contains('after') || lower.contains('بعد')) return 'After Meal';
+    if (lower.contains('before sleep') || lower.contains('سونے') || lower.contains('سوتے') || lower.contains('bedtime')) {
+      return 'Bedtime';
+    }
+    if (lower.contains('before') || lower.contains('پہلے')) return 'Before Meal';
+    if (lower.contains('empty') || lower.contains('خالی') || lower.contains('نہار')) return 'Empty Stomach';
+    if (lower.contains('during') || lower.contains('دوران') || lower.contains('with meal')) return 'With Meal';
+    return meal;
+  }
+
+  /// Compact numeric timing used when the user prefers the "1+1+1" format
+  /// (e.g. "1+0+1", "Single Dose", "2/day").
+  static String buildCompactEnglishTiming(Map med) {
+    if (isInjectable(med)) return 'Single Dose';
+    final timing = med['timing']?.toString() ?? '';
+    final parts = parseTiming(timing);
+    final hasParts = parts.any((p) => p > 0);
+    if (hasParts) return parts.join('+');
+    if (timing.isNotEmpty) return timing;
+    final q = med['quantity'] ?? med['qty'] ?? 1;
+    final perDay = q is num ? q.toInt() : (int.tryParse(q.toString()) ?? 1);
+    return '$perDay/day';
   }
 
   // ====================== ASSET LOADER ======================

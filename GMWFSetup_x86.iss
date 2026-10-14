@@ -1,5 +1,5 @@
 ; ══════════════════════════════════════════════════════════════
-; GMWF Installer — Premium Edition v1.6.1 (x86 / 32-bit)
+; GMWF Installer — Premium Edition v1.6.2 (x86 / 32-bit)
 ; ──────────────────────────────────────────────────────────────
 ; Features:
 ;   • Premium dark-themed modern UI with GMWF emerald/gold branding
@@ -15,8 +15,8 @@
 [Setup]
 AppId={{A1B2C3D4-9F23-4C11-8ABC-1234567890AB}
 AppName=GMWF
-AppVersion=1.6.1
-AppVerName=GMWF Management System v1.6.1 (32-bit)
+AppVersion=1.6.2
+AppVerName=GMWF Management System v1.6.2 (32-bit)
 AppPublisher=GMWF
 AppPublisherURL=https://gmwf.pk/
 AppSupportURL=https://gmwf.pk/
@@ -32,7 +32,7 @@ DefaultGroupName=GMWF
 
 ; Output
 OutputDir=installer
-OutputBaseFilename=GMWF-v1.6.1-x86
+OutputBaseFilename=GMWF-v1.6.2-x86
 SetupIconFile=Installer\gmwf.ico
 
 ; Compression
@@ -72,7 +72,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Messages]
 SetupWindowTitle=GMWF Management System — Setup Wizard (32-bit)
 WelcomeLabel1=Welcome to GMWF
-WelcomeLabel2=This setup wizard will guide you through the installation of GMWF Management System v1.6.1 (32-bit) on your computer.%n%nGMWF is a comprehensive welfare management platform for dispensaries, donations, attendance, madrassa, and branch operations.%n%nClick Next to continue, or Cancel to exit.
+WelcomeLabel2=This setup wizard will guide you through the installation of GMWF Management System v1.6.2 (32-bit) on your computer.%n%nGMWF is a comprehensive welfare management platform for dispensaries, donations, attendance, madrassa, and branch operations.%n%nClick Next to continue, or Cancel to exit.
 ReadyLabel1=Ready to Install
 ReadyLabel2a=The installer is ready to begin. Review your settings below, then click Install to proceed.
 FinishedHeadingLabel=Installation Complete
@@ -266,7 +266,7 @@ begin
     S := S + MemoTasksInfo + NewLine + NewLine;
 
   S := S + 'COMPONENTS' + NewLine;
-  S := S + Space + 'GMWF Management System v1.6.1 (32-bit)' + NewLine;
+  S := S + Space + 'GMWF Management System v1.6.2 (32-bit)' + NewLine;
   S := S + Space + 'Python 3.12 Embedded Runtime (x86)' + NewLine;
   S := S + Space + 'Background Sync Scripts' + NewLine;
   S := S + Space + 'Visual C++ Runtime' + NewLine;
@@ -414,7 +414,7 @@ begin
   GVersionLabel.Parent := WizardForm;
   GVersionLabel.Left := ScaleX(16);
   GVersionLabel.Top := GBrandLabel.Top + GBrandLabel.Height + ScaleY(1);
-  GVersionLabel.Caption := 'v1.6.1  |  x86 Admin  |  By Ans';
+  GVersionLabel.Caption := 'v1.6.2  |  x86 Admin  |  By Ans';
   GVersionLabel.Font.Name := 'Segoe UI';
   GVersionLabel.Font.Size := 7;
   GVersionLabel.Font.Style := [];

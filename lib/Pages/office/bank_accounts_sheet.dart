@@ -1,6 +1,7 @@
 // lib/pages/office/bank_accounts_sheet.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/design_system.dart';
 import 'package:intl/intl.dart';
 import '../../services/finance_ledger_storage.dart';
 import '../../widgets/bank_logo_widget.dart';
@@ -80,7 +81,7 @@ class _BankAccountsSheetState extends State<BankAccountsSheet> {
     widget.onSaved();
     if (mounted) {
       Navigator.pop(context);
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(content: Text('Org Bank Account "${newAcc.accountTitle}" saved successfully.')),
       );
     }
@@ -93,8 +94,8 @@ class _BankAccountsSheetState extends State<BankAccountsSheet> {
 
     return Container(
       height: MediaQuery.of(context).size.height * 0.85,
-      decoration: const BoxDecoration(
-        color: Colors.white,
+      decoration: BoxDecoration(
+        color: context.adapt(SoftPalette.gray50),
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
       padding: const EdgeInsets.all(24),
@@ -103,11 +104,11 @@ class _BankAccountsSheetState extends State<BankAccountsSheet> {
         children: [
           Row(
             children: [
-              const Icon(Icons.account_balance_rounded, color: Color(0xFF10B981), size: 28),
+              const Icon(Icons.account_balance_rounded, color: SoftPalette.emerald350, size: 28),
               const SizedBox(width: 12),
-              const Expanded(
+              Expanded(
                 child: Text('Organization Bank & Cash Accounts',
-                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                    style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate900))),
               ),
               IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
             ],
@@ -119,8 +120,8 @@ class _BankAccountsSheetState extends State<BankAccountsSheet> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('Active Bank & Treasury Accounts',
-                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                  Text('Active Bank & Treasury Accounts',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate900))),
                   const SizedBox(height: 12),
 
                   ListView.separated(
@@ -136,9 +137,9 @@ class _BankAccountsSheetState extends State<BankAccountsSheet> {
                       return Container(
                         padding: const EdgeInsets.all(12),
                         decoration: BoxDecoration(
-                          color: const Color(0xFFF8FAFC),
+                          color: context.adapt(SoftPalette.gray50),
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: const Color(0xFFE2E8F0)),
+                          border: Border.all(color: context.adapt(SoftPalette.slate150)),
                         ),
                         child: Row(
                           children: [
@@ -150,15 +151,15 @@ class _BankAccountsSheetState extends State<BankAccountsSheet> {
                                 children: [
                                   Text(acc.accountTitle, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                                   Text('COA: ${acc.accountCode} • ${acc.accountNumber}',
-                                      style: const TextStyle(fontSize: 11, color: Color(0xFF64748B))),
+                                      style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.slate550))),
                                 ],
                               ),
                             ),
                             Column(
                               crossAxisAlignment: CrossAxisAlignment.end,
                               children: [
-                                Text(balanceStr, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: Color(0xFF10B981))),
-                                const Text('Live Balance', style: TextStyle(fontSize: 10, color: Color(0xFF94A3B8))),
+                                Text(balanceStr, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: SoftPalette.emerald350)),
+                                Text('Live Balance', style: TextStyle(fontSize: 10, color: context.adapt(SoftPalette.slate350))),
                               ],
                             ),
                           ],
@@ -171,8 +172,8 @@ class _BankAccountsSheetState extends State<BankAccountsSheet> {
                   const Divider(),
                   const SizedBox(height: 12),
 
-                  const Text('Add New Org Bank / Cash Account',
-                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: Color(0xFF0F172A))),
+                  Text('Add New Org Bank / Cash Account',
+                      style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.slate900))),
                   const SizedBox(height: 16),
 
                   Form(
@@ -236,7 +237,7 @@ class _BankAccountsSheetState extends State<BankAccountsSheet> {
                           width: double.infinity,
                           height: 46,
                           child: ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF10B981), foregroundColor: Colors.white),
+                            style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.emerald350, foregroundColor: SoftPalette.gray50),
                             icon: const Icon(Icons.add_circle_outline_rounded),
                             label: const Text('Create Org Bank Account', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                             onPressed: _saveAccount,

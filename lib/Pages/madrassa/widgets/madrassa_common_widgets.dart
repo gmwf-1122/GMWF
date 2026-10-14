@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:flutter/services.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import '../madrassa_strings.dart';
@@ -47,11 +49,11 @@ Widget buildTf(
                 children: [
                   TextSpan(
                     text: en,
-                    style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black87),
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.gray900A87)),
                   ),
-                  const TextSpan(
+                  TextSpan(
                     text: ' *',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFFD32F2F)),
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.red500)),
                   ),
                 ],
               ),
@@ -63,11 +65,11 @@ Widget buildTf(
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
       enabledBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: BorderSide(color: errorText != null ? const Color(0xFFD32F2F) : const Color(0xFFD0D3D9)),
+        borderSide: BorderSide(color: errorText != null ? context.adapt(SoftPalette.red500) : context.adapt(SoftPalette.slate200)),
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: Color(0xFF4C4DDC), width: 2),
+        borderSide: BorderSide(color: context.adapt(SoftPalette.indigo550), width: 2),
       ),
       contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
     ),
@@ -84,7 +86,7 @@ class FriendlyError extends StatelessWidget {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.error_outline_rounded, color: Colors.red.shade300, size: 48),
+          Icon(Icons.error_outline_rounded, color: context.adapt(SoftPalette.red400), size: 48),
           const SizedBox(height: 16),
           Text(en, style: const TextStyle(fontWeight: FontWeight.bold)),
         ],
@@ -93,7 +95,7 @@ class FriendlyError extends StatelessWidget {
   }
 }
 
-Widget sectionLabel(String label) {
+Widget sectionLabel(String label, BuildContext context) {
   final en = label.split('\n')[0];
   return Padding(
     padding: const EdgeInsets.symmetric(vertical: 8),
@@ -102,7 +104,7 @@ Widget sectionLabel(String label) {
       style: TextStyle(
           fontSize: 11,
           fontWeight: FontWeight.w900,
-          color: Colors.indigo.shade400,
+          color: context.adapt(SoftPalette.indigo500),
           letterSpacing: 1.2),
     ),
   );
@@ -123,22 +125,22 @@ class ExportButton extends StatelessWidget {
         if (val == 'pdf') onPdf();
       },
       itemBuilder: (ctx) => [
-        _menuItem('Export PDF', Icons.picture_as_pdf_outlined, Colors.red, 'pdf'),
-        _menuItem('Export Excel', Icons.file_download_outlined, Colors.green, 'excel'),
+        _menuItem('Export PDF', Icons.picture_as_pdf_outlined, ctx.adapt(SoftPalette.red400), 'pdf'),
+        _menuItem('Export Excel', Icons.file_download_outlined, ctx.adapt(SoftPalette.green400), 'excel'),
       ],
       child: Container(
         padding: EdgeInsets.symmetric(horizontal: isSmall ? 12 : 16, vertical: isSmall ? 8 : 10),
         decoration: BoxDecoration(
-          color: const Color(0xFF4C4DDC),
+          color: SoftPalette.indigo550,
           borderRadius: BorderRadius.circular(12),
-          boxShadow: isSmall ? null : [BoxShadow(color: const Color(0xFF4C4DDC).withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 4))],
+          boxShadow: isSmall ? null : [BoxShadow(color: SoftPalette.indigo550.withValues(alpha: 0.3), blurRadius: 8, offset: const Offset(0, 4))],
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.download_rounded, color: Colors.white, size: isSmall ? 16 : 18),
+            Icon(Icons.download_rounded, color: SoftPalette.gray50, size: isSmall ? 16 : 18),
             if (!isSmall) const SizedBox(width: 8),
-            if (!isSmall) const Text('Download Reports', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+            if (!isSmall) const Text('Download Reports', style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 13)),
           ],
         ),
       ),
@@ -179,13 +181,13 @@ class StudentExportMenu extends StatelessWidget {
         if (val == 'pdf') onPdf();
         if (val == 'whatsapp' && onWhatsApp != null) onWhatsApp!();
       },
-      icon: const Icon(Icons.download_rounded, color: Color(0xFF4C4DDC), size: 20),
+      icon: Icon(Icons.download_rounded, color: context.adapt(SoftPalette.indigo550), size: 20),
       itemBuilder: (ctx) => [
         PopupMenuItem(
           value: 'pdf',
           child: Row(
             children: [
-              Icon(Icons.picture_as_pdf_outlined, color: Colors.red.shade400, size: 18),
+              Icon(Icons.picture_as_pdf_outlined, color: ctx.adapt(SoftPalette.red400), size: 18),
               const SizedBox(width: 8),
               const Text('PDF', style: TextStyle(fontSize: 12)),
             ],
@@ -195,7 +197,7 @@ class StudentExportMenu extends StatelessWidget {
           value: 'excel',
           child: Row(
             children: [
-              Icon(Icons.file_download_outlined, color: Colors.green.shade400, size: 18),
+              Icon(Icons.file_download_outlined, color: ctx.adapt(SoftPalette.green350), size: 18),
               const SizedBox(width: 8),
               const Text('Excel', style: TextStyle(fontSize: 12)),
             ],
@@ -206,7 +208,7 @@ class StudentExportMenu extends StatelessWidget {
             value: 'whatsapp',
             child: Row(
               children: [
-                const FaIcon(FontAwesomeIcons.whatsapp, color: Color(0xFF25D366), size: 18),
+                FaIcon(FontAwesomeIcons.whatsapp, color: ctx.adapt(SoftPalette.green350), size: 18),
                 const SizedBox(width: 8),
                 const Text('WhatsApp', style: TextStyle(fontSize: 12)),
               ],
@@ -241,10 +243,10 @@ Widget buildActivityItem(BuildContext context, String user, String text, String 
           child: Container(
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1E293B) : const Color(0xFFF8FAFC),
+              color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
               borderRadius: BorderRadius.circular(14),
               border: Border.all(
-                color: isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0),
+                color: isDark ? SoftPalette.slate700 : SoftPalette.slate150,
                 width: 1,
               ),
             ),
@@ -261,7 +263,7 @@ Widget buildActivityItem(BuildContext context, String user, String text, String 
                           style: TextStyle(
                             fontWeight: FontWeight.bold,
                             fontSize: 12.5,
-                            color: isDark ? Colors.white : const Color(0xFF0F172A),
+                            color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                           ),
                         ),
                       ),
@@ -271,7 +273,7 @@ Widget buildActivityItem(BuildContext context, String user, String text, String 
                       Text(
                         time,
                         style: TextStyle(
-                          color: isDark ? Colors.white54 : const Color(0xFF94A3B8),
+                          color: isDark ? SoftPalette.gray50A54 : SoftPalette.slate350,
                           fontSize: 10.5,
                           fontWeight: FontWeight.w500,
                         ),
@@ -304,7 +306,7 @@ Widget buildActivityItem(BuildContext context, String user, String text, String 
                   text,
                   style: context.urduStyle(
                     style: TextStyle(
-                      color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+                      color: isDark ? SoftPalette.slate200 : SoftPalette.slate600,
                       fontSize: 11.5,
                       height: 1.38,
                     ),
@@ -362,11 +364,11 @@ class _PasswordFieldState extends State<PasswordField> {
                   children: [
                     TextSpan(
                       text: en,
-                      style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Colors.black87),
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.gray900A87)),
                     ),
-                    const TextSpan(
+                    TextSpan(
                       text: ' *',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: Color(0xFFD32F2F)),
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.red500)),
                     ),
                   ],
                 ),
@@ -384,11 +386,11 @@ class _PasswordFieldState extends State<PasswordField> {
         border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: BorderSide(color: widget.errorText != null ? const Color(0xFFD32F2F) : const Color(0xFFD0D3D9)),
+          borderSide: BorderSide(color: widget.errorText != null ? context.adapt(SoftPalette.red500) : context.adapt(SoftPalette.slate200)),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(12),
-          borderSide: const BorderSide(color: Color(0xFF4C4DDC), width: 2),
+          borderSide: BorderSide(color: context.adapt(SoftPalette.indigo550), width: 2),
         ),
         contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
         errorText: widget.errorText,

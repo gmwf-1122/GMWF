@@ -1,6 +1,8 @@
 // lib/widgets/device_badge_widget.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 
 class DeviceBadgeWidget extends StatelessWidget {
@@ -30,92 +32,92 @@ class DeviceBadgeWidget extends StatelessWidget {
     final isOnline = deviceInfo!['isOnline'] as bool? ?? false;
 
     IconData icon = FontAwesomeIcons.desktop;
-    Color iconColor = Colors.blue.shade700;
-    Color bgColor = Colors.blue.shade50;
-    Color borderColor = Colors.blue.shade200;
+    Color iconColor = context.adapt(SoftPalette.blue500);
+    Color bgColor = context.adapt(SoftPalette.slate100);
+    Color borderColor = context.adapt(SoftPalette.sky300);
     String label = '$platform $browser';
 
     switch (iconType.toLowerCase()) {
       case 'chrome':
         icon = FontAwesomeIcons.chrome;
-        iconColor = const Color(0xFF4285F4); // Google Blue
-        bgColor = const Color(0xFFE8F0FE);
-        borderColor = const Color(0xFFAECBFA);
+        iconColor = context.adapt(SoftPalette.blue400); // Google Blue
+        bgColor = context.adapt(SoftPalette.slate100);
+        borderColor = context.adapt(SoftPalette.blue200);
         label = 'Chrome ($os)';
         break;
       case 'edge':
         icon = FontAwesomeIcons.edge;
-        iconColor = const Color(0xFF0078D7); // Edge Blue/Teal
-        bgColor = const Color(0xFFE6F2FB);
-        borderColor = const Color(0xFF99C9EE);
+        iconColor = context.adapt(SoftPalette.blue500); // Edge Blue/Teal
+        bgColor = context.adapt(SoftPalette.slate100);
+        borderColor = context.adapt(SoftPalette.sky300);
         label = 'Edge ($os)';
         break;
       case 'firefox':
         icon = FontAwesomeIcons.firefoxBrowser;
-        iconColor = const Color(0xFFFF7139); // Firefox Orange
-        bgColor = const Color(0xFFFFF0EB);
-        borderColor = const Color(0xFFFFC5B2);
+        iconColor = context.adapt(SoftPalette.orange350); // Firefox Orange
+        bgColor = context.adapt(SoftPalette.orange100m);
+        borderColor = context.adapt(SoftPalette.orange200);
         label = 'Firefox ($os)';
         break;
       case 'safari':
         icon = FontAwesomeIcons.safari;
-        iconColor = const Color(0xFF0066CC); // Safari Compass Blue
-        bgColor = const Color(0xFFE5F0FA);
-        borderColor = const Color(0xFF99C2EC);
+        iconColor = context.adapt(SoftPalette.blue550); // Safari Compass Blue
+        bgColor = context.adapt(SoftPalette.slate100);
+        borderColor = context.adapt(SoftPalette.blue300);
         label = 'Safari ($os)';
         break;
       case 'windows':
         icon = FontAwesomeIcons.windows;
-        iconColor = const Color(0xFF00ADEF); // Windows Blue
-        bgColor = const Color(0xFFE5F7FD);
-        borderColor = const Color(0xFF99DFFB);
+        iconColor = context.adapt(SoftPalette.sky350); // Windows Blue
+        bgColor = context.adapt(SoftPalette.slate100);
+        borderColor = context.adapt(SoftPalette.sky200);
         label = (deviceName.isNotEmpty && deviceName != 'Windows PC')
             ? '$deviceName ($os)'
             : (os.isNotEmpty ? os : 'Windows PC');
         break;
       case 'android':
         icon = FontAwesomeIcons.android;
-        iconColor = const Color(0xFF3DDC84); // Android Green
-        bgColor = const Color(0xFFEAFBF2);
-        borderColor = const Color(0xFFA1F0C7);
+        iconColor = context.adapt(SoftPalette.green300); // Android Green
+        bgColor = context.adapt(SoftPalette.emerald100m);
+        borderColor = context.adapt(SoftPalette.emerald200);
         label = deviceModel.isNotEmpty ? deviceModel : 'Android';
         break;
       case 'ios':
         icon = FontAwesomeIcons.apple;
-        iconColor = const Color(0xFF333333); // Apple Dark
-        bgColor = const Color(0xFFF2F2F2);
-        borderColor = const Color(0xFFCCCCCC);
+        iconColor = context.adapt(SoftPalette.gray750); // Apple Dark
+        bgColor = context.adapt(SoftPalette.gray100);
+        borderColor = context.adapt(SoftPalette.gray200);
         label = os.isNotEmpty ? os : 'iOS Device';
         break;
 
       case 'macos':
         icon = FontAwesomeIcons.apple;
-        iconColor = const Color(0xFF333333);
-        bgColor = const Color(0xFFF2F2F2);
-        borderColor = const Color(0xFFCCCCCC);
+        iconColor = context.adapt(SoftPalette.gray750);
+        bgColor = context.adapt(SoftPalette.gray100);
+        borderColor = context.adapt(SoftPalette.gray200);
         label = 'macOS';
         break;
 
       case 'linux':
         icon = FontAwesomeIcons.linux;
-        iconColor = const Color(0xFFFCC624);
-        bgColor = const Color(0xFFFFFBEA);
-        borderColor = const Color(0xFFFFE999);
+        iconColor = context.adapt(SoftPalette.yellow200);
+        bgColor = context.adapt(SoftPalette.yellow50m);
+        borderColor = context.adapt(SoftPalette.yellow150);
         label = 'Linux';
         break;
 
       default:
         if (platform.toLowerCase() == 'web') {
           icon = FontAwesomeIcons.globe;
-          iconColor = Colors.teal;
-          bgColor = Colors.teal.shade50;
-          borderColor = Colors.teal.shade200;
+          iconColor = context.adapt(SoftPalette.teal500);
+          bgColor = context.adapt(SoftPalette.teal100m);
+          borderColor = context.adapt(SoftPalette.teal300);
           label = 'Web Browser';
         } else {
           icon = FontAwesomeIcons.mobileScreenButton;
-          iconColor = Colors.indigo;
-          bgColor = Colors.indigo.shade50;
-          borderColor = Colors.indigo.shade200;
+          iconColor = context.adapt(SoftPalette.indigo600);
+          bgColor = context.adapt(SoftPalette.slate150);
+          borderColor = context.adapt(SoftPalette.indigo350);
           label = platform;
         }
     }
@@ -216,7 +218,7 @@ class DeviceBadgeWidget extends StatelessWidget {
               width: 7,
               height: 7,
               decoration: const BoxDecoration(
-                color: Colors.green,
+                color: SoftPalette.green400,
                 shape: BoxShape.circle,
               ),
             ),

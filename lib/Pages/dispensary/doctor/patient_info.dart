@@ -1,9 +1,10 @@
 // lib/pages/dispensary/doctor/patient_info.dart (updated)
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/services.dart';
 import 'package:hive/hive.dart';
-import 'package:another_flushbar/flushbar.dart';
+import 'package:gmwf/design/components/flushbar_compat.dart';
 import '../../../services/local_storage_service.dart';
 import '../../../services/staff_patient_link_service.dart';
 import '../../../realtime/realtime_manager.dart';
@@ -47,8 +48,8 @@ class PatientInfo extends StatelessWidget {
     this.onSkipPatient,
   });
 
-  static const Color _teal  = Color(0xFF00695C);
-  static const Color _amber = Color(0xFFFFA000);
+  static const Color _teal  = SoftPalette.teal600;
+  static const Color _amber = SoftPalette.amber300;
 
   /// Extract a clean token number (e.g. '#005' or '#002') from a full serial string
   static String formatDisplayToken(String? serial) {
@@ -69,7 +70,7 @@ class PatientInfo extends StatelessWidget {
       return VitalEvaluation(
         displayValue: 'N/A',
         status: VitalStatus.neutral,
-        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+        color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
       );
     }
     final s = rawBp.toString().trim();
@@ -77,7 +78,7 @@ class PatientInfo extends StatelessWidget {
       return VitalEvaluation(
         displayValue: 'N/A',
         status: VitalStatus.neutral,
-        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+        color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
       );
     }
 
@@ -97,7 +98,7 @@ class PatientInfo extends StatelessWidget {
       return VitalEvaluation(
         displayValue: s,
         status: VitalStatus.neutral,
-        color: isDark ? Colors.white : const Color(0xFF0F172A),
+        color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
       );
     }
 
@@ -113,19 +114,19 @@ class PatientInfo extends StatelessWidget {
       return VitalEvaluation(
         displayValue: s,
         status: VitalStatus.critical,
-        color: isDark ? const Color(0xFFF87171) : const Color(0xFFDC2626), // Vivid Red
+        color: isDark ? SoftPalette.red350 : SoftPalette.red500, // Vivid Red
       );
     } else if (isWarnHigh) {
       return VitalEvaluation(
         displayValue: s,
         status: VitalStatus.warning,
-        color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706), // Amber / Yellow
+        color: isDark ? SoftPalette.amber200 : SoftPalette.orange400, // Amber / Yellow
       );
     } else {
       return VitalEvaluation(
         displayValue: s,
         status: VitalStatus.normal,
-        color: isDark ? const Color(0xFF4ADE80) : const Color(0xFF16A34A), // Green
+        color: isDark ? SoftPalette.green300 : SoftPalette.green400, // Green
       );
     }
   }
@@ -135,7 +136,7 @@ class PatientInfo extends StatelessWidget {
       return VitalEvaluation(
         displayValue: 'N/A',
         status: VitalStatus.neutral,
-        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+        color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
       );
     }
     final s = rawTemp.toString().trim();
@@ -143,7 +144,7 @@ class PatientInfo extends StatelessWidget {
       return VitalEvaluation(
         displayValue: 'N/A',
         status: VitalStatus.neutral,
-        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+        color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
       );
     }
 
@@ -153,7 +154,7 @@ class PatientInfo extends StatelessWidget {
       return VitalEvaluation(
         displayValue: s,
         status: VitalStatus.neutral,
-        color: isDark ? Colors.white : const Color(0xFF0F172A),
+        color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
       );
     }
 
@@ -182,19 +183,19 @@ class PatientInfo extends StatelessWidget {
       return VitalEvaluation(
         displayValue: displayVal,
         status: VitalStatus.critical,
-        color: isDark ? const Color(0xFFF87171) : const Color(0xFFDC2626), // Vivid Red
+        color: isDark ? SoftPalette.red350 : SoftPalette.red500, // Vivid Red
       );
     } else if (isWarning) {
       return VitalEvaluation(
         displayValue: displayVal,
         status: VitalStatus.warning,
-        color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706), // Amber / Yellow
+        color: isDark ? SoftPalette.amber200 : SoftPalette.orange400, // Amber / Yellow
       );
     } else {
       return VitalEvaluation(
         displayValue: displayVal,
         status: VitalStatus.normal,
-        color: isDark ? const Color(0xFF4ADE80) : const Color(0xFF16A34A), // Green
+        color: isDark ? SoftPalette.green300 : SoftPalette.green400, // Green
       );
     }
   }
@@ -204,7 +205,7 @@ class PatientInfo extends StatelessWidget {
       return VitalEvaluation(
         displayValue: 'N/A',
         status: VitalStatus.neutral,
-        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+        color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
       );
     }
     final s = rawSugar.toString().trim();
@@ -212,7 +213,7 @@ class PatientInfo extends StatelessWidget {
       return VitalEvaluation(
         displayValue: 'N/A',
         status: VitalStatus.neutral,
-        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+        color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
       );
     }
 
@@ -222,7 +223,7 @@ class PatientInfo extends StatelessWidget {
       return VitalEvaluation(
         displayValue: s,
         status: VitalStatus.neutral,
-        color: isDark ? Colors.white : const Color(0xFF0F172A),
+        color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
       );
     }
 
@@ -232,19 +233,19 @@ class PatientInfo extends StatelessWidget {
       return VitalEvaluation(
         displayValue: displayVal,
         status: VitalStatus.critical,
-        color: isDark ? const Color(0xFFF87171) : const Color(0xFFDC2626), // Vivid Red
+        color: isDark ? SoftPalette.red350 : SoftPalette.red500, // Vivid Red
       );
     } else if (val >= 141 && val < 200) {
       return VitalEvaluation(
         displayValue: displayVal,
         status: VitalStatus.warning,
-        color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706), // Amber / Yellow
+        color: isDark ? SoftPalette.amber200 : SoftPalette.orange400, // Amber / Yellow
       );
     } else {
       return VitalEvaluation(
         displayValue: displayVal,
         status: VitalStatus.normal,
-        color: isDark ? const Color(0xFF4ADE80) : const Color(0xFF16A34A), // Green
+        color: isDark ? SoftPalette.green300 : SoftPalette.green400, // Green
       );
     }
   }
@@ -254,7 +255,7 @@ class PatientInfo extends StatelessWidget {
       return VitalEvaluation(
         displayValue: 'N/A kg',
         status: VitalStatus.neutral,
-        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+        color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
       );
     }
     final s = rawWeight.toString().trim();
@@ -262,7 +263,7 @@ class PatientInfo extends StatelessWidget {
       return VitalEvaluation(
         displayValue: 'N/A kg',
         status: VitalStatus.neutral,
-        color: isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B),
+        color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
       );
     }
 
@@ -272,7 +273,7 @@ class PatientInfo extends StatelessWidget {
       return VitalEvaluation(
         displayValue: s,
         status: VitalStatus.neutral,
-        color: isDark ? Colors.white : const Color(0xFF0F172A),
+        color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
       );
     }
 
@@ -288,31 +289,31 @@ class PatientInfo extends StatelessWidget {
       return VitalEvaluation(
         displayValue: displayVal,
         status: VitalStatus.critical,
-        color: isDark ? const Color(0xFFF87171) : const Color(0xFFDC2626), // Red (Dangerous)
+        color: isDark ? SoftPalette.red350 : SoftPalette.red500, // Red (Dangerous)
       );
     } else if (val >= 85) {
       return VitalEvaluation(
         displayValue: displayVal,
         status: VitalStatus.warning,
-        color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706), // Amber / Yellow (High)
+        color: isDark ? SoftPalette.amber200 : SoftPalette.orange400, // Amber / Yellow (High)
       );
     } else if (val < 35) {
       return VitalEvaluation(
         displayValue: displayVal,
         status: VitalStatus.critical,
-        color: isDark ? const Color(0xFFF87171) : const Color(0xFFDC2626), // Red (Severe low)
+        color: isDark ? SoftPalette.red350 : SoftPalette.red500, // Red (Severe low)
       );
     } else if (val < 45) {
       return VitalEvaluation(
         displayValue: displayVal,
         status: VitalStatus.warning,
-        color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706), // Amber / Yellow (Low)
+        color: isDark ? SoftPalette.amber200 : SoftPalette.orange400, // Amber / Yellow (Low)
       );
     } else {
       return VitalEvaluation(
         displayValue: displayVal,
         status: VitalStatus.normal,
-        color: isDark ? const Color(0xFF4ADE80) : const Color(0xFF16A34A), // Green (Normal)
+        color: isDark ? SoftPalette.green300 : SoftPalette.green400, // Green (Normal)
       );
     }
   }
@@ -323,7 +324,7 @@ class PatientInfo extends StatelessWidget {
     return VitalEvaluation(
       displayValue: isMissing ? 'N/A' : s,
       status: VitalStatus.neutral,
-      color: isDark ? Colors.white : const Color(0xFF0F172A),
+      color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
     );
   }
 
@@ -338,7 +339,7 @@ class PatientInfo extends StatelessWidget {
     final sub   = vital['sub'] as String?;
 
     final iconColor = eval.status == VitalStatus.neutral
-        ? (isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8))
+        ? (isDark ? SoftPalette.slate550 : SoftPalette.slate350)
         : eval.color;
 
     return Padding(
@@ -357,7 +358,7 @@ class PatientInfo extends StatelessWidget {
                 style: TextStyle(
                   fontSize: compact ? 9.5 : 10,
                   fontWeight: FontWeight.bold,
-                  color: isDark ? const Color(0xFF64748B) : const Color(0xFF94A3B8),
+                  color: isDark ? SoftPalette.slate550 : SoftPalette.slate350,
                   letterSpacing: 0.5,
                 ),
               ),
@@ -380,7 +381,7 @@ class PatientInfo extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF1E293B) : Colors.grey.shade200,
+                color: isDark ? SoftPalette.slate800 : SoftPalette.gray100,
                 borderRadius: BorderRadius.circular(4),
               ),
               child: Text(
@@ -388,7 +389,7 @@ class PatientInfo extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 8.5,
                   fontWeight: FontWeight.w600,
-                  color: isDark ? const Color(0xFF94A3B8) : Colors.grey.shade700,
+                  color: isDark ? SoftPalette.slate350 : SoftPalette.gray550,
                 ),
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
@@ -437,23 +438,23 @@ class PatientInfo extends StatelessWidget {
         final isDark = Theme.of(ctx).brightness == Brightness.dark;
         return AlertDialog(
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-          backgroundColor: isDark ? const Color(0xFF1E293B) : null,
+          backgroundColor: isDark ? SoftPalette.slate800 : null,
           title: Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF0F766E).withValues(alpha: 0.25) : Colors.teal.shade50,
+              color: isDark ? SoftPalette.teal550.withValues(alpha: 0.25) : SoftPalette.teal100m,
               borderRadius: BorderRadius.circular(12),
-              border: isDark ? Border.all(color: const Color(0xFF14B8A6).withValues(alpha: 0.3)) : null,
+              border: isDark ? Border.all(color: SoftPalette.teal350.withValues(alpha: 0.3)) : null,
             ),
             child: Row(
               children: [
-                Icon(Icons.edit_note_rounded, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800, size: 24),
+                Icon(Icons.edit_note_rounded, color: isDark ? SoftPalette.teal300 : SoftPalette.teal600, size: 24),
                 const SizedBox(width: 10),
                 Text(
                   'Edit Vitals & View Audit',
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
-                    color: isDark ? Colors.white : Colors.teal.shade900,
+                    color: isDark ? SoftPalette.gray50 : SoftPalette.teal700,
                     fontSize: 16,
                   ),
                 ),
@@ -471,27 +472,27 @@ class PatientInfo extends StatelessWidget {
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF1E3A8A).withValues(alpha: 0.3) : Colors.blue.shade50,
+                      color: isDark ? SoftPalette.blue700.withValues(alpha: 0.3) : SoftPalette.slate100,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: isDark ? const Color(0xFF3B82F6).withValues(alpha: 0.4) : Colors.blue.shade200),
+                      border: Border.all(color: isDark ? SoftPalette.blue500.withValues(alpha: 0.4) : SoftPalette.sky300),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
                           children: [
-                            Icon(Icons.support_agent_rounded, size: 18, color: isDark ? const Color(0xFF60A5FA) : Colors.blue.shade800),
+                            Icon(Icons.support_agent_rounded, size: 18, color: isDark ? SoftPalette.blue350 : SoftPalette.blue550),
                             const SizedBox(width: 6),
                             Text(
                               'Added by Receptionist ($recBy)',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: isDark ? const Color(0xFF93C5FD) : Colors.blue.shade900),
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: isDark ? SoftPalette.blue300 : SoftPalette.blue600),
                             ),
                           ],
                         ),
                         const SizedBox(height: 6),
                         Text(
                           'BP: $recBp | Temp: $recTemp°C | Weight: ${recVitals['weight'] ?? 'N/A'} kg',
-                          style: TextStyle(fontSize: 12, color: isDark ? const Color(0xFFDBEAFE) : Colors.blue.shade900),
+                          style: TextStyle(fontSize: 12, color: isDark ? SoftPalette.slate150 : SoftPalette.blue600),
                         ),
                       ],
                     ),
@@ -501,27 +502,27 @@ class PatientInfo extends StatelessWidget {
                     Container(
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF78350F).withValues(alpha: 0.3) : Colors.amber.shade50,
+                        color: isDark ? SoftPalette.orange700.withValues(alpha: 0.3) : SoftPalette.yellow50,
                         borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: isDark ? const Color(0xFFF59E0B).withValues(alpha: 0.4) : Colors.amber.shade300),
+                        border: Border.all(color: isDark ? SoftPalette.amber300.withValues(alpha: 0.4) : SoftPalette.yellow200),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Row(
                             children: [
-                              Icon(Icons.medical_services_rounded, size: 18, color: isDark ? const Color(0xFFFBBF24) : Colors.amber.shade900),
+                              Icon(Icons.medical_services_rounded, size: 18, color: isDark ? SoftPalette.amber200 : SoftPalette.orange350),
                               const SizedBox(width: 6),
                               Text(
                                 'Previous Doctor Update (${docVitals['updatedBy'] ?? 'Doctor'})',
-                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: isDark ? const Color(0xFFFDE68A) : Colors.amber.shade900),
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: isDark ? SoftPalette.yellow150 : SoftPalette.orange350),
                               ),
                             ],
                           ),
                           const SizedBox(height: 6),
                           Text(
                             'BP: ${docVitals['bp'] ?? 'N/A'} | Temp: ${docVitals['temp'] ?? 'N/A'}°C',
-                            style: TextStyle(fontSize: 12, color: isDark ? const Color(0xFFFEF3C7) : Colors.amber.shade900),
+                            style: TextStyle(fontSize: 12, color: isDark ? SoftPalette.yellow100 : SoftPalette.orange350),
                           ),
                         ],
                       ),
@@ -530,7 +531,7 @@ class PatientInfo extends StatelessWidget {
                   const SizedBox(height: 16),
                   Text(
                     'Update Vitals (Doctor):',
-                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade800),
+                    style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.teal300 : SoftPalette.teal600),
                   ),
                   const SizedBox(height: 8),
                   Row(
@@ -552,7 +553,7 @@ class PatientInfo extends StatelessWidget {
                       ),
                       Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 8),
-                        child: Text('/', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: isDark ? Colors.white70 : Colors.black87)),
+                        child: Text('/', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87)),
                       ),
                     Expanded(
                       child: TextField(
@@ -630,12 +631,12 @@ class PatientInfo extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+            child: Text('Cancel', style: TextStyle(color: context.adapt(SoftPalette.gray350))),
           ),
           ElevatedButton.icon(
             style: ElevatedButton.styleFrom(
               backgroundColor: _teal,
-              foregroundColor: Colors.white,
+              foregroundColor: SoftPalette.gray50,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
             icon: const Icon(Icons.save_rounded, size: 18),
@@ -712,7 +713,7 @@ class PatientInfo extends StatelessWidget {
                 onVitalsUpdated?.call(vitals);
                 Flushbar(
                   message: '✅ Vitals updated and audit trail saved',
-                  backgroundColor: Colors.teal.shade700,
+                  backgroundColor: SoftPalette.teal550,
                   duration: const Duration(seconds: 3),
                 ).show(context);
               }
@@ -757,11 +758,11 @@ class PatientInfo extends StatelessWidget {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.person_search, size: 50, color: Colors.grey.shade400),
+            Icon(Icons.person_search, size: 50, color: context.adapt(SoftPalette.gray300)),
             const SizedBox(height: 8),
             Text(
               "Select a patient to view details",
-              style: TextStyle(fontSize: 14, color: Colors.grey.shade700),
+              style: TextStyle(fontSize: 14, color: context.adapt(SoftPalette.gray550)),
               textAlign: TextAlign.center,
             ),
           ],
@@ -864,16 +865,16 @@ class PatientInfo extends StatelessWidget {
                   width: 32,
                   height: 32,
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF134E4A) : const Color(0xFFCCFBF1),
+                    color: isDark ? SoftPalette.teal700 : SoftPalette.teal100,
                     shape: BoxShape.circle,
                     border: Border.all(
-                      color: isDark ? const Color(0xFF2DD4BF) : _teal,
+                      color: isDark ? SoftPalette.teal300 : _teal,
                       width: 1.5,
                     ),
                   ),
                   child: Icon(
                     Icons.person_rounded,
-                    color: isDark ? const Color(0xFF2DD4BF) : _teal,
+                    color: isDark ? SoftPalette.teal300 : _teal,
                     size: 18,
                   ),
                 ),
@@ -891,7 +892,7 @@ class PatientInfo extends StatelessWidget {
                         style: TextStyle(
                           fontSize: isNarrow ? 15 : 17,
                           fontWeight: FontWeight.w900,
-                          color: isDark ? Colors.white : const Color(0xFF0F172A),
+                          color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                           letterSpacing: -0.2,
                         ),
                         overflow: TextOverflow.ellipsis,
@@ -900,7 +901,7 @@ class PatientInfo extends StatelessWidget {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                            color: isDark ? SoftPalette.slate800 : SoftPalette.slate150,
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
@@ -911,7 +912,7 @@ class PatientInfo extends StatelessWidget {
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
-                              color: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF475569),
+                              color: isDark ? SoftPalette.slate200 : SoftPalette.slate600,
                             ),
                           ),
                         ),
@@ -921,16 +922,16 @@ class PatientInfo extends StatelessWidget {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: isDark ? const Color(0xFF134E4A) : Colors.teal.shade50,
+                            color: isDark ? SoftPalette.teal700 : SoftPalette.teal100m,
                             borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: isDark ? const Color(0xFF2DD4BF) : Colors.teal.shade200),
+                            border: Border.all(color: isDark ? SoftPalette.teal300 : SoftPalette.teal300),
                           ),
                           child: Text(
                             'Guardian: $guardianName',
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
-                              color: isDark ? const Color(0xFF5EEAD4) : Colors.teal.shade900,
+                              color: isDark ? SoftPalette.teal200 : SoftPalette.teal700,
                             ),
                           ),
                         ),
@@ -938,13 +939,13 @@ class PatientInfo extends StatelessWidget {
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: isDark ? const Color(0xFF6B21A8) : Colors.purple.shade700,
+                            color: isDark ? SoftPalette.violet600 : SoftPalette.purple600,
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: const Text(
                             '🩺 VITALS ONLY',
                             style: TextStyle(
-                              color: Colors.white,
+                              color: SoftPalette.gray50,
                               fontSize: 9.5,
                               fontWeight: FontWeight.w800,
                               letterSpacing: 0.3,
@@ -964,10 +965,10 @@ class PatientInfo extends StatelessWidget {
                     padding: const EdgeInsets.symmetric(horizontal: 10),
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF451A03) : const Color(0xFFFFFBEB),
+                      color: isDark ? SoftPalette.orange800 : SoftPalette.yellow50m,
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
-                        color: isDark ? const Color(0xFFF59E0B) : const Color(0xFFFBBF24),
+                        color: isDark ? SoftPalette.amber300 : SoftPalette.amber200,
                         width: 1.2,
                       ),
                     ),
@@ -976,14 +977,14 @@ class PatientInfo extends StatelessWidget {
                       children: [
                         Icon(
                           Icons.confirmation_number_rounded,
-                          color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706),
+                          color: isDark ? SoftPalette.amber200 : SoftPalette.orange400,
                           size: 13,
                         ),
                         const SizedBox(width: 4),
                         Text(
                           displayToken,
                           style: TextStyle(
-                            color: isDark ? const Color(0xFFFDE68A) : const Color(0xFFB45309),
+                            color: isDark ? SoftPalette.yellow150 : SoftPalette.orange500,
                             fontSize: 11.5,
                             fontWeight: FontWeight.w800,
                           ),
@@ -999,19 +1000,19 @@ class PatientInfo extends StatelessWidget {
                   height: 28,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
                   decoration: BoxDecoration(
-                    color: isDark ? const Color(0xFF064E3B).withValues(alpha: 0.35) : const Color(0xFFECFDF5),
+                    color: isDark ? SoftPalette.emerald700.withValues(alpha: 0.35) : SoftPalette.emerald50,
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: isDark ? const Color(0xFF059669) : const Color(0xFF10B981), width: 1),
+                    border: Border.all(color: isDark ? SoftPalette.emerald500 : SoftPalette.emerald350, width: 1),
                   ),
                   child: Row(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      Icon(Icons.schedule_rounded, size: 12, color: isDark ? const Color(0xFF34D399) : const Color(0xFF059669)),
+                      Icon(Icons.schedule_rounded, size: 12, color: isDark ? SoftPalette.emerald300 : SoftPalette.emerald500),
                       const SizedBox(width: 4),
                       Text(
                         '$prescDays day requested',
                         style: TextStyle(
-                          color: isDark ? const Color(0xFF34D399) : const Color(0xFF059669),
+                          color: isDark ? SoftPalette.emerald300 : SoftPalette.emerald500,
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
                         ),
@@ -1029,20 +1030,20 @@ class PatientInfo extends StatelessWidget {
                     height: 28,
                     padding: const EdgeInsets.symmetric(horizontal: 10),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF0F766E) : _teal,
+                      color: isDark ? SoftPalette.teal550 : _teal,
                       borderRadius: BorderRadius.circular(14),
                     ),
                     child: const Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.edit_note_rounded, color: Colors.white, size: 15),
+                        Icon(Icons.edit_note_rounded, color: SoftPalette.gray50, size: 15),
                         SizedBox(width: 4),
                         Text(
                           'Edit BP/Temp',
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.bold,
-                            color: Colors.white,
+                            color: SoftPalette.gray50,
                           ),
                         ),
                       ],
@@ -1060,20 +1061,20 @@ class PatientInfo extends StatelessWidget {
                       height: 28,
                       padding: const EdgeInsets.symmetric(horizontal: 10),
                       decoration: BoxDecoration(
-                        color: isDark ? const Color(0xFF7C2D12) : const Color(0xFFEA580C),
+                        color: isDark ? SoftPalette.orange700 : SoftPalette.orange400,
                         borderRadius: BorderRadius.circular(14),
                       ),
                       child: const Row(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.skip_next_rounded, color: Colors.white, size: 15),
+                          Icon(Icons.skip_next_rounded, color: SoftPalette.gray50, size: 15),
                           SizedBox(width: 3),
                           Text(
                             'Skip',
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.bold,
-                              color: Colors.white,
+                              color: SoftPalette.gray50,
                             ),
                           ),
                         ],
@@ -1090,10 +1091,10 @@ class PatientInfo extends StatelessWidget {
             Container(
               padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 8),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF0A0F1D) : const Color(0xFFF8FAFC),
+                color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                 borderRadius: BorderRadius.circular(14),
                 border: Border.all(
-                  color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                  color: isDark ? SoftPalette.slate800 : SoftPalette.slate150,
                   width: 1.2,
                 ),
               ),
@@ -1122,7 +1123,7 @@ class PatientInfo extends StatelessWidget {
                                 thickness: 1,
                                 indent: 3,
                                 endIndent: 3,
-                                color: isDark ? const Color(0xFF1E293B) : const Color(0xFFE2E8F0),
+                                color: isDark ? SoftPalette.slate800 : SoftPalette.slate150,
                               ),
                             Expanded(
                               child: _buildVitalCell(

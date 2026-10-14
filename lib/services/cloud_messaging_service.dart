@@ -1,10 +1,12 @@
 // lib/services/cloud_messaging_service.dart
 
 import 'dart:async';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'dart:convert';
 import 'dart:io' as io;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
@@ -1027,8 +1029,8 @@ $xmlString
     final body = (isUrdu ? notification['body_ur'] : notification['body_en']) ?? notification['message'] ?? '';
     final category = notification['category'] ?? notification['type'] ?? 'Alert';
 
-    ScaffoldMessenger.maybeOf(context)?.hideCurrentSnackBar();
-    ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+    AppToast.hideCurrent();
+    AppToast.showSnackBar(context, 
       SnackBar(
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -1036,9 +1038,9 @@ $xmlString
         elevation: 8,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
-          side: const BorderSide(color: Color(0xFF0D9488), width: 1.2),
+          side: const BorderSide(color: SoftPalette.teal500, width: 1.2),
         ),
-        backgroundColor: const Color(0xFF0F172A),
+        backgroundColor: SoftPalette.slate900,
         duration: const Duration(seconds: 6),
         content: Directionality(
           textDirection: isUrdu ? TextDirection.rtl : TextDirection.ltr,
@@ -1051,14 +1053,14 @@ $xmlString
                 height: 42,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: Colors.white.withAlpha(20),
-                  border: Border.all(color: const Color(0xFF14B8A6), width: 1.5),
+                  color: SoftPalette.gray50.withAlpha(20),
+                  border: Border.all(color: SoftPalette.teal350, width: 1.5),
                 ),
                 padding: const EdgeInsets.all(4),
                 child: Image.asset(
                   kAppLogoAsset,
                   fit: BoxFit.contain,
-                  errorBuilder: (context, error, stackTrace) => const Icon(Icons.notifications_active, color: Color(0xFF14B8A6), size: 22),
+                  errorBuilder: (context, error, stackTrace) => const Icon(Icons.notifications_active, color: SoftPalette.teal350, size: 22),
                 ),
               ),
               const SizedBox(width: 12),
@@ -1073,7 +1075,7 @@ $xmlString
                         const Text(
                           kAppTitle,
                           style: TextStyle(
-                            color: Color(0xFF2DD4BF),
+                            color: SoftPalette.teal300,
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
                             letterSpacing: 0.3,
@@ -1083,14 +1085,14 @@ $xmlString
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF1E293B),
+                            color: SoftPalette.slate800,
                             borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: const Color(0xFF334155)),
+                            border: Border.all(color: SoftPalette.slate700),
                           ),
                           child: Text(
                             category.toString().toUpperCase(),
                             style: const TextStyle(
-                              color: Color(0xFF94A3B8),
+                              color: SoftPalette.slate350,
                               fontSize: 9.5,
                               fontWeight: FontWeight.w600,
                             ),
@@ -1103,7 +1105,7 @@ $xmlString
                       title.toString(),
                       style: const TextStyle(
                         fontWeight: FontWeight.bold,
-                        color: Colors.white,
+                        color: SoftPalette.gray50,
                         fontSize: 13.5,
                       ),
                       maxLines: 1,
@@ -1113,7 +1115,7 @@ $xmlString
                     Text(
                       body.toString(),
                       style: const TextStyle(
-                        color: Color(0xFFCBD5E1),
+                        color: SoftPalette.slate200,
                         fontSize: 12,
                       ),
                       maxLines: 2,
@@ -1127,7 +1129,7 @@ $xmlString
         ),
         action: SnackBarAction(
           label: isUrdu ? 'دیکھیں' : 'VIEW',
-          textColor: const Color(0xFF38BDF8),
+          textColor: SoftPalette.sky350,
           onPressed: () {
             bringAppToFront();
             handleNotificationTap(notification);
@@ -1448,7 +1450,7 @@ $xmlString
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           children: [
-            const Icon(Icons.info_outline, color: Color(0xFFF59E0B)),
+            const Icon(Icons.info_outline, color: SoftPalette.amber300),
             const SizedBox(width: 8),
             Expanded(child: Text(title)),
           ],

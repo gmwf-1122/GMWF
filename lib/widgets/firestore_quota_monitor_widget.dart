@@ -1,6 +1,9 @@
 // lib/widgets/firestore_quota_monitor_widget.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/utils/debounced_box_listenable.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 import '../services/local_storage_service.dart';
@@ -24,7 +27,7 @@ class FirestoreQuotaMonitorWidget extends StatelessWidget {
       valueListenable: QuotaService.isQuotaExhaustedNotifier,
       builder: (context, isQuotaExhausted, _) {
         return ValueListenableBuilder<Box>(
-          valueListenable: Hive.box(LocalStorageService.entriesBox).listenable(),
+          valueListenable: DebouncedBoxListenable.shared(Hive.box(LocalStorageService.entriesBox)),
           builder: (context, Box entriesBox, _) {
             final totalTokensToday = _countTodayTokens(entriesBox);
             final pendingSync = Hive.isBoxOpen(LocalStorageService.syncBox)
@@ -61,17 +64,17 @@ class FirestoreQuotaMonitorWidget extends StatelessWidget {
               margin: const EdgeInsets.symmetric(vertical: 8),
               padding: const EdgeInsets.all(20),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF161B22) : Colors.white,
+                color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                 borderRadius: BorderRadius.circular(16),
                 border: Border.all(
                   color: isQuotaExhausted
-                      ? const Color(0xFFEF4444).withValues(alpha: 0.6)
-                      : (isDark ? const Color(0xFF30363D) : const Color(0xFFE2E8F0)),
+                      ? SoftPalette.red400.withValues(alpha: 0.6)
+                      : (isDark ? SoftPalette.slate750 : SoftPalette.slate150),
                   width: isQuotaExhausted ? 1.5 : 1.0,
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: (isQuotaExhausted ? Colors.red : Colors.black).withValues(alpha: isDark ? 0.2 : 0.04),
+                    color: (isQuotaExhausted ? SoftPalette.red400 : SoftPalette.gray900).withValues(alpha: isDark ? 0.2 : 0.04),
                     blurRadius: 12,
                     offset: const Offset(0, 4),
                   ),
@@ -86,30 +89,30 @@ class FirestoreQuotaMonitorWidget extends StatelessWidget {
                       margin: const EdgeInsets.only(bottom: 16),
                       padding: const EdgeInsets.all(12),
                       decoration: BoxDecoration(
-                        color: const Color(0xFFFEF2F2),
+                        color: context.adapt(SoftPalette.red100t),
                         borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFFFECACA)),
+                        border: Border.all(color: context.adapt(SoftPalette.red200)),
                       ),
                       child: Row(
                         children: [
-                          const Icon(Icons.warning_amber_rounded, color: Color(0xFFDC2626), size: 22),
+                          const Icon(Icons.warning_amber_rounded, color: SoftPalette.red500, size: 22),
                           const SizedBox(width: 10),
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Text(
+                                Text(
                                   "Firebase Cloud Quota Limit Reached (50,000 Reads Exceeded)",
                                   style: TextStyle(
                                     fontSize: 13,
                                     fontWeight: FontWeight.bold,
-                                    color: Color(0xFF991B1B),
+                                    color: context.adapt(SoftPalette.red600),
                                   ),
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
                                   "Daily free quota was consumed by global queries/devices. App is operating in 100% Offline Local Hive & LAN Zero-Quota Mode until midnight UTC reset.",
-                                  style: TextStyle(fontSize: 11.5, color: Colors.red.shade800),
+                                  style: TextStyle(fontSize: 11.5, color: context.adapt(SoftPalette.red550)),
                                 ),
                               ],
                             ),
@@ -128,12 +131,12 @@ class FirestoreQuotaMonitorWidget extends StatelessWidget {
                           Container(
                             padding: const EdgeInsets.all(8),
                             decoration: BoxDecoration(
-                              color: (isQuotaExhausted ? const Color(0xFFEF4444) : const Color(0xFF00695C)).withValues(alpha: 0.12),
+                              color: (isQuotaExhausted ? SoftPalette.red400 : SoftPalette.teal600).withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(10),
                             ),
                             child: Icon(
                               isQuotaExhausted ? Icons.cloud_off_rounded : Icons.speed_rounded,
-                              color: isQuotaExhausted ? const Color(0xFFDC2626) : const Color(0xFF00897B),
+                              color: isQuotaExhausted ? SoftPalette.red500 : SoftPalette.teal500,
                               size: 22,
                             ),
                           ),
@@ -146,14 +149,14 @@ class FirestoreQuotaMonitorWidget extends StatelessWidget {
                                 style: TextStyle(
                                   fontSize: 16,
                                   fontWeight: FontWeight.w800,
-                                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                                  color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                                 ),
                               ),
                               Text(
                                 'Firebase Free Tier Limits (50k Reads • 20k Writes • 1 GB Storage)',
                                 style: TextStyle(
                                   fontSize: 12,
-                                  color: isDark ? const Color(0xFF8B949E) : const Color(0xFF64748B),
+                                  color: isDark ? SoftPalette.slate400 : SoftPalette.slate550,
                                 ),
                               ),
                             ],
@@ -164,15 +167,15 @@ class FirestoreQuotaMonitorWidget extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                         decoration: BoxDecoration(
                           color: isQuotaExhausted
-                              ? const Color(0xFFEF4444).withValues(alpha: 0.15)
+                              ? SoftPalette.red400.withValues(alpha: 0.15)
                               : (onLan
-                                  ? const Color(0xFF10B981).withValues(alpha: 0.15)
-                                  : const Color(0xFFF59E0B).withValues(alpha: 0.15)),
+                                  ? SoftPalette.emerald350.withValues(alpha: 0.15)
+                                  : SoftPalette.amber300.withValues(alpha: 0.15)),
                           borderRadius: BorderRadius.circular(8),
                           border: Border.all(
                             color: isQuotaExhausted
-                                ? const Color(0xFFEF4444)
-                                : (onLan ? const Color(0xFF10B981) : const Color(0xFFF59E0B)),
+                                ? SoftPalette.red400
+                                : (onLan ? SoftPalette.emerald350 : SoftPalette.amber300),
                             width: 1,
                           ),
                         ),
@@ -185,8 +188,8 @@ class FirestoreQuotaMonitorWidget extends StatelessWidget {
                                   : (onLan ? Icons.wifi_tethering_rounded : Icons.cloud_queue_rounded),
                               size: 14,
                               color: isQuotaExhausted
-                                  ? const Color(0xFFEF4444)
-                                  : (onLan ? const Color(0xFF10B981) : const Color(0xFFF59E0B)),
+                                  ? SoftPalette.red400
+                                  : (onLan ? SoftPalette.emerald350 : SoftPalette.amber300),
                             ),
                             const SizedBox(width: 6),
                             Text(
@@ -197,8 +200,8 @@ class FirestoreQuotaMonitorWidget extends StatelessWidget {
                                 fontSize: 12,
                                 fontWeight: FontWeight.w700,
                                 color: isQuotaExhausted
-                                    ? const Color(0xFFEF4444)
-                                    : (onLan ? const Color(0xFF10B981) : const Color(0xFFF59E0B)),
+                                    ? SoftPalette.red400
+                                    : (onLan ? SoftPalette.emerald350 : SoftPalette.amber300),
                               ),
                             ),
                           ],
@@ -218,7 +221,7 @@ class FirestoreQuotaMonitorWidget extends StatelessWidget {
                     countStr: NumberFormat('#,###').format(estimatedReads),
                     maxStr: '/ 50,000',
                     percent: readPercent,
-                    color: const Color(0xFF3B82F6),
+                    color: SoftPalette.blue500,
                     icon: Icons.download_rounded,
                     isDark: isDark,
                   );
@@ -228,7 +231,7 @@ class FirestoreQuotaMonitorWidget extends StatelessWidget {
                     countStr: NumberFormat('#,###').format(estimatedWrites),
                     maxStr: '/ 20,000',
                     percent: writePercent,
-                    color: const Color(0xFF8B5CF6),
+                    color: SoftPalette.violet500,
                     icon: Icons.upload_rounded,
                     isDark: isDark,
                   );
@@ -238,7 +241,7 @@ class FirestoreQuotaMonitorWidget extends StatelessWidget {
                     countStr: '${estimatedStorageMb.toStringAsFixed(1)} MB',
                     maxStr: '/ 1,024 MB (1 GB)',
                     percent: storagePercent,
-                    color: const Color(0xFF0284C7),
+                    color: SoftPalette.sky500,
                     icon: Icons.cloud_done_rounded,
                     isDark: isDark,
                     subtitle: '${NumberFormat('#,###').format(totalDocs)} total cloud documents',
@@ -247,10 +250,10 @@ class FirestoreQuotaMonitorWidget extends StatelessWidget {
                   final cardLan = Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF0D1117) : const Color(0xFFF8FAFC),
+                      color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                       borderRadius: BorderRadius.circular(12),
                       border: Border.all(
-                        color: const Color(0xFF10B981).withValues(alpha: 0.3),
+                        color: SoftPalette.emerald350.withValues(alpha: 0.3),
                       ),
                     ),
                     child: Column(
@@ -258,14 +261,14 @@ class FirestoreQuotaMonitorWidget extends StatelessWidget {
                       children: [
                         Row(
                           children: const [
-                            Icon(Icons.shield_outlined, color: Color(0xFF10B981), size: 16),
+                            Icon(Icons.shield_outlined, color: SoftPalette.emerald350, size: 16),
                             SizedBox(width: 6),
                             Text(
                               'LAN Ops Saved',
                               style: TextStyle(
                                 fontSize: 12,
                                 fontWeight: FontWeight.bold,
-                                color: Color(0xFF10B981),
+                                color: SoftPalette.emerald350,
                               ),
                             ),
                           ],
@@ -276,13 +279,13 @@ class FirestoreQuotaMonitorWidget extends StatelessWidget {
                           style: TextStyle(
                             fontSize: 22,
                             fontWeight: FontWeight.w900,
-                            color: isDark ? Colors.white : const Color(0xFF0F172A),
+                            color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                           ),
                         ),
                         const SizedBox(height: 4),
-                        const Text(
+                        Text(
                           'Served via WebSocket',
-                          style: TextStyle(fontSize: 11, color: Color(0xFF64748B)),
+                          style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.slate550)),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                         ),
@@ -344,10 +347,10 @@ class FirestoreQuotaMonitorWidget extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0D1117) : const Color(0xFFF8FAFC),
+        color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: isDark ? const Color(0xFF21262D) : const Color(0xFFE2E8F0),
+          color: isDark ? SoftPalette.slate800 : SoftPalette.slate150,
         ),
       ),
       child: Column(
@@ -365,7 +368,7 @@ class FirestoreQuotaMonitorWidget extends StatelessWidget {
                     style: TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w600,
-                      color: isDark ? const Color(0xFF8B949E) : const Color(0xFF64748B),
+                      color: isDark ? SoftPalette.slate400 : SoftPalette.slate550,
                     ),
                   ),
                 ],
@@ -390,14 +393,14 @@ class FirestoreQuotaMonitorWidget extends StatelessWidget {
                 style: TextStyle(
                   fontSize: 20,
                   fontWeight: FontWeight.w900,
-                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                 ),
               ),
               const SizedBox(width: 4),
               Flexible(
                 child: Text(
                   maxStr,
-                  style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                  style: TextStyle(fontSize: 11, color: SoftPalette.adaptive(SoftPalette.slate350, isDark)),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
@@ -408,7 +411,7 @@ class FirestoreQuotaMonitorWidget extends StatelessWidget {
             borderRadius: BorderRadius.circular(4),
             child: LinearProgressIndicator(
               value: percent,
-              backgroundColor: isDark ? const Color(0xFF21262D) : const Color(0xFFE2E8F0),
+              backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.slate150,
               valueColor: AlwaysStoppedAnimation<Color>(color),
               minHeight: 6,
             ),
@@ -417,7 +420,7 @@ class FirestoreQuotaMonitorWidget extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               subtitle,
-              style: const TextStyle(fontSize: 10, color: Color(0xFF64748B)),
+              style: TextStyle(fontSize: 10, color: SoftPalette.adaptive(SoftPalette.slate550, isDark)),
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
             ),

@@ -1,6 +1,7 @@
 // lib/pages/branches_register.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 
@@ -60,7 +61,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
       description: 'Branch coordination, staff payroll, biometric attendance, finance & operational management.',
       tag: 'CORE DEPARTMENT • MANDATORY',
       icon: Icons.business_rounded,
-      color: Color(0xFF475569), // Slate
+      color: SoftPalette.slate600, // Slate
       isCore: true,
     ),
     _DepartmentItem(
@@ -69,7 +70,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
       description: 'Outpatient clinic, doctor consultations, vitals, OPD queue, patient history & medicine inventory.',
       tag: 'HEALTHCARE & PHARMACY',
       icon: Icons.local_hospital_rounded,
-      color: Color(0xFF0D9488), // Teal
+      color: SoftPalette.teal500, // Teal
     ),
     _DepartmentItem(
       id: 'dasterkhwaan',
@@ -77,7 +78,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
       description: 'Community kitchen, daily meal distribution, ration inventory & food log tracking.',
       tag: 'COMMUNITY KITCHEN & MEALS',
       icon: Icons.restaurant_rounded,
-      color: Color(0xFFEA580C), // Orange
+      color: SoftPalette.orange400, // Orange
     ),
     _DepartmentItem(
       id: 'madrassa',
@@ -85,7 +86,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
       description: 'Islamic education, Quran Nazra & Hifz programs, student registers, teacher attendance & fee records.',
       tag: 'ISLAMIC EDUCATION',
       icon: Icons.menu_book_rounded,
-      color: Color(0xFF7C3AED), // Deep Purple
+      color: SoftPalette.violet550, // Deep Purple
     ),
     _DepartmentItem(
       id: 'school',
@@ -93,7 +94,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
       description: 'Formal academic education, multi-grade student enrollment, class curricula & teacher coordination.',
       tag: 'ACADEMIC SCHOOLING',
       icon: Icons.school_rounded,
-      color: Color(0xFF2563EB), // Blue
+      color: SoftPalette.blue550, // Blue
     ),
   ];
 
@@ -137,7 +138,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
               description: 'Custom branch operational department.',
               tag: 'CUSTOM DEPARTMENT',
               icon: Icons.category_rounded,
-              color: const Color(0xFF0891B2),
+              color: SoftPalette.cyan500,
               isCustom: true,
             ),
           );
@@ -263,7 +264,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
             ElevatedButton(
               style: ElevatedButton.styleFrom(
                 backgroundColor: t.accent,
-                foregroundColor: Colors.white,
+                foregroundColor: SoftPalette.gray50,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
               onPressed: () async {
@@ -287,7 +288,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
                       description: 'Custom branch operational department.',
                       tag: 'CUSTOM DEPARTMENT',
                       icon: Icons.category_rounded,
-                      color: const Color(0xFF0891B2),
+                      color: SoftPalette.cyan500,
                       isCustom: true,
                     ),
                   );
@@ -527,10 +528,10 @@ class _BranchesRegisterState extends State<BranchesRegister>
               Container(
                 padding: const EdgeInsets.all(10),
                 decoration: BoxDecoration(
-                  color: Colors.green.withValues(alpha: 0.15),
+                  color: SoftPalette.green400.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(12),
                 ),
-                child: const Icon(Icons.check_circle_rounded, color: Colors.green, size: 24),
+                child: const Icon(Icons.check_circle_rounded, color: SoftPalette.green400, size: 24),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -543,7 +544,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
                     ),
                     Text(
                       'Saved locally & synced to cloud instantly',
-                      style: TextStyle(fontSize: 12, color: Colors.green.shade700, fontWeight: FontWeight.w600),
+                      style: TextStyle(fontSize: 12, color: SoftPalette.green500, fontWeight: FontWeight.w600),
                     ),
                   ],
                 ),
@@ -602,14 +603,14 @@ class _BranchesRegisterState extends State<BranchesRegister>
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF0284C7).withValues(alpha: 0.08),
+                    color: SoftPalette.sky500.withValues(alpha: 0.08),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: const Color(0xFF0284C7).withValues(alpha: 0.25)),
+                    border: Border.all(color: SoftPalette.sky500.withValues(alpha: 0.25)),
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.notifications_active_rounded, color: Color(0xFF0284C7), size: 20),
+                      const Icon(Icons.notifications_active_rounded, color: SoftPalette.sky500, size: 20),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
@@ -652,8 +653,8 @@ class _BranchesRegisterState extends State<BranchesRegister>
                   icon: const Icon(Icons.person_add_rounded, size: 16),
                   label: const Text('Assign Users & Staff'),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF0284C7),
-                    side: BorderSide(color: const Color(0xFF0284C7).withValues(alpha: 0.4)),
+                    foregroundColor: SoftPalette.sky500,
+                    side: BorderSide(color: SoftPalette.sky500.withValues(alpha: 0.4)),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                   onPressed: () {
@@ -668,7 +669,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
                 ElevatedButton(
                   style: ElevatedButton.styleFrom(
                     backgroundColor: t.accent,
-                    foregroundColor: Colors.white,
+                    foregroundColor: SoftPalette.gray50,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                   onPressed: () {
@@ -688,7 +689,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
   void _snack(String msg, {bool error = false, bool success = false, bool info = false}) {
     if (!mounted) return;
     final t = RoleThemeScope.dataOf(context);
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+    AppToast.showSnackBar(context, SnackBar(
       content: Row(children: [
         Icon(
           error
@@ -696,7 +697,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
               : success
                   ? Icons.check_circle_outline
                   : Icons.info_outline,
-          color: Colors.white,
+          color: SoftPalette.gray50,
           size: 18,
         ),
         const SizedBox(width: 10),
@@ -705,10 +706,10 @@ class _BranchesRegisterState extends State<BranchesRegister>
       backgroundColor: error
           ? t.danger
           : success
-              ? Colors.green.shade700
+              ? SoftPalette.green500
               : info
-                  ? const Color(0xFF0284C7)
-                  : const Color(0xFF37474F),
+                  ? SoftPalette.sky500
+                  : SoftPalette.slate700,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       margin: const EdgeInsets.all(16),
@@ -764,7 +765,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
           // Loading Overlay
           if (_loading)
             Container(
-              color: Colors.black54,
+              color: SoftPalette.gray900A54,
               child: Center(
                 child: Container(
                   padding: const EdgeInsets.symmetric(horizontal: 44, vertical: 36),
@@ -772,7 +773,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
                     color: t.bgCard,
                     borderRadius: BorderRadius.circular(24),
                     boxShadow: const [
-                      BoxShadow(color: Colors.black26, blurRadius: 30, offset: Offset(0, 10))
+                      BoxShadow(color: SoftPalette.gray900A26, blurRadius: 30, offset: Offset(0, 10))
                     ],
                   ),
                   child: Column(
@@ -862,13 +863,13 @@ class _BranchesRegisterState extends State<BranchesRegister>
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                       decoration: BoxDecoration(
-                        color: Colors.green.withValues(alpha: 0.12),
+                        color: SoftPalette.green400.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(6),
-                        border: Border.all(color: Colors.green.withValues(alpha: 0.3)),
+                        border: Border.all(color: SoftPalette.green400.withValues(alpha: 0.3)),
                       ),
                       child: const Text(
                         'INSTANT LOCAL CACHE',
-                        style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.green),
+                        style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: SoftPalette.green400),
                       ),
                     ),
                   ],
@@ -945,7 +946,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
         border: Border.all(color: t.bgRule),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
+            color: SoftPalette.gray900.withValues(alpha: 0.03),
             blurRadius: 12,
             offset: const Offset(0, 3),
           ),
@@ -1053,9 +1054,9 @@ class _BranchesRegisterState extends State<BranchesRegister>
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF0284C7).withValues(alpha: 0.07),
+        color: SoftPalette.sky500.withValues(alpha: 0.07),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFF0284C7).withValues(alpha: 0.25)),
+        border: Border.all(color: SoftPalette.sky500.withValues(alpha: 0.25)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1065,10 +1066,10 @@ class _BranchesRegisterState extends State<BranchesRegister>
               Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF0284C7).withValues(alpha: 0.15),
+                  color: SoftPalette.sky500.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.manage_accounts_rounded, color: Color(0xFF0284C7), size: 18),
+                child: const Icon(Icons.manage_accounts_rounded, color: SoftPalette.sky500, size: 18),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -1084,12 +1085,12 @@ class _BranchesRegisterState extends State<BranchesRegister>
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF0284C7).withValues(alpha: 0.15),
+                  color: SoftPalette.sky500.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: const Text(
                   'AUTO-DISPATCH',
-                  style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Color(0xFF0284C7)),
+                  style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: SoftPalette.sky500),
                 ),
               ),
             ],
@@ -1175,7 +1176,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
         border: Border.all(color: t.bgRule),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.03),
+            color: SoftPalette.gray900.withValues(alpha: 0.03),
             blurRadius: 12,
             offset: const Offset(0, 3),
           ),
@@ -1190,7 +1191,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
             decoration: BoxDecoration(border: Border(bottom: BorderSide(color: t.bgRule))),
             child: Row(
               children: [
-                Icon(Icons.hub_rounded, color: const Color(0xFF0284C7), size: 20),
+                Icon(Icons.hub_rounded, color: SoftPalette.sky500, size: 20),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Column(
@@ -1283,8 +1284,8 @@ class _BranchesRegisterState extends State<BranchesRegister>
                       avatar: const Icon(Icons.add_rounded, size: 16),
                       label: const Text('Custom Department', style: TextStyle(fontSize: 12)),
                       onPressed: _showAddCustomDepartmentDialog,
-                      backgroundColor: Colors.cyan.withValues(alpha: 0.08),
-                      side: BorderSide(color: Colors.cyan.withValues(alpha: 0.3)),
+                      backgroundColor: SoftPalette.cyan350.withValues(alpha: 0.08),
+                      side: BorderSide(color: SoftPalette.cyan350.withValues(alpha: 0.3)),
                     ),
                   ],
                 ),
@@ -1353,7 +1354,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
                                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                         decoration: BoxDecoration(
                                           color: isLocked
-                                              ? const Color(0xFF475569).withValues(alpha: 0.18)
+                                              ? context.adapt(SoftPalette.slate600).withValues(alpha: 0.18)
                                               : dept.color.withValues(alpha: 0.12),
                                           borderRadius: BorderRadius.circular(6),
                                         ),
@@ -1362,7 +1363,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
                                           style: TextStyle(
                                             fontSize: 9,
                                             fontWeight: FontWeight.bold,
-                                            color: isLocked ? const Color(0xFF475569) : dept.color,
+                                            color: isLocked ? context.adapt(SoftPalette.slate600) : dept.color,
                                           ),
                                         ),
                                       ),
@@ -1390,10 +1391,10 @@ class _BranchesRegisterState extends State<BranchesRegister>
                                 child: Container(
                                   padding: const EdgeInsets.all(6),
                                   decoration: BoxDecoration(
-                                    color: Colors.grey.withValues(alpha: 0.15),
+                                    color: SoftPalette.gray350.withValues(alpha: 0.15),
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-                                  child: const Icon(Icons.lock_rounded, size: 16, color: Colors.grey),
+                                  child: const Icon(Icons.lock_rounded, size: 16, color: SoftPalette.gray350),
                                 ),
                               )
                             else
@@ -1410,7 +1411,7 @@ class _BranchesRegisterState extends State<BranchesRegister>
                                   ),
                                 ),
                                 child: isSelected
-                                    ? const Icon(Icons.check_rounded, color: Colors.white, size: 16)
+                                    ? const Icon(Icons.check_rounded, color: SoftPalette.gray50, size: 16)
                                     : null,
                               ),
                           ],
@@ -1453,18 +1454,18 @@ class _BranchesRegisterState extends State<BranchesRegister>
                 child: SizedBox(
                   width: 24,
                   height: 24,
-                  child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white),
+                  child: CircularProgressIndicator(strokeWidth: 2.5, color: SoftPalette.gray50),
                 ),
               )
             : const Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.add_business_rounded, color: Colors.white, size: 20),
+                  Icon(Icons.add_business_rounded, color: SoftPalette.gray50, size: 20),
                   SizedBox(width: 10),
                   Text(
                     'Register Branch & Dispatch HQ Alert',
                     style: TextStyle(
-                      color: Colors.white,
+                      color: SoftPalette.gray50,
                       fontSize: 15,
                       fontWeight: FontWeight.w800,
                       letterSpacing: 0.3,

@@ -259,9 +259,9 @@ class _MadrassaConfigViewState extends State<MadrassaConfigView> {
 
       if (hasError) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          AppToast.showSnackBar(context, 
             const SnackBar(
-              backgroundColor: Colors.red,
+              backgroundColor: SoftPalette.red400,
               content: Text('Please correct all validation errors to continue'),
             ),
           );
@@ -271,9 +271,9 @@ class _MadrassaConfigViewState extends State<MadrassaConfigView> {
 
       if ((ptm! + msg! + att! + uni!) != base!) {
         if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
+          AppToast.showSnackBar(context, 
             SnackBar(
-              backgroundColor: Colors.red,
+              backgroundColor: SoftPalette.red400,
               content: Text('Sum of deductions ($ptm + $msg + $att + $uni = ${ptm + msg + att + uni}) must equal Base Points ($base)'),
             ),
           );
@@ -363,13 +363,13 @@ class _MadrassaConfigViewState extends State<MadrassaConfigView> {
       );
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(content: Text(context.l.configSaved)),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(content: Text('Error saving: $e')),
         );
       }
@@ -389,18 +389,18 @@ class _MadrassaConfigViewState extends State<MadrassaConfigView> {
 
       if (!mounted) return;
       if (saved == 0) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(content: Text(context.l.exportCancelled)),
         );
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text(
               type == MadrassaCsvType.unknown
                   ? context.l.exportAllSuccess
                   : context.l.exportSuccess,
             ),
-            backgroundColor: Colors.green,
+            backgroundColor: SoftPalette.green400,
           ),
         );
 
@@ -414,8 +414,8 @@ class _MadrassaConfigViewState extends State<MadrassaConfigView> {
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Export failed: $e'), backgroundColor: Colors.red),
+        AppToast.showSnackBar(context, 
+          SnackBar(content: Text('Export failed: $e'), backgroundColor: SoftPalette.red400),
         );
       }
     } finally {
@@ -454,11 +454,11 @@ class _MadrassaConfigViewState extends State<MadrassaConfigView> {
               child: Text(context.l.cancel, style: context.urduStyle()),
             ),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0F766E)),
+              style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.teal550),
               onPressed: () => Navigator.pop(ctx, true),
               child: Text(
                 context.l.importCsv,
-                style: context.urduStyle(style: const TextStyle(color: Colors.white)),
+                style: context.urduStyle(style: const TextStyle(color: SoftPalette.gray50)),
               ),
             ),
           ],
@@ -505,19 +505,19 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
   await MadrassaLocalStorage.downloadStudents(widget.branchId);
 }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('${context.l.importSuccess}: ${importResult.message}'),
-            backgroundColor: (importResult.imported > 0 || importResult.skipped > 0) ? Colors.green : Colors.orange,
+            backgroundColor: (importResult.imported > 0 || importResult.skipped > 0) ? SoftPalette.green400 : SoftPalette.amber300,
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('${context.l.importFailed}: $e'),
-            backgroundColor: Colors.red,
+            backgroundColor: SoftPalette.red400,
           ),
         );
       }
@@ -530,120 +530,261 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
   Widget build(BuildContext context) {
     return ValueListenableBuilder(
       valueListenable: UserThemeService.listenable(widget.username),
-      builder: (context, _, __) {
+      builder: (context, _, child) {
         final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.username);
-        final scaffoldBg = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8F9FD);
+        final scaffoldBg = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
 
         return Scaffold(
           backgroundColor: scaffoldBg,
-          body: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _buildWelcomeHeader(context),
-                const SizedBox(height: 32),
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final bool isFeeEnabled = LocalStorageService.isMadrassaFeeEnabled(widget.branchId);
-                    final isMobile = constraints.maxWidth < kConfigMobileBreakpoint;
-                    if (!isFeeEnabled) {
-                      return _buildActivePeriodCard(context);
-                    }
-                    if (isMobile) {
-                      return Column(
-                        children: [
-                          _buildActivePeriodCard(context),
-                          const SizedBox(height: 24),
-                          _buildDeductionsCard(context),
-                        ],
-                      );
-                    } else {
-                      return Row(
+          body: LayoutBuilder(
+            builder: (context, constraints) {
+              final isMobile = constraints.maxWidth < kConfigMobileBreakpoint;
+              final bool isFeeEnabled = LocalStorageService.isMadrassaFeeEnabled(widget.branchId);
+
+              return SingleChildScrollView(
+                padding: EdgeInsets.symmetric(
+                  horizontal: isMobile ? 16 : 24,
+                  vertical: isMobile ? 18 : 24,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _buildWelcomeHeader(context),
+                    const SizedBox(height: 24),
+                    if (!isFeeEnabled)
+                      _buildActivePeriodCard(context)
+                    else if (isMobile) ...[
+                      _buildActivePeriodCard(context),
+                      const SizedBox(height: 20),
+                      _buildDeductionsCard(context),
+                    ] else ...[
+                      Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Expanded(child: _buildActivePeriodCard(context)),
                           const SizedBox(width: 24),
                           Expanded(child: _buildDeductionsCard(context)),
                         ],
-                      );
-                    }
-                  },
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    _buildSaveConfigBar(context, isMobile: isMobile),
+                    const SizedBox(height: 28),
+                    _buildDataImportExportCard(context),
+                    if (isMobile) ...[
+                      const SizedBox(height: 24),
+                      _buildAccountCard(context),
+                    ],
+                  ],
                 ),
-                const SizedBox(height: 32),
-                _buildDataImportExportCard(context),
-                const SizedBox(height: 32),
-                Align(
-                  alignment: Alignment.centerRight,
-                  child: ElevatedButton.icon(
-                    onPressed: _isSaving ? null : _save,
-                    icon: _isSaving
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white,
-                            ),
-                          )
-                        : const Icon(Icons.save_outlined),
-                    label: Text(
-                      context.l.save,
-                      style: const TextStyle(fontWeight: FontWeight.bold),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF0F766E),
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 18),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                      elevation: 2,
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildSaveConfigBar(BuildContext context, {required bool isMobile}) {
+    final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.username);
+    final saveButton = ElevatedButton.icon(
+      onPressed: _isSaving ? null : _save,
+      icon: _isSaving
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: SoftPalette.gray50,
+              ),
+            )
+          : const Icon(Icons.save_rounded, size: 18),
+      label: Text(
+        context.l.save,
+        style: context.urduStyle(
+          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+        ),
+      ),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: SoftPalette.teal550,
+        foregroundColor: SoftPalette.gray50,
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        elevation: 2,
+      ),
+    );
+
+    if (isMobile) {
+      return SizedBox(
+        width: double.infinity,
+        height: 48,
+        child: saveButton,
+      );
+    }
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      decoration: BoxDecoration(
+        color: isDark ? SoftPalette.slate800 : SoftPalette.slate50,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: isDark ? SoftPalette.slate700 : SoftPalette.slate200),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.info_outline_rounded,
+            size: 18,
+            color: isDark ? SoftPalette.gray50A70 : SoftPalette.slate500,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              context.isUrdu
+                  ? 'تعلیمی سیشن اور کٹوتی کے قواعد محفوظ کرنے کے لیے کلک کریں۔'
+                  : 'Changes to academic period and deduction rules will apply immediately upon saving.',
+              style: context.urduStyle(
+                style: TextStyle(
+                  fontSize: 12.5,
+                  color: isDark ? SoftPalette.gray50A70 : SoftPalette.slate500,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 16),
+          saveButton,
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAccountCard(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.username);
+    final cardBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.slate200;
+    final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.slate800;
+    final textMuted = isDark ? SoftPalette.gray50A70 : SoftPalette.slate500;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: cardBg,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: borderColor),
+        boxShadow: [
+          BoxShadow(
+            color: SoftPalette.gray900.withValues(alpha: isDark ? 0.2 : 0.04),
+            blurRadius: 12,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: context.adapt(SoftPalette.teal550).withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Center(
+              child: Text(
+                widget.username.isNotEmpty ? widget.username[0].toUpperCase() : 'U',
+                style: TextStyle(
+                  color: context.adapt(SoftPalette.teal550),
+                  fontWeight: FontWeight.bold,
+                  fontSize: 17,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  widget.username,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: context.urduStyle(
+                    style: TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                      color: textPrimary,
                     ),
                   ),
                 ),
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final isMobile = constraints.maxWidth < kConfigMobileBreakpoint;
-                    if (isMobile) {
-                      return Column(
-                        children: [
-                          const SizedBox(height: 24),
-                          SizedBox(
-                            width: double.infinity,
-                            height: 52,
-                            child: OutlinedButton.icon(
-                              onPressed: () async {
-                                final navigator = Navigator.of(context);
-                                await FirebaseAuth.instance.signOut();
-                                navigator.pushNamedAndRemoveUntil('/login', (_) => false);
-                              },
-                              icon: const Icon(Icons.logout_rounded, color: Colors.redAccent),
-                              label: const Text(
-                                'Sign Out',
-                                style: TextStyle(
-                                  color: Colors.redAccent,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 15,
-                                ),
-                              ),
-                              style: OutlinedButton.styleFrom(
-                                side: const BorderSide(color: Colors.redAccent, width: 1.5),
-                                shape: RoundedRectangleBorder(
-                                  borderRadius: BorderRadius.circular(16),
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      );
-                    }
-                    return const SizedBox.shrink();
-                  },
+                const SizedBox(height: 2),
+                Text(
+                  '${widget.branchId.toUpperCase()} • ${widget.role.toUpperCase()}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: textMuted,
+                    fontWeight: FontWeight.w500,
+                  ),
                 ),
               ],
             ),
           ),
-        );
-      },
+          const SizedBox(width: 8),
+          OutlinedButton.icon(
+            onPressed: () async {
+              final confirm = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: Text(
+                    context.isUrdu ? 'لاگ آؤٹ' : 'Sign Out',
+                    style: context.urduStyle(style: const TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                  content: Text(
+                    context.isUrdu ? 'کیا آپ واقعی لاگ آؤٹ کرنا چاہتے ہیں؟' : 'Are you sure you want to sign out?',
+                    style: context.urduStyle(),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: Text(context.l.cancel, style: context.urduStyle()),
+                    ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(backgroundColor: context.adapt(SoftPalette.red500)),
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: Text(
+                        context.isUrdu ? 'لاگ آؤٹ' : 'Sign Out',
+                        style: context.urduStyle(style: const TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+              if (confirm != true) return;
+              if (!context.mounted) return;
+              final navigator = Navigator.of(context);
+              await FirebaseAuth.instance.signOut();
+              navigator.pushNamedAndRemoveUntil('/login', (_) => false);
+            },
+            icon: Icon(Icons.logout_rounded, size: 15, color: context.adapt(SoftPalette.red500)),
+            label: Text(
+              context.isUrdu ? 'لاگ آؤٹ' : 'Sign Out',
+              style: context.urduStyle(
+                style: TextStyle(
+                  color: context.adapt(SoftPalette.red500),
+                  fontWeight: FontWeight.w600,
+                  fontSize: 12.5,
+                ),
+              ),
+            ),
+            style: OutlinedButton.styleFrom(
+              side: BorderSide(color: context.adapt(SoftPalette.red500).withValues(alpha: 0.35)),
+              backgroundColor: context.adapt(SoftPalette.red500).withValues(alpha: 0.06),
+              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -652,14 +793,14 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
       width: double.infinity,
       decoration: BoxDecoration(
         gradient: const LinearGradient(
-          colors: [Color(0xFF0F766E), Color(0xFF10B981)],
+          colors: [SoftPalette.teal550, SoftPalette.emerald350],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         borderRadius: BorderRadius.circular(24),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF0F766E).withValues(alpha: 0.3),
+            color: SoftPalette.teal550.withValues(alpha: 0.3),
             blurRadius: 16,
             offset: const Offset(0, 8),
           ),
@@ -674,12 +815,12 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
             width: 54,
             height: 54,
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.15),
+              color: SoftPalette.gray50.withValues(alpha: 0.15),
               shape: BoxShape.circle,
             ),
             child: const Icon(
               Icons.settings_suggest_rounded,
-              color: Colors.white,
+              color: SoftPalette.gray50,
               size: 28,
             ),
           );
@@ -690,7 +831,7 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
               style: const TextStyle(
                 fontSize: 22,
                 fontWeight: FontWeight.bold,
-                color: Colors.white,
+                color: SoftPalette.gray50,
               ),
             ),
           );
@@ -700,7 +841,7 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
             style: context.urduStyle(
               style: TextStyle(
                 fontSize: 14,
-                color: Colors.white.withValues(alpha: 0.85),
+                color: SoftPalette.gray50.withValues(alpha: 0.85),
               ),
             ),
           );
@@ -720,13 +861,13 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
               style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
             ),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.white.withValues(alpha: 0.15),
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.gray50.withValues(alpha: 0.15),
+              foregroundColor: SoftPalette.gray50,
               shadowColor: Colors.transparent,
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(30),
-                side: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
+                side: BorderSide(color: SoftPalette.gray50.withValues(alpha: 0.2)),
               ),
             ),
           );
@@ -792,7 +933,7 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
 
   Widget _buildActivePeriodCard(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.username);
-    final periodColor = isDark ? const Color(0xFF60A5FA) : HSLColor.fromAHSL(1.0, 210, 0.65, 0.45).toColor();
+    final periodColor = isDark ? SoftPalette.blue350 : HSLColor.fromAHSL(1.0, 210, 0.65, 0.45).toColor();
 
     return _configCard(
       context: context,
@@ -806,7 +947,7 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
             _year = DateTime.now().year;
             _month = DateTime.now().month;
           });
-          ScaffoldMessenger.of(context).showSnackBar(
+          AppToast.showSnackBar(context, 
             SnackBar(
               content: Text(
                 'Detected current period: ${DateFormat('MMMM yyyy').format(DateTime.now())}',
@@ -880,19 +1021,19 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
                   child: Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF451A03).withValues(alpha: 0.5) : Colors.red.shade50,
+                      color: isDark ? SoftPalette.orange800.withValues(alpha: 0.5) : SoftPalette.pink100m,
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: isDark ? const Color(0xFF78350F) : Colors.red.shade100),
+                      border: Border.all(color: isDark ? SoftPalette.orange700 : SoftPalette.red200),
                     ),
                     child: Row(
                       children: [
-                        Icon(Icons.warning_amber_rounded, color: isDark ? const Color(0xFFF87171) : Colors.red.shade700),
+                        Icon(Icons.warning_amber_rounded, color: isDark ? SoftPalette.red350 : SoftPalette.red500),
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
                             'Warning: Selected PTM date falls on a holiday.',
                             style: TextStyle(
-                              color: isDark ? const Color(0xFFFCA5A5) : Colors.red.shade800,
+                              color: isDark ? SoftPalette.red300 : SoftPalette.red550,
                               fontWeight: FontWeight.w500,
                               fontSize: 12,
                             ),
@@ -913,6 +1054,7 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
 
   Widget _buildDataImportExportCard(BuildContext context) {
     final busy = _isExporting || _isImporting;
+    final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.username);
 
     return _configCard(
       context: context,
@@ -923,77 +1065,162 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
       child: LayoutBuilder(
         builder: (context, constraints) {
           final isMobile = constraints.maxWidth < 600;
-          final exportButtons = [
-            _csvActionButton(
-              context,
-              label: context.l.exportStudents,
-              icon: Icons.groups_outlined,
-              onPressed: busy ? null : () => _exportCsv(MadrassaCsvType.students),
-            ),
-            _csvActionButton(
-              context,
-              label: context.l.exportDailyLogs,
-              icon: Icons.event_note_outlined,
-              onPressed: busy ? null : () => _exportCsv(MadrassaCsvType.dailyLogs),
-            ),
-            _csvActionButton(
-              context,
-              label: context.l.exportAuditLog,
-              icon: Icons.history_edu_outlined,
-              onPressed: busy ? null : () => _exportCsv(MadrassaCsvType.auditLog),
-            ),
-            _csvActionButton(
-              context,
-              label: context.l.exportAllCsv,
-              icon: Icons.folder_zip_outlined,
-              onPressed: busy ? null : () => _exportCsv(MadrassaCsvType.unknown),
-              filled: true,
-            ),
-          ];
+
+          final studentsTile = _exportTile(
+            context,
+            label: context.l.exportStudents,
+            subtitle: context.isUrdu ? 'طلباء کی فہرست' : 'Students Roster',
+            icon: Icons.groups_outlined,
+            iconColor: context.adapt(SoftPalette.teal550),
+            onPressed: busy ? null : () => _exportCsv(MadrassaCsvType.students),
+          );
+
+          final dailyLogsTile = _exportTile(
+            context,
+            label: context.l.exportDailyLogs,
+            subtitle: context.isUrdu ? 'حاضری اور اسباق' : 'Attendance & Logs',
+            icon: Icons.event_note_outlined,
+            iconColor: context.adapt(SoftPalette.blue350),
+            onPressed: busy ? null : () => _exportCsv(MadrassaCsvType.dailyLogs),
+          );
+
+          final auditLogTile = _exportTile(
+            context,
+            label: context.l.exportAuditLog,
+            subtitle: context.isUrdu ? 'سرگرمی لاگ' : 'Audit Trail',
+            icon: Icons.history_edu_outlined,
+            iconColor: context.adapt(SoftPalette.violet550),
+            onPressed: busy ? null : () => _exportCsv(MadrassaCsvType.auditLog),
+          );
+
+          final exportAllTile = _exportTile(
+            context,
+            label: context.l.exportAllCsv,
+            subtitle: context.isUrdu ? 'مکمل بیک اپ' : 'Complete Backup',
+            icon: Icons.folder_zip_outlined,
+            iconColor: context.adapt(SoftPalette.emerald350),
+            isPrimary: true,
+            onPressed: busy ? null : () => _exportCsv(MadrassaCsvType.unknown),
+          );
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              if (isMobile)
-                ...exportButtons.map((b) => Padding(
-                      padding: const EdgeInsets.only(bottom: 12),
-                      child: SizedBox(width: double.infinity, child: b),
-                    ))
-              else
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 12,
-                  children: exportButtons,
+              if (isMobile) ...[
+                Row(
+                  children: [
+                    Expanded(child: studentsTile),
+                    const SizedBox(width: 10),
+                    Expanded(child: dailyLogsTile),
+                  ],
                 ),
+                const SizedBox(height: 10),
+                Row(
+                  children: [
+                    Expanded(child: auditLogTile),
+                    const SizedBox(width: 10),
+                    Expanded(child: exportAllTile),
+                  ],
+                ),
+              ] else ...[
+                Row(
+                  children: [
+                    Expanded(child: studentsTile),
+                    const SizedBox(width: 12),
+                    Expanded(child: dailyLogsTile),
+                    const SizedBox(width: 12),
+                    Expanded(child: auditLogTile),
+                    const SizedBox(width: 12),
+                    Expanded(child: exportAllTile),
+                  ],
+                ),
+              ],
               const SizedBox(height: 16),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: busy ? null : _importCsv,
-                  icon: _isImporting
-                      ? const SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.upload_file_outlined),
-                  label: Text(
-                    context.l.importCsv,
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF0F766E),
-                    side: const BorderSide(color: Color(0xFF0F766E)),
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              // Import / Restore Box
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: busy ? null : _importCsv,
+                  borderRadius: BorderRadius.circular(14),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    decoration: BoxDecoration(
+                      color: isDark
+                          ? SoftPalette.slate900.withValues(alpha: 0.6)
+                          : context.adapt(SoftPalette.teal550).withValues(alpha: 0.04),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: context.adapt(SoftPalette.teal550).withValues(alpha: 0.3),
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        Container(
+                          width: 40,
+                          height: 40,
+                          decoration: BoxDecoration(
+                            color: context.adapt(SoftPalette.teal550).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: _isImporting
+                              ? const Center(
+                                  child: SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  ),
+                                )
+                              : Icon(
+                                  Icons.upload_file_rounded,
+                                  color: context.adapt(SoftPalette.teal550),
+                                  size: 22,
+                                ),
+                        ),
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                context.l.importCsv,
+                                style: context.urduStyle(
+                                  style: TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13.5,
+                                    color: isDark ? SoftPalette.gray50 : SoftPalette.slate800,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Text(
+                                context.isUrdu
+                                    ? 'CSV فائل سے طلباء یا لاگز بحال کریں'
+                                    : 'Restore students, daily logs, or audit records from CSV',
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 11,
+                                  color: isDark ? SoftPalette.gray50A70 : SoftPalette.slate500,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Icon(
+                          Icons.arrow_forward_ios_rounded,
+                          size: 13,
+                          color: context.adapt(SoftPalette.teal550),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
-              if (_isExporting)
-                const Padding(
-                  padding: EdgeInsets.only(top: 12),
-                  child: LinearProgressIndicator(color: Color(0xFF0F766E)),
-                ),
+              if (_isExporting) ...[
+                const SizedBox(height: 12),
+                LinearProgressIndicator(color: context.adapt(SoftPalette.teal550)),
+              ],
             ],
           );
         },
@@ -1001,38 +1228,88 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
     );
   }
 
-  Widget _csvActionButton(
+  Widget _exportTile(
     BuildContext context, {
     required String label,
+    required String subtitle,
     required IconData icon,
+    required Color iconColor,
     required VoidCallback? onPressed,
-    bool filled = false,
+    bool isPrimary = false,
   }) {
-    if (filled) {
-      return ElevatedButton.icon(
-        onPressed: onPressed,
-        icon: Icon(icon, size: 18),
-        label: Text(label, style: const TextStyle(fontWeight: FontWeight.bold)),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF0F766E),
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        ),
-      );
-    }
-
     final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.username);
+    final cardBg = isDark
+        ? (isPrimary ? context.adapt(SoftPalette.teal550).withValues(alpha: 0.16) : SoftPalette.slate900.withValues(alpha: 0.6))
+        : (isPrimary ? context.adapt(SoftPalette.teal550).withValues(alpha: 0.08) : SoftPalette.gray50);
+    final borderColor = isPrimary
+        ? context.adapt(SoftPalette.teal550).withValues(alpha: 0.45)
+        : (isDark ? SoftPalette.slate700 : SoftPalette.slate200);
+    final textColor = isDark ? SoftPalette.gray50 : SoftPalette.slate800;
+    final subColor = isDark ? SoftPalette.gray50A70 : SoftPalette.slate500;
 
-    return OutlinedButton.icon(
-      onPressed: onPressed,
-      icon: Icon(icon, size: 18),
-      label: Text(label),
-      style: OutlinedButton.styleFrom(
-        foregroundColor: isDark ? const Color(0xFFCBD5E1) : const Color(0xFF44474E),
-        side: BorderSide(color: isDark ? const Color(0xFF334155) : const Color(0xFFD0D3D9)),
-        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          decoration: BoxDecoration(
+            color: cardBg,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: borderColor, width: isPrimary ? 1.2 : 1),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Container(
+                    width: 32,
+                    height: 32,
+                    decoration: BoxDecoration(
+                      color: iconColor.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(icon, size: 17, color: iconColor),
+                  ),
+                  Icon(
+                    Icons.arrow_downward_rounded,
+                    size: 15,
+                    color: isPrimary ? context.adapt(SoftPalette.teal550) : subColor,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: context.urduStyle(
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 12,
+                    color: textColor,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 1),
+              Text(
+                subtitle,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: context.urduStyle(
+                  style: TextStyle(
+                    fontSize: 10,
+                    color: subColor,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -1055,18 +1332,18 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
               margin: const EdgeInsets.only(bottom: 16),
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: isDark ? const Color(0xFF451A03).withValues(alpha: 0.5) : const Color(0xFFFFFBEB),
+                color: isDark ? SoftPalette.orange800.withValues(alpha: 0.5) : SoftPalette.yellow50m,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: isDark ? const Color(0xFF78350F) : const Color(0xFFF59E0B)),
+                border: Border.all(color: isDark ? SoftPalette.orange700 : SoftPalette.amber300),
               ),
               child: Row(
                 children: [
-                  Icon(Icons.info_outline_rounded, color: isDark ? const Color(0xFFFBBF24) : const Color(0xFFD97706), size: 20),
+                  Icon(Icons.info_outline_rounded, color: isDark ? SoftPalette.amber200 : SoftPalette.orange400, size: 20),
                   const SizedBox(width: 10),
                   Expanded(
                     child: Text(
                       'Money Factor is disabled for this branch in Branch Facilities. Fee dues and deduction savings are turned off and hidden across all Parent, Teacher, and Principal screens.',
-                      style: TextStyle(fontSize: 12, color: isDark ? const Color(0xFFFDE68A) : const Color(0xFF92400E), fontWeight: FontWeight.w500),
+                      style: TextStyle(fontSize: 12, color: isDark ? SoftPalette.yellow150 : SoftPalette.orange600, fontWeight: FontWeight.w500),
                     ),
                   ),
                 ],
@@ -1163,10 +1440,10 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
     Widget? trailing,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.username);
-    final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final borderColor = isDark ? const Color(0xFF334155) : Colors.grey.withValues(alpha: 0.12);
-    final textPrimary = isDark ? Colors.white : const Color(0xFF1A1C1E);
-    final textMuted = isDark ? const Color(0xFF94A3B8) : Colors.grey;
+    final cardBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.gray350.withValues(alpha: 0.12);
+    final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.gray900;
+    final textMuted = isDark ? SoftPalette.slate350 : SoftPalette.gray350;
 
     final accentColor = HSLColor.fromAHSL(1.0, hue, 0.65, isDark ? 0.60 : 0.45).toColor();
     final bgTint = HSLColor.fromAHSL(1.0, hue, 0.65, isDark ? 0.20 : 0.94).toColor();
@@ -1179,7 +1456,7 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
         border: Border.all(color: borderColor),
         boxShadow: [
           BoxShadow(
-            color: const Color(0xFF1A1C1E).withValues(alpha: isDark ? 0.2 : 0.04),
+            color: SoftPalette.gray900.withValues(alpha: isDark ? 0.2 : 0.04),
             blurRadius: 16,
             offset: const Offset(0, 8),
           ),
@@ -1243,10 +1520,10 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
     IconData? prefixIcon,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.username);
-    final inputBg = isDark ? const Color(0xFF0F172A) : Colors.white;
-    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7);
-    final textPrimary = isDark ? Colors.white : const Color(0xFF1A1C1E);
-    final labelColor = isDark ? Colors.white70 : const Color(0xFF44474E);
+    final inputBg = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+    final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.slate150;
+    final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.gray900;
+    final labelColor = isDark ? SoftPalette.gray50A70 : SoftPalette.slate700;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1265,9 +1542,9 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
                         ),
                       ),
                     ),
-                    const TextSpan(
+                    TextSpan(
                       text: ' *',
-                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFFD32F2F)),
+                      style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.red500)),
                     ),
                   ],
                 ),
@@ -1290,7 +1567,7 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
           style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500, color: textPrimary),
           decoration: InputDecoration(
             errorText: errorText,
-            prefixIcon: prefixIcon != null ? Icon(prefixIcon, size: 20, color: isDark ? const Color(0xFF94A3B8) : null) : null,
+            prefixIcon: prefixIcon != null ? Icon(prefixIcon, size: 20, color: isDark ? SoftPalette.slate350 : null) : null,
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
@@ -1299,12 +1576,12 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
               borderSide: BorderSide(
-                color: errorText != null ? const Color(0xFFD32F2F) : borderColor,
+                color: errorText != null ? context.adapt(SoftPalette.red500) : borderColor,
               ),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFF0F766E), width: 2),
+              borderSide: BorderSide(color: context.adapt(SoftPalette.teal550), width: 2),
             ),
             filled: true,
             fillColor: inputBg,
@@ -1325,11 +1602,11 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
     IconData? prefixIcon,
   }) {
     final isDark = Theme.of(context).brightness == Brightness.dark || UserThemeService.isDarkMode(widget.username);
-    final cardBg = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final inputBg = isDark ? const Color(0xFF0F172A) : Colors.white;
-    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE0E2E7);
-    final textPrimary = isDark ? Colors.white : Colors.black87;
-    final labelColor = isDark ? Colors.white70 : const Color(0xFF44474E);
+    final cardBg = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final inputBg = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+    final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.slate150;
+    final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.gray900A87;
+    final labelColor = isDark ? SoftPalette.gray50A70 : SoftPalette.slate700;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -1361,7 +1638,7 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
             color: textPrimary,
           ),
           decoration: InputDecoration(
-            prefixIcon: prefixIcon != null ? Icon(prefixIcon, size: 20, color: isDark ? const Color(0xFF94A3B8) : null) : null,
+            prefixIcon: prefixIcon != null ? Icon(prefixIcon, size: 20, color: isDark ? SoftPalette.slate350 : null) : null,
             contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
@@ -1373,7 +1650,7 @@ if (importResult.type == MadrassaCsvType.dailyLogs) {
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(12),
-              borderSide: const BorderSide(color: Color(0xFF0F766E), width: 2),
+              borderSide: BorderSide(color: context.adapt(SoftPalette.teal550), width: 2),
             ),
             filled: true,
             fillColor: inputBg,

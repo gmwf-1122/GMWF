@@ -6,6 +6,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 
 class GShadow {
   GShadow._(); // prevent instantiation
@@ -16,7 +17,7 @@ class GShadow {
   /// s1 — Hairline lift. Barely-there shadow for subtle separation.
   static List<BoxShadow> s1(bool isDark) => [
     BoxShadow(
-      color: Colors.black.withValues(alpha: isDark ? 0.18 : 0.04),
+      color: SoftPalette.gray900.withValues(alpha: isDark ? 0.18 : 0.04),
       blurRadius: 2,
       offset: const Offset(0, 1),
     ),
@@ -25,7 +26,7 @@ class GShadow {
   /// s2 — Card rest state. Standard shadow for resting cards.
   static List<BoxShadow> s2(bool isDark) => [
     BoxShadow(
-      color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.06),
+      color: SoftPalette.gray900.withValues(alpha: isDark ? 0.25 : 0.06),
       blurRadius: 6,
       spreadRadius: 0,
       offset: const Offset(0, 2),
@@ -35,7 +36,7 @@ class GShadow {
   /// s3 — Interactive / hover card. Adds accent glow.
   static List<BoxShadow> s3(bool isDark, Color accent) => [
     BoxShadow(
-      color: Colors.black.withValues(alpha: isDark ? 0.30 : 0.08),
+      color: SoftPalette.gray900.withValues(alpha: isDark ? 0.30 : 0.08),
       blurRadius: 12,
       offset: const Offset(0, 4),
     ),
@@ -49,7 +50,7 @@ class GShadow {
   /// s4 — Modal / dialog. Deepest shadow for floating surfaces.
   static List<BoxShadow> s4(bool isDark) => [
     BoxShadow(
-      color: Colors.black.withValues(alpha: isDark ? 0.40 : 0.12),
+      color: SoftPalette.gray900.withValues(alpha: isDark ? 0.40 : 0.12),
       blurRadius: 24,
       spreadRadius: 2,
       offset: const Offset(0, 8),
@@ -70,13 +71,13 @@ class GShadow {
     if (isDark) {
       return [
         BoxShadow(
-          color: Colors.black.withValues(alpha: 0.65),
+          color: SoftPalette.gray900.withValues(alpha: 0.65),
           blurRadius: (18 * depth).clamp(4.0, 36.0),
           spreadRadius: 1,
           offset: Offset(6 * depth, 8 * depth),
         ),
         BoxShadow(
-          color: Colors.white.withValues(alpha: 0.08),
+          color: SoftPalette.gray50.withValues(alpha: 0.08),
           blurRadius: (12 * depth).clamp(3.0, 24.0),
           spreadRadius: -1,
           offset: Offset(-4 * depth, -4 * depth),
@@ -92,19 +93,19 @@ class GShadow {
     } else {
       return [
         BoxShadow(
-          color: Colors.black.withValues(alpha: 0.12),
+          color: SoftPalette.gray900.withValues(alpha: 0.12),
           blurRadius: (18 * depth).clamp(4.0, 36.0),
           spreadRadius: 1,
           offset: Offset(7 * depth, 8 * depth),
         ),
         BoxShadow(
-          color: Colors.white.withValues(alpha: 0.95),
+          color: SoftPalette.gray50.withValues(alpha: 0.95),
           blurRadius: (14 * depth).clamp(3.0, 28.0),
           spreadRadius: -1,
           offset: Offset(-6 * depth, -6 * depth),
         ),
         BoxShadow(
-          color: Colors.black.withValues(alpha: 0.03),
+          color: SoftPalette.gray900.withValues(alpha: 0.03),
           blurRadius: 4,
           offset: const Offset(0, 2),
         ),

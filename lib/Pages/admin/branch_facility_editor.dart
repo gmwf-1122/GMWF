@@ -1,7 +1,10 @@
 // lib/pages/admin/branch_facility_editor.dart
 
 import 'dart:async';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../services/local_storage_service.dart';
@@ -298,7 +301,7 @@ class _BranchFacilityEditorDialogState
     if (text.isEmpty) return;
     final id = text.toLowerCase().replaceAll(RegExp(r'[^a-z0-9_]'), '_');
     if (_camps.any((c) => c['id'] == id)) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(content: Text('Camp with ID "$id" already exists')),
       );
       return;
@@ -324,7 +327,7 @@ class _BranchFacilityEditorDialogState
         if (depts.length > 1) {
           depts.remove(deptKey);
         } else {
-          ScaffoldMessenger.of(context).showSnackBar(
+          AppToast.showSnackBar(context, 
             const SnackBar(content: Text('Camp must have at least one active department.')),
           );
         }
@@ -523,7 +526,7 @@ class _BranchFacilityEditorDialogState
   Future<void> _saveBranchData() async {
     final newName = _nameController.text.trim();
     if (newName.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         const SnackBar(content: Text('Branch Name cannot be empty')),
       );
       return;
@@ -639,7 +642,7 @@ class _BranchFacilityEditorDialogState
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(content: Text('Failed to update branch: $e')),
         );
       }
@@ -651,12 +654,12 @@ class _BranchFacilityEditorDialogState
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final bgDialog = isDark ? const Color(0xFF1E293B) : Colors.white;
-    final textColor = isDark ? Colors.white : const Color(0xFF0F172A);
-    final subtextColor = isDark ? const Color(0xFF94A3B8) : const Color(0xFF64748B);
-    final borderColor = isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0);
-    final inputBg = isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC);
-    const teal = Color(0xFF00695C);
+    final bgDialog = isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+    final textColor = isDark ? SoftPalette.gray50 : SoftPalette.slate900;
+    final subtextColor = isDark ? SoftPalette.slate350 : SoftPalette.slate550;
+    final borderColor = isDark ? SoftPalette.slate700 : SoftPalette.slate150;
+    final inputBg = isDark ? SoftPalette.slate900 : SoftPalette.gray50;
+    const teal = SoftPalette.teal600;
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
@@ -756,15 +759,15 @@ class _BranchFacilityEditorDialogState
                       title: 'Dispensary Camps / Desks (${_dispensaries.length})',
                       subtitle: 'Medical clinical consultations, patient registration & medicine dispensing',
                       icon: Icons.local_hospital_rounded,
-                      color: const Color(0xFF0D9488),
+                      color: SoftPalette.teal500,
                       ctrl: _dispensaryInputCtrl,
                       hint: 'e.g. Saddar Dispensary, Haji Camp',
                       onAdd: _addDispensary,
                       items: _dispensaries,
                       sessionOptions: const [
-                        {'key': 'morning', 'label': '☀️ Morning', 'icon': Icons.wb_sunny_rounded, 'color': Color(0xFFF59E0B)},
-                        {'key': 'evening', 'label': '🌅 Evening', 'icon': Icons.nights_stay_rounded, 'color': Color(0xFF3B82F6)},
-                        {'key': 'night',   'label': '🌙 Night',   'icon': Icons.dark_mode_rounded,   'color': Color(0xFF8B5CF6)},
+                        {'key': 'morning', 'label': '☀️ Morning', 'icon': Icons.wb_sunny_rounded, 'color': SoftPalette.amber300},
+                        {'key': 'evening', 'label': '🌅 Evening', 'icon': Icons.nights_stay_rounded, 'color': SoftPalette.blue500},
+                        {'key': 'night',   'label': '🌙 Night',   'icon': Icons.dark_mode_rounded,   'color': SoftPalette.violet500},
                       ],
                       onDelete: (id) => setState(() => _dispensaries.removeWhere((i) => i['id'] == id)),
                       isDark: isDark,
@@ -781,16 +784,16 @@ class _BranchFacilityEditorDialogState
                       title: 'Dasterkhwaan Meal Units & Desks (${_dasterkhwaans.length})',
                       subtitle: 'Kitchen food distribution, breakfast, lunch, dinner & special meal shifts',
                       icon: Icons.restaurant_rounded,
-                      color: const Color(0xFFEA580C),
+                      color: SoftPalette.orange400,
                       ctrl: _dasterkhwaanInputCtrl,
                       hint: 'e.g. Unit 1 - Main Dasterkhwaan, Camp 2 Desks',
                       onAdd: _addDasterkhwaan,
                       items: _dasterkhwaans,
                       sessionOptions: const [
-                        {'key': 'evening', 'label': '🌅 Evening / Dinner (شام)', 'icon': Icons.wb_sunny_rounded,    'color': Color(0xFFEA580C)},
-                        {'key': 'night',   'label': '🌙 Night / Sehri (رات)',     'icon': Icons.dark_mode_rounded,   'color': Color(0xFF8B5CF6)},
-                        {'key': 'morning', 'label': '☀️ Morning / Breakfast',     'icon': Icons.free_breakfast_rounded, 'color': Color(0xFFF59E0B)},
-                        {'key': 'lunch',   'label': '🍲 Lunch / Afternoon',       'icon': Icons.lunch_dining_rounded,   'color': Color(0xFF10B981)},
+                        {'key': 'evening', 'label': '🌅 Evening / Dinner (شام)', 'icon': Icons.wb_sunny_rounded,    'color': SoftPalette.orange400},
+                        {'key': 'night',   'label': '🌙 Night / Sehri (رات)',     'icon': Icons.dark_mode_rounded,   'color': SoftPalette.violet500},
+                        {'key': 'morning', 'label': '☀️ Morning / Breakfast',     'icon': Icons.free_breakfast_rounded, 'color': SoftPalette.amber300},
+                        {'key': 'lunch',   'label': '🍲 Lunch / Afternoon',       'icon': Icons.lunch_dining_rounded,   'color': SoftPalette.emerald350},
                       ],
                       onDelete: (id) => setState(() => _dasterkhwaans.removeWhere((i) => i['id'] == id)),
                       isDark: isDark,
@@ -807,15 +810,15 @@ class _BranchFacilityEditorDialogState
                       title: 'Madrassa Campuses (${_madrassas.length})',
                       subtitle: 'Quranic education, student attendance, Hifz & Nazra classes',
                       icon: Icons.menu_book_rounded,
-                      color: const Color(0xFF059669),
+                      color: SoftPalette.emerald500,
                       ctrl: _madrassaInputCtrl,
                       hint: 'e.g. Main Madrassa, Hifz Section',
                       onAdd: _addMadrassa,
                       items: _madrassas,
                       sessionOptions: const [
-                        {'key': 'morning', 'label': '☀️ Morning / Day', 'icon': Icons.wb_sunny_rounded, 'color': Color(0xFFF59E0B)},
-                        {'key': 'evening', 'label': '🌅 Evening',       'icon': Icons.nights_stay_rounded, 'color': Color(0xFF3B82F6)},
-                        {'key': 'night',   'label': '🌙 Night',         'icon': Icons.dark_mode_rounded,   'color': Color(0xFF8B5CF6)},
+                        {'key': 'morning', 'label': '☀️ Morning / Day', 'icon': Icons.wb_sunny_rounded, 'color': SoftPalette.amber300},
+                        {'key': 'evening', 'label': '🌅 Evening',       'icon': Icons.nights_stay_rounded, 'color': SoftPalette.blue500},
+                        {'key': 'night',   'label': '🌙 Night',         'icon': Icons.dark_mode_rounded,   'color': SoftPalette.violet500},
                       ],
                       onDelete: (id) => setState(() => _madrassas.removeWhere((i) => i['id'] == id)),
                       isDark: isDark,
@@ -832,15 +835,15 @@ class _BranchFacilityEditorDialogState
                       title: 'School Wings / Campus (${_schools.length})',
                       subtitle: 'Taleem-wa-Tarbiyat academic classes, faculty & student schedules',
                       icon: Icons.school_rounded,
-                      color: const Color(0xFF4F46E5),
+                      color: SoftPalette.indigo550,
                       ctrl: _schoolInputCtrl,
                       hint: 'e.g. Primary Wing, Girls Section',
                       onAdd: _addSchool,
                       items: _schools,
                       sessionOptions: const [
-                        {'key': 'morning', 'label': '☀️ Morning / Day Shift',        'icon': Icons.wb_sunny_rounded, 'color': Color(0xFFF59E0B)},
-                        {'key': 'evening', 'label': '🌅 Evening / Afternoon Shift',  'icon': Icons.nights_stay_rounded, 'color': Color(0xFF3B82F6)},
-                        {'key': 'night',   'label': '🌙 Night Shift',                'icon': Icons.dark_mode_rounded,   'color': Color(0xFF8B5CF6)},
+                        {'key': 'morning', 'label': '☀️ Morning / Day Shift',        'icon': Icons.wb_sunny_rounded, 'color': SoftPalette.amber300},
+                        {'key': 'evening', 'label': '🌅 Evening / Afternoon Shift',  'icon': Icons.nights_stay_rounded, 'color': SoftPalette.blue500},
+                        {'key': 'night',   'label': '🌙 Night Shift',                'icon': Icons.dark_mode_rounded,   'color': SoftPalette.violet500},
                       ],
                       onDelete: (id) => setState(() => _schools.removeWhere((i) => i['id'] == id)),
                       isDark: isDark,
@@ -871,12 +874,12 @@ class _BranchFacilityEditorDialogState
                   ElevatedButton.icon(
                     onPressed: _isSaving ? null : _saveBranchData,
                     icon: _isSaving
-                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                        ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50))
                         : const Icon(Icons.check_circle_rounded, size: 18),
                     label: Text(_isSaving ? 'Saving Configurations...' : 'Save & Sync All Schedules'),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: teal,
-                      foregroundColor: Colors.white,
+                      foregroundColor: SoftPalette.gray50,
                       padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 13),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       elevation: 1,
@@ -914,7 +917,7 @@ class _BranchFacilityEditorDialogState
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+        color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: borderColor),
       ),
@@ -942,7 +945,7 @@ class _BranchFacilityEditorDialogState
                       style: TextStyle(
                         fontSize: 15,
                         fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.white : const Color(0xFF1E293B),
+                        color: isDark ? SoftPalette.gray50 : SoftPalette.slate800,
                       ),
                     ),
                     Text(
@@ -960,7 +963,7 @@ class _BranchFacilityEditorDialogState
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1E293B) : Colors.white,
+              color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
               borderRadius: BorderRadius.circular(12),
               border: Border.all(color: color.withValues(alpha: 0.25)),
             ),
@@ -976,7 +979,7 @@ class _BranchFacilityEditorDialogState
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                        color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                         letterSpacing: 0.3,
                       ),
                     ),
@@ -1015,7 +1018,7 @@ class _BranchFacilityEditorDialogState
                     margin: const EdgeInsets.only(bottom: 8),
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                     decoration: BoxDecoration(
-                      color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                      color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                       borderRadius: BorderRadius.circular(8),
                       border: Border.all(
                         color: isEnabled ? sColor.withValues(alpha: 0.35) : borderColor,
@@ -1033,7 +1036,7 @@ class _BranchFacilityEditorDialogState
                             style: TextStyle(
                               fontSize: 12,
                               fontWeight: FontWeight.bold,
-                              color: isDark ? Colors.white : textColor,
+                              color: isDark ? SoftPalette.gray50 : textColor,
                             ),
                           ),
                         ),
@@ -1070,7 +1073,7 @@ class _BranchFacilityEditorDialogState
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(
-                                color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                                color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                                 borderRadius: BorderRadius.circular(6),
                                 border: Border.all(color: borderColor),
                               ),
@@ -1097,7 +1100,7 @@ class _BranchFacilityEditorDialogState
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                               decoration: BoxDecoration(
-                                color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                                color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                                 borderRadius: BorderRadius.circular(6),
                                 border: Border.all(color: borderColor),
                               ),
@@ -1118,12 +1121,12 @@ class _BranchFacilityEditorDialogState
                           Container(
                             padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                             decoration: BoxDecoration(
-                              color: Colors.red.withValues(alpha: 0.1),
+                              color: SoftPalette.red400.withValues(alpha: 0.1),
                               borderRadius: BorderRadius.circular(6),
                             ),
                             child: const Text(
                               'DISALLOWED / CLOSED',
-                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: Colors.redAccent),
+                              style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: SoftPalette.red400),
                             ),
                           ),
                         ],
@@ -1201,7 +1204,7 @@ class _BranchFacilityEditorDialogState
                     hintText: hint,
                     hintStyle: TextStyle(color: subtextColor, fontSize: 12),
                     filled: true,
-                    fillColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+                    fillColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: borderColor)),
                     enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: borderColor)),
@@ -1216,7 +1219,7 @@ class _BranchFacilityEditorDialogState
                 label: const Text('Add Desk/Unit'),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: color,
-                  foregroundColor: Colors.white,
+                  foregroundColor: SoftPalette.gray50,
                   padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   elevation: 0,
@@ -1246,7 +1249,7 @@ class _BranchFacilityEditorDialogState
                 margin: const EdgeInsets.only(bottom: 8),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: isDark ? const Color(0xFF1E293B) : Colors.white,
+                  color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
                   borderRadius: BorderRadius.circular(10),
                   border: Border.all(color: borderColor),
                 ),
@@ -1267,7 +1270,7 @@ class _BranchFacilityEditorDialogState
                             style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.bold,
-                              color: isDark ? Colors.white : color,
+                              color: isDark ? SoftPalette.gray50 : color,
                             ),
                           ),
                         ),
@@ -1278,7 +1281,7 @@ class _BranchFacilityEditorDialogState
                         ),
                         const Spacer(),
                         IconButton(
-                          icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 18),
+                          icon: const Icon(Icons.delete_outline_rounded, color: SoftPalette.red400, size: 18),
                           tooltip: 'Remove unit',
                           onPressed: () => onDelete(id),
                         ),
@@ -1342,11 +1345,11 @@ class _BranchFacilityEditorDialogState
                                                 style: TextStyle(
                                                   fontSize: 10,
                                                   fontWeight: FontWeight.bold,
-                                                  color: isDark ? Colors.white70 : color,
+                                                  color: isDark ? SoftPalette.gray50A70 : color,
                                                 ),
                                               ),
                                               const SizedBox(width: 3),
-                                              Icon(Icons.edit_rounded, size: 10, color: isDark ? Colors.white70 : color),
+                                              Icon(Icons.edit_rounded, size: 10, color: isDark ? SoftPalette.gray50A70 : color),
                                             ],
                                           ),
                                         ),
@@ -1356,12 +1359,12 @@ class _BranchFacilityEditorDialogState
                                 ),
                                 selected: isSelected,
                                 selectedColor: color.withValues(alpha: 0.25),
-                                checkmarkColor: isDark ? Colors.white : color,
+                                checkmarkColor: isDark ? SoftPalette.gray50 : color,
                                 labelStyle: TextStyle(
                                   fontSize: 11,
                                   fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
                                   color: isSelected
-                                      ? (isDark ? Colors.white : color)
+                                      ? (isDark ? SoftPalette.gray50 : color)
                                       : subtextColor,
                                 ),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -1369,7 +1372,7 @@ class _BranchFacilityEditorDialogState
                                   color: isSelected ? color : borderColor,
                                   width: isSelected ? 1.2 : 0.8,
                                 ),
-                                backgroundColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+                                backgroundColor: isDark ? SoftPalette.slate900 : SoftPalette.slate100,
                                 onSelected: (_) => _toggleSession(facility, sKey),
                               );
                             }).toList(),
@@ -1395,11 +1398,11 @@ class _BranchFacilityEditorDialogState
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: _allowVitalsToken
-            ? (isDark ? const Color(0xFF064E3B).withValues(alpha: 0.35) : const Color(0xFFECFDF5))
-            : (isDark ? const Color(0xFF450A0A).withValues(alpha: 0.35) : const Color(0xFFFEF2F2)),
+            ? (isDark ? SoftPalette.emerald700.withValues(alpha: 0.35) : SoftPalette.emerald50)
+            : (isDark ? SoftPalette.red800.withValues(alpha: 0.35) : SoftPalette.red100t),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: _allowVitalsToken ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+          color: _allowVitalsToken ? SoftPalette.emerald350 : SoftPalette.red400,
           width: 1.5,
         ),
       ),
@@ -1409,12 +1412,12 @@ class _BranchFacilityEditorDialogState
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: _allowVitalsToken ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+              color: _allowVitalsToken ? SoftPalette.emerald350 : SoftPalette.red400,
               borderRadius: BorderRadius.circular(8),
             ),
             child: Icon(
               _allowVitalsToken ? Icons.monitor_heart : Icons.heart_broken_rounded,
-              color: Colors.white,
+              color: SoftPalette.gray50,
               size: 20,
             ),
           ),
@@ -1430,7 +1433,7 @@ class _BranchFacilityEditorDialogState
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                        color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -1438,15 +1441,15 @@ class _BranchFacilityEditorDialogState
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
                         color: _allowVitalsToken
-                            ? const Color(0xFF10B981).withValues(alpha: 0.15)
-                            : const Color(0xFFEF4444).withValues(alpha: 0.15),
+                            ? SoftPalette.emerald350.withValues(alpha: 0.15)
+                            : SoftPalette.red400.withValues(alpha: 0.15),
                       ),
                       child: Text(
                         _allowVitalsToken ? 'DUAL TOKEN ALLOWED 🟢' : 'SINGLE TOKEN ONLY 🔴',
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
-                          color: _allowVitalsToken ? const Color(0xFF059669) : const Color(0xFFDC2626),
+                          color: _allowVitalsToken ? SoftPalette.emerald500 : SoftPalette.red500,
                         ),
                       ),
                     ),
@@ -1465,9 +1468,9 @@ class _BranchFacilityEditorDialogState
           const SizedBox(width: 8),
           Switch(
             value: _allowVitalsToken,
-            activeColor: const Color(0xFF10B981),
-            inactiveThumbColor: Colors.red.shade400,
-            inactiveTrackColor: Colors.red.shade100,
+            activeColor: SoftPalette.emerald350,
+            inactiveThumbColor: SoftPalette.red400,
+            inactiveTrackColor: context.adapt(SoftPalette.red200),
             onChanged: (val) {
               setState(() {
                 _allowVitalsToken = val;
@@ -1491,11 +1494,11 @@ class _BranchFacilityEditorDialogState
     return Container(
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(
           color: _allowDoctorInventoryApproval
-              ? const Color(0xFF0F766E).withValues(alpha: 0.5)
+              ? SoftPalette.teal550.withValues(alpha: 0.5)
               : borderColor,
           width: _allowDoctorInventoryApproval ? 1.2 : 0.8,
         ),
@@ -1505,12 +1508,12 @@ class _BranchFacilityEditorDialogState
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: _allowDoctorInventoryApproval ? const Color(0xFF0F766E) : const Color(0xFF64748B),
+              color: _allowDoctorInventoryApproval ? SoftPalette.teal550 : SoftPalette.slate550,
               borderRadius: BorderRadius.circular(8),
             ),
             child: Icon(
               _allowDoctorInventoryApproval ? Icons.approval_rounded : Icons.lock_outline_rounded,
-              color: Colors.white,
+              color: SoftPalette.gray50,
               size: 20,
             ),
           ),
@@ -1526,7 +1529,7 @@ class _BranchFacilityEditorDialogState
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                        color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -1534,8 +1537,8 @@ class _BranchFacilityEditorDialogState
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
                         color: _allowDoctorInventoryApproval
-                            ? const Color(0xFF10B981).withValues(alpha: 0.15)
-                            : const Color(0xFF64748B).withValues(alpha: 0.15),
+                            ? SoftPalette.emerald350.withValues(alpha: 0.15)
+                            : context.adapt(SoftPalette.slate550).withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
@@ -1543,7 +1546,7 @@ class _BranchFacilityEditorDialogState
                         style: TextStyle(
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
-                          color: _allowDoctorInventoryApproval ? const Color(0xFF059669) : const Color(0xFF64748B),
+                          color: _allowDoctorInventoryApproval ? SoftPalette.emerald500 : context.adapt(SoftPalette.slate550),
                         ),
                       ),
                     ),
@@ -1562,9 +1565,9 @@ class _BranchFacilityEditorDialogState
           const SizedBox(width: 8),
           Switch(
             value: _allowDoctorInventoryApproval,
-            activeColor: const Color(0xFF0F766E),
-            inactiveThumbColor: Colors.grey.shade400,
-            inactiveTrackColor: Colors.grey.shade200,
+            activeColor: SoftPalette.teal550,
+            inactiveThumbColor: context.adapt(SoftPalette.gray300),
+            inactiveTrackColor: context.adapt(SoftPalette.gray100),
             onChanged: (val) {
               setState(() {
                 _allowDoctorInventoryApproval = val;
@@ -1592,7 +1595,7 @@ class _BranchFacilityEditorDialogState
         'urdu': 'بند ہے (عام حالت)',
         'desc': 'Food details logging is turned off. Staff cannot log cooked/procured food details.',
         'badge': 'DISABLED 🚫',
-        'color': const Color(0xFF64748B),
+        'color': SoftPalette.slate550,
         'icon': Icons.block_rounded,
       },
       {
@@ -1601,7 +1604,7 @@ class _BranchFacilityEditorDialogState
         'urdu': 'صرف آفس بوائے',
         'desc': 'Allows the branch Office Boy to record cooked and hotel food procurement entries.',
         'badge': 'OFFICE BOY 🧑‍💼',
-        'color': const Color(0xFF0284C7),
+        'color': SoftPalette.sky500,
         'icon': Icons.badge_rounded,
       },
       {
@@ -1610,7 +1613,7 @@ class _BranchFacilityEditorDialogState
         'urdu': 'صرف کچن عملہ',
         'desc': 'Allows kitchen staff to record cooking sessions and outside food entries.',
         'badge': 'KITCHEN 👨‍🍳',
-        'color': const Color(0xFFEA580C),
+        'color': SoftPalette.orange400,
         'icon': Icons.restaurant_rounded,
       },
       {
@@ -1619,7 +1622,7 @@ class _BranchFacilityEditorDialogState
         'urdu': 'آفس بوائے اور کچن دونوں',
         'desc': 'Both Office Boy and Kitchen personnel are authorized to log food details.',
         'badge': 'BOTH AUTHORIZED 🤝',
-        'color': const Color(0xFF10B981),
+        'color': SoftPalette.emerald350,
         'icon': Icons.groups_rounded,
       },
     ];
@@ -1627,7 +1630,7 @@ class _BranchFacilityEditorDialogState
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: borderColor, width: 1),
       ),
@@ -1639,10 +1642,10 @@ class _BranchFacilityEditorDialogState
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFEA580C).withValues(alpha: 0.15),
+                  color: SoftPalette.orange400.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.receipt_long_rounded, color: Color(0xFFEA580C), size: 20),
+                child: const Icon(Icons.receipt_long_rounded, color: SoftPalette.orange400, size: 20),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -1654,7 +1657,7 @@ class _BranchFacilityEditorDialogState
                       style: TextStyle(
                         fontSize: 13.5,
                         fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                        color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -1677,7 +1680,7 @@ class _BranchFacilityEditorDialogState
                 decoration: BoxDecoration(
                   color: isSelected
                       ? color.withValues(alpha: isDark ? 0.2 : 0.08)
-                      : (isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC)),
+                      : (isDark ? SoftPalette.slate900 : SoftPalette.gray50),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
                     color: isSelected ? color : borderColor,
@@ -1730,8 +1733,8 @@ class _BranchFacilityEditorDialogState
                                             fontSize: 13,
                                             fontWeight: FontWeight.bold,
                                             color: isSelected
-                                                ? (isDark ? Colors.white : const Color(0xFF0F172A))
-                                                : (isDark ? Colors.white70 : const Color(0xFF334155)),
+                                                ? (isDark ? SoftPalette.gray50 : SoftPalette.slate900)
+                                                : (isDark ? SoftPalette.gray50A70 : SoftPalette.slate700),
                                           ),
                                         ),
                                       ],
@@ -1797,7 +1800,7 @@ class _BranchFacilityEditorDialogState
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF1F5F9),
+        color: isDark ? SoftPalette.slate900 : SoftPalette.slate100,
         borderRadius: BorderRadius.circular(10),
         border: Border.all(color: borderColor),
       ),
@@ -1806,26 +1809,26 @@ class _BranchFacilityEditorDialogState
         children: [
           Row(
             children: [
-              const Icon(Icons.schedule_rounded, size: 16, color: Color(0xFF059669)),
+              const Icon(Icons.schedule_rounded, size: 16, color: SoftPalette.emerald500),
               const SizedBox(width: 6),
               Text(
                 'Madrassa Shift / Session Presets (شعبہ حفظ و ناظرہ کے اوقات)',
                 style: TextStyle(
                   fontSize: 12,
                   fontWeight: FontWeight.bold,
-                  color: isDark ? Colors.white : const Color(0xFF0F172A),
+                  color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                 ),
               ),
               const Spacer(),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF059669).withValues(alpha: 0.12),
+                  color: SoftPalette.emerald500.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
                   '$activeCount Active Shifts',
-                  style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: Color(0xFF059669)),
+                  style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.bold, color: SoftPalette.emerald500),
                 ),
               ),
             ],
@@ -1903,19 +1906,19 @@ class _BranchFacilityEditorDialogState
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
           color: isSelected
-              ? const Color(0xFF059669)
-              : (isDark ? const Color(0xFF1E293B) : Colors.white),
+              ? SoftPalette.emerald500
+              : (isDark ? SoftPalette.slate800 : SoftPalette.gray50),
           borderRadius: BorderRadius.circular(8),
           border: Border.all(
             color: isSelected
-                ? const Color(0xFF059669)
-                : (isDark ? const Color(0xFF334155) : const Color(0xFFCBD5E1)),
+                ? SoftPalette.emerald500
+                : (isDark ? SoftPalette.slate700 : SoftPalette.slate200),
             width: isSelected ? 1.5 : 1,
           ),
           boxShadow: isSelected
               ? [
                   BoxShadow(
-                    color: const Color(0xFF059669).withValues(alpha: 0.25),
+                    color: SoftPalette.emerald500.withValues(alpha: 0.25),
                     blurRadius: 6,
                     offset: const Offset(0, 2),
                   ),
@@ -1928,7 +1931,7 @@ class _BranchFacilityEditorDialogState
             Icon(
               isSelected ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
               size: 14,
-              color: isSelected ? Colors.white : const Color(0xFF64748B),
+              color: isSelected ? SoftPalette.gray50 : SoftPalette.slate550,
             ),
             const SizedBox(width: 6),
             Column(
@@ -1940,14 +1943,14 @@ class _BranchFacilityEditorDialogState
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
-                    color: isSelected ? Colors.white : (isDark ? Colors.white : const Color(0xFF0F172A)),
+                    color: isSelected ? SoftPalette.gray50 : (isDark ? SoftPalette.gray50 : SoftPalette.slate900),
                   ),
                 ),
                 Text(
                   urduLabel,
                   style: TextStyle(
                     fontSize: 9.5,
-                    color: isSelected ? Colors.white70 : const Color(0xFF64748B),
+                    color: isSelected ? SoftPalette.gray50A70 : SoftPalette.slate550,
                   ),
                 ),
               ],
@@ -1970,7 +1973,7 @@ class _BranchFacilityEditorDialogState
         'urdu': 'حفظ اور ناظرہ دونوں',
         'desc': 'Offers both programs. In student enrollment, teachers/admins select whether each student fits into Hifz or Nazra.',
         'badge': 'BOTH AVAILABLE 📖 🕋',
-        'color': const Color(0xFF0F766E),
+        'color': SoftPalette.teal550,
         'icon': Icons.auto_stories_rounded,
       },
       {
@@ -1979,7 +1982,7 @@ class _BranchFacilityEditorDialogState
         'urdu': 'صرف حفظ قرآن کیمپس',
         'desc': 'Dedicated Quran memorization. All enrolled students are set to Hifz with Sabak, Sabqi, and Manzil progression.',
         'badge': 'HIFZ ONLY 🕋',
-        'color': const Color(0xFF7C3AED),
+        'color': SoftPalette.violet550,
         'icon': Icons.mosque_rounded,
       },
       {
@@ -1988,7 +1991,7 @@ class _BranchFacilityEditorDialogState
         'urdu': 'صرف ناظرہ قرآن کیمپس',
         'desc': 'Dedicated Nazra reading. All students are enrolled into Nazra (Sabak & Attendance only). 100% Free / No fees.',
         'badge': 'NAZRA ONLY 📖',
-        'color': const Color(0xFF059669),
+        'color': SoftPalette.emerald500,
         'icon': Icons.menu_book_rounded,
       },
     ];
@@ -1996,7 +1999,7 @@ class _BranchFacilityEditorDialogState
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E293B) : Colors.white,
+        color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
         borderRadius: BorderRadius.circular(14),
         border: Border.all(color: borderColor, width: 1),
       ),
@@ -2008,10 +2011,10 @@ class _BranchFacilityEditorDialogState
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF0F766E).withValues(alpha: 0.15),
+                  color: SoftPalette.teal550.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.school_rounded, color: Color(0xFF0F766E), size: 20),
+                child: Icon(Icons.school_rounded, color: context.adapt(SoftPalette.teal550), size: 20),
               ),
               const SizedBox(width: 10),
               Expanded(
@@ -2023,7 +2026,7 @@ class _BranchFacilityEditorDialogState
                       style: TextStyle(
                         fontSize: 13.5,
                         fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                        color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                       ),
                     ),
                     const SizedBox(height: 2),
@@ -2075,7 +2078,7 @@ class _BranchFacilityEditorDialogState
                     decoration: BoxDecoration(
                       color: isSelected
                           ? mColor.withValues(alpha: isDark ? 0.25 : 0.08)
-                          : (isDark ? const Color(0xFF0F172A).withValues(alpha: 0.5) : const Color(0xFFF8FAFC)),
+                          : (isDark ? SoftPalette.slate900.withValues(alpha: 0.5) : SoftPalette.gray50),
                       borderRadius: BorderRadius.circular(10),
                       border: Border.all(
                         color: isSelected ? mColor : borderColor,
@@ -2088,13 +2091,13 @@ class _BranchFacilityEditorDialogState
                         Container(
                           padding: const EdgeInsets.all(8),
                           decoration: BoxDecoration(
-                            color: isSelected ? mColor : (isDark ? const Color(0xFF334155) : const Color(0xFFE2E8F0)),
+                            color: isSelected ? mColor : (isDark ? SoftPalette.slate700 : SoftPalette.slate150),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Icon(
                             m['icon'] as IconData,
                             size: 18,
-                            color: isSelected ? Colors.white : (isDark ? Colors.white70 : const Color(0xFF64748B)),
+                            color: isSelected ? SoftPalette.gray50 : (isDark ? SoftPalette.gray50A70 : SoftPalette.slate550),
                           ),
                         ),
                         const SizedBox(width: 12),
@@ -2110,8 +2113,8 @@ class _BranchFacilityEditorDialogState
                                       fontSize: 12.5,
                                       fontWeight: FontWeight.bold,
                                       color: isSelected
-                                          ? (isDark ? Colors.white : mColor)
-                                          : (isDark ? Colors.white : const Color(0xFF1E293B)),
+                                          ? (isDark ? SoftPalette.gray50 : mColor)
+                                          : (isDark ? SoftPalette.gray50 : SoftPalette.slate800),
                                     ),
                                   ),
                                   const SizedBox(width: 6),
@@ -2135,7 +2138,7 @@ class _BranchFacilityEditorDialogState
                                       style: TextStyle(
                                         fontSize: 9.5,
                                         fontWeight: FontWeight.bold,
-                                        color: isSelected ? mColor : const Color(0xFF94A3B8),
+                                        color: isSelected ? mColor : SoftPalette.slate350,
                                       ),
                                     ),
                                   ),
@@ -2204,15 +2207,15 @@ class _BranchFacilityEditorDialogState
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         color: isLockedByNazra
-            ? (isDark ? const Color(0xFF1E293B).withValues(alpha: 0.5) : const Color(0xFFF1F5F9))
+            ? (isDark ? SoftPalette.slate800.withValues(alpha: 0.5) : SoftPalette.slate100)
             : (_madrassaFeeEnabled
-                ? (isDark ? const Color(0xFF064E3B).withValues(alpha: 0.35) : const Color(0xFFECFDF5))
-                : (isDark ? const Color(0xFF451A03).withValues(alpha: 0.35) : const Color(0xFFFFFBEB))),
+                ? (isDark ? SoftPalette.emerald700.withValues(alpha: 0.35) : SoftPalette.emerald50)
+                : (isDark ? SoftPalette.orange800.withValues(alpha: 0.35) : SoftPalette.yellow50m)),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
           color: isLockedByNazra
               ? borderColor
-              : (_madrassaFeeEnabled ? const Color(0xFF10B981) : const Color(0xFFF59E0B)),
+              : (_madrassaFeeEnabled ? SoftPalette.emerald350 : SoftPalette.amber300),
           width: 1.5,
         ),
       ),
@@ -2223,15 +2226,15 @@ class _BranchFacilityEditorDialogState
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
               color: isLockedByNazra
-                  ? const Color(0xFF64748B)
-                  : (_madrassaFeeEnabled ? const Color(0xFF10B981) : const Color(0xFFF59E0B)),
+                  ? SoftPalette.slate550
+                  : (_madrassaFeeEnabled ? SoftPalette.emerald350 : SoftPalette.amber300),
               borderRadius: BorderRadius.circular(8),
             ),
             child: Icon(
               isLockedByNazra
                   ? Icons.money_off_rounded
                   : (_madrassaFeeEnabled ? Icons.payments_rounded : Icons.money_off_rounded),
-              color: Colors.white,
+              color: SoftPalette.gray50,
               size: 20,
             ),
           ),
@@ -2247,7 +2250,7 @@ class _BranchFacilityEditorDialogState
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.bold,
-                        color: isDark ? Colors.white : const Color(0xFF0F172A),
+                        color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -2255,10 +2258,10 @@ class _BranchFacilityEditorDialogState
                       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                       decoration: BoxDecoration(
                         color: isLockedByNazra
-                            ? const Color(0xFF64748B).withValues(alpha: 0.15)
+                            ? context.adapt(SoftPalette.slate550).withValues(alpha: 0.15)
                             : (_madrassaFeeEnabled
-                                ? const Color(0xFF10B981).withValues(alpha: 0.15)
-                                : const Color(0xFFF59E0B).withValues(alpha: 0.15)),
+                                ? SoftPalette.emerald350.withValues(alpha: 0.15)
+                                : SoftPalette.amber300.withValues(alpha: 0.15)),
                         borderRadius: BorderRadius.circular(4),
                       ),
                       child: Text(
@@ -2269,8 +2272,8 @@ class _BranchFacilityEditorDialogState
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
                           color: isLockedByNazra
-                              ? const Color(0xFF64748B)
-                              : (_madrassaFeeEnabled ? const Color(0xFF059669) : const Color(0xFFD97706)),
+                              ? context.adapt(SoftPalette.slate550)
+                              : (_madrassaFeeEnabled ? SoftPalette.emerald500 : SoftPalette.orange400),
                         ),
                       ),
                     ),
@@ -2291,7 +2294,7 @@ class _BranchFacilityEditorDialogState
           const SizedBox(width: 8),
           Switch(
             value: isLockedByNazra ? false : _madrassaFeeEnabled,
-            activeColor: const Color(0xFF10B981),
+            activeColor: SoftPalette.emerald350,
             onChanged: isLockedByNazra
                 ? null
                 : (val) {
@@ -2316,27 +2319,27 @@ class _BranchFacilityEditorDialogState
     required Color borderColor,
     required Color inputBg,
   }) {
-    const color = Color(0xFF0284C7); // Sky blue / Cyan
+    const color = SoftPalette.sky500; // Sky blue / Cyan
 
     const deptDefinitions = [
-      {'key': 'dispensary',   'label': '🏥 Dispensary',   'color': Color(0xFF0D9488)},
-      {'key': 'dasterkhwaan', 'label': '🍽️ Dasterkhwaan', 'color': Color(0xFFEA580C)},
-      {'key': 'madrassa',     'label': '📖 Madrassa',     'color': Color(0xFF059669)},
-      {'key': 'school',       'label': '🏫 School',       'color': Color(0xFF4F46E5)},
+      {'key': 'dispensary',   'label': '🏥 Dispensary',   'color': SoftPalette.teal500},
+      {'key': 'dasterkhwaan', 'label': '🍽️ Dasterkhwaan', 'color': SoftPalette.orange400},
+      {'key': 'madrassa',     'label': '📖 Madrassa',     'color': SoftPalette.emerald500},
+      {'key': 'school',       'label': '🏫 School',       'color': SoftPalette.indigo550},
     ];
 
     const sessionOptions = [
-      {'key': 'morning', 'label': '☀️ Morning', 'color': Color(0xFFF59E0B)},
-      {'key': 'evening', 'label': '🌅 Evening', 'color': Color(0xFF3B82F6)},
-      {'key': 'night',   'label': '🌙 Night',   'color': Color(0xFF8B5CF6)},
+      {'key': 'morning', 'label': '☀️ Morning', 'color': SoftPalette.amber300},
+      {'key': 'evening', 'label': '🌅 Evening', 'color': SoftPalette.blue500},
+      {'key': 'night',   'label': '🌙 Night',   'color': SoftPalette.violet500},
     ];
 
     return Container(
       padding: const EdgeInsets.all(18),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF0F9FF),
+        color: isDark ? SoftPalette.slate900 : SoftPalette.slate50,
         borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: isDark ? color.withValues(alpha: 0.3) : const Color(0xFFBAE6FD), width: 1.2),
+        border: Border.all(color: isDark ? color.withValues(alpha: 0.3) : SoftPalette.slate150, width: 1.2),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -2364,7 +2367,7 @@ class _BranchFacilityEditorDialogState
                           style: TextStyle(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
-                            color: isDark ? Colors.white : const Color(0xFF0369A1),
+                            color: isDark ? SoftPalette.gray50 : SoftPalette.sky550,
                           ),
                         ),
                         const SizedBox(width: 8),
@@ -2398,7 +2401,7 @@ class _BranchFacilityEditorDialogState
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF1E293B) : Colors.white,
+              color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
               borderRadius: BorderRadius.circular(10),
               border: Border.all(color: borderColor),
             ),
@@ -2420,7 +2423,7 @@ class _BranchFacilityEditorDialogState
                           hintText: 'e.g. Model Town Camp, DHA Medical Center, Kapayya Desk',
                           hintStyle: TextStyle(color: subtextColor, fontSize: 12),
                           filled: true,
-                          fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                          fillColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                           contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                           border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: borderColor)),
                           enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: borderColor)),
@@ -2435,7 +2438,7 @@ class _BranchFacilityEditorDialogState
                       label: const Text('Add Camp'),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: color,
-                        foregroundColor: Colors.white,
+                        foregroundColor: SoftPalette.gray50,
                         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                         elevation: 0,
@@ -2500,11 +2503,11 @@ class _BranchFacilityEditorDialogState
                 padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
                   color: isClosed
-                      ? (isDark ? const Color(0xFF451A03).withValues(alpha: 0.25) : const Color(0xFFFEF2F2))
-                      : (isDark ? const Color(0xFF1E293B) : Colors.white),
+                      ? (isDark ? SoftPalette.orange800.withValues(alpha: 0.25) : SoftPalette.red100t)
+                      : (isDark ? SoftPalette.slate800 : SoftPalette.gray50),
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: isClosed ? Colors.red.withValues(alpha: 0.35) : borderColor,
+                    color: isClosed ? SoftPalette.red400.withValues(alpha: 0.35) : borderColor,
                     width: isClosed ? 1.2 : 1.0,
                   ),
                 ),
@@ -2516,7 +2519,7 @@ class _BranchFacilityEditorDialogState
                       children: [
                         Icon(
                           isClosed ? Icons.location_off_rounded : Icons.location_on_rounded,
-                          color: isClosed ? Colors.redAccent : color,
+                          color: isClosed ? SoftPalette.red400 : color,
                           size: 20,
                         ),
                         const SizedBox(width: 8),
@@ -2525,7 +2528,7 @@ class _BranchFacilityEditorDialogState
                           style: TextStyle(
                             fontSize: 14,
                             fontWeight: FontWeight.bold,
-                            color: isClosed ? (isDark ? Colors.white60 : Colors.black54) : textColor,
+                            color: isClosed ? (isDark ? SoftPalette.gray50A60 : SoftPalette.gray900A54) : textColor,
                             decoration: isClosed ? TextDecoration.lineThrough : null,
                           ),
                         ),
@@ -2533,16 +2536,16 @@ class _BranchFacilityEditorDialogState
                         Container(
                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                           decoration: BoxDecoration(
-                            color: isClosed ? Colors.red.withValues(alpha: 0.12) : Colors.green.withValues(alpha: 0.12),
+                            color: isClosed ? SoftPalette.red400.withValues(alpha: 0.12) : SoftPalette.green400.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: isClosed ? Colors.red.withValues(alpha: 0.3) : Colors.green.withValues(alpha: 0.3)),
+                            border: Border.all(color: isClosed ? SoftPalette.red400.withValues(alpha: 0.3) : SoftPalette.green400.withValues(alpha: 0.3)),
                           ),
                           child: Text(
                             isClosed ? '🔴 CLOSED / ARCHIVED' : '🟢 ACTIVE',
                             style: TextStyle(
                               fontSize: 10,
                               fontWeight: FontWeight.bold,
-                              color: isClosed ? Colors.redAccent : Colors.green,
+                              color: isClosed ? SoftPalette.red400 : SoftPalette.green400,
                             ),
                           ),
                         ),
@@ -2556,26 +2559,26 @@ class _BranchFacilityEditorDialogState
                           icon: Icon(
                             isClosed ? Icons.published_with_changes_rounded : Icons.archive_rounded,
                             size: 14,
-                            color: isClosed ? Colors.green : Colors.orange.shade800,
+                            color: isClosed ? SoftPalette.green400 : SoftPalette.orange400,
                           ),
                           label: Text(
                             isClosed ? 'Reopen Camp' : 'Close Camp',
                             style: TextStyle(
                               fontSize: 11,
                               fontWeight: FontWeight.bold,
-                              color: isClosed ? Colors.green : Colors.orange.shade800,
+                              color: isClosed ? SoftPalette.green400 : SoftPalette.orange400,
                             ),
                           ),
                           style: OutlinedButton.styleFrom(
                             padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                            side: BorderSide(color: isClosed ? Colors.green : Colors.orange.shade800),
+                            side: BorderSide(color: isClosed ? SoftPalette.green400 : SoftPalette.orange400),
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                           ),
                         ),
                         const SizedBox(width: 6),
 
                         IconButton(
-                          icon: const Icon(Icons.delete_outline_rounded, color: Colors.redAccent, size: 18),
+                          icon: const Icon(Icons.delete_outline_rounded, color: SoftPalette.red400, size: 18),
                           tooltip: 'Remove Camp',
                           onPressed: () {
                             setState(() {
@@ -2613,11 +2616,11 @@ class _BranchFacilityEditorDialogState
                                 label: Text(dLabel),
                                 selected: isSelected,
                                 selectedColor: dColor.withValues(alpha: 0.22),
-                                checkmarkColor: isDark ? Colors.white : dColor,
+                                checkmarkColor: isDark ? SoftPalette.gray50 : dColor,
                                 labelStyle: TextStyle(
                                   fontSize: 11,
                                   fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                  color: isSelected ? (isDark ? Colors.white : dColor) : subtextColor,
+                                  color: isSelected ? (isDark ? SoftPalette.gray50 : dColor) : subtextColor,
                                 ),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                 side: BorderSide(
@@ -2684,10 +2687,10 @@ class _BranchFacilityEditorDialogState
                                             children: [
                                               Text(
                                                 '${_formatTimeStr(effOpen)} - ${_formatTimeStr(effClose)}',
-                                                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: isDark ? Colors.white70 : sColor),
+                                                style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: isDark ? SoftPalette.gray50A70 : sColor),
                                               ),
                                               const SizedBox(width: 2),
-                                              Icon(Icons.edit_rounded, size: 9, color: isDark ? Colors.white70 : sColor),
+                                              Icon(Icons.edit_rounded, size: 9, color: isDark ? SoftPalette.gray50A70 : sColor),
                                             ],
                                           ),
                                         ),
@@ -2697,11 +2700,11 @@ class _BranchFacilityEditorDialogState
                                 ),
                                 selected: isSelected,
                                 selectedColor: sColor.withValues(alpha: 0.22),
-                                checkmarkColor: isDark ? Colors.white : sColor,
+                                checkmarkColor: isDark ? SoftPalette.gray50 : sColor,
                                 labelStyle: TextStyle(
                                   fontSize: 11,
                                   fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                  color: isSelected ? (isDark ? Colors.white : sColor) : subtextColor,
+                                  color: isSelected ? (isDark ? SoftPalette.gray50 : sColor) : subtextColor,
                                 ),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                 side: BorderSide(

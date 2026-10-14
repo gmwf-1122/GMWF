@@ -1,4 +1,6 @@
 import 'dart:math' as math;
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
@@ -134,9 +136,9 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
         ? (totalMemorized / widget.totalLines * 100).clamp(0.0, 100.0)
         : 0.0;
     final remaining = (widget.totalLines - totalMemorized).clamp(0, widget.totalLines);
-    const teal = Color(0xFF008080);
-    const tealLight = Color(0xFFE0F2F1);
-    const cardBg = Color(0xFFF8FFFE);
+    const teal = SoftPalette.teal550;
+    final tealLight = context.adapt(SoftPalette.teal100m);
+    final cardBg = context.adapt(SoftPalette.teal50t);
 
     final isNazra = widget.isNazra == true ||
         widget.className.toLowerCase().contains('nazra') ||
@@ -170,11 +172,11 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
             child: Container(
               width: 480,
               decoration: BoxDecoration(
-                color: Colors.white,
+                color: context.adapt(SoftPalette.gray50),
                 borderRadius: BorderRadius.circular(24),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withOpacity(0.14),
+                    color: SoftPalette.gray900.withOpacity(0.14),
                     blurRadius: 32,
                     offset: const Offset(0, 12),
                   ),
@@ -187,7 +189,7 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                   Container(
                     decoration: const BoxDecoration(
                       gradient: LinearGradient(
-                        colors: [Color(0xFF005f5f), teal, Color(0xFF00a896)],
+                        colors: [SoftPalette.teal600, teal, SoftPalette.teal400],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       ),
@@ -200,17 +202,17 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                         Container(
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
-                            border: Border.all(color: Colors.white, width: 3),
+                            border: Border.all(color: SoftPalette.gray50, width: 3),
                             boxShadow: [
                               BoxShadow(
-                                color: Colors.black.withOpacity(0.2),
+                                color: SoftPalette.gray900.withOpacity(0.2),
                                 blurRadius: 8,
                               ),
                             ],
                           ),
                           child: CircleAvatar(
                             radius: 36,
-                            backgroundColor: const Color(0xFF006666),
+                            backgroundColor: SoftPalette.teal600,
                             child: ClipOval(
                               child: () {
                                 final photoStr = widget.photoUrl?.trim();
@@ -225,13 +227,13 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                     height: 72,
                                     errorBuilder: (_, __, ___) => Text(
                                       widget.studentName.isNotEmpty ? widget.studentName[0].toUpperCase() : '?',
-                                      style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
+                                      style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: SoftPalette.gray50),
                                     ),
                                   );
                                 }
                                 return Text(
                                   widget.studentName.isNotEmpty ? widget.studentName[0].toUpperCase() : '?',
-                                  style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: Colors.white),
+                                  style: const TextStyle(fontSize: 28, fontWeight: FontWeight.bold, color: SoftPalette.gray50),
                                 );
                               }(),
                             ),
@@ -247,7 +249,7 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                 style: const TextStyle(
                                   fontSize: 20,
                                   fontWeight: FontWeight.bold,
-                                  color: Colors.white,
+                                  color: SoftPalette.gray50,
                                   letterSpacing: 0.3,
                                 ),
                               ),
@@ -301,7 +303,7 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                 child: CustomPaint(
                                   painter: _ArcPainter(
                                     progress: _progressAnim.value,
-                                    color: isNazra && isQComp ? const Color(0xFF10B981) : teal,
+                                    color: isNazra && isQComp ? context.adapt(SoftPalette.emerald350) : teal,
                                     bg: tealLight,
                                   ),
                                   child: Center(
@@ -312,7 +314,7 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                       style: TextStyle(
                                         fontSize: 14,
                                         fontWeight: FontWeight.bold,
-                                        color: isNazra && isQComp ? const Color(0xFF10B981) : teal,
+                                        color: isNazra && isQComp ? context.adapt(SoftPalette.emerald350) : teal,
                                       ),
                                     ),
                                   ),
@@ -328,10 +330,10 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                     isNazra
                                         ? (context.isUrdu ? 'قاعدہ کی پیش رفت' : 'Qaida Progress')
                                         : 'Memorization Progress',
-                                    style: const TextStyle(
+                                    style: TextStyle(
                                       fontSize: 12,
                                       fontWeight: FontWeight.w600,
-                                      color: Color(0xFF6B7280),
+                                      color: context.adapt(SoftPalette.slate550),
                                       letterSpacing: 0.5,
                                     ),
                                   ),
@@ -345,7 +347,7 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                         minHeight: 10,
                                         backgroundColor: tealLight,
                                         valueColor: AlwaysStoppedAnimation(
-                                          isNazra && isQComp ? const Color(0xFF10B981) : teal,
+                                          isNazra && isQComp ? context.adapt(SoftPalette.emerald350) : teal,
                                         ),
                                       ),
                                     ),
@@ -361,9 +363,9 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                                 ? (context.isUrdu ? 'قاعدہ مکمل (21 اسباق)' : 'Qaida Completed (21 Lessons)')
                                                 : (context.isUrdu ? 'سبق نمبر $qLessonNum / ۲۱ زیرِ تعلیم' : 'Lesson $qLessonNum of 21 in progress'))
                                             : '$totalMemorized lines memorized',
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           fontSize: 12,
-                                          color: Color(0xFF374151),
+                                          color: context.adapt(SoftPalette.slate700),
                                           fontWeight: FontWeight.w500,
                                         ),
                                       ),
@@ -373,9 +375,9 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                                 ? '✅ 100%'
                                                 : (context.isUrdu ? '${21 - qLessonNum} اسباق باقی' : '${21 - qLessonNum} left'))
                                             : '$remaining left',
-                                        style: const TextStyle(
+                                        style: TextStyle(
                                           fontSize: 11,
-                                          color: Color(0xFF9CA3AF),
+                                          color: context.adapt(SoftPalette.slate350),
                                         ),
                                       ),
                                     ],
@@ -396,8 +398,8 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                 icon: Icons.auto_stories_rounded,
                                 label: context.isUrdu ? 'قاعدہ اسباق' : 'Qaida Lessons',
                                 value: isQComp ? '21 / 21 ✅' : '$qLessonNum / 21',
-                                color: isQComp ? const Color(0xFF059669) : teal,
-                                bg: isQComp ? const Color(0xFFECFDF5) : tealLight,
+                                color: isQComp ? context.adapt(SoftPalette.emerald500) : teal,
+                                bg: isQComp ? context.adapt(SoftPalette.emerald50) : tealLight,
                               ),
                               const SizedBox(width: 10),
                               _statCard(
@@ -406,16 +408,16 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                 value: isQComp
                                     ? (context.isUrdu ? 'ناظرہ قرآن' : 'Nazra Quran')
                                     : (context.isUrdu ? 'قاعدہ جاری' : 'Qaida Active'),
-                                color: const Color(0xFF6366F1),
-                                bg: const Color(0xFFEEF2FF),
+                                color: context.adapt(SoftPalette.indigo500),
+                                bg: context.adapt(SoftPalette.slate100),
                               ),
                               const SizedBox(width: 10),
                               _statCard(
                                 icon: Icons.timelapse_rounded,
                                 label: 'Time with Org',
                                 value: _timeWithOrg(),
-                                color: const Color(0xFFF59E0B),
-                                bg: const Color(0xFFFFFBEB),
+                                color: context.adapt(SoftPalette.amber300),
+                                bg: context.adapt(SoftPalette.yellow50m),
                               ),
                             ],
                           ),
@@ -426,8 +428,8 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                 icon: Icons.menu_book_rounded,
                                 label: 'Total Verses',
                                 value: '${widget.totalLines}',
-                                color: const Color(0xFF6366F1),
-                                bg: const Color(0xFFEEF2FF),
+                                color: context.adapt(SoftPalette.indigo500),
+                                bg: context.adapt(SoftPalette.slate100),
                               ),
                               const SizedBox(width: 10),
                               _statCard(
@@ -442,8 +444,8 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                 icon: Icons.timelapse_rounded,
                                 label: 'Time with Org',
                                 value: _timeWithOrg(),
-                                color: const Color(0xFFF59E0B),
-                                bg: const Color(0xFFFFFBEB),
+                                color: context.adapt(SoftPalette.amber300),
+                                bg: context.adapt(SoftPalette.yellow50m),
                               ),
                             ],
                           ),
@@ -457,10 +459,10 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                             width: double.infinity,
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
-                              color: isQComp ? const Color(0xFFF0FDF4) : const Color(0xFFF0FDFA),
+                              color: isQComp ? context.adapt(SoftPalette.emerald50m) : context.adapt(SoftPalette.teal50t),
                               borderRadius: BorderRadius.circular(14),
                               border: Border.all(
-                                color: isQComp ? const Color(0xFFBBF7D0) : const Color(0xFFCCFBF1),
+                                color: isQComp ? context.adapt(SoftPalette.emerald150) : context.adapt(SoftPalette.teal100),
                               ),
                             ),
                             child: Row(
@@ -468,12 +470,12 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                 Container(
                                   padding: const EdgeInsets.all(8),
                                   decoration: BoxDecoration(
-                                    color: isQComp ? const Color(0xFFDCFCE7) : const Color(0xFFCCFBF1),
+                                    color: isQComp ? context.adapt(SoftPalette.emerald100) : context.adapt(SoftPalette.teal100),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
                                   child: Icon(
                                     isQComp ? Icons.verified_rounded : Icons.auto_stories_rounded,
-                                    color: isQComp ? const Color(0xFF16A34A) : teal,
+                                    color: isQComp ? context.adapt(SoftPalette.green400) : teal,
                                     size: 20,
                                   ),
                                 ),
@@ -488,7 +490,7 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                             : (context.isUrdu ? 'قاعدہ مرحلہ: جاری' : 'Qaida Stage: In Progress'),
                                         style: TextStyle(
                                           fontSize: 11,
-                                          color: isQComp ? const Color(0xFF15803D) : const Color(0xFF0F766E),
+                                          color: isQComp ? context.adapt(SoftPalette.green550) : context.adapt(SoftPalette.teal550),
                                           fontWeight: FontWeight.w700,
                                           letterSpacing: 0.4,
                                         ),
@@ -501,7 +503,7 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                         style: TextStyle(
                                           fontSize: 15,
                                           fontWeight: FontWeight.bold,
-                                          color: isQComp ? const Color(0xFF166534) : const Color(0xFF115E59),
+                                          color: isQComp ? context.adapt(SoftPalette.green600) : context.adapt(SoftPalette.teal600),
                                         ),
                                       ),
                                       const SizedBox(height: 3),
@@ -513,7 +515,7 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                             : (context.isUrdu ? 'باقی اسباق: ${21 - qLessonNum} (کل 21 اسباق)' : '${21 - qLessonNum} lessons remaining out of 21'),
                                         style: TextStyle(
                                           fontSize: 11,
-                                          color: isQComp ? const Color(0xFF15803D) : Colors.grey[700],
+                                          color: isQComp ? context.adapt(SoftPalette.green550) : context.adapt(SoftPalette.gray550),
                                         ),
                                       ),
                                     ],
@@ -529,12 +531,12 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                             decoration: BoxDecoration(
                               color: widget.estimatedDays != null
                                   ? cardBg
-                                  : const Color(0xFFFFF7ED),
+                                  : context.adapt(SoftPalette.amber50m),
                               borderRadius: BorderRadius.circular(14),
                               border: Border.all(
                                 color: widget.estimatedDays != null
                                   ? tealLight
-                                  : const Color(0xFFFED7AA),
+                                  : context.adapt(SoftPalette.amber150),
                             ),
                           ),
                           child: Row(
@@ -544,14 +546,14 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                 decoration: BoxDecoration(
                                   color: widget.estimatedDays != null
                                       ? tealLight
-                                      : const Color(0xFFFED7AA),
+                                      : context.adapt(SoftPalette.amber150),
                                   borderRadius: BorderRadius.circular(10),
                                 ),
                                 child: Icon(
                                   Icons.flag_rounded,
                                   color: widget.estimatedDays != null
                                       ? teal
-                                      : const Color(0xFFEA580C),
+                                      : context.adapt(SoftPalette.orange400),
                                   size: 20,
                                 ),
                               ),
@@ -564,7 +566,7 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                       'Estimated Completion',
                                       style: TextStyle(
                                         fontSize: 11,
-                                        color: Colors.grey[600],
+                                        color: context.adapt(SoftPalette.gray500),
                                         fontWeight: FontWeight.w600,
                                         letterSpacing: 0.4,
                                       ),
@@ -578,8 +580,8 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                         fontSize: 16,
                                         fontWeight: FontWeight.bold,
                                         color: widget.estimatedDays != null
-                                            ? const Color(0xFF065F46)
-                                            : const Color(0xFF9A3412),
+                                            ? context.adapt(SoftPalette.emerald600)
+                                            : context.adapt(SoftPalette.red600),
                                       ),
                                     ),
                                     if (widget.estimatedDays != null)
@@ -587,7 +589,7 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                         'Based on daily memorization rate',
                                         style: TextStyle(
                                           fontSize: 10,
-                                          color: Colors.grey[500],
+                                          color: context.adapt(SoftPalette.gray350),
                                         ),
                                       ),
                                   ],
@@ -604,21 +606,21 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                             width: double.infinity,
                             padding: const EdgeInsets.all(16),
                             decoration: BoxDecoration(
-                              color: const Color(0xFFF0FDF4),
+                              color: context.adapt(SoftPalette.emerald50m),
                               borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: const Color(0xFFDCFCE7)),
+                              border: Border.all(color: context.adapt(SoftPalette.emerald100)),
                             ),
                             child: Row(
                               children: [
                                 Container(
                                   padding: const EdgeInsets.all(8),
                                   decoration: BoxDecoration(
-                                    color: const Color(0xFFDCFCE7),
+                                    color: context.adapt(SoftPalette.emerald100),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
-                                  child: const Icon(
+                                  child: Icon(
                                     Icons.insights_rounded,
-                                    color: Color(0xFF16A34A),
+                                    color: context.adapt(SoftPalette.green400),
                                     size: 20,
                                   ),
                                 ),
@@ -627,11 +629,11 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                   child: Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      const Text(
+                                      Text(
                                         '3-Year Hifz Target (36 Months)',
                                         style: TextStyle(
                                           fontSize: 11,
-                                          color: Color(0xFF15803D),
+                                          color: context.adapt(SoftPalette.green550),
                                           fontWeight: FontWeight.w700,
                                           letterSpacing: 0.4,
                                         ),
@@ -640,10 +642,10 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                       if (daysLeftIn3Years > 0) ...[
                                         Text(
                                           'Requires min. ${linesPerDayRequired.toStringAsFixed(1)} lines/day to finish on time',
-                                          style: const TextStyle(
+                                          style: TextStyle(
                                             fontSize: 13,
                                             fontWeight: FontWeight.bold,
-                                            color: Color(0xFF166534),
+                                            color: context.adapt(SoftPalette.green600),
                                           ),
                                         ),
                                         const SizedBox(height: 2),
@@ -651,16 +653,16 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                           'Target Time Left: ${_formatDays(daysLeftIn3Years)} • Current pace: ${(widget.recentDailyRate ?? 0.0).toStringAsFixed(1)} lines/day',
                                           style: TextStyle(
                                             fontSize: 10.5,
-                                            color: Colors.grey[700],
+                                            color: context.adapt(SoftPalette.gray550),
                                           ),
                                         ),
                                       ] else ...[
-                                        const Text(
+                                        Text(
                                           'Target completion timeframe exceeded (3 years passed)',
                                           style: TextStyle(
                                             fontSize: 13,
                                             fontWeight: FontWeight.bold,
-                                            color: Color(0xFF991B1B),
+                                            color: context.adapt(SoftPalette.red600),
                                           ),
                                         ),
                                         const SizedBox(height: 2),
@@ -668,7 +670,7 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
                                           'Current pace: ${(widget.recentDailyRate ?? 0.0).toStringAsFixed(1)} lines/day',
                                           style: TextStyle(
                                             fontSize: 10.5,
-                                            color: Colors.grey[700],
+                                            color: context.adapt(SoftPalette.gray550),
                                           ),
                                         ),
                                       ],
@@ -719,17 +721,17 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.2),
+        color: SoftPalette.gray50.withOpacity(0.2),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(icon, size: 11, color: Colors.white70),
+          Icon(icon, size: 11, color: SoftPalette.gray50A70),
           const SizedBox(width: 4),
           Text(
             label,
-            style: const TextStyle(fontSize: 11, color: Colors.white),
+            style: const TextStyle(fontSize: 11, color: SoftPalette.gray50),
           ),
         ],
       ),
@@ -766,9 +768,9 @@ class _StudentProgressDialogState extends State<StudentProgressDialog>
             const SizedBox(height: 2),
             Text(
               label,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 10,
-                color: Color(0xFF6B7280),
+                color: context.adapt(SoftPalette.slate550),
                 fontWeight: FontWeight.w500,
               ),
             ),

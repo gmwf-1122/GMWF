@@ -1,6 +1,8 @@
 // lib/widgets/bank_logo_widget.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
 
 class BankLogoWidget extends StatelessWidget {
   final String bankName;
@@ -44,17 +46,17 @@ class BankLogoWidget extends StatelessWidget {
   /// Provides brand color for initial badge fallbacks
   static Color getBrandColor(String name) {
     final lower = name.toLowerCase().trim();
-    if (lower.contains('meezan')) return const Color(0xFF501968);
-    if (lower.contains('easypaisa')) return const Color(0xFF00A859);
-    if (lower.contains('jazzcash')) return const Color(0xFFED1C24);
-    if (lower.contains('ubl')) return const Color(0xFF00569B);
-    if (lower.contains('bop')) return const Color(0xFFD32F2F);
-    if (lower.contains('nbp')) return const Color(0xFF006837);
-    if (lower.contains('faysal')) return const Color(0xFF003865);
-    if (lower.contains('hbl')) return const Color(0xFF008375);
-    if (lower.contains('mcb')) return const Color(0xFFFF6600);
-    if (lower.contains('cash')) return const Color(0xFF10B981);
-    return const Color(0xFF475569);
+    if (lower.contains('meezan')) return SoftPalette.purple750;
+    if (lower.contains('easypaisa')) return SoftPalette.green400;
+    if (lower.contains('jazzcash')) return SoftPalette.red500;
+    if (lower.contains('ubl')) return SoftPalette.blue600;
+    if (lower.contains('bop')) return SoftPalette.red500;
+    if (lower.contains('nbp')) return SoftPalette.green600;
+    if (lower.contains('faysal')) return SoftPalette.blue750;
+    if (lower.contains('hbl')) return SoftPalette.teal550;
+    if (lower.contains('mcb')) return SoftPalette.orange350;
+    if (lower.contains('cash')) return SoftPalette.emerald350;
+    return SoftPalette.slate600;
   }
 
   static String getBankInitials(String name) {
@@ -79,11 +81,11 @@ class BankLogoWidget extends StatelessWidget {
         width: size,
         height: size,
         decoration: BoxDecoration(
-          color: const Color(0xFF10B981).withOpacity(0.15),
+          color: SoftPalette.emerald350.withOpacity(0.15),
           shape: BoxShape.circle,
-          border: Border.all(color: const Color(0xFF10B981).withOpacity(0.3), width: 1),
+          border: Border.all(color: SoftPalette.emerald350.withOpacity(0.3), width: 1),
         ),
-        child: Icon(Icons.payments_rounded, size: size * 0.58, color: const Color(0xFF10B981)),
+        child: Icon(Icons.payments_rounded, size: size * 0.58, color: SoftPalette.emerald350),
       );
     } else if (assetPath != null) {
       logoChild = Container(
@@ -91,11 +93,11 @@ class BankLogoWidget extends StatelessWidget {
         height: size,
         padding: const EdgeInsets.all(2),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: SoftPalette.gray50,
           borderRadius: BorderRadius.circular(size * 0.22),
-          border: Border.all(color: const Color(0xFFE2E8F0), width: 1),
+          border: Border.all(color: SoftPalette.slate150, width: 1),
           boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.04), blurRadius: 4, offset: const Offset(0, 1)),
+            BoxShadow(color: SoftPalette.gray900.withOpacity(0.04), blurRadius: 4, offset: const Offset(0, 1)),
           ],
         ),
         child: ClipRRect(
@@ -123,10 +125,10 @@ class BankLogoWidget extends StatelessWidget {
         Text(
           bankName,
           style: labelStyle ??
-              const TextStyle(
+              TextStyle(
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
-                color: Color(0xFF0F172A),
+                color: context.adapt(SoftPalette.slate900),
               ),
         ),
       ],
@@ -151,7 +153,7 @@ class BankLogoWidget extends StatelessWidget {
         child: Text(
           initials,
           style: TextStyle(
-            color: Colors.white,
+            color: SoftPalette.gray50,
             fontWeight: FontWeight.w800,
             fontSize: size * 0.4,
             letterSpacing: -0.5,

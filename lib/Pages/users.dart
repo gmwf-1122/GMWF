@@ -1,6 +1,10 @@
 // lib/pages/users.dart — Role-Theme Aware + Full Mobile Responsive
 
+import 'package:gmwf/services/cloud/cloud_db.dart';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
+import 'package:gmwf/design/tokens/comfort_colors.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:flutter/services.dart';
@@ -20,6 +24,7 @@ import '../widgets/global_module_wrapper.dart';
 import '../widgets/app_back_button.dart';
 import '../widgets/device_badge_widget.dart';
 import '../utils/formatters.dart';
+import '../utils/debounced_box_listenable.dart';
 import '../services/user_module_access_service.dart';
 import '../services/device_info_service.dart';
 import '../services/finance_local_storage.dart';
@@ -265,7 +270,7 @@ class _UsersScreenState extends State<UsersScreen>
                       label: const Text('Register User', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: t.accent,
-                        foregroundColor: Colors.white,
+                        foregroundColor: SoftPalette.gray50,
                         elevation: 0,
                         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
@@ -306,7 +311,7 @@ class _UsersScreenState extends State<UsersScreen>
                   ),
                 ],
               ),
-              labelColor: Colors.white,
+              labelColor: SoftPalette.gray50,
               unselectedLabelColor: t.textSecondary,
               labelStyle: const TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5),
               unselectedLabelStyle: const TextStyle(fontWeight: FontWeight.w500, fontSize: 12.5),
@@ -353,13 +358,13 @@ class _UsersScreenState extends State<UsersScreen>
         await LocalStorageService.repairAndSanitizeLocalAccounts();
       }
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           const SnackBar(content: Text('Records refreshed successfully'), duration: Duration(seconds: 2)),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(content: Text('Refresh failed: $e'), duration: const Duration(seconds: 2)),
         );
       }
@@ -372,22 +377,22 @@ class _UsersScreenState extends State<UsersScreen>
       final pushed = await LocalStorageService.pushLocalUsersToFirestore();
       if (mounted) {
         setState(() {});
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text(
               'Accounts Repaired: ${res["canonicalUsers"]} verified, ${res["rolesRepaired"]} roles fixed, $pushed synced to Firestore.',
             ),
-            backgroundColor: const Color(0xFF10B981),
+            backgroundColor: SoftPalette.emerald350,
             duration: const Duration(seconds: 4),
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('Repair error: $e'),
-            backgroundColor: Colors.redAccent,
+            backgroundColor: SoftPalette.red400,
           ),
         );
       }
@@ -397,27 +402,27 @@ class _UsersScreenState extends State<UsersScreen>
   Future<void> _triggerHealKashif() async {
     try {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           const SnackBar(content: Text('Healing Kashif account and synchronizing with Cloud...'), duration: Duration(seconds: 1)),
         );
       }
       final ok = await LocalStorageService.healKashifAccount(syncToCloud: true);
       if (mounted) {
         setState(() {});
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text(ok
                 ? '✅ Kashif account healed & fully activated! (rec+dis · Karachi · Pin: 1122)'
                 : 'Failed to heal Kashif account'),
-            backgroundColor: ok ? const Color(0xFF10B981) : Colors.redAccent,
+            backgroundColor: ok ? SoftPalette.emerald350 : SoftPalette.red400,
             duration: const Duration(seconds: 4),
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Heal Kashif error: $e'), backgroundColor: Colors.redAccent),
+        AppToast.showSnackBar(context, 
+          SnackBar(content: Text('Heal Kashif error: $e'), backgroundColor: SoftPalette.red400),
         );
       }
     }
@@ -426,24 +431,24 @@ class _UsersScreenState extends State<UsersScreen>
   Future<void> _pushUsersToCloud() async {
     try {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           const SnackBar(content: Text('Restoring local users to Firestore...'), duration: Duration(seconds: 1)),
         );
       }
       final pushed = await LocalStorageService.pushLocalUsersToFirestore();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('✅ $pushed local users successfully restored to Firestore!'),
-            backgroundColor: const Color(0xFF10B981),
+            backgroundColor: SoftPalette.emerald350,
             duration: const Duration(seconds: 4),
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Upload failed: $e'), backgroundColor: Colors.redAccent),
+        AppToast.showSnackBar(context, 
+          SnackBar(content: Text('Upload failed: $e'), backgroundColor: SoftPalette.red400),
         );
       }
     }
@@ -522,24 +527,24 @@ class _UsersScreenState extends State<UsersScreen>
 
       if (mounted) {
         setState(() {});
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text(
               directWriteSucceeded
                   ? '✅ Account active and confirmed in Cloud Firestore!'
                   : '✅ Account healed locally & enqueued for Cloud sync!',
             ),
-            backgroundColor: const Color(0xFF10B981),
+            backgroundColor: SoftPalette.emerald350,
             duration: const Duration(seconds: 3),
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('Failed to heal account: $e'),
-            backgroundColor: Colors.redAccent,
+            backgroundColor: SoftPalette.red400,
           ),
         );
       }
@@ -617,7 +622,7 @@ class _UsersScreenState extends State<UsersScreen>
                 border: Border.all(color: t.bgRule),
                 boxShadow: [
                   BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.03),
+                    color: SoftPalette.gray900.withValues(alpha: 0.03),
                     blurRadius: 6,
                     offset: const Offset(0, 2),
                   ),
@@ -690,10 +695,10 @@ class _UsersScreenState extends State<UsersScreen>
                       : null,
                 ),
                 child: Row(children: [
-                  Icon(Icons.tune_rounded, color: _filtersExpanded ? Colors.white : t.textSecondary, size: 18),
+                  Icon(Icons.tune_rounded, color: _filtersExpanded ? SoftPalette.gray50 : t.textSecondary, size: 18),
                   const SizedBox(width: 6),
                   Text('Filters', style: TextStyle(
-                      color: _filtersExpanded ? Colors.white : t.textSecondary,
+                      color: _filtersExpanded ? SoftPalette.gray50 : t.textSecondary,
                       fontSize: 12.5, fontWeight: FontWeight.w700)),
                 ]),
               ),
@@ -703,8 +708,8 @@ class _UsersScreenState extends State<UsersScreen>
             const SizedBox(width: 8),
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF0F5132),
-                foregroundColor: Colors.white,
+                backgroundColor: SoftPalette.emerald700,
+                foregroundColor: SoftPalette.gray50,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 elevation: 0,
@@ -718,8 +723,8 @@ class _UsersScreenState extends State<UsersScreen>
             const SizedBox(width: 8),
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF0284C7),
-                foregroundColor: Colors.white,
+                backgroundColor: SoftPalette.sky500,
+                foregroundColor: SoftPalette.gray50,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 elevation: 0,
@@ -731,26 +736,26 @@ class _UsersScreenState extends State<UsersScreen>
             const SizedBox(width: 8),
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF1E293B),
-                foregroundColor: Colors.white,
+                backgroundColor: SoftPalette.slate800,
+                foregroundColor: SoftPalette.gray50,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 elevation: 0,
               ),
-              icon: const Icon(Icons.auto_fix_high_rounded, size: 18, color: Color(0xFF38BDF8)),
+              icon: const Icon(Icons.auto_fix_high_rounded, size: 18, color: SoftPalette.sky350),
               label: const Text('Repair Accounts', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
               onPressed: () => _repairLocalAccounts(),
             ),
             const SizedBox(width: 8),
             ElevatedButton.icon(
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF065F46),
-                foregroundColor: Colors.white,
+                backgroundColor: SoftPalette.emerald600,
+                foregroundColor: SoftPalette.gray50,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                 elevation: 0,
               ),
-              icon: const Icon(Icons.healing_rounded, size: 18, color: Color(0xFF34D399)),
+              icon: const Icon(Icons.healing_rounded, size: 18, color: SoftPalette.emerald300),
               label: const Text('Heal Kashif', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
               onPressed: () => _triggerHealKashif(),
             ),
@@ -813,9 +818,9 @@ class _UsersScreenState extends State<UsersScreen>
                 border: Border.all(color: _familyView ? t.accent : t.bgRule),
               ),
               child: Row(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.family_restroom_rounded, color: _familyView ? Colors.white : t.textSecondary, size: 14),
+                Icon(Icons.family_restroom_rounded, color: _familyView ? SoftPalette.gray50 : t.textSecondary, size: 14),
                 const SizedBox(width: 5),
-                Text('Family', style: TextStyle(color: _familyView ? Colors.white : t.textSecondary,
+                Text('Family', style: TextStyle(color: _familyView ? SoftPalette.gray50 : t.textSecondary,
                     fontSize: 12, fontWeight: FontWeight.w600)),
               ]),
             ),
@@ -837,7 +842,7 @@ class _UsersScreenState extends State<UsersScreen>
           border: Border.all(color: active ? t.accent : t.bgRule),
         ),
         child: Text(label, style: TextStyle(
-            color: active ? Colors.white : t.textSecondary,
+            color: active ? SoftPalette.gray50 : t.textSecondary,
             fontSize: 12, fontWeight: FontWeight.w600)),
       ),
     );
@@ -897,7 +902,7 @@ class _UsersScreenState extends State<UsersScreen>
         _syncPatientsForBranch(branchId);
       }
       return ValueListenableBuilder<Box>(
-        valueListenable: Hive.box(LocalStorageService.patientsBox).listenable(),
+        valueListenable: DebouncedBoxListenable.shared(Hive.box(LocalStorageService.patientsBox)), // batched: a sync writes hundreds of patients
         builder: (context, box, _) {
           final allLocal = LocalStorageService.getAllLocalPatients(branchId: branchId);
           var filtered = allLocal.where((p) {
@@ -967,7 +972,7 @@ class _UsersScreenState extends State<UsersScreen>
 
     // Staff path (Local-first + Hive reactive updates)
     return ValueListenableBuilder<Box>(
-      valueListenable: Hive.box('local_users').listenable(),
+      valueListenable: DebouncedBoxListenable.shared(Hive.box('local_users')), // batched: one rebuild per sync burst
       builder: (context, box, _) {
         if (!_syncedBranches.contains('users_$branchId')) {
           _syncedBranches.add('users_$branchId');
@@ -1261,33 +1266,33 @@ class _UsersScreenState extends State<UsersScreen>
         }
 
         if (_selectedCategoryFilter == 'online') {
-          addCategorySection('online', 'Currently Online', onlineList.length, Icons.fiber_manual_record, Colors.green, onlineList);
+          addCategorySection('online', 'Currently Online', onlineList.length, Icons.fiber_manual_record, SoftPalette.green400, onlineList);
         } else if (_selectedCategoryFilter == 'office') {
-          addCategorySection('office', 'Office & Administration', officeList.length, Icons.business_center_rounded, Colors.indigo, officeList);
+          addCategorySection('office', 'Office & Administration', officeList.length, Icons.business_center_rounded, SoftPalette.indigo600, officeList);
         } else if (_selectedCategoryFilter == 'kitchen') {
-          addCategorySection('kitchen', 'Dasterkhawaan & Kitchen', kitchenList.length, Icons.soup_kitchen_rounded, Colors.amber.shade800, kitchenList);
+          addCategorySection('kitchen', 'Dasterkhawaan & Kitchen', kitchenList.length, Icons.soup_kitchen_rounded, SoftPalette.orange350, kitchenList);
         } else if (_selectedCategoryFilter == 'dispensary') {
-          addCategorySection('dispensary', 'Dispensary Department', dispensaryList.length, Icons.local_hospital_rounded, Colors.blue, dispensaryList);
+          addCategorySection('dispensary', 'Dispensary Department', dispensaryList.length, Icons.local_hospital_rounded, SoftPalette.blue400, dispensaryList);
         } else if (_selectedCategoryFilter == 'madrassa_faculty') {
-          addCategorySection('madrassa_faculty', 'Madrassa Faculty', madrassaFacultyList.length, Icons.school_rounded, Colors.teal, madrassaFacultyList);
+          addCategorySection('madrassa_faculty', 'Madrassa Faculty', madrassaFacultyList.length, Icons.school_rounded, SoftPalette.teal500, madrassaFacultyList);
         } else if (_selectedCategoryFilter == 'madrassa_guardian') {
-          addCategorySection('madrassa_guardian', 'Madrassa Guardians', madrassaGuardianList.length, Icons.family_restroom_rounded, Colors.orange, madrassaGuardianList);
+          addCategorySection('madrassa_guardian', 'Madrassa Guardians', madrassaGuardianList.length, Icons.family_restroom_rounded, SoftPalette.amber300, madrassaGuardianList);
         } else if (_selectedCategoryFilter == 'school_faculty') {
-          addCategorySection('school_faculty', 'School Faculty', schoolFacultyList.length, Icons.account_balance_rounded, Colors.deepPurple, schoolFacultyList);
+          addCategorySection('school_faculty', 'School Faculty', schoolFacultyList.length, Icons.account_balance_rounded, SoftPalette.violet600, schoolFacultyList);
         } else if (_selectedCategoryFilter == 'school_guardian') {
-          addCategorySection('school_guardian', 'School Guardians', schoolGuardianList.length, Icons.family_restroom_rounded, Colors.purpleAccent, schoolGuardianList);
+          addCategorySection('school_guardian', 'School Guardians', schoolGuardianList.length, Icons.family_restroom_rounded, SoftPalette.purple400, schoolGuardianList);
         } else if (_selectedCategoryFilter == 'revoked') {
-          addCategorySection('revoked', 'Revoked Users & Offboarded Employees', revokedList.length, Icons.no_accounts_rounded, Colors.red, revokedList);
+          addCategorySection('revoked', 'Revoked Users & Offboarded Employees', revokedList.length, Icons.no_accounts_rounded, SoftPalette.red400, revokedList);
         } else {
-          addCategorySection('online', 'Currently Online', onlineList.length, Icons.fiber_manual_record, Colors.green, onlineList);
-          addCategorySection('office', 'Office & Administration', officeList.length, Icons.business_center_rounded, Colors.indigo, officeList);
-          addCategorySection('kitchen', 'Dasterkhawaan & Kitchen', kitchenList.length, Icons.soup_kitchen_rounded, Colors.amber.shade800, kitchenList);
-          addCategorySection('dispensary', 'Dispensary Department', dispensaryList.length, Icons.local_hospital_rounded, Colors.blue, dispensaryList);
-          if (madrassaFacultyList.isNotEmpty) addCategorySection('madrassa_faculty', 'Madrassa Faculty', madrassaFacultyList.length, Icons.school_rounded, Colors.teal, madrassaFacultyList);
-          if (madrassaGuardianList.isNotEmpty) addCategorySection('madrassa_guardian', 'Madrassa Guardians', madrassaGuardianList.length, Icons.family_restroom_rounded, Colors.orange, madrassaGuardianList);
-          if (schoolFacultyList.isNotEmpty) addCategorySection('school_faculty', 'School Faculty', schoolFacultyList.length, Icons.account_balance_rounded, Colors.deepPurple, schoolFacultyList);
-          if (schoolGuardianList.isNotEmpty) addCategorySection('school_guardian', 'School Guardians', schoolGuardianList.length, Icons.family_restroom_rounded, Colors.purpleAccent, schoolGuardianList);
-          addCategorySection('revoked', 'Revoked Users & Offboarded Employees', revokedList.length, Icons.no_accounts_rounded, Colors.red, revokedList);
+          addCategorySection('online', 'Currently Online', onlineList.length, Icons.fiber_manual_record, SoftPalette.green400, onlineList);
+          addCategorySection('office', 'Office & Administration', officeList.length, Icons.business_center_rounded, SoftPalette.indigo600, officeList);
+          addCategorySection('kitchen', 'Dasterkhawaan & Kitchen', kitchenList.length, Icons.soup_kitchen_rounded, SoftPalette.orange350, kitchenList);
+          addCategorySection('dispensary', 'Dispensary Department', dispensaryList.length, Icons.local_hospital_rounded, SoftPalette.blue400, dispensaryList);
+          if (madrassaFacultyList.isNotEmpty) addCategorySection('madrassa_faculty', 'Madrassa Faculty', madrassaFacultyList.length, Icons.school_rounded, SoftPalette.teal500, madrassaFacultyList);
+          if (madrassaGuardianList.isNotEmpty) addCategorySection('madrassa_guardian', 'Madrassa Guardians', madrassaGuardianList.length, Icons.family_restroom_rounded, SoftPalette.amber300, madrassaGuardianList);
+          if (schoolFacultyList.isNotEmpty) addCategorySection('school_faculty', 'School Faculty', schoolFacultyList.length, Icons.account_balance_rounded, SoftPalette.violet600, schoolFacultyList);
+          if (schoolGuardianList.isNotEmpty) addCategorySection('school_guardian', 'School Guardians', schoolGuardianList.length, Icons.family_restroom_rounded, SoftPalette.purple400, schoolGuardianList);
+          addCategorySection('revoked', 'Revoked Users & Offboarded Employees', revokedList.length, Icons.no_accounts_rounded, SoftPalette.red400, revokedList);
         }
 
         final activeCategoryKeys = <String>[
@@ -1317,31 +1322,31 @@ class _UsersScreenState extends State<UsersScreen>
                       children: [
                         _categoryChip(t, 'All (${list.length})', 'all', Icons.grid_view_rounded, t.accent),
                         const SizedBox(width: 6),
-                        _categoryChip(t, 'Online (${onlineList.length})', 'online', Icons.fiber_manual_record, Colors.green),
+                        _categoryChip(t, 'Online (${onlineList.length})', 'online', Icons.fiber_manual_record, SoftPalette.green400),
                         const SizedBox(width: 6),
-                        _categoryChip(t, 'Office (${officeList.length})', 'office', Icons.business_center_rounded, Colors.indigo),
+                        _categoryChip(t, 'Office (${officeList.length})', 'office', Icons.business_center_rounded, SoftPalette.indigo600),
                         const SizedBox(width: 6),
-                        _categoryChip(t, 'Dasterkhawaan (${kitchenList.length})', 'kitchen', Icons.soup_kitchen_rounded, Colors.amber.shade800),
+                        _categoryChip(t, 'Dasterkhawaan (${kitchenList.length})', 'kitchen', Icons.soup_kitchen_rounded, SoftPalette.orange350),
                         const SizedBox(width: 6),
-                        _categoryChip(t, 'Dispensary (${dispensaryList.length})', 'dispensary', Icons.local_hospital_rounded, Colors.blue),
+                        _categoryChip(t, 'Dispensary (${dispensaryList.length})', 'dispensary', Icons.local_hospital_rounded, SoftPalette.blue400),
                         const SizedBox(width: 6),
                         if (madrassaFacultyList.isNotEmpty) ...[
-                          _categoryChip(t, 'Madrassa Faculty (${madrassaFacultyList.length})', 'madrassa_faculty', Icons.school_rounded, Colors.teal),
+                          _categoryChip(t, 'Madrassa Faculty (${madrassaFacultyList.length})', 'madrassa_faculty', Icons.school_rounded, SoftPalette.teal500),
                           const SizedBox(width: 6),
                         ],
                         if (madrassaGuardianList.isNotEmpty) ...[
-                          _categoryChip(t, 'Madrassa Guardians (${madrassaGuardianList.length})', 'madrassa_guardian', Icons.family_restroom_rounded, Colors.orange),
+                          _categoryChip(t, 'Madrassa Guardians (${madrassaGuardianList.length})', 'madrassa_guardian', Icons.family_restroom_rounded, SoftPalette.amber300),
                           const SizedBox(width: 6),
                         ],
                         if (schoolFacultyList.isNotEmpty) ...[
-                          _categoryChip(t, 'School Faculty (${schoolFacultyList.length})', 'school_faculty', Icons.account_balance_rounded, Colors.deepPurple),
+                          _categoryChip(t, 'School Faculty (${schoolFacultyList.length})', 'school_faculty', Icons.account_balance_rounded, SoftPalette.violet600),
                           const SizedBox(width: 6),
                         ],
                         if (schoolGuardianList.isNotEmpty) ...[
-                          _categoryChip(t, 'School Guardians (${schoolGuardianList.length})', 'school_guardian', Icons.family_restroom_rounded, Colors.purpleAccent),
+                          _categoryChip(t, 'School Guardians (${schoolGuardianList.length})', 'school_guardian', Icons.family_restroom_rounded, SoftPalette.purple400),
                           const SizedBox(width: 6),
                         ],
-                        _categoryChip(t, 'Revoked & Offboarded (${revokedList.length})', 'revoked', Icons.no_accounts_rounded, Colors.red),
+                        _categoryChip(t, 'Revoked & Offboarded (${revokedList.length})', 'revoked', Icons.no_accounts_rounded, SoftPalette.red400),
                       ],
                     ),
                   ),
@@ -1425,12 +1430,12 @@ class _UsersScreenState extends State<UsersScreen>
 
   Color _getStatusColor(String rawStatus) {
     final s = rawStatus.toLowerCase().trim();
-    if (s == 'hifz_completed' || s == 'hifz completed') return const Color(0xFF4C4DDC);
-    if (s == 'left') return Colors.redAccent;
-    if (s == 'dropped' || s == 'dropped out' || s == 'dropped_out') return Colors.red;
-    if (s == 'archived') return Colors.orange;
-    if (s == 'active') return Colors.green;
-    return Colors.red;
+    if (s == 'hifz_completed' || s == 'hifz completed') return SoftPalette.indigo550;
+    if (s == 'left') return SoftPalette.red400;
+    if (s == 'dropped' || s == 'dropped out' || s == 'dropped_out') return SoftPalette.red400;
+    if (s == 'archived') return SoftPalette.amber300;
+    if (s == 'active') return SoftPalette.green400;
+    return SoftPalette.red400;
   }
 
   bool _isUserOnline(Map<String, dynamic> data) =>
@@ -1463,12 +1468,12 @@ class _UsersScreenState extends State<UsersScreen>
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: active ? Colors.white : color, size: 13),
+            Icon(icon, color: active ? SoftPalette.gray50 : color, size: 13),
             const SizedBox(width: 6),
             Text(
               label,
               style: TextStyle(
-                color: active ? Colors.white : color,
+                color: active ? SoftPalette.gray50 : color,
                 fontSize: 11.5,
                 fontWeight: active ? FontWeight.w800 : FontWeight.w600,
               ),
@@ -1570,7 +1575,7 @@ class _UsersScreenState extends State<UsersScreen>
                   child: Text(
                     '$count',
                     style: TextStyle(
-                      color: isCollapsed ? color : Colors.white,
+                      color: isCollapsed ? color : SoftPalette.gray50,
                       fontWeight: FontWeight.w900,
                       fontSize: 11.5,
                     ),
@@ -1670,7 +1675,7 @@ class _UsersScreenState extends State<UsersScreen>
       decoration: BoxDecoration(
         gradient: isChairmanCard
             ? const LinearGradient(
-                colors: [Color(0xFF1E112A), Color(0xFF2A1706), Color(0xFF170F2A), Color(0xFF0F172A)],
+                colors: [SoftPalette.purple900, SoftPalette.orange900, SoftPalette.violet900, SoftPalette.slate900],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               )
@@ -1678,24 +1683,24 @@ class _UsersScreenState extends State<UsersScreen>
         color: isChairmanCard
             ? null
             : (isPendingRestore
-                ? const Color(0xFFF59E0B).withValues(alpha: 0.08)
-                : (isRevoked ? Colors.red.withValues(alpha: 0.04) : t.bgCard)),
+                ? SoftPalette.amber300.withValues(alpha: 0.08)
+                : (isRevoked ? SoftPalette.red400.withValues(alpha: 0.04) : t.bgCard)),
         borderRadius: BorderRadius.circular(15),
         border: Border.all(
           color: isChairmanCard
-              ? const Color(0xFFFBBF24)
+              ? SoftPalette.amber200
               : (isPendingRestore
-                  ? const Color(0xFFF59E0B).withValues(alpha: 0.6)
+                  ? SoftPalette.amber300.withValues(alpha: 0.6)
                   : (isRevoked
-                      ? Colors.red.withValues(alpha: 0.35)
-                      : (isServerDesk ? const Color(0xFF0284C7).withValues(alpha: 0.35) : t.bgRule))),
+                      ? SoftPalette.red400.withValues(alpha: 0.35)
+                      : (isServerDesk ? SoftPalette.sky500.withValues(alpha: 0.35) : t.bgRule))),
           width: isChairmanCard ? 2.0 : (isPendingRestore ? 1.4 : 0.9),
         ),
         boxShadow: [
           BoxShadow(
             color: isChairmanCard
-                ? const Color(0xFFF59E0B).withValues(alpha: 0.30)
-                : (isServerDesk ? const Color(0xFF0284C7).withValues(alpha: 0.05) : Colors.black.withValues(alpha: 0.03)),
+                ? SoftPalette.amber300.withValues(alpha: 0.30)
+                : (isServerDesk ? SoftPalette.sky500.withValues(alpha: 0.05) : SoftPalette.gray900.withValues(alpha: 0.03)),
             blurRadius: isChairmanCard ? 16 : 8,
             offset: const Offset(0, 2),
           ),
@@ -1707,7 +1712,7 @@ class _UsersScreenState extends State<UsersScreen>
         child: InkWell(
           borderRadius: BorderRadius.circular(15),
           hoverColor: isChairmanCard
-              ? Colors.amber.withValues(alpha: 0.06)
+              ? SoftPalette.amber200.withValues(alpha: 0.06)
               : t.accent.withValues(alpha: 0.04),
           onTap: () => _openDetail(itemId, branchId),
           child: Padding(
@@ -1731,26 +1736,28 @@ class _UsersScreenState extends State<UsersScreen>
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               color: isChairmanCard
-                                  ? const Color(0xFF382207)
+                                  ? SoftPalette.amber800
                                   : (isServerDesk
-                                      ? const Color(0xFFE0F2FE)
-                                      : (isFemale ? const Color(0xFFFCE7F3) : (isMale ? const Color(0xFFE0F2FE) : t.accentMuted))),
+                                      ? context.adapt(SoftPalette.slate100)
+                                      : (isFemale ? context.adapt(SoftPalette.pink100) : (isMale ? context.adapt(SoftPalette.slate100) : t.accentMuted))),
                               border: Border.all(
                                 color: isChairmanCard
-                                    ? const Color(0xFFFBBF24)
+                                    ? SoftPalette.amber200
                                     : (isOnline
-                                        ? const Color(0xFF22C55E)
-                                        : (isServerDesk ? const Color(0xFF0284C7).withValues(alpha: 0.6) : t.bgRule)),
+                                        ? SoftPalette.green350
+                                        : (isServerDesk ? SoftPalette.sky500.withValues(alpha: 0.6) : t.bgRule)),
                                 width: isChairmanCard ? 2.2 : (isOnline ? 1.8 : 1.0),
                               ),
                               image: profilePicUrl != null && profilePicUrl.trim().isNotEmpty
                                   ? (() {
                                       final b64Bytes = ImageUploadService.decodeBase64ToBytes(profilePicUrl);
+                                      // Decode at the 48 px avatar size, not the photo's full resolution.
+                                      final avatarPx = (48 * MediaQuery.devicePixelRatioOf(context)).round();
                                       if (b64Bytes != null) {
-                                        return DecorationImage(image: MemoryImage(b64Bytes), fit: BoxFit.cover);
+                                        return DecorationImage(image: ResizeImage(MemoryImage(b64Bytes), width: avatarPx), fit: BoxFit.cover);
                                       }
                                       if (profilePicUrl.startsWith('http://') || profilePicUrl.startsWith('https://')) {
-                                        return DecorationImage(image: NetworkImage(profilePicUrl), fit: BoxFit.cover);
+                                        return DecorationImage(image: ResizeImage(NetworkImage(profilePicUrl), width: avatarPx), fit: BoxFit.cover);
                                       }
                                       return null;
                                     })()
@@ -1758,8 +1765,8 @@ class _UsersScreenState extends State<UsersScreen>
                               boxShadow: [
                                 BoxShadow(
                                   color: isChairmanCard
-                                      ? const Color(0xFFF59E0B).withValues(alpha: 0.35)
-                                      : (isOnline ? const Color(0xFF22C55E).withValues(alpha: 0.2) : t.accent.withValues(alpha: 0.08)),
+                                      ? SoftPalette.amber300.withValues(alpha: 0.35)
+                                      : (isOnline ? SoftPalette.green350.withValues(alpha: 0.2) : t.accent.withValues(alpha: 0.08)),
                                   blurRadius: 8,
                                   offset: const Offset(0, 2),
                                 ),
@@ -1770,11 +1777,11 @@ class _UsersScreenState extends State<UsersScreen>
                                 ? (isChairmanCard
                                     ? const Text('👑', style: TextStyle(fontSize: 22))
                                     : (isServerDesk
-                                        ? const Icon(Icons.dns_rounded, size: 24, color: Color(0xFF0284C7))
+                                        ? const Icon(Icons.dns_rounded, size: 24, color: SoftPalette.sky500)
                                         : (isFemale
-                                            ? const Icon(Icons.face_3_rounded, size: 26, color: Color(0xFFDB2777))
+                                            ? const Icon(Icons.face_3_rounded, size: 26, color: SoftPalette.pink500)
                                             : (isMale
-                                                ? const Icon(Icons.face_6_rounded, size: 26, color: Color(0xFF0284C7))
+                                                ? const Icon(Icons.face_6_rounded, size: 26, color: SoftPalette.sky500)
                                                 : Text(initials, style: TextStyle(color: t.accent, fontWeight: FontWeight.w900, fontSize: 16))))))
                                 : null,
                           ),
@@ -1786,15 +1793,15 @@ class _UsersScreenState extends State<UsersScreen>
                                 width: 14,
                                 height: 14,
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF22C55E),
+                                  color: SoftPalette.green350,
                                   shape: BoxShape.circle,
                                   border: Border.all(
-                                    color: isChairmanCard ? const Color(0xFF1E112A) : t.bgCard,
+                                    color: isChairmanCard ? SoftPalette.purple900 : t.bgCard,
                                     width: 2.2,
                                   ),
                                   boxShadow: const [
                                     BoxShadow(
-                                      color: Color(0x6622C55E),
+                                      color: SoftPalette.green350A40,
                                       blurRadius: 4,
                                       spreadRadius: 1,
                                     ),
@@ -1824,7 +1831,7 @@ class _UsersScreenState extends State<UsersScreen>
                             style: TextStyle(
                               fontSize: 15,
                               fontWeight: FontWeight.w800,
-                              color: isChairmanCard ? const Color(0xFFFFFBEB) : (isRevoked ? Colors.red.shade900 : t.textPrimary),
+                              color: isChairmanCard ? SoftPalette.yellow50m : (isRevoked ? SoftPalette.red550 : t.textPrimary),
                               decoration: isRevoked ? TextDecoration.lineThrough : null,
                               height: 1.2,
                               letterSpacing: isChairmanCard ? 0.3 : 0,
@@ -1837,16 +1844,16 @@ class _UsersScreenState extends State<UsersScreen>
                               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                               decoration: BoxDecoration(
                                 gradient: const LinearGradient(
-                                  colors: [Color(0xFF92400E), Color(0xFF451A03)],
+                                  colors: [SoftPalette.orange600, SoftPalette.orange800],
                                 ),
                                 borderRadius: BorderRadius.circular(12),
-                                border: Border.all(color: const Color(0xFFFCD34D), width: 0.8),
+                                border: Border.all(color: SoftPalette.yellow200, width: 0.8),
                               ),
                               child: const Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
                                   Text('👑 ', style: TextStyle(fontSize: 9)),
-                                  Text('CHAIRMAN', style: TextStyle(color: Color(0xFFFDE68A), fontSize: 9.5, fontWeight: FontWeight.w900)),
+                                  Text('CHAIRMAN', style: TextStyle(color: SoftPalette.yellow150, fontSize: 9.5, fontWeight: FontWeight.w900)),
                                 ],
                               ),
                             )
@@ -1854,16 +1861,16 @@ class _UsersScreenState extends State<UsersScreen>
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF0284C7).withValues(alpha: 0.14),
+                                color: SoftPalette.sky500.withValues(alpha: 0.14),
                                 borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: const Color(0xFF0284C7).withValues(alpha: 0.4), width: 0.6),
+                                border: Border.all(color: SoftPalette.sky500.withValues(alpha: 0.4), width: 0.6),
                               ),
                               child: const Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(Icons.dns_rounded, size: 10, color: Color(0xFF0284C7)),
+                                  Icon(Icons.dns_rounded, size: 10, color: SoftPalette.sky500),
                                   SizedBox(width: 4),
-                                  Text('SERVER DESK', style: TextStyle(color: Color(0xFF0284C7), fontSize: 9.5, fontWeight: FontWeight.w900)),
+                                  Text('SERVER DESK', style: TextStyle(color: SoftPalette.sky500, fontSize: 9.5, fontWeight: FontWeight.w900)),
                                 ],
                               ),
                             ),
@@ -1871,16 +1878,16 @@ class _UsersScreenState extends State<UsersScreen>
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF22C55E).withValues(alpha: 0.16),
+                                color: SoftPalette.green350.withValues(alpha: 0.16),
                                 borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: const Color(0xFF22C55E).withValues(alpha: 0.4), width: 0.6),
+                                border: Border.all(color: SoftPalette.green350.withValues(alpha: 0.4), width: 0.6),
                               ),
                               child: const Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(Icons.circle, size: 6, color: Color(0xFF22C55E)),
+                                  Icon(Icons.circle, size: 6, color: SoftPalette.green350),
                                   SizedBox(width: 4),
-                                  Text('ONLINE', style: TextStyle(color: Color(0xFF16A34A), fontSize: 9, fontWeight: FontWeight.w800)),
+                                  Text('ONLINE', style: TextStyle(color: SoftPalette.green400, fontSize: 9, fontWeight: FontWeight.w800)),
                                 ],
                               ),
                             ),
@@ -1903,18 +1910,18 @@ class _UsersScreenState extends State<UsersScreen>
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
                               decoration: BoxDecoration(
-                                color: const Color(0xFFF59E0B).withValues(alpha: 0.2),
+                                color: SoftPalette.amber300.withValues(alpha: 0.2),
                                 borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: const Color(0xFFF59E0B), width: 0.8),
+                                border: Border.all(color: SoftPalette.amber300, width: 0.8),
                               ),
                               child: const Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  Icon(Icons.mark_email_unread_rounded, size: 10, color: Color(0xFFFBBF24)),
+                                  Icon(Icons.mark_email_unread_rounded, size: 10, color: SoftPalette.amber200),
                                   SizedBox(width: 4),
                                   Text(
                                     'RESTORE REQUESTED',
-                                    style: TextStyle(color: Color(0xFFFBBF24), fontSize: 9, fontWeight: FontWeight.w900),
+                                    style: TextStyle(color: SoftPalette.amber200, fontSize: 9, fontWeight: FontWeight.w900),
                                   ),
                                 ],
                               ),
@@ -1923,26 +1930,26 @@ class _UsersScreenState extends State<UsersScreen>
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                color: Colors.purple.withValues(alpha: 0.15),
+                                color: SoftPalette.purple550.withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.purple.withValues(alpha: 0.4), width: 0.6),
+                                border: Border.all(color: SoftPalette.purple550.withValues(alpha: 0.4), width: 0.6),
                               ),
                               child: const Text(
                                 'OFFBOARDED EMPLOYEE',
-                                style: TextStyle(color: Colors.purpleAccent, fontSize: 9, fontWeight: FontWeight.bold),
+                                style: TextStyle(color: SoftPalette.purple400, fontSize: 9, fontWeight: FontWeight.bold),
                               ),
                             )
                           else if (isRevoked)
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                color: Colors.red.withValues(alpha: 0.15),
+                                color: SoftPalette.red400.withValues(alpha: 0.15),
                                 borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: Colors.red.withValues(alpha: 0.4), width: 0.6),
+                                border: Border.all(color: SoftPalette.red400.withValues(alpha: 0.4), width: 0.6),
                               ),
                               child: const Text(
                                 'REVOKED USER',
-                                style: TextStyle(color: Colors.redAccent, fontSize: 9, fontWeight: FontWeight.bold),
+                                style: TextStyle(color: SoftPalette.red400, fontSize: 9, fontWeight: FontWeight.bold),
                               ),
                             )
                           else if (status == 'corrupted' || data['isCorruptedOrOrphanAuth'] == true)
@@ -1952,18 +1959,18 @@ class _UsersScreenState extends State<UsersScreen>
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                                 decoration: BoxDecoration(
-                                  color: Colors.red.withValues(alpha: 0.15),
+                                  color: SoftPalette.red400.withValues(alpha: 0.15),
                                   borderRadius: BorderRadius.circular(8),
-                                  border: Border.all(color: Colors.redAccent, width: 0.8),
+                                  border: Border.all(color: SoftPalette.red400, width: 0.8),
                                 ),
                                 child: const Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    Icon(Icons.auto_fix_high_rounded, size: 10, color: Colors.redAccent),
+                                    Icon(Icons.auto_fix_high_rounded, size: 10, color: SoftPalette.red400),
                                     SizedBox(width: 4),
                                     Text(
                                       'CORRUPTED · HEAL',
-                                      style: TextStyle(color: Colors.redAccent, fontSize: 9, fontWeight: FontWeight.bold),
+                                      style: TextStyle(color: SoftPalette.red400, fontSize: 9, fontWeight: FontWeight.bold),
                                     ),
                                   ],
                                 ),
@@ -1992,7 +1999,7 @@ class _UsersScreenState extends State<UsersScreen>
                               '@$username',
                               style: TextStyle(
                                 fontSize: 12,
-                                color: isChairmanCard ? const Color(0xFFFDE68A).withValues(alpha: 0.8) : t.textSecondary,
+                                color: isChairmanCard ? SoftPalette.yellow150.withValues(alpha: 0.8) : t.textSecondary,
                                 fontWeight: FontWeight.w500,
                               ),
                             ),
@@ -2005,7 +2012,7 @@ class _UsersScreenState extends State<UsersScreen>
                               subtitle,
                               style: TextStyle(
                                 fontSize: 12,
-                                color: isChairmanCard ? const Color(0xFFFBBF24) : t.accent,
+                                color: isChairmanCard ? SoftPalette.amber200 : t.accent,
                                 fontWeight: FontWeight.w600,
                               ),
                               maxLines: 1,
@@ -2065,18 +2072,18 @@ class _UsersScreenState extends State<UsersScreen>
                             Container(
                               padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF0284C7).withValues(alpha: 0.1),
+                                color: SoftPalette.sky500.withValues(alpha: 0.1),
                                 borderRadius: BorderRadius.circular(6),
-                                border: Border.all(color: const Color(0xFF0284C7).withValues(alpha: 0.3), width: 0.5),
+                                border: Border.all(color: SoftPalette.sky500.withValues(alpha: 0.3), width: 0.5),
                               ),
                               child: Row(
                                 mainAxisSize: MainAxisSize.min,
                                 children: [
-                                  const Icon(Icons.pin_outlined, size: 10, color: Color(0xFF0284C7)),
+                                  const Icon(Icons.pin_outlined, size: 10, color: SoftPalette.sky500),
                                   const SizedBox(width: 3),
                                   Text(
                                     'PIN: $zkPin',
-                                    style: const TextStyle(color: Color(0xFF0284C7), fontSize: 9.5, fontWeight: FontWeight.w700),
+                                    style: const TextStyle(color: SoftPalette.sky500, fontSize: 9.5, fontWeight: FontWeight.w700),
                                   ),
                                 ],
                               ),
@@ -2096,10 +2103,10 @@ class _UsersScreenState extends State<UsersScreen>
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 3),
                   decoration: BoxDecoration(
-                    color: isChairmanCard ? Colors.white.withValues(alpha: 0.08) : t.bg.withValues(alpha: 0.7),
+                    color: isChairmanCard ? SoftPalette.gray50.withValues(alpha: 0.08) : t.bg.withValues(alpha: 0.7),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: isChairmanCard ? Colors.white.withValues(alpha: 0.16) : t.bgRule,
+                      color: isChairmanCard ? SoftPalette.gray50.withValues(alpha: 0.16) : t.bgRule,
                       width: 0.8,
                     ),
                   ),
@@ -2123,12 +2130,12 @@ class _UsersScreenState extends State<UsersScreen>
                                 width: 34,
                                 height: 34,
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF10B981).withValues(alpha: 0.18),
+                                  color: SoftPalette.emerald350.withValues(alpha: 0.18),
                                   borderRadius: BorderRadius.circular(9),
-                                  border: Border.all(color: const Color(0xFF10B981), width: 1.0),
+                                  border: Border.all(color: SoftPalette.emerald350, width: 1.0),
                                 ),
                                 alignment: Alignment.center,
-                                child: const Icon(Icons.auto_fix_high_rounded, size: 16, color: Color(0xFF10B981)),
+                                child: const Icon(Icons.auto_fix_high_rounded, size: 16, color: SoftPalette.emerald350),
                               ),
                             ),
                           ),
@@ -2148,13 +2155,13 @@ class _UsersScreenState extends State<UsersScreen>
                                 height: 34,
                                 decoration: BoxDecoration(
                                   color: isPendingRestore
-                                      ? const Color(0xFF10B981).withValues(alpha: 0.18)
-                                      : (isRevoked ? Colors.green.withValues(alpha: 0.14) : Colors.red.withValues(alpha: 0.12)),
+                                      ? SoftPalette.emerald350.withValues(alpha: 0.18)
+                                      : (isRevoked ? SoftPalette.green400.withValues(alpha: 0.14) : SoftPalette.red400.withValues(alpha: 0.12)),
                                   borderRadius: BorderRadius.circular(9),
                                   border: Border.all(
                                     color: isPendingRestore
-                                        ? const Color(0xFF10B981)
-                                        : (isRevoked ? Colors.green.shade600 : Colors.red.shade400),
+                                        ? SoftPalette.emerald350
+                                        : (isRevoked ? SoftPalette.green400 : SoftPalette.red400),
                                     width: 0.8,
                                   ),
                                 ),
@@ -2165,8 +2172,8 @@ class _UsersScreenState extends State<UsersScreen>
                                       : (isRevoked ? Icons.lock_open_rounded : Icons.lock_person_rounded),
                                   size: 16,
                                   color: isPendingRestore
-                                      ? const Color(0xFF10B981)
-                                      : (isRevoked ? Colors.green.shade600 : Colors.red.shade400),
+                                      ? SoftPalette.emerald350
+                                      : (isRevoked ? SoftPalette.green400 : SoftPalette.red400),
                                 ),
                               ),
                             ),
@@ -2181,12 +2188,12 @@ class _UsersScreenState extends State<UsersScreen>
                                 width: 34,
                                 height: 34,
                                 decoration: BoxDecoration(
-                                  color: Colors.teal.withValues(alpha: 0.14),
+                                  color: SoftPalette.teal500.withValues(alpha: 0.14),
                                   borderRadius: BorderRadius.circular(9),
-                                  border: Border.all(color: Colors.teal.withValues(alpha: 0.5), width: 0.8),
+                                  border: Border.all(color: SoftPalette.teal500.withValues(alpha: 0.5), width: 0.8),
                                 ),
                                 alignment: Alignment.center,
-                                child: const Icon(Icons.school_rounded, size: 16, color: Colors.teal),
+                                child: const Icon(Icons.school_rounded, size: 16, color: SoftPalette.teal500),
                               ),
                             ),
                           ),
@@ -2201,15 +2208,15 @@ class _UsersScreenState extends State<UsersScreen>
                               width: 34,
                               height: 34,
                               decoration: BoxDecoration(
-                                color: isChairmanCard ? const Color(0xFFFBBF24).withValues(alpha: 0.18) : t.accent.withValues(alpha: 0.14),
+                                color: isChairmanCard ? SoftPalette.amber200.withValues(alpha: 0.18) : t.accent.withValues(alpha: 0.14),
                                 borderRadius: BorderRadius.circular(9),
                                 border: Border.all(
-                                  color: isChairmanCard ? const Color(0xFFFBBF24).withValues(alpha: 0.6) : t.accent.withValues(alpha: 0.5),
+                                  color: isChairmanCard ? SoftPalette.amber200.withValues(alpha: 0.6) : t.accent.withValues(alpha: 0.5),
                                   width: 0.8,
                                 ),
                               ),
                               alignment: Alignment.center,
-                              child: Icon(Icons.edit_rounded, size: 16, color: isChairmanCard ? const Color(0xFFFBBF24) : t.accent),
+                              child: Icon(Icons.edit_rounded, size: 16, color: isChairmanCard ? SoftPalette.amber200 : t.accent),
                             ),
                           ),
                         ),
@@ -2220,7 +2227,7 @@ class _UsersScreenState extends State<UsersScreen>
                             width: 30,
                             height: 34,
                             alignment: Alignment.center,
-                            child: Icon(Icons.more_vert_rounded, size: 18, color: isChairmanCard ? Colors.white70 : t.textSecondary),
+                            child: Icon(Icons.more_vert_rounded, size: 18, color: isChairmanCard ? SoftPalette.gray50A70 : t.textSecondary),
                           ),
                           tooltip: 'More actions',
                           color: t.bgCard,
@@ -2265,7 +2272,7 @@ class _UsersScreenState extends State<UsersScreen>
                               value: 'sync_cloud',
                               child: Row(
                                 children: [
-                                  Icon(Icons.cloud_upload_rounded, size: 17, color: const Color(0xFF10B981)),
+                                  Icon(Icons.cloud_upload_rounded, size: 17, color: SoftPalette.emerald350),
                                   const SizedBox(width: 10),
                                   Text('Sync to Cloud', style: TextStyle(color: t.textPrimary, fontSize: 13, fontWeight: FontWeight.w600)),
                                 ],
@@ -2276,9 +2283,9 @@ class _UsersScreenState extends State<UsersScreen>
                                 value: 'heal_kashif',
                                 child: Row(
                                   children: [
-                                    Icon(Icons.healing_rounded, size: 17, color: Color(0xFF10B981)),
+                                    Icon(Icons.healing_rounded, size: 17, color: SoftPalette.emerald350),
                                     SizedBox(width: 10),
-                                    Text('Heal Kashif Account', style: TextStyle(color: Color(0xFF10B981), fontSize: 13, fontWeight: FontWeight.bold)),
+                                    Text('Heal Kashif Account', style: TextStyle(color: SoftPalette.emerald350, fontSize: 13, fontWeight: FontWeight.bold)),
                                   ],
                                 ),
                               ),
@@ -2287,9 +2294,9 @@ class _UsersScreenState extends State<UsersScreen>
                                 value: 'guardian_status',
                                 child: const Row(
                                   children: [
-                                    Icon(Icons.school_rounded, size: 17, color: Colors.teal),
+                                    Icon(Icons.school_rounded, size: 17, color: SoftPalette.teal500),
                                     SizedBox(width: 10),
-                                    Text('Update Status', style: TextStyle(color: Colors.teal, fontSize: 13, fontWeight: FontWeight.w600)),
+                                    Text('Update Status', style: TextStyle(color: SoftPalette.teal500, fontSize: 13, fontWeight: FontWeight.w600)),
                                   ],
                                 ),
                               )
@@ -2298,9 +2305,9 @@ class _UsersScreenState extends State<UsersScreen>
                                 value: 'medical',
                                 child: const Row(
                                   children: [
-                                    Icon(Icons.medical_services_outlined, size: 17, color: Colors.teal),
+                                    Icon(Icons.medical_services_outlined, size: 17, color: SoftPalette.teal500),
                                     SizedBox(width: 10),
-                                    Text('Medical History', style: TextStyle(color: Colors.teal, fontSize: 13, fontWeight: FontWeight.w600)),
+                                    Text('Medical History', style: TextStyle(color: SoftPalette.teal500, fontSize: 13, fontWeight: FontWeight.w600)),
                                   ],
                                 ),
                               ),
@@ -2309,9 +2316,9 @@ class _UsersScreenState extends State<UsersScreen>
                               value: 'delete',
                               child: Row(
                                 children: [
-                                  Icon(Icons.delete_forever_rounded, size: 17, color: Colors.redAccent),
+                                  Icon(Icons.delete_forever_rounded, size: 17, color: SoftPalette.red400),
                                   SizedBox(width: 10),
-                                  Text('Delete Account', style: TextStyle(color: Colors.redAccent, fontSize: 13, fontWeight: FontWeight.w700)),
+                                  Text('Delete Account', style: TextStyle(color: SoftPalette.red400, fontSize: 13, fontWeight: FontWeight.w700)),
                                 ],
                               ),
                             ),
@@ -2357,11 +2364,11 @@ class _UsersScreenState extends State<UsersScreen>
     final reasonCtrl = TextEditingController();
 
     final statusOptions = [
-      {'key': 'active', 'label': 'Active Student / Guardian', 'color': Colors.green, 'icon': Icons.check_circle_rounded},
-      {'key': 'hifz_completed', 'label': 'Hifz Completed', 'color': const Color(0xFF4C4DDC), 'icon': Icons.workspace_premium_rounded},
-      {'key': 'left', 'label': 'Left Madrassa', 'color': Colors.redAccent, 'icon': Icons.exit_to_app_rounded},
-      {'key': 'dropped', 'label': 'Dropped Out', 'color': Colors.red, 'icon': Icons.person_off_rounded},
-      {'key': 'archived', 'label': 'Archived', 'color': Colors.orange, 'icon': Icons.archive_rounded},
+      {'key': 'active', 'label': 'Active Student / Guardian', 'color': SoftPalette.green400, 'icon': Icons.check_circle_rounded},
+      {'key': 'hifz_completed', 'label': 'Hifz Completed', 'color': SoftPalette.indigo550, 'icon': Icons.workspace_premium_rounded},
+      {'key': 'left', 'label': 'Left Madrassa', 'color': SoftPalette.red400, 'icon': Icons.exit_to_app_rounded},
+      {'key': 'dropped', 'label': 'Dropped Out', 'color': SoftPalette.red400, 'icon': Icons.person_off_rounded},
+      {'key': 'archived', 'label': 'Archived', 'color': SoftPalette.amber300, 'icon': Icons.archive_rounded},
     ];
 
     final confirm = await showDialog<bool>(
@@ -2470,7 +2477,7 @@ class _UsersScreenState extends State<UsersScreen>
                           onPressed: () => Navigator.pop(ctx, true),
                           style: ElevatedButton.styleFrom(
                             backgroundColor: currentOpt['color'] as Color,
-                            foregroundColor: Colors.white,
+                            foregroundColor: SoftPalette.gray50,
                             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                           ),
                           child: const Text('Update Status', style: TextStyle(fontWeight: FontWeight.bold)),
@@ -2513,17 +2520,17 @@ class _UsersScreenState extends State<UsersScreen>
 
       if (mounted) {
         setState(() {});
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('Guardian status updated to ${selectedStatus.replaceAll('_', ' ').toUpperCase()}'),
-            backgroundColor: Colors.green.shade700,
+            backgroundColor: SoftPalette.green500,
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to update status: $e'), backgroundColor: Colors.red),
+        AppToast.showSnackBar(context, 
+          SnackBar(content: Text('Failed to update status: $e'), backgroundColor: SoftPalette.red400),
         );
       }
     }
@@ -2574,10 +2581,10 @@ class _UsersScreenState extends State<UsersScreen>
     targetUser ??= <String, dynamic>{};
     final targetRole = (targetUser['role'] ?? targetUser['accountType'] ?? '').toString().toLowerCase().trim();
     if (targetRole == 'chairman' && !_isChairmanActor()) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: const Text("Access Denied: Only the Chairman is allowed to access the Chairman's account."),
-          backgroundColor: Colors.red.shade800,
+          backgroundColor: SoftPalette.red550,
           behavior: SnackBarBehavior.floating,
         ),
       );
@@ -2709,12 +2716,12 @@ class _UsersScreenState extends State<UsersScreen>
   Future<void> _showQuickDeleteUserDialog(Map<String, dynamic> data, String branchId, RoleThemeData t) async {
     if (!_canManageUserAccess(data)) {
       final roleName = (data['role'] as String? ?? 'User').toUpperCase();
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: Text((data['role']?.toString().toLowerCase().trim() == 'chairman')
               ? 'Access Denied: The Chairman account can NEVER be deleted or removed.'
               : 'Access Denied: You do not have permission to delete $roleName accounts.'),
-          backgroundColor: Colors.red.shade800,
+          backgroundColor: SoftPalette.red550,
         ),
       );
       return;
@@ -2732,7 +2739,7 @@ class _UsersScreenState extends State<UsersScreen>
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         title: Row(
           children: [
-            const Icon(Icons.delete_forever_rounded, color: Colors.red, size: 28),
+            const Icon(Icons.delete_forever_rounded, color: SoftPalette.red400, size: 28),
             const SizedBox(width: 10),
             Text('Delete Account', style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 18)),
           ],
@@ -2751,8 +2758,8 @@ class _UsersScreenState extends State<UsersScreen>
             icon: const Icon(Icons.delete_forever_rounded, size: 18),
             label: const Text('Delete Permanently'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.red400,
+              foregroundColor: SoftPalette.gray50,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
           ),
@@ -2944,20 +2951,20 @@ class _UsersScreenState extends State<UsersScreen>
           : 'Account "$userName" was removed from the app and server records. Firebase Auth cleanup was skipped because the stored password was missing or invalid.';
 
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text(deleteMessage),
-            backgroundColor: Colors.red.shade800,
+            backgroundColor: SoftPalette.red550,
           ),
         );
         setState(() {});
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('Error deleting account: $e'),
-            backgroundColor: Colors.red.shade900,
+            backgroundColor: SoftPalette.red550,
           ),
         );
       }
@@ -2969,11 +2976,11 @@ class _UsersScreenState extends State<UsersScreen>
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFFF59E0B).withValues(alpha: 0.12),
+        color: SoftPalette.amber300.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.45), width: 1.2),
+        border: Border.all(color: SoftPalette.amber300.withValues(alpha: 0.45), width: 1.2),
         boxShadow: [
-          BoxShadow(color: const Color(0xFFF59E0B).withValues(alpha: 0.1), blurRadius: 10, offset: const Offset(0, 3)),
+          BoxShadow(color: SoftPalette.amber300.withValues(alpha: 0.1), blurRadius: 10, offset: const Offset(0, 3)),
         ],
       ),
       child: Column(
@@ -2984,17 +2991,17 @@ class _UsersScreenState extends State<UsersScreen>
               Container(
                 padding: const EdgeInsets.all(6),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF59E0B).withValues(alpha: 0.25),
+                  color: SoftPalette.amber300.withValues(alpha: 0.25),
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: const Icon(Icons.notifications_active_rounded, color: Color(0xFFFBBF24), size: 18),
+                child: const Icon(Icons.notifications_active_rounded, color: SoftPalette.amber200, size: 18),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
                   'Access Restore Requests (${pendingList.length})',
                   style: const TextStyle(
-                    color: Color(0xFFFBBF24),
+                    color: SoftPalette.amber200,
                     fontSize: 14,
                     fontWeight: FontWeight.bold,
                   ),
@@ -3003,12 +3010,12 @@ class _UsersScreenState extends State<UsersScreen>
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF59E0B),
+                  color: SoftPalette.amber300,
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: const Text(
                   'REQUIRES HQ APPROVAL',
-                  style: TextStyle(color: Colors.black, fontSize: 9, fontWeight: FontWeight.w900),
+                  style: TextStyle(color: SoftPalette.gray900, fontSize: 9, fontWeight: FontWeight.w900),
                 ),
               ),
             ],
@@ -3026,7 +3033,7 @@ class _UsersScreenState extends State<UsersScreen>
               decoration: BoxDecoration(
                 color: t.bgCard,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.25)),
+                border: Border.all(color: SoftPalette.amber300.withValues(alpha: 0.25)),
               ),
               child: Row(
                 children: [
@@ -3070,8 +3077,8 @@ class _UsersScreenState extends State<UsersScreen>
                     icon: const Icon(Icons.cancel_outlined, size: 14),
                     label: const Text('Reject'),
                     style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.red.shade400,
-                      side: BorderSide(color: Colors.red.shade400.withValues(alpha: 0.6)),
+                      foregroundColor: SoftPalette.red400,
+                      side: BorderSide(color: SoftPalette.red400.withValues(alpha: 0.6)),
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                     ),
@@ -3082,8 +3089,8 @@ class _UsersScreenState extends State<UsersScreen>
                     icon: const Icon(Icons.check_circle_rounded, size: 14),
                     label: const Text('Allow'),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFF10B981),
-                      foregroundColor: Colors.white,
+                      backgroundColor: SoftPalette.emerald350,
+                      foregroundColor: SoftPalette.gray50,
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                       elevation: 0,
@@ -3101,10 +3108,10 @@ class _UsersScreenState extends State<UsersScreen>
   Future<void> _showQuickRevokeDialog(Map<String, dynamic> data, String branchId, RoleThemeData t) async {
     if (!_canManageUserAccess(data)) {
       final roleName = (data['role'] as String? ?? 'User').toUpperCase();
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: Text('Access Denied: You do not have permission to alter access for $roleName accounts.'),
-          backgroundColor: Colors.red.shade800,
+          backgroundColor: SoftPalette.red550,
         ),
       );
       return;
@@ -3142,10 +3149,10 @@ class _UsersScreenState extends State<UsersScreen>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: const Color(0xFFF59E0B).withValues(alpha: 0.2),
+                  color: SoftPalette.amber300.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.notifications_active_rounded, color: Color(0xFFFBBF24), size: 22),
+                child: const Icon(Icons.notifications_active_rounded, color: SoftPalette.amber200, size: 22),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -3180,13 +3187,13 @@ class _UsersScreenState extends State<UsersScreen>
               onPressed: () => Navigator.pop(ctx, 'reject'),
               icon: const Icon(Icons.cancel_outlined, size: 16),
               label: const Text('Reject'),
-              style: OutlinedButton.styleFrom(foregroundColor: Colors.red),
+              style: OutlinedButton.styleFrom(foregroundColor: SoftPalette.red400),
             ),
             ElevatedButton.icon(
               onPressed: () => Navigator.pop(ctx, 'allow'),
               icon: const Icon(Icons.check_circle_rounded, size: 16),
               label: const Text('Allow & Restore'),
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF10B981), foregroundColor: Colors.white),
+              style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.emerald350, foregroundColor: SoftPalette.gray50),
             ),
           ],
         ),
@@ -3237,10 +3244,10 @@ class _UsersScreenState extends State<UsersScreen>
               Container(
                 padding: const EdgeInsets.all(8),
                 decoration: BoxDecoration(
-                  color: Colors.red.withValues(alpha: 0.15),
+                  color: SoftPalette.red400.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(10),
                 ),
-                child: const Icon(Icons.lock_person_rounded, color: Colors.red, size: 22),
+                child: const Icon(Icons.lock_person_rounded, color: SoftPalette.red400, size: 22),
               ),
               const SizedBox(width: 12),
               Expanded(
@@ -3299,8 +3306,8 @@ class _UsersScreenState extends State<UsersScreen>
               icon: const Icon(Icons.lock_person_rounded, size: 16),
               label: const Text('Revoke Access'),
               style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
+                backgroundColor: SoftPalette.red400,
+                foregroundColor: SoftPalette.gray50,
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
               ),
             ),
@@ -3350,10 +3357,10 @@ class _UsersScreenState extends State<UsersScreen>
 
     if (mounted) {
       setState(() {});
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: Text('🔒 App access revoked for @$name'),
-          backgroundColor: Colors.red.shade800,
+          backgroundColor: SoftPalette.red550,
         ),
       );
     }
@@ -3377,10 +3384,10 @@ class _UsersScreenState extends State<UsersScreen>
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.green.withValues(alpha: 0.15),
+                color: SoftPalette.green400.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.check_circle_rounded, color: Colors.green, size: 22),
+              child: const Icon(Icons.check_circle_rounded, color: SoftPalette.green400, size: 22),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -3419,8 +3426,8 @@ class _UsersScreenState extends State<UsersScreen>
             icon: const Icon(Icons.check_circle_rounded, size: 16),
             label: const Text('Allow & Restore'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.green,
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.green400,
+              foregroundColor: SoftPalette.gray50,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
           ),
@@ -3459,10 +3466,10 @@ class _UsersScreenState extends State<UsersScreen>
 
     if (mounted) {
       setState(() {});
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: Text('✅ Access allowed and restored for @$name'),
-          backgroundColor: Colors.green,
+          backgroundColor: SoftPalette.green400,
         ),
       );
     }
@@ -3487,10 +3494,10 @@ class _UsersScreenState extends State<UsersScreen>
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.red.withValues(alpha: 0.15),
+                color: SoftPalette.red400.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.cancel_rounded, color: Colors.red, size: 22),
+              child: const Icon(Icons.cancel_rounded, color: SoftPalette.red400, size: 22),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -3534,8 +3541,8 @@ class _UsersScreenState extends State<UsersScreen>
             icon: const Icon(Icons.cancel_rounded, size: 16),
             label: const Text('Reject Request'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.red,
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.red400,
+              foregroundColor: SoftPalette.gray50,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
           ),
@@ -3573,10 +3580,10 @@ class _UsersScreenState extends State<UsersScreen>
 
     if (mounted) {
       setState(() {});
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: Text('❌ Access restore request rejected for @$name'),
-          backgroundColor: Colors.red.shade700,
+          backgroundColor: SoftPalette.red500,
         ),
       );
     }
@@ -3725,7 +3732,7 @@ class _UsersScreenState extends State<UsersScreen>
     for (final bId in candidateBranches) {
       for (final docId in targetDocIds) {
         try {
-          await FirebaseFirestore.instance
+          await CloudDb.instance
               .collection('branches')
               .doc(bId)
               .collection('users')
@@ -3737,7 +3744,7 @@ class _UsersScreenState extends State<UsersScreen>
       final empId = (data['linkedEmployeeId'] ?? data['localId'] ?? data['id'] ?? '').toString().trim();
       if (empId.isNotEmpty) {
         try {
-          await FirebaseFirestore.instance
+          await CloudDb.instance
               .collection('branches')
               .doc(bId)
               .collection('employees')
@@ -3827,10 +3834,10 @@ class _UsersScreenState extends State<UsersScreen>
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
-                color: Colors.purple.withValues(alpha: 0.15),
+                color: SoftPalette.purple550.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(10),
               ),
-              child: const Icon(Icons.person_add_rounded, color: Colors.purpleAccent, size: 22),
+              child: const Icon(Icons.person_add_rounded, color: SoftPalette.purple400, size: 22),
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -3852,8 +3859,8 @@ class _UsersScreenState extends State<UsersScreen>
             icon: const Icon(Icons.check_circle_rounded, size: 16),
             label: const Text('Reactivate Employee'),
             style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.purple,
-              foregroundColor: Colors.white,
+              backgroundColor: SoftPalette.purple550,
+              foregroundColor: SoftPalette.gray50,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
           ),
@@ -3881,17 +3888,17 @@ class _UsersScreenState extends State<UsersScreen>
 
       if (mounted) {
         setState(() {});
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text('✅ Employee $name has been reactivated.'),
-            backgroundColor: Colors.purple,
+            backgroundColor: SoftPalette.purple550,
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to reactivate employee: $e'), backgroundColor: Colors.red),
+        AppToast.showSnackBar(context, 
+          SnackBar(content: Text('Failed to reactivate employee: $e'), backgroundColor: SoftPalette.red400),
         );
       }
     }
@@ -3905,8 +3912,8 @@ class _UsersScreenState extends State<UsersScreen>
           Container(
             padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-                color: (isError ? Colors.red : t.accent).withValues(alpha: 0.08), shape: BoxShape.circle),
-            child: Icon(icon, size: 40, color: isError ? Colors.red.shade400 : t.accent.withValues(alpha: 0.5)),
+                color: (isError ? SoftPalette.red400 : t.accent).withValues(alpha: 0.08), shape: BoxShape.circle),
+            child: Icon(icon, size: 40, color: isError ? SoftPalette.red400 : t.accent.withValues(alpha: 0.5)),
           ),
           const SizedBox(height: 16),
           Text(title, style: TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: t.textPrimary)),
@@ -3962,7 +3969,7 @@ class _UsersScreenState extends State<UsersScreen>
       decoration: BoxDecoration(
         color: t.bgCard, borderRadius: BorderRadius.circular(16),
         border: Border.all(color: t.bgRule, width: 0.8),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 3))],
+        boxShadow: [BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 3))],
       ),
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
@@ -3977,7 +3984,7 @@ class _UsersScreenState extends State<UsersScreen>
           children: [
             if (guardian != null)
               _familyMemberTile(guardian, Icons.person_rounded, t.accent, branchId, t, isGuardian: true),
-            ...children.map((c) => _familyMemberTile(c, Icons.child_care_rounded, Colors.orange.shade600, branchId, t)),
+            ...children.map((c) => _familyMemberTile(c, Icons.child_care_rounded, SoftPalette.orange350, branchId, t)),
           ],
         ),
       ),
@@ -4017,7 +4024,7 @@ class _UsersScreenState extends State<UsersScreen>
       decoration: BoxDecoration(
         color: t.bgCard, borderRadius: BorderRadius.circular(16),
         border: Border.all(color: t.bgRule, width: 0.8),
-        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 3))],
+        boxShadow: [BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.04), blurRadius: 10, offset: const Offset(0, 3))],
       ),
       child: Theme(
         data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
@@ -4072,7 +4079,7 @@ class _UsersScreenState extends State<UsersScreen>
             constraints: const BoxConstraints(maxWidth: 520),
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: const Color(0xFF0F172A),
+              color: SoftPalette.slate900,
               borderRadius: BorderRadius.circular(24),
               border: Border.all(color: t.accent.withValues(alpha: 0.4), width: 1.8),
               boxShadow: [
@@ -4097,7 +4104,7 @@ class _UsersScreenState extends State<UsersScreen>
                         const Text(
                           'Profile Photo',
                           style: TextStyle(
-                            color: Colors.white,
+                            color: SoftPalette.gray50,
                             fontSize: 18,
                             fontWeight: FontWeight.w800,
                             letterSpacing: -0.3,
@@ -4106,7 +4113,7 @@ class _UsersScreenState extends State<UsersScreen>
                       ],
                     ),
                     IconButton(
-                      icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                      icon: const Icon(Icons.close_rounded, color: SoftPalette.gray50A70),
                       onPressed: () => Navigator.pop(ctx),
                       tooltip: 'Close',
                     ),
@@ -4120,10 +4127,10 @@ class _UsersScreenState extends State<UsersScreen>
                   height: 320,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    border: Border.all(color: const Color(0xFFF59E0B), width: 4.0),
+                    border: Border.all(color: SoftPalette.amber300, width: 4.0),
                     boxShadow: [
                       BoxShadow(
-                        color: const Color(0xFFF59E0B).withValues(alpha: 0.45),
+                        color: SoftPalette.amber300.withValues(alpha: 0.45),
                         blurRadius: 24,
                         spreadRadius: 3,
                       ),
@@ -4143,7 +4150,7 @@ class _UsersScreenState extends State<UsersScreen>
                 Text(
                   name,
                   style: const TextStyle(
-                    color: Colors.white,
+                    color: SoftPalette.gray50,
                     fontSize: 20,
                     fontWeight: FontWeight.w800,
                   ),
@@ -4196,10 +4203,10 @@ class _UsersScreenState extends State<UsersScreen>
 
   void _openAccessControlMatrixSheet(BuildContext context, RoleThemeData t) {
     if (!_isChairmanActor()) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: const Text('Access Denied: Only the Chairman may open and use the Master Access Control Matrix.'),
-          backgroundColor: Colors.red.shade800,
+          backgroundColor: SoftPalette.red550,
         ),
       );
       return;
@@ -4291,7 +4298,7 @@ class _AccessControlMatrixViewState extends State<_AccessControlMatrixView> with
 
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xFF0F172A),
+        color: SoftPalette.slate900,
         borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
         border: Border.all(color: t.accent.withValues(alpha: 0.4), width: 1.5),
       ),
@@ -4303,7 +4310,7 @@ class _AccessControlMatrixViewState extends State<_AccessControlMatrixView> with
               margin: const EdgeInsets.only(top: 10, bottom: 6),
               width: 40,
               height: 4,
-              decoration: BoxDecoration(color: Colors.white30, borderRadius: BorderRadius.circular(2)),
+              decoration: BoxDecoration(color: SoftPalette.gray50A30, borderRadius: BorderRadius.circular(2)),
             ),
           ),
           // Header
@@ -4317,23 +4324,23 @@ class _AccessControlMatrixViewState extends State<_AccessControlMatrixView> with
                     Container(
                       padding: const EdgeInsets.all(8),
                       decoration: BoxDecoration(
-                        color: const Color(0xFF0F5132).withValues(alpha: 0.3),
+                        color: SoftPalette.emerald700.withValues(alpha: 0.3),
                         borderRadius: BorderRadius.circular(10),
                       ),
-                      child: const Icon(Icons.admin_panel_settings_rounded, color: Color(0xFF10B981), size: 24),
+                      child: const Icon(Icons.admin_panel_settings_rounded, color: SoftPalette.emerald350, size: 24),
                     ),
                     const SizedBox(width: 12),
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: const [
-                        Text('Master Access Control Matrix', style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
-                        Text('Chairman Authority & Module Permission Overrides', style: TextStyle(color: Colors.white60, fontSize: 11)),
+                        Text('Master Access Control Matrix', style: TextStyle(color: SoftPalette.gray50, fontSize: 17, fontWeight: FontWeight.bold)),
+                        Text('Chairman Authority & Module Permission Overrides', style: TextStyle(color: SoftPalette.gray50A60, fontSize: 11)),
                       ],
                     ),
                   ],
                 ),
                 IconButton(
-                  icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                  icon: const Icon(Icons.close_rounded, color: SoftPalette.gray50A70),
                   onPressed: () => Navigator.pop(context),
                 ),
               ],
@@ -4341,9 +4348,9 @@ class _AccessControlMatrixViewState extends State<_AccessControlMatrixView> with
           ),
           TabBar(
             controller: _tabCtrl,
-            labelColor: const Color(0xFF10B981),
-            unselectedLabelColor: Colors.white60,
-            indicatorColor: const Color(0xFF10B981),
+            labelColor: SoftPalette.emerald350,
+            unselectedLabelColor: SoftPalette.gray50A60,
+            indicatorColor: SoftPalette.emerald350,
             tabs: const [
               Tab(icon: Icon(Icons.person_off_rounded, size: 18), text: 'User Module Overrides'),
               Tab(icon: Icon(Icons.table_chart_rounded, size: 18), text: 'Role Access Matrix'),
@@ -4370,15 +4377,15 @@ class _AccessControlMatrixViewState extends State<_AccessControlMatrixView> with
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
           child: Container(
             height: 42,
-            decoration: BoxDecoration(color: const Color(0xFF1E293B), borderRadius: BorderRadius.circular(12)),
+            decoration: BoxDecoration(color: SoftPalette.slate800, borderRadius: BorderRadius.circular(12)),
             child: TextField(
               controller: _searchCtrl,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
+              style: const TextStyle(color: SoftPalette.gray50, fontSize: 13),
               onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
               decoration: const InputDecoration(
                 hintText: 'Search user by name, username, or role...',
-                hintStyle: TextStyle(color: Colors.white54, fontSize: 12),
-                prefixIcon: Icon(Icons.search, color: Colors.white54, size: 18),
+                hintStyle: TextStyle(color: SoftPalette.gray50A54, fontSize: 12),
+                prefixIcon: Icon(Icons.search, color: SoftPalette.gray50A54, size: 18),
                 border: InputBorder.none,
                 contentPadding: EdgeInsets.symmetric(vertical: 10),
               ),
@@ -4431,21 +4438,21 @@ class _AccessControlMatrixViewState extends State<_AccessControlMatrixView> with
                     decoration: BoxDecoration(
                       gradient: isChairman
                           ? const LinearGradient(
-                              colors: [Color(0xFF382207), Color(0xFF1E293B)],
+                              colors: [SoftPalette.amber800, SoftPalette.slate800],
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
                             )
                           : null,
-                      color: isChairman ? null : const Color(0xFF1E293B),
+                      color: isChairman ? null : SoftPalette.slate800,
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(
-                        color: isChairman ? const Color(0xFFF59E0B) : Colors.white10,
+                        color: isChairman ? SoftPalette.amber300 : SoftPalette.gray50A10,
                         width: isChairman ? 1.8 : 1.0,
                       ),
                       boxShadow: isChairman
                           ? [
                               BoxShadow(
-                                color: const Color(0xFFF59E0B).withValues(alpha: 0.3),
+                                color: SoftPalette.amber300.withValues(alpha: 0.3),
                                 blurRadius: 14,
                                 spreadRadius: 1,
                               )
@@ -4463,15 +4470,15 @@ class _AccessControlMatrixViewState extends State<_AccessControlMatrixView> with
                               Row(
                                 children: [
                                   CircleAvatar(
-                                    backgroundColor: isChairman ? const Color(0xFFD97706) : const Color(0xFF0F5132),
-                                    child: Text(name.isNotEmpty ? name[0].toUpperCase() : 'U', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                    backgroundColor: isChairman ? SoftPalette.orange400 : SoftPalette.emerald700,
+                                    child: Text(name.isNotEmpty ? name[0].toUpperCase() : 'U', style: const TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold)),
                                   ),
                                   const SizedBox(width: 10),
                                   Column(
                                     crossAxisAlignment: CrossAxisAlignment.start,
                                     children: [
-                                      Text(name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-                                      Text('Role: ${role.toUpperCase()} | Branch: ${user['branchId'] ?? 'all'}', style: const TextStyle(color: Colors.white60, fontSize: 11)),
+                                      Text(name, style: const TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 14)),
+                                      Text('Role: ${role.toUpperCase()} | Branch: ${user['branchId'] ?? 'all'}', style: const TextStyle(color: SoftPalette.gray50A60, fontSize: 11)),
                                     ],
                                   ),
                                 ],
@@ -4479,18 +4486,18 @@ class _AccessControlMatrixViewState extends State<_AccessControlMatrixView> with
                               if (isChairman)
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                  decoration: BoxDecoration(color: const Color(0xFFD97706).withValues(alpha: 0.2), borderRadius: BorderRadius.circular(20), border: Border.all(color: const Color(0xFFD97706))),
-                                  child: const Text('👑 Chairman (Unrestricted)', style: TextStyle(color: Color(0xFFF59E0B), fontSize: 10, fontWeight: FontWeight.bold)),
+                                  decoration: BoxDecoration(color: SoftPalette.orange400.withValues(alpha: 0.2), borderRadius: BorderRadius.circular(20), border: Border.all(color: SoftPalette.orange400)),
+                                  child: const Text('👑 Chairman (Unrestricted)', style: TextStyle(color: SoftPalette.amber300, fontSize: 10, fontWeight: FontWeight.bold)),
                                 ),
                             ],
                           ),
                           const SizedBox(height: 12),
-                          const Divider(color: Colors.white12, height: 1),
+                          const Divider(color: SoftPalette.gray50A12, height: 1),
                           const SizedBox(height: 8),
                           if (isChairman)
                             const Padding(
                               padding: EdgeInsets.symmetric(vertical: 6.0),
-                              child: Text('The Chairman is the highest authority in GMWF and has 100% unrestricted access to all modules and finance.', style: TextStyle(color: Colors.white70, fontSize: 11, fontStyle: FontStyle.italic)),
+                              child: Text('The Chairman is the highest authority in GMWF and has 100% unrestricted access to all modules and finance.', style: TextStyle(color: SoftPalette.gray50A70, fontSize: 11, fontStyle: FontStyle.italic)),
                             )
                           else
                             Wrap(
@@ -4508,24 +4515,23 @@ class _AccessControlMatrixViewState extends State<_AccessControlMatrixView> with
                                   avatar: Icon(
                                     isBlocked ? Icons.block_rounded : (isAllowed ? Icons.check_circle_rounded : Icons.lock_outline_rounded),
                                     size: 14,
-                                    color: isBlocked ? Colors.redAccent : (isAllowed ? Colors.greenAccent : Colors.white54),
+                                    color: isBlocked ? SoftPalette.red400 : (isAllowed ? SoftPalette.emerald200 : SoftPalette.gray50A54),
                                   ),
                                   label: Text(
                                     isBlocked ? '$modName (BLOCKED)' : modName,
                                     style: TextStyle(
                                       fontSize: 11,
                                       fontWeight: FontWeight.bold,
-                                      color: isBlocked ? Colors.redAccent : (isAllowed ? Colors.white : Colors.white54),
+                                      color: isBlocked ? SoftPalette.red400 : (isAllowed ? SoftPalette.gray50 : SoftPalette.gray50A54),
                                     ),
                                   ),
-                                  selectedColor: isBlocked ? Colors.red.withValues(alpha: 0.2) : const Color(0xFF0F5132),
-                                  backgroundColor: const Color(0xFF0F172A),
+                                  selectedColor: isBlocked ? SoftPalette.red400.withValues(alpha: 0.2) : SoftPalette.emerald700,
+                                  backgroundColor: SoftPalette.slate900,
                                   side: BorderSide(
-                                    color: isBlocked ? Colors.redAccent : (isAllowed ? const Color(0xFF10B981) : Colors.white24),
+                                    color: isBlocked ? SoftPalette.red400 : (isAllowed ? SoftPalette.emerald350 : SoftPalette.gray50A24),
                                   ),
                                   onSelected: (val) async {
                                     final newBlocked = !isBlocked;
-                                    final messenger = ScaffoldMessenger.maybeOf(context);
                                     await UserModuleAccessService.setModuleAccessForUser(
                                       userId: userId,
                                       moduleId: modId,
@@ -4534,7 +4540,7 @@ class _AccessControlMatrixViewState extends State<_AccessControlMatrixView> with
                                     );
                                     if (!mounted) return;
                                     setState(() {});
-                                    messenger?.showSnackBar(
+                                    AppToast.fromSnackBar(
                                       SnackBar(
                                         content: Text(newBlocked
                                             ? 'Blocked $modName for $name'
@@ -4566,17 +4572,17 @@ class _AccessControlMatrixViewState extends State<_AccessControlMatrixView> with
       controller: widget.scrollController,
       padding: const EdgeInsets.all(16),
       child: Table(
-        border: TableBorder.all(color: Colors.white24, borderRadius: BorderRadius.circular(10)),
+        border: TableBorder.all(color: SoftPalette.gray50A24, borderRadius: BorderRadius.circular(10)),
         columnWidths: const {
           0: FlexColumnWidth(1.2),
           1: FlexColumnWidth(2.5),
         },
         children: [
           TableRow(
-            decoration: const BoxDecoration(color: Color(0xFF1E293B)),
+            decoration: const BoxDecoration(color: SoftPalette.slate800),
             children: const [
-              Padding(padding: EdgeInsets.all(10), child: Text('Role Title', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
-              Padding(padding: EdgeInsets.all(10), child: Text('Permitted System Modules & Scope', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12))),
+              Padding(padding: EdgeInsets.all(10), child: Text('Role Title', style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 12))),
+              Padding(padding: EdgeInsets.all(10), child: Text('Permitted System Modules & Scope', style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold, fontSize: 12))),
             ],
           ),
           ...matrix.entries.map((e) {
@@ -4584,7 +4590,7 @@ class _AccessControlMatrixViewState extends State<_AccessControlMatrixView> with
               children: [
                 Padding(
                   padding: const EdgeInsets.all(10),
-                  child: Text(e.key, style: const TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 12)),
+                  child: Text(e.key, style: const TextStyle(color: SoftPalette.emerald350, fontWeight: FontWeight.bold, fontSize: 12)),
                 ),
                 Padding(
                   padding: const EdgeInsets.all(10),
@@ -4594,8 +4600,8 @@ class _AccessControlMatrixViewState extends State<_AccessControlMatrixView> with
                     children: e.value.map((m) {
                       return Container(
                         padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(color: Colors.white10, borderRadius: BorderRadius.circular(4)),
-                        child: Text(m, style: const TextStyle(color: Colors.white70, fontSize: 10)),
+                        decoration: BoxDecoration(color: SoftPalette.gray50A10, borderRadius: BorderRadius.circular(4)),
+                        child: Text(m, style: const TextStyle(color: SoftPalette.gray50A70, fontSize: 10)),
                       );
                     }).toList(),
                   ),

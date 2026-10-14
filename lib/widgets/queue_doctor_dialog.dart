@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/components/app_toast.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../services/local_storage_service.dart';
 import '../services/queue_self_healing_service.dart';
@@ -52,6 +54,7 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
           ? Hive.box(LocalStorageService.syncBox).length
           : 0;
 
+      await LocalStorageService.healLegacyHistoricalData(force: true);
       final report = await QueueSelfHealingService().healEntireQueue();
 
       if (mounted) {
@@ -83,12 +86,12 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
           _isHealing = false;
           _healingProgressMessage = '';
         });
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           SnackBar(
             content: Text(uploadedCount > 0
                 ? '✅ Successfully uploaded $uploadedCount records to Cloud Firestore! ($finalCount remaining)'
                 : 'Self-healing finished. $finalCount items in queue.'),
-            backgroundColor: const Color(0xFF00695C),
+            backgroundColor: SoftPalette.teal600,
           ),
         );
       }
@@ -98,8 +101,8 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
           _isHealing = false;
           _healingProgressMessage = '';
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Healing error: $e'), backgroundColor: Colors.red),
+        AppToast.showSnackBar(context, 
+          SnackBar(content: Text('Healing error: $e'), backgroundColor: SoftPalette.red400),
         );
       }
     }
@@ -114,17 +117,17 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
       await SyncService().broadcastUniversalForceUpload();
       await SyncService().triggerUpload(force: true);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
+        AppToast.showSnackBar(context, 
           const SnackBar(
             content: Text('📡 Universal Force Upload broadcasted to all connected stations and Cloud!'),
-            backgroundColor: Color(0xFF00695C),
+            backgroundColor: SoftPalette.teal600,
           ),
         );
       }
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Broadcast notice: $e'), backgroundColor: Colors.orange),
+        AppToast.showSnackBar(context, 
+          SnackBar(content: Text('Broadcast notice: $e'), backgroundColor: SoftPalette.amber300),
         );
       }
     } finally {
@@ -159,7 +162,7 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
           FilledButton(
-            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            style: FilledButton.styleFrom(backgroundColor: SoftPalette.red400),
             onPressed: () => Navigator.pop(ctx, true),
             child: const Text('Purge'),
           ),
@@ -172,10 +175,10 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
     await box.deleteAll(keysToDelete);
     await box.flush();
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
+      AppToast.showSnackBar(context, 
         SnackBar(
           content: Text('Successfully removed ${keysToDelete.length} ${type.replaceAll('_', ' ')} records.'),
-          backgroundColor: const Color(0xFF00695C),
+          backgroundColor: SoftPalette.teal600,
         ),
       );
       setState(() {});
@@ -188,7 +191,7 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
 
     return Dialog(
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-      backgroundColor: isDark ? const Color(0xFF1E293B) : Colors.white,
+      backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
       child: ConstrainedBox(
         constraints: const BoxConstraints(maxWidth: 580, maxHeight: 680),
         child: Padding(
@@ -202,10 +205,10 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
                   Container(
                     padding: const EdgeInsets.all(10),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF00695C).withValues(alpha: 0.15),
+                      color: SoftPalette.teal600.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Icon(Icons.healing_rounded, color: Color(0xFF00897B), size: 26),
+                    child: const Icon(Icons.healing_rounded, color: SoftPalette.teal500, size: 26),
                   ),
                   const SizedBox(width: 14),
                   Expanded(
@@ -217,14 +220,14 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
                           style: TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
-                            color: isDark ? Colors.white : const Color(0xFF0F172A),
+                            color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
                           ),
                         ),
                         Text(
                           'Diagnose, auto-repair corrupted records, and flush backlogs to Cloud Firestore',
                           style: TextStyle(
                             fontSize: 12,
-                            color: isDark ? Colors.white60 : Colors.black54,
+                            color: isDark ? SoftPalette.gray50A60 : SoftPalette.gray900A54,
                           ),
                         ),
                       ],
@@ -258,7 +261,7 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
                               child: _statCard(
                                 title: 'Pending Upload',
                                 count: totalPending,
-                                color: totalPending > 0 ? Colors.orange : Colors.green,
+                                color: totalPending > 0 ? SoftPalette.amber300 : SoftPalette.green400,
                                 icon: Icons.cloud_upload_outlined,
                                 isDark: isDark,
                               ),
@@ -268,7 +271,7 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
                               child: _statCard(
                                 title: 'Dead Letter / Stalled',
                                 count: deadLetters,
-                                color: deadLetters > 0 ? Colors.redAccent : Colors.blueGrey,
+                                color: deadLetters > 0 ? SoftPalette.red400 : SoftPalette.slate500,
                                 icon: Icons.warning_amber_rounded,
                                 isDark: isDark,
                               ),
@@ -282,20 +285,20 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
                           Container(
                             padding: const EdgeInsets.all(12),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                              color: SoftPalette.emerald350.withValues(alpha: 0.12),
                               borderRadius: BorderRadius.circular(12),
-                              border: Border.all(color: const Color(0xFF10B981).withValues(alpha: 0.4)),
+                              border: Border.all(color: SoftPalette.emerald350.withValues(alpha: 0.4)),
                             ),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 const Row(
                                   children: [
-                                    Icon(Icons.check_circle, color: Color(0xFF10B981), size: 18),
+                                    Icon(Icons.check_circle, color: SoftPalette.emerald350, size: 18),
                                     SizedBox(width: 8),
                                     Text(
                                       'Self-Healing Sweep Completed',
-                                      style: TextStyle(color: Color(0xFF10B981), fontWeight: FontWeight.bold, fontSize: 13),
+                                      style: TextStyle(color: SoftPalette.emerald350, fontWeight: FontWeight.bold, fontSize: 13),
                                     ),
                                   ],
                                 ),
@@ -304,7 +307,7 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
                                   '• ${_lastReport!.healedCount} malformed actions repaired (camps/branches resolved)\n'
                                   '• ${_lastReport!.deadLettersRevived} dead-letter items revived back into active queue\n'
                                   '• ${_lastReport!.duplicatesPurged} obsolete duplicates cleaned',
-                                  style: TextStyle(fontSize: 12, color: isDark ? Colors.white70 : Colors.black87),
+                                  style: TextStyle(fontSize: 12, color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
                                 ),
                               ],
                             ),
@@ -318,7 +321,7 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
                           style: TextStyle(
                             fontSize: 13,
                             fontWeight: FontWeight.w700,
-                            color: isDark ? Colors.white70 : Colors.black87,
+                            color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87,
                           ),
                         ),
                         const SizedBox(height: 8),
@@ -328,11 +331,11 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
                             child: Center(
                               child: Column(
                                 children: [
-                                  const Icon(Icons.cloud_done, color: Colors.green, size: 36),
+                                  const Icon(Icons.cloud_done, color: SoftPalette.green400, size: 36),
                                   const SizedBox(height: 8),
                                   Text(
                                     'All queues are completely clear!',
-                                    style: TextStyle(color: isDark ? Colors.white60 : Colors.black54, fontSize: 13),
+                                    style: TextStyle(color: isDark ? SoftPalette.gray50A60 : SoftPalette.gray900A54, fontSize: 13),
                                   ),
                                 ],
                               ),
@@ -344,16 +347,16 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
                               margin: const EdgeInsets.only(bottom: 6),
                               padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                               decoration: BoxDecoration(
-                                color: isDark ? const Color(0xFF0F172A) : const Color(0xFFF8FAFC),
+                                color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
                                 borderRadius: BorderRadius.circular(8),
-                                border: Border.all(color: isDark ? Colors.white10 : Colors.black12),
+                                border: Border.all(color: isDark ? SoftPalette.gray50A10 : SoftPalette.gray900A12),
                               ),
                               child: Row(
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
                                   Text(
                                     entry.key.replaceAll('_', ' ').toUpperCase(),
-                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: isDark ? Colors.white70 : Colors.black87),
+                                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray900A87),
                                   ),
                                   Row(
                                     mainAxisSize: MainAxisSize.min,
@@ -361,17 +364,17 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
                                       Container(
                                         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                                         decoration: BoxDecoration(
-                                          color: const Color(0xFF00695C).withValues(alpha: 0.15),
+                                          color: SoftPalette.teal600.withValues(alpha: 0.15),
                                           borderRadius: BorderRadius.circular(10),
                                         ),
                                         child: Text(
                                           '${entry.value}',
-                                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Color(0xFF00897B)),
+                                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: SoftPalette.teal500),
                                         ),
                                       ),
                                       const SizedBox(width: 6),
                                       IconButton(
-                                        icon: const Icon(Icons.delete_outline_rounded, size: 18, color: Colors.redAccent),
+                                        icon: const Icon(Icons.delete_outline_rounded, size: 18, color: SoftPalette.red400),
                                         tooltip: 'Purge all ${entry.value} ${entry.key.replaceAll('_', ' ')} records from queue',
                                         constraints: const BoxConstraints(minWidth: 28, minHeight: 28),
                                         padding: EdgeInsets.zero,
@@ -395,7 +398,7 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
                   padding: const EdgeInsets.only(bottom: 12),
                   child: Row(
                     children: [
-                      const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF00897B))),
+                      const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.teal500)),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
@@ -403,7 +406,7 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w600,
-                            color: isDark ? const Color(0xFF4DB6AC) : const Color(0xFF00695C),
+                            color: isDark ? SoftPalette.teal350 : SoftPalette.teal600,
                           ),
                         ),
                       ),
@@ -430,14 +433,14 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
                   Expanded(
                     child: ElevatedButton.icon(
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF00695C),
-                        foregroundColor: Colors.white,
+                        backgroundColor: SoftPalette.teal600,
+                        foregroundColor: SoftPalette.gray50,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       ),
                       onPressed: _isHealing ? null : _runHealing,
                       icon: _isHealing
-                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
+                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(color: SoftPalette.gray50, strokeWidth: 2))
                           : const Icon(Icons.auto_fix_high_rounded, size: 18),
                       label: Text(_isHealing ? 'Healing & Syncing...' : 'Auto-Heal & Flush Now'),
                     ),
@@ -484,7 +487,7 @@ class _QueueDoctorDialogState extends State<QueueDoctorDialog> {
                 title,
                 style: TextStyle(
                   fontSize: 11,
-                  color: isDark ? Colors.white60 : Colors.black54,
+                  color: isDark ? SoftPalette.gray50A60 : SoftPalette.gray900A54,
                 ),
               ),
             ],

@@ -2,17 +2,18 @@
 
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/design_system.dart';
 import 'package:intl/intl.dart';
 import '../../services/finance_ledger_storage.dart';
 import '../../widgets/bank_logo_widget.dart';
 import 'shared_finance_components.dart';
 
-const _kAccent = Color(0xFF10B981);
-const _kBg = Color(0xFFF8FAFC);
-const _kBgCard = Colors.white;
-const _kBorder = Color(0xFFE2E8F0);
-const _kTextPrimary = Color(0xFF0F172A);
-const _kTextSecondary = Color(0xFF64748B);
+const _kAccent = SoftPalette.emerald350;
+const _kBg = SoftPalette.gray50;
+const _kBgCard = SoftPalette.gray50;
+const _kBorder = SoftPalette.slate150;
+const _kTextPrimary = SoftPalette.slate900;
+const _kTextSecondary = SoftPalette.slate550;
 
 class FinanceOverviewDashboard extends StatefulWidget {
   final String branchId;
@@ -133,14 +134,14 @@ class _FinanceOverviewDashboardState extends State<FinanceOverviewDashboard> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
-        backgroundColor: _kBg,
+      return Scaffold(
+        backgroundColor: context.adapt(_kBg),
         body: Center(child: CircularProgressIndicator(color: _kAccent)),
       );
     }
 
     return Scaffold(
-      backgroundColor: _kBg,
+      backgroundColor: context.adapt(_kBg),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -153,14 +154,14 @@ class _FinanceOverviewDashboardState extends State<FinanceOverviewDashboard> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text(
+                      Text(
                         'Treasury & Financial Overview',
-                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: _kTextPrimary, letterSpacing: -0.5),
+                        style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: context.adapt(_kTextPrimary), letterSpacing: -0.5),
                       ),
                       const SizedBox(height: 4),
                       Text(
                         'Live double-entry general ledger summary & org bank accounts balance',
-                        style: TextStyle(fontSize: 12, color: _kTextSecondary),
+                        style: TextStyle(fontSize: 12, color: context.adapt(_kTextSecondary)),
                       ),
                     ],
                   ),
@@ -198,7 +199,7 @@ class _FinanceOverviewDashboardState extends State<FinanceOverviewDashboard> {
                     value: _fmtCurrency(_totalBankBalance),
                     subtitle: '${_orgAccounts.where((a) => a.accountCode != '1030').length} Active Bank Accounts',
                     icon: Icons.account_balance_rounded,
-                    color: const Color(0xFF0284C7),
+                    color: SoftPalette.sky500,
                     onTap: () => widget.onNavigateToTab(6), // Reports / Reconcile
                   ),
                   _buildKpiCard(
@@ -206,7 +207,7 @@ class _FinanceOverviewDashboardState extends State<FinanceOverviewDashboard> {
                     value: _fmtCurrency(_cashOnHand),
                     subtitle: 'Petty Cash Fund (COA: 1030)',
                     icon: Icons.payments_rounded,
-                    color: const Color(0xFF10B981),
+                    color: SoftPalette.emerald350,
                     onTap: () => widget.onNavigateToTab(4), // Expenses
                   ),
                   _buildKpiCard(
@@ -214,7 +215,7 @@ class _FinanceOverviewDashboardState extends State<FinanceOverviewDashboard> {
                     value: _fmtCurrency(_monthOutflow),
                     subtitle: 'Payroll & Operating Expenses ($_selectedMonth)',
                     icon: Icons.output_rounded,
-                    color: const Color(0xFFEF4444),
+                    color: SoftPalette.red400,
                     onTap: () => widget.onNavigateToTab(4), // Expenses
                   ),
                   _buildKpiCard(
@@ -222,7 +223,7 @@ class _FinanceOverviewDashboardState extends State<FinanceOverviewDashboard> {
                     value: _fmtCurrency(_loansReceivable),
                     subtitle: 'Active Staff Advances (COA: 1040)',
                     icon: Icons.credit_card_rounded,
-                    color: const Color(0xFFF59E0B),
+                    color: SoftPalette.amber300,
                     onTap: () => widget.onNavigateToTab(3), // Loans
                   ),
                 ],
@@ -235,9 +236,9 @@ class _FinanceOverviewDashboardState extends State<FinanceOverviewDashboard> {
               children: [
                 const Icon(Icons.account_balance_wallet_rounded, size: 20, color: _kAccent),
                 const SizedBox(width: 8),
-                const Text(
+                Text(
                   'Foundation Bank & Treasury Accounts',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _kTextPrimary),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: context.adapt(_kTextPrimary)),
                 ),
                 const Spacer(),
                 TextButton(
@@ -266,11 +267,11 @@ class _FinanceOverviewDashboardState extends State<FinanceOverviewDashboard> {
                 return Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: _kBgCard,
+                    color: context.adapt(_kBgCard),
                     borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: _kBorder),
+                    border: Border.all(color: context.adapt(_kBorder)),
                     boxShadow: [
-                      BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 6, offset: const Offset(0, 2)),
+                      BoxShadow(color: SoftPalette.gray900.withOpacity(0.02), blurRadius: 6, offset: const Offset(0, 2)),
                     ],
                   ),
                   child: Row(
@@ -284,7 +285,7 @@ class _FinanceOverviewDashboardState extends State<FinanceOverviewDashboard> {
                           children: [
                             Text(
                               acc.accountTitle,
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: _kTextPrimary),
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: context.adapt(_kTextPrimary)),
                               overflow: TextOverflow.ellipsis,
                             ),
                             const SizedBox(height: 2),
@@ -307,9 +308,9 @@ class _FinanceOverviewDashboardState extends State<FinanceOverviewDashboard> {
               children: [
                 const Icon(Icons.history_rounded, size: 20, color: _kAccent),
                 const SizedBox(width: 8),
-                const Text(
+                Text(
                   'Recent Double-Entry Journal Feed',
-                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: _kTextPrimary),
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: context.adapt(_kTextPrimary)),
                 ),
                 const Spacer(),
                 TextButton(
@@ -322,20 +323,20 @@ class _FinanceOverviewDashboardState extends State<FinanceOverviewDashboard> {
 
             Container(
               decoration: BoxDecoration(
-                color: _kBgCard,
+                color: context.adapt(_kBgCard),
                 borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: _kBorder),
+                border: Border.all(color: context.adapt(_kBorder)),
               ),
               child: _recentEntries.isEmpty
-                  ? const Padding(
+                  ? Padding(
                       padding: EdgeInsets.all(32),
-                      child: Center(child: Text('No journal entries posted yet.', style: TextStyle(color: _kTextSecondary))),
+                      child: Center(child: Text('No journal entries posted yet.', style: TextStyle(color: context.adapt(_kTextSecondary)))),
                     )
                   : ListView.separated(
                       shrinkWrap: true,
                       physics: const NeverScrollableScrollPhysics(),
                       itemCount: _recentEntries.length,
-                      separatorBuilder: (_, __) => const Divider(height: 1, color: _kBorder),
+                      separatorBuilder: (_, __) => Divider(height: 1, color: context.adapt(_kBorder)),
                       itemBuilder: (context, idx) {
                         final entry = _recentEntries[idx];
                         final dept = entry.departmentId ?? 'ADMIN';
@@ -344,15 +345,15 @@ class _FinanceOverviewDashboardState extends State<FinanceOverviewDashboard> {
                         return ListTile(
                           contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
                           leading: CircleAvatar(
-                            backgroundColor: const Color(0xFFF1F5F9),
+                            backgroundColor: context.adapt(SoftPalette.slate100),
                             child: Text(
                               entry.sourceType.substring(0, 2),
-                              style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: _kTextPrimary),
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11, color: context.adapt(_kTextPrimary)),
                             ),
                           ),
                           title: Row(
                             children: [
-                              Text(entry.sourceType, style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: _kTextPrimary)),
+                              Text(entry.sourceType, style: TextStyle(fontWeight: FontWeight.w800, fontSize: 12, color: context.adapt(_kTextPrimary))),
                               const SizedBox(width: 8),
                               DepartmentChip(department: dept),
                               const SizedBox(width: 8),
@@ -361,7 +362,7 @@ class _FinanceOverviewDashboardState extends State<FinanceOverviewDashboard> {
                           ),
                           subtitle: Text(
                             '${entry.description} • Posted by ${entry.createdBy} on ${entry.date}',
-                            style: const TextStyle(fontSize: 11, color: _kTextSecondary),
+                            style: TextStyle(fontSize: 11, color: context.adapt(_kTextSecondary)),
                           ),
                           trailing: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -369,7 +370,7 @@ class _FinanceOverviewDashboardState extends State<FinanceOverviewDashboard> {
                             children: [
                               Text(
                                 _fmtCurrency(entry.totalDebits / 100.0),
-                                style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: _kTextPrimary),
+                                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 13, color: context.adapt(_kTextPrimary)),
                               ),
                               const Text('Balanced Dr = Cr', style: TextStyle(fontSize: 9, color: _kAccent, fontWeight: FontWeight.bold)),
                             ],
@@ -398,11 +399,11 @@ class _FinanceOverviewDashboardState extends State<FinanceOverviewDashboard> {
       child: Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: _kBgCard,
+          color: context.adapt(_kBgCard),
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: _kBorder),
+          border: Border.all(color: context.adapt(_kBorder)),
           boxShadow: [
-            BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 6, offset: const Offset(0, 2)),
+            BoxShadow(color: SoftPalette.gray900.withOpacity(0.02), blurRadius: 6, offset: const Offset(0, 2)),
           ],
         ),
         child: Column(
@@ -420,17 +421,17 @@ class _FinanceOverviewDashboardState extends State<FinanceOverviewDashboard> {
                   child: Icon(icon, size: 20, color: color),
                 ),
                 const Spacer(),
-                const Icon(Icons.arrow_forward_ios_rounded, size: 12, color: _kTextSecondary),
+                Icon(Icons.arrow_forward_ios_rounded, size: 12, color: context.adapt(_kTextSecondary)),
               ],
             ),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(title, style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: _kTextSecondary)),
+                Text(title, style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: context.adapt(_kTextSecondary))),
                 const SizedBox(height: 4),
                 Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900, color: color, letterSpacing: -0.5)),
                 const SizedBox(height: 2),
-                Text(subtitle, style: const TextStyle(fontSize: 10, color: Color(0xFF94A3B8))),
+                Text(subtitle, style: TextStyle(fontSize: 10, color: context.adapt(SoftPalette.slate350))),
               ],
             ),
           ],

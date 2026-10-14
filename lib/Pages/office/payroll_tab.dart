@@ -1,6 +1,7 @@
 // lib/pages/office/payroll_tab.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/design_system.dart';
 import 'package:flutter/services.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
@@ -132,12 +133,12 @@ class _PayrollTabState extends State<PayrollTab> {
 
   Color _mutedColorForKey(String key) {
     const palette = [
-      Color(0xFF0F172A), // Deep Slate
-      Color(0xFF047857), // Deep Emerald
-      Color(0xFF1E40AF), // Deep Royal Blue
-      Color(0xFF6B21A8), // Deep Purple
-      Color(0xFFB45309), // Amber Bronze
-      Color(0xFF0E7490), // Cyan Teal
+      SoftPalette.slate900, // Deep Slate
+      SoftPalette.emerald550, // Deep Emerald
+      SoftPalette.blue600, // Deep Royal Blue
+      SoftPalette.violet600, // Deep Purple
+      SoftPalette.orange500, // Amber Bronze
+      SoftPalette.sky550, // Cyan Teal
     ];
     final idx = key.hashCode.abs() % palette.length;
     return palette[idx];
@@ -149,19 +150,19 @@ class _PayrollTabState extends State<PayrollTab> {
     final t = RoleThemeData(
       roleLabel: tOriginal.roleLabel,
       isDarkCanvas: false,
-      bg: const Color(0xFFF8FAFC),
-      bgCard: Colors.white,
-      bgCardAlt: const Color(0xFFF1F5F9),
-      bgRule: const Color(0xFFE2E8F0),
-      accent: const Color(0xFF10B981),
-      accentLight: const Color(0xFF34D399),
-      accentMuted: const Color(0xFFD1FAE5),
-      accentGradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
-      glassTint: const Color(0x1A10B981),
-      textPrimary: const Color(0xFF111827),
-      textSecondary: const Color(0xFF6B7280),
-      textTertiary: const Color(0xFF9CA3AF),
-      danger: const Color(0xFFEF4444),
+      bg: SoftPalette.gray50,
+      bgCard: SoftPalette.gray50,
+      bgCardAlt: SoftPalette.slate100,
+      bgRule: SoftPalette.slate150,
+      accent: SoftPalette.emerald350,
+      accentLight: SoftPalette.emerald300,
+      accentMuted: SoftPalette.emerald100,
+      accentGradient: const LinearGradient(colors: [SoftPalette.emerald350, SoftPalette.emerald500]),
+      glassTint: SoftPalette.emerald350A10,
+      textPrimary: SoftPalette.slate900,
+      textSecondary: SoftPalette.slate550,
+      textTertiary: SoftPalette.slate350,
+      danger: SoftPalette.red400,
       zakat: tOriginal.zakat,
       nonZakat: tOriginal.nonZakat,
       gmwf: tOriginal.gmwf,
@@ -175,7 +176,7 @@ class _PayrollTabState extends State<PayrollTab> {
     );
 
     return Scaffold(
-      backgroundColor: const Color(0xFFF8FAFC),
+      backgroundColor: context.adapt(SoftPalette.gray50),
       body: Column(
         children: [
           _buildMonthPickerBar(t),
@@ -287,7 +288,7 @@ class _PayrollTabState extends State<PayrollTab> {
         child: Text(
           label,
           style: TextStyle(
-            color: active ? Colors.white : t.textSecondary,
+            color: active ? SoftPalette.gray50 : t.textSecondary,
             fontSize: 11,
             fontWeight: FontWeight.bold,
           ),
@@ -455,11 +456,11 @@ class _PayrollTabState extends State<PayrollTab> {
                 margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                 decoration: BoxDecoration(
-                  color: Colors.white,
+                  color: context.adapt(SoftPalette.gray50),
                   borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                  border: Border.all(color: context.adapt(SoftPalette.slate150)),
                   boxShadow: const [
-                    BoxShadow(color: Color(0x08000000), blurRadius: 4, offset: Offset(0, 2)),
+                    BoxShadow(color: SoftPalette.gray900A3, blurRadius: 4, offset: Offset(0, 2)),
                   ],
                 ),
                 child: Row(
@@ -467,29 +468,29 @@ class _PayrollTabState extends State<PayrollTab> {
                   children: [
                     Row(
                       children: [
-                        const Icon(Icons.check_circle_outline_rounded, color: Color(0xFF059669), size: 16),
+                        const Icon(Icons.check_circle_outline_rounded, color: SoftPalette.emerald500, size: 16),
                         const SizedBox(width: 6),
-                        const Text('DISBURSEMENT: ', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF64748B))),
-                        Text('$paidCount / ${list.length} PAID', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: Color(0xFF059669))),
-                        Text(' ($unpaidCount pending)', style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+                        Text('DISBURSEMENT: ', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.adapt(SoftPalette.slate550))),
+                        Text('$paidCount / ${list.length} PAID', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: SoftPalette.emerald500)),
+                        Text(' ($unpaidCount pending)', style: TextStyle(fontSize: 11, color: context.adapt(SoftPalette.slate350))),
                       ],
                     ),
-                    Container(width: 1, height: 18, color: const Color(0xFFE2E8F0)),
+                    Container(width: 1, height: 18, color: context.adapt(SoftPalette.slate150)),
                     Row(
                       children: [
-                        const Icon(Icons.account_balance_wallet_outlined, color: Color(0xFF059669), size: 16),
+                        const Icon(Icons.account_balance_wallet_outlined, color: SoftPalette.emerald500, size: 16),
                         const SizedBox(width: 6),
-                        const Text('DISBURSED: ', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF64748B))),
-                        Text('PKR ${_fmtCurrency(disbursedTotal)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: Color(0xFF059669))),
+                        Text('DISBURSED: ', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.adapt(SoftPalette.slate550))),
+                        Text('PKR ${_fmtCurrency(disbursedTotal)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: SoftPalette.emerald500)),
                       ],
                     ),
-                    Container(width: 1, height: 18, color: const Color(0xFFE2E8F0)),
+                    Container(width: 1, height: 18, color: context.adapt(SoftPalette.slate150)),
                     Row(
                       children: [
-                        const Icon(Icons.hourglass_empty_rounded, color: Color(0xFFD97706), size: 16),
+                        const Icon(Icons.hourglass_empty_rounded, color: SoftPalette.orange400, size: 16),
                         const SizedBox(width: 6),
-                        const Text('PENDING REQUIRED: ', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: Color(0xFF64748B))),
-                        Text('PKR ${_fmtCurrency(pendingTotal)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: Color(0xFFD97706))),
+                        Text('PENDING REQUIRED: ', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w700, color: context.adapt(SoftPalette.slate550))),
+                        Text('PKR ${_fmtCurrency(pendingTotal)}', style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900, color: SoftPalette.orange400)),
                       ],
                     ),
                   ],
@@ -532,7 +533,7 @@ class _PayrollTabState extends State<PayrollTab> {
         final sortedDepts = FinanceLedgerStorage.sortDepartmentsCanonical(depts.keys);
 
         final branchName = Hive.box(LocalStorageService.branchesBox).get(branchId)?['name'] ?? branchId;
-        final branchCol = _mutedColorForKey(branchName.toString());
+        final branchCol = context.adapt(_mutedColorForKey(branchName.toString()));
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -542,20 +543,20 @@ class _PayrollTabState extends State<PayrollTab> {
               margin: const EdgeInsets.only(top: 14, bottom: 8),
               width: double.infinity,
               decoration: BoxDecoration(
-                color: const Color(0xFFF1F5F9),
+                color: context.adapt(SoftPalette.slate100),
                 borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFFCBD5E1), width: 1.0),
+                border: Border.all(color: context.adapt(SoftPalette.slate200), width: 1.0),
               ),
               child: Center(
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Icon(Icons.business_rounded, color: Color(0xFF0F172A), size: 18),
+                    Icon(Icons.business_rounded, color: context.adapt(SoftPalette.slate900), size: 18),
                     const SizedBox(width: 8),
                     Text(
                       branchName.toString().toUpperCase(),
-                      style: const TextStyle(
-                        color: Color(0xFF0F172A),
+                      style: TextStyle(
+                        color: context.adapt(SoftPalette.slate900),
                         fontSize: 15,
                         fontWeight: FontWeight.w900,
                         letterSpacing: 1.5,
@@ -704,18 +705,18 @@ class _PayrollTabState extends State<PayrollTab> {
       margin: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
       decoration: BoxDecoration(
-        color: Colors.amber.withOpacity(0.08),
+        color: context.adapt(SoftPalette.amber200).withOpacity(0.08),
         borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.amber.withOpacity(0.35)),
+        border: Border.all(color: context.adapt(SoftPalette.amber200).withOpacity(0.35)),
       ),
       child: Row(
         children: [
-          const Icon(Icons.lock_outline, color: Colors.amber, size: 18),
+          const Icon(Icons.lock_outline, color: SoftPalette.amber200, size: 18),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
               'This period is locked and closed. All calculations and payouts are strictly read-only.',
-              style: TextStyle(color: Colors.amber[800], fontSize: 11, fontWeight: FontWeight.bold),
+              style: TextStyle(color: SoftPalette.orange350, fontSize: 11, fontWeight: FontWeight.bold),
             ),
           ),
         ],
@@ -759,7 +760,7 @@ class _PayrollTabState extends State<PayrollTab> {
     final dept = emp['department']?.toString() ?? '';
 
     final branchLabel = Hive.box(LocalStorageService.branchesBox).get(emp['branchId']?.toString() ?? '')?['name'] ?? emp['branchId']?.toString() ?? '';
-    final branchCol = _mutedColorForKey(branchLabel);
+    final branchCol = context.adapt(_mutedColorForKey(branchLabel));
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
@@ -789,7 +790,7 @@ class _PayrollTabState extends State<PayrollTab> {
                                 borderRadius: BorderRadius.circular(2),
                               ),
                             ),
-                            buildInitialsAvatar(name: name, theme: t, radius: 18),
+                            buildInitialsAvatar(context: context, name: name, theme: t, radius: 18),
                             const SizedBox(width: 10),
                             Expanded(
                               child: Column(
@@ -807,13 +808,13 @@ class _PayrollTabState extends State<PayrollTab> {
                                           padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
                                           decoration: BoxDecoration(
                                             color: emp['camp'].toString().contains('Haji')
-                                                ? const Color(0xFF0284C7).withOpacity(0.12)
-                                                : const Color(0xFF059669).withOpacity(0.12),
+                                                ? SoftPalette.sky500.withOpacity(0.12)
+                                                : SoftPalette.emerald500.withOpacity(0.12),
                                             borderRadius: BorderRadius.circular(4),
                                             border: Border.all(
                                               color: emp['camp'].toString().contains('Haji')
-                                                  ? const Color(0xFF0284C7)
-                                                  : const Color(0xFF059669),
+                                                  ? SoftPalette.sky500
+                                                  : SoftPalette.emerald500,
                                               width: 0.8,
                                             ),
                                           ),
@@ -823,8 +824,8 @@ class _PayrollTabState extends State<PayrollTab> {
                                               fontSize: 9.5,
                                               fontWeight: FontWeight.bold,
                                               color: emp['camp'].toString().contains('Haji')
-                                                  ? const Color(0xFF0369A1)
-                                                  : const Color(0xFF047857),
+                                                  ? SoftPalette.sky550
+                                                  : SoftPalette.emerald550,
                                             ),
                                           ),
                                         ),
@@ -860,7 +861,7 @@ class _PayrollTabState extends State<PayrollTab> {
                           const SizedBox(height: 3),
                           Text(
                             'PKR ${_fmtCurrency(netPayDisplay)}',
-                            style: TextStyle(color: isPaid ? Colors.green[600] : t.textPrimary, fontSize: 22, fontWeight: FontWeight.w500),
+                            style: TextStyle(color: isPaid ? SoftPalette.green400 : t.textPrimary, fontSize: 22, fontWeight: FontWeight.w500),
                           ),
                         ],
                       ),
@@ -920,12 +921,12 @@ class _PayrollTabState extends State<PayrollTab> {
                             Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Icon(Icons.cancel_outlined, size: 13, color: Colors.redAccent),
+                                const Icon(Icons.cancel_outlined, size: 13, color: SoftPalette.red400),
                                 const SizedBox(width: 4),
                                 Expanded(
                                   child: Text(
                                     'Absent on: ${FinanceLocalStorage.formatDayRanges(absentDates)}',
-                                    style: const TextStyle(color: Colors.redAccent, fontSize: 11, fontWeight: FontWeight.w600),
+                                    style: const TextStyle(color: SoftPalette.red400, fontSize: 11, fontWeight: FontWeight.w600),
                                   ),
                                 ),
                               ],
@@ -936,12 +937,12 @@ class _PayrollTabState extends State<PayrollTab> {
                             Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Icon(Icons.event_busy_outlined, size: 13, color: Colors.orangeAccent),
+                                const Icon(Icons.event_busy_outlined, size: 13, color: SoftPalette.amber300),
                                 const SizedBox(width: 4),
                                 Expanded(
                                   child: Text(
                                     'Leave on: ${FinanceLocalStorage.formatDayRanges(paidLeaveDates)}',
-                                    style: const TextStyle(color: Colors.orangeAccent, fontSize: 11, fontWeight: FontWeight.w600),
+                                    style: const TextStyle(color: SoftPalette.amber300, fontSize: 11, fontWeight: FontWeight.w600),
                                   ),
                                 ),
                               ],
@@ -952,7 +953,7 @@ class _PayrollTabState extends State<PayrollTab> {
                             Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                const Icon(Icons.check_circle_outline, size: 13, color: Colors.green),
+                                const Icon(Icons.check_circle_outline, size: 13, color: SoftPalette.green400),
                                 const SizedBox(width: 4),
                                 Expanded(
                                   child: Text(
@@ -992,8 +993,8 @@ class _PayrollTabState extends State<PayrollTab> {
                         Expanded(
                           child: ElevatedButton.icon(
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: isLocked ? Colors.grey : t.accent,
-                              foregroundColor: Colors.white,
+                              backgroundColor: isLocked ? SoftPalette.gray350 : t.accent,
+                              foregroundColor: SoftPalette.gray50,
                               padding: const EdgeInsets.symmetric(vertical: 10),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                             ),
@@ -1050,8 +1051,8 @@ class _PayrollTabState extends State<PayrollTab> {
                       width: double.infinity,
                       child: OutlinedButton.icon(
                         style: OutlinedButton.styleFrom(
-                          foregroundColor: isLocked ? Colors.grey : t.danger,
-                          side: BorderSide(color: isLocked ? Colors.grey : t.danger, width: 0.5),
+                          foregroundColor: isLocked ? context.adapt(SoftPalette.gray350) : t.danger,
+                          side: BorderSide(color: isLocked ? context.adapt(SoftPalette.gray350) : t.danger, width: 0.5),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                           padding: const EdgeInsets.symmetric(vertical: 8),
                         ),
@@ -1166,18 +1167,18 @@ class _PayrollTabState extends State<PayrollTab> {
                   final amount = (e['amount'] as num?)?.toDouble() ?? 0.0;
                   final date = DateFormat('EEE, dd MMM yyyy').format(DateTime.parse(e['date']));
 
-                  Color amountColor = Colors.green;
+                  Color amountColor = SoftPalette.green400;
                   String typeLabel = 'Salary Payout';
                   IconData icon = Icons.payments_outlined;
                   StatusPillVariant typeVariant = StatusPillVariant.success;
 
                   if (type == 'advance_payment') {
-                    amountColor = Colors.orange;
+                    amountColor = SoftPalette.amber300;
                     typeLabel = 'Advance Issue';
                     icon = Icons.add_card;
                     typeVariant = StatusPillVariant.warning;
                   } else if (type == 'arrears_payment') {
-                    amountColor = Colors.purple;
+                    amountColor = SoftPalette.purple550;
                     typeLabel = 'Arrears Paid';
                     icon = Icons.redo_outlined;
                     typeVariant = StatusPillVariant.pro;
@@ -1220,7 +1221,7 @@ class _PayrollTabState extends State<PayrollTab> {
                                 const SizedBox(width: 8),
                                 InkWell(
                                   onTap: () => _showVoidDialog(context, e['localId']),
-                                  child: const Icon(Icons.delete_forever_outlined, color: Colors.red, size: 18),
+                                  child: const Icon(Icons.delete_forever_outlined, color: SoftPalette.red400, size: 18),
                                 )
                               ]
                             ],
@@ -1273,12 +1274,12 @@ class _PayrollTabState extends State<PayrollTab> {
               child: Text('Cancel', style: TextStyle(color: t.textSecondary)),
             ),
             ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.red),
+              style: ElevatedButton.styleFrom(backgroundColor: SoftPalette.red400),
               onPressed: () async {
                 if (reasonController.text.trim().isEmpty) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(const SnackBar(
+                  AppToast.showSnackBar(ctx, const SnackBar(
                     content: Text('Please enter a reason for voiding this transaction.'),
-                    backgroundColor: Colors.red,
+                    backgroundColor: SoftPalette.red400,
                     behavior: SnackBarBehavior.floating,
                   ));
                   return;
@@ -1296,21 +1297,21 @@ class _PayrollTabState extends State<PayrollTab> {
 
                   if (ctx.mounted) {
                     Navigator.pop(ctx);
-                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                    AppToast.showSnackBar(context, SnackBar(
                       content: const Text('Transaction voided and ledger recalculated.'),
                       backgroundColor: t.accent,
                       behavior: SnackBarBehavior.floating,
                     ));
                   }
                 } catch (e) {
-                  ScaffoldMessenger.of(ctx).showSnackBar(SnackBar(
+                  AppToast.showSnackBar(ctx, SnackBar(
                     content: Text('Failed: $e'),
-                    backgroundColor: Colors.red,
+                    backgroundColor: SoftPalette.red400,
                     behavior: SnackBarBehavior.floating,
                   ));
                 }
               },
-              child: const Text('Void Transaction', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              child: const Text('Void Transaction', style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold)),
             ),
           ],
         );
@@ -1421,7 +1422,7 @@ class _PayrollTabState extends State<PayrollTab> {
                       showCustomSnackBar(sheetCtx, 'Failed: $e', error: true);
                     }
                   },
-                  child: const Text('Issue Loan', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  child: const Text('Issue Loan', style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold)),
                 ),
               ],
             );
@@ -1543,7 +1544,7 @@ class _PayrollTabState extends State<PayrollTab> {
                       showCustomSnackBar(sheetCtx, 'Failed: $e', error: true);
                     }
                   },
-                  child: const Text('Log Repayment', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  child: const Text('Log Repayment', style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold)),
                 ),
               ],
             );
@@ -1777,8 +1778,8 @@ class _PayrollTabState extends State<PayrollTab> {
                                      style: ElevatedButton.styleFrom(
                                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                                        minimumSize: Size.zero,
-                                       backgroundColor: Colors.grey.withOpacity(0.1),
-                                       foregroundColor: Colors.grey[700],
+                                       backgroundColor: SoftPalette.gray350.withOpacity(0.1),
+                                       foregroundColor: context.adapt(SoftPalette.gray550),
                                        elevation: 0,
                                      ),
                                      onPressed: () {
@@ -1876,7 +1877,7 @@ class _PayrollTabState extends State<PayrollTab> {
                           Text('NET PAID SALARY', style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.bold, fontSize: 13)),
                           Text(
                             'PKR ${NumberFormat('#,###').format(netPaid)}',
-                            style: const TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 16),
+                            style: const TextStyle(color: SoftPalette.green400, fontWeight: FontWeight.bold, fontSize: 16),
                           ),
                         ],
                       ),
@@ -1885,7 +1886,7 @@ class _PayrollTabState extends State<PayrollTab> {
                     ElevatedButton(
                       style: ElevatedButton.styleFrom(
                         backgroundColor: t.accent,
-                        foregroundColor: Colors.white,
+                        foregroundColor: SoftPalette.gray50,
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                       ),
@@ -1941,7 +1942,7 @@ class _PayrollTabState extends State<PayrollTab> {
                                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                             children: [
                                               Text('Absence Deductions:', style: TextStyle(color: t.textTertiary, fontSize: 11)),
-                                              Text('- PKR ${NumberFormat('#,###').format(absenceDeductions)}', style: const TextStyle(color: Colors.red, fontSize: 11, fontWeight: FontWeight.bold)),
+                                              Text('- PKR ${NumberFormat('#,###').format(absenceDeductions)}', style: const TextStyle(color: SoftPalette.red400, fontSize: 11, fontWeight: FontWeight.bold)),
                                             ],
                                           ),
                                         ],
@@ -1951,7 +1952,7 @@ class _PayrollTabState extends State<PayrollTab> {
                                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                             children: [
                                               Text(otherDeductionsType == 'loan' ? 'Loan Deduction:' : (otherDeductionsType == 'security' ? 'Security Deduction:' : 'Other Deductions:'), style: TextStyle(color: t.textTertiary, fontSize: 11)),
-                                              Text('- PKR ${NumberFormat('#,###').format(otherDed)}', style: const TextStyle(color: Colors.red, fontSize: 11, fontWeight: FontWeight.bold)),
+                                              Text('- PKR ${NumberFormat('#,###').format(otherDed)}', style: const TextStyle(color: SoftPalette.red400, fontSize: 11, fontWeight: FontWeight.bold)),
                                             ],
                                           ),
                                         ],
@@ -1961,7 +1962,7 @@ class _PayrollTabState extends State<PayrollTab> {
                                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                             children: [
                                               Text('Arrears / Adjustment:', style: TextStyle(color: t.textTertiary, fontSize: 11)),
-                                              Text('+ PKR ${NumberFormat('#,###').format(arrs)}', style: const TextStyle(color: Colors.green, fontSize: 11, fontWeight: FontWeight.bold)),
+                                              Text('+ PKR ${NumberFormat('#,###').format(arrs)}', style: const TextStyle(color: SoftPalette.green400, fontSize: 11, fontWeight: FontWeight.bold)),
                                             ],
                                           ),
                                         ],
@@ -1971,7 +1972,7 @@ class _PayrollTabState extends State<PayrollTab> {
                                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                             children: [
                                               Text('OT & Holiday Bonus:', style: TextStyle(color: t.textTertiary, fontSize: 11)),
-                                              Text('+ PKR ${NumberFormat('#,###').format(otBonus)}', style: const TextStyle(color: Colors.green, fontSize: 11, fontWeight: FontWeight.bold)),
+                                              Text('+ PKR ${NumberFormat('#,###').format(otBonus)}', style: const TextStyle(color: SoftPalette.green400, fontSize: 11, fontWeight: FontWeight.bold)),
                                             ],
                                           ),
                                         ],
@@ -1982,7 +1983,7 @@ class _PayrollTabState extends State<PayrollTab> {
                                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                           children: [
                                             Text('Net Disbursed Amount:', style: TextStyle(color: t.textPrimary, fontSize: 12, fontWeight: FontWeight.bold)),
-                                            Text('PKR ${NumberFormat('#,###').format(netPaid)}', style: const TextStyle(color: Colors.green, fontSize: 14, fontWeight: FontWeight.bold)),
+                                            Text('PKR ${NumberFormat('#,###').format(netPaid)}', style: const TextStyle(color: SoftPalette.green400, fontSize: 14, fontWeight: FontWeight.bold)),
                                           ],
                                         ),
                                       ],
@@ -1997,11 +1998,11 @@ class _PayrollTabState extends State<PayrollTab> {
                                 ),
                                 ElevatedButton(
                                   style: ElevatedButton.styleFrom(
-                                    backgroundColor: Colors.green,
+                                    backgroundColor: SoftPalette.green400,
                                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                   ),
                                   onPressed: () => Navigator.pop(confirmCtx, true),
-                                  child: const Text('Confirm & Disburse', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                                  child: const Text('Confirm & Disburse', style: TextStyle(color: SoftPalette.gray50, fontWeight: FontWeight.bold)),
                                 ),
                               ],
                             );
@@ -2091,7 +2092,7 @@ class _PayrollTabState extends State<PayrollTab> {
           Text(label, style: TextStyle(color: t.textSecondary, fontSize: 12)),
           Text(
             '${isDeduction ? "-" : ""} PKR ${NumberFormat('#,###').format(amount)}',
-            style: TextStyle(color: isDeduction ? Colors.red : t.textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
+            style: TextStyle(color: isDeduction ? SoftPalette.red400 : t.textPrimary, fontSize: 13, fontWeight: FontWeight.bold),
           ),
         ],
       ),
@@ -2113,7 +2114,7 @@ class _PayrollTabState extends State<PayrollTab> {
         Text(
           '${isDeduction ? "-" : ""}PKR ${NumberFormat('#,###').format(amount)}',
           style: TextStyle(
-            color: highlightColor ?? (isDeduction ? Colors.red[400] : t.textPrimary),
+            color: highlightColor ?? (isDeduction ? SoftPalette.red400 : t.textPrimary),
             fontSize: 12,
             fontWeight: FontWeight.bold,
           ),

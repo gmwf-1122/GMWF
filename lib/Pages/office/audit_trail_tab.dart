@@ -1,6 +1,7 @@
 // lib/pages/office/audit_trail_tab.dart
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -106,19 +107,19 @@ class _AuditTrailTabState extends State<AuditTrailTab> {
     final t = RoleThemeData(
       roleLabel: tOriginal.roleLabel,
       isDarkCanvas: false,
-      bg: const Color(0xFFF8FAFC),
-      bgCard: Colors.white,
-      bgCardAlt: const Color(0xFFF1F5F9),
-      bgRule: const Color(0xFFE2E8F0),
-      accent: const Color(0xFF10B981),
-      accentLight: const Color(0xFF34D399),
-      accentMuted: const Color(0xFFD1FAE5),
-      accentGradient: const LinearGradient(colors: [Color(0xFF10B981), Color(0xFF059669)]),
-      glassTint: const Color(0x1A10B981),
-      textPrimary: const Color(0xFF111827),
-      textSecondary: const Color(0xFF6B7280),
-      textTertiary: const Color(0xFF9CA3AF),
-      danger: const Color(0xFFEF4444),
+      bg: SoftPalette.gray50,
+      bgCard: SoftPalette.gray50,
+      bgCardAlt: SoftPalette.slate100,
+      bgRule: SoftPalette.slate150,
+      accent: SoftPalette.emerald350,
+      accentLight: SoftPalette.emerald300,
+      accentMuted: SoftPalette.emerald100,
+      accentGradient: const LinearGradient(colors: [SoftPalette.emerald350, SoftPalette.emerald500]),
+      glassTint: SoftPalette.emerald350A10,
+      textPrimary: SoftPalette.slate900,
+      textSecondary: SoftPalette.slate550,
+      textTertiary: SoftPalette.slate350,
+      danger: SoftPalette.red400,
       zakat: tOriginal.zakat,
       nonZakat: tOriginal.nonZakat,
       gmwf: tOriginal.gmwf,
@@ -223,16 +224,16 @@ class _AuditTrailTabState extends State<AuditTrailTab> {
                       final date = DateFormat('yyyy-MM-dd HH:mm').format(DateTime.parse(log['timestamp']));
                       final reason = log['reason'] ?? '';
 
-                      Color actionColor = Colors.blue;
+                      Color actionColor = SoftPalette.blue400;
                       IconData actionIcon = Icons.edit_rounded;
                       if (act == 'CREATE') {
-                        actionColor = Colors.green;
+                        actionColor = SoftPalette.green400;
                         actionIcon = Icons.add_circle_outline_rounded;
                       } else if (act == 'DELETE' || act == 'VOID') {
-                        actionColor = Colors.red;
+                        actionColor = SoftPalette.red400;
                         actionIcon = Icons.remove_circle_outline_rounded;
                       } else if (act == 'TRANSFER') {
-                        actionColor = Colors.purple;
+                        actionColor = SoftPalette.purple550;
                         actionIcon = Icons.swap_horiz_rounded;
                       }
 
@@ -291,8 +292,8 @@ class _AuditTrailTabState extends State<AuditTrailTab> {
                                               const SizedBox(width: 6),
                                               Container(
                                                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                                decoration: BoxDecoration(color: const Color(0xFF6366F1).withValues(alpha: 0.12), borderRadius: BorderRadius.circular(4)),
-                                                child: Text(log['serial'].toString(), style: const TextStyle(color: Color(0xFF6366F1), fontSize: 9, fontWeight: FontWeight.bold)),
+                                                decoration: BoxDecoration(color: SoftPalette.indigo500.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(4)),
+                                                child: Text(log['serial'].toString(), style: const TextStyle(color: SoftPalette.indigo500, fontSize: 9, fontWeight: FontWeight.bold)),
                                               ),
                                             ],
                                           ],
@@ -317,9 +318,9 @@ class _AuditTrailTabState extends State<AuditTrailTab> {
                                         if (log['requestedBy'] != null && log['requestedBy'].toString().isNotEmpty)
                                           Text('Requested: ${log['requestedBy']}', style: TextStyle(color: t.textTertiary, fontSize: 11)),
                                         if (log['approvedBy'] != null && log['approvedBy'].toString().isNotEmpty)
-                                          Text('Approved: ${log['approvedBy']}', style: const TextStyle(color: Color(0xFF10B981), fontSize: 11, fontWeight: FontWeight.bold)),
+                                          Text('Approved: ${log['approvedBy']}', style: const TextStyle(color: SoftPalette.emerald350, fontSize: 11, fontWeight: FontWeight.bold)),
                                         if (log['rejectedBy'] != null && log['rejectedBy'].toString().isNotEmpty)
-                                          Text('Rejected: ${log['rejectedBy']}', style: const TextStyle(color: Color(0xFFEF4444), fontSize: 11, fontWeight: FontWeight.bold)),
+                                          Text('Rejected: ${log['rejectedBy']}', style: const TextStyle(color: SoftPalette.red400, fontSize: 11, fontWeight: FontWeight.bold)),
                                       ],
                                     ),
                                     if (log['fieldChanges'] != null && (log['fieldChanges'] as List).isNotEmpty) ...[
@@ -436,8 +437,8 @@ class _AuditTrailTabState extends State<AuditTrailTab> {
                                 child: const Row(
                                   children: [
                                     Expanded(flex: 2, child: Text('Field', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 10))),
-                                    Expanded(flex: 3, child: Text('Local Client Value', style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold, fontSize: 10))),
-                                    Expanded(flex: 3, child: Text('Cloud Server Value', style: TextStyle(color: Colors.blue, fontWeight: FontWeight.bold, fontSize: 10))),
+                                    Expanded(flex: 3, child: Text('Local Client Value', style: TextStyle(color: SoftPalette.green400, fontWeight: FontWeight.bold, fontSize: 10))),
+                                    Expanded(flex: 3, child: Text('Cloud Server Value', style: TextStyle(color: SoftPalette.blue400, fontWeight: FontWeight.bold, fontSize: 10))),
                                   ],
                                 ),
                               ),
@@ -459,14 +460,14 @@ class _AuditTrailTabState extends State<AuditTrailTab> {
                                         flex: 3,
                                         child: Text(
                                           d['local']?.toString() ?? 'null',
-                                          style: const TextStyle(color: Colors.green, fontSize: 11),
+                                          style: const TextStyle(color: SoftPalette.green400, fontSize: 11),
                                         ),
                                       ),
                                       Expanded(
                                         flex: 3,
                                         child: Text(
                                           d['remote']?.toString() ?? 'null',
-                                          style: const TextStyle(color: Colors.blue, fontSize: 11),
+                                          style: const TextStyle(color: SoftPalette.blue400, fontSize: 11),
                                         ),
                                       ),
                                     ],
@@ -480,8 +481,8 @@ class _AuditTrailTabState extends State<AuditTrailTab> {
                                   Expanded(
                                     child: OutlinedButton(
                                       style: OutlinedButton.styleFrom(
-                                        foregroundColor: Colors.green,
-                                        side: const BorderSide(color: Colors.green, width: 0.5),
+                                        foregroundColor: SoftPalette.green400,
+                                        side: const BorderSide(color: SoftPalette.green400, width: 0.5),
                                         padding: const EdgeInsets.symmetric(vertical: 10),
                                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                       ),
@@ -493,8 +494,8 @@ class _AuditTrailTabState extends State<AuditTrailTab> {
                                   Expanded(
                                     child: OutlinedButton(
                                       style: OutlinedButton.styleFrom(
-                                        foregroundColor: Colors.blue,
-                                        side: const BorderSide(color: Colors.blue, width: 0.5),
+                                        foregroundColor: SoftPalette.blue400,
+                                        side: const BorderSide(color: SoftPalette.blue400, width: 0.5),
                                         padding: const EdgeInsets.symmetric(vertical: 10),
                                         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                                       ),
@@ -544,7 +545,7 @@ class _AuditTrailTabState extends State<AuditTrailTab> {
         child: Text(
           displayLabel,
           style: TextStyle(
-            color: active ? Colors.white : t.textSecondary,
+            color: active ? SoftPalette.gray50 : t.textSecondary,
             fontSize: 11,
             fontWeight: FontWeight.bold,
           ),
