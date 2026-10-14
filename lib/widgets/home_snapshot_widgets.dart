@@ -3456,13 +3456,13 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
   if (isGlobalExec) {
     // 1. Get all branch IDs and consolidate Karachi sub-camps and branch aliases
     final rawBranchIds = await RecentActivityService.getAllBranchIdsAsync();
-    final Set<String> cleanBranchIds = {'karachi', 'gujrat', 'sialkot', 'jalalpur_jattan', 'rawalpindi'};
+    final Set<String> cleanBranchIds = {'karachi', 'gujrat', 'sialkot', 'jalalpurjattan', 'rawalpindi'};
     for (final id in rawBranchIds) {
       final norm = id.toLowerCase().trim().replaceAll(' ', '_').replaceAll('-', '_');
       if (norm.contains('karachi') || norm.contains('haji') || norm.contains('kapaya') || norm.contains('saddar')) {
         cleanBranchIds.add('karachi');
       } else if (norm.contains('jalal')) {
-        cleanBranchIds.add('jalalpur_jattan');
+        cleanBranchIds.add('jalalpurjattan');
       } else if (norm.contains('gujrat')) {
         cleanBranchIds.add('gujrat');
       } else if (norm.contains('sialkot')) {
@@ -3706,13 +3706,13 @@ Future<SnapshotDashboardData> buildLocalSnapshotDashboardData(Map<String, dynami
   final isGlobalExec = isExecutiveOrGlobal || !isBranchScoped;
 
   if (isGlobalExec) {
-    final Set<String> cleanBranchIds = {'karachi', 'gujrat', 'sialkot', 'jalalpur_jattan', 'rawalpindi'};
+    final Set<String> cleanBranchIds = {'karachi', 'gujrat', 'sialkot', 'jalalpurjattan', 'rawalpindi'};
     for (final id in RecentActivityService.getAllBranchIds()) {
       final norm = id.toLowerCase().trim().replaceAll(' ', '_').replaceAll('-', '_');
       if (norm.contains('karachi') || norm.contains('haji') || norm.contains('kapaya') || norm.contains('saddar')) {
         cleanBranchIds.add('karachi');
       } else if (norm.contains('jalal')) {
-        cleanBranchIds.add('jalalpur_jattan');
+        cleanBranchIds.add('jalalpurjattan');
       } else if (norm.contains('gujrat')) {
         cleanBranchIds.add('gujrat');
       } else if (norm.contains('sialkot')) {
@@ -3936,6 +3936,22 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
     super.initState();
     _localFuture = buildLocalSnapshotDashboardData(widget.userData);
     _checkAndShowImmediateStartupAppreciation();
+    _triggerBackgroundRemoteSync();
+  }
+
+  void _triggerBackgroundRemoteSync() {
+    Future.delayed(const Duration(milliseconds: 600), () async {
+      if (!mounted) return;
+      try {
+        final remoteData = await fetchSnapshotDashboardData(widget.userData);
+        if (mounted) {
+          setState(() {
+            _lastGlobalSnapshotData = remoteData;
+            _localFuture = Future.value(remoteData);
+          });
+        }
+      } catch (_) {}
+    });
   }
 
   void _checkAndShowImmediateStartupAppreciation() {
@@ -4020,12 +4036,12 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
     if (uB.isNotEmpty && uB != 'all' && uB != 'global') {
       unawaited(LocalStorageService.downloadDasterkhwaanTokens(uB, days: 2, force: true));
     } else {
-      for (final b in ['karachi', 'gujrat', 'sialkot', 'rawalpindi']) {
+      for (final b in ['karachi', 'gujrat', 'sialkot', 'jalalpurjattan', 'rawalpindi']) {
         unawaited(LocalStorageService.downloadDasterkhwaanTokens(b, days: 2, force: true));
       }
     }
     setState(() {
-      _localFuture = buildLocalSnapshotDashboardData(widget.userData);
+      _localFuture = fetchSnapshotDashboardData(widget.userData);
     });
     ref.invalidate(snapshotDashboardDataProvider(_userKey));
   }

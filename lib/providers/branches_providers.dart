@@ -462,7 +462,7 @@ class DispensaryNotifier
         branchIds.add(id);
       }
     }
-    branchIds.addAll(['karachi', 'gujrat', 'sialkot', 'rawalpindi', 'jalalpur_jattan']);
+    branchIds.addAll(['karachi', 'gujrat', 'sialkot', 'rawalpindi', 'jalalpurjattan']);
 
     try {
       final connectivity = await Connectivity().checkConnectivity();
@@ -774,7 +774,7 @@ class DispensaryNotifier
         _lastFirestoreFetch[fetchKey] = DateTime.now();
         final candidateBranches = <String>{};
         if (targetBranchId.isEmpty || targetBranchId == 'all') {
-          candidateBranches.addAll(['karachi', 'gujrat', 'sialkot', 'rawalpindi', 'jalalpur_jattan']);
+          candidateBranches.addAll(['karachi', 'gujrat', 'sialkot', 'rawalpindi', 'jalalpurjattan']);
         } else {
           final canonical = LocalStorageService.sanitizeBranchId(targetBranchId, fallback: targetBranchId.toLowerCase().trim());
           candidateBranches.add(canonical);

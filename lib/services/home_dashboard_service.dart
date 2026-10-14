@@ -53,21 +53,48 @@ bool _isSameDate(dynamic rawDate, String ymd, String dmyy) {
   return false;
 }
 
-bool _isMatchingBranch(String docBranchId, String targetBranchId) {
+bool _isMatchingBranch(String docBranchId, String targetBranchId, [String serial = '']) {
   final b1 = docBranchId.toLowerCase().trim().replaceAll(' ', '_').replaceAll('-', '_');
   final b2 = targetBranchId.toLowerCase().trim().replaceAll(' ', '_').replaceAll('-', '_');
   if (b2 == 'all' || b2 == 'global') return true;
+
+  final sUpper = serial.toUpperCase();
+
+  // Karachi sub-camps and aliases
+  if (b2 == 'karachi' || b2.contains('karachi') || b2.contains('saddar') || b2.contains('haji') || b2.contains('kapaya')) {
+    if (b1.contains('karachi') || b1.contains('haji') || b1.contains('saddar') || b1.contains('kapaya') || b1.contains('kap')) return true;
+    if (sUpper.contains('SADD') || sUpper.contains('HAJI') || sUpper.contains('KAP') || sUpper.contains('HC')) return true;
+    if (b1.isEmpty) return b2 == 'karachi';
+  }
+
+  // Jalalpur Jattan aliases
+  if (b2.contains('jalal') || b2 == 'jlj' || b2 == 'jpj') {
+    if (b1.contains('jalal') || b1 == 'jlj' || b1 == 'jpj' || b1.contains('jattan')) return true;
+    if (sUpper.contains('JLJ') || sUpper.contains('JPJ')) return true;
+  }
+
+  // Gujrat aliases
+  if (b2.contains('gujrat') || b2 == 'grt' || b2 == 'gjt') {
+    if (b1.contains('gujrat') || b1 == 'grt' || b1 == 'gjt') return true;
+    if (sUpper.contains('GRT') || sUpper.contains('GJT')) return true;
+  }
+
+  // Sialkot aliases
+  if (b2.contains('sialkot') || b2 == 'skt') {
+    if (b1.contains('sialkot') || b1 == 'skt') return true;
+    if (sUpper.contains('SKT')) return true;
+  }
+
+  // Rawalpindi aliases
+  if (b2.contains('rawalpindi') || b2 == 'rwp' || b2.contains('pindi')) {
+    if (b1.contains('rawalpindi') || b1 == 'rwp' || b1.contains('pindi')) return true;
+    if (sUpper.contains('RWP')) return true;
+  }
+
   if (b1.isEmpty) return false;
   if (b1 == b2) return true;
-  if (b2 == 'karachi') {
-    return b1.contains('karachi') || b1.contains('haji') || b1.contains('kapaya') || b1.contains('saddar');
-  }
-  if (b2.contains('karachi') || b2.contains('haji') || b2.contains('saddar') || b2.contains('kapaya')) {
-    if (b2.contains('haji')) return b1.contains('haji');
-    if (b2.contains('saddar') || b2.contains('kapaya')) return b1.contains('saddar') || b1.contains('kapaya') || (b1 == 'karachi');
-    return b1.contains('karachi');
-  }
-  return b1 == b2;
+  if (b1.replaceAll('_', '') == b2.replaceAll('_', '')) return true;
+  return b1.contains(b2) || b2.contains(b1);
 }
 
 /// Computes branch statistics from local Hive data (local_entries, local_donations, and historical branch cache).
@@ -139,8 +166,8 @@ Future<BranchStats> fetchLocalBranchStats(String branchId, DateTime date, {bool 
           final b = (e['branchId'] as String? ?? '').toLowerCase().trim();
           final dk = e['dateKey']?.toString();
           final rawDate = e['dateKey'] ?? e['date'] ?? e['createdAt'] ?? e['timestamp'] ?? e['serial'];
-          if (_isMatchingBranch(b, bId) && (dk == dateKeyDmyy || _isSameDate(rawDate, dateKeyYmd, dateKeyDmyy))) {
-            final rawSerial = (e['serial'] ?? e['id'] ?? e['tokenNumber'] ?? '').toString().trim().toLowerCase();
+          final rawSerial = (e['serial'] ?? e['id'] ?? e['tokenNumber'] ?? '').toString().trim().toLowerCase();
+          if (_isMatchingBranch(b, bId, rawSerial) && (dk == dateKeyDmyy || _isSameDate(rawDate, dateKeyYmd, dateKeyDmyy))) {
             final parts = rawSerial.split('-');
             final sNum = parts.length > 1 ? parts.last : rawSerial;
             final canonicalKey = parts.length > 2
@@ -156,12 +183,7 @@ Future<BranchStats> fetchLocalBranchStats(String branchId, DateTime date, {bool 
         final days = (val['daysOfMedicine'] as num?)?.toInt() ?? 1;
         final status = val['status']?.toString().toLowerCase();
 
-        if (type.contains('zakat') && !type.contains('non')) {
-          z++;
-          final rev = 20 * days;
-          dispRev += rev;
-          zRev += rev;
-        } else if (type.contains('non-zakat') || type.contains('nonzakat') || type.contains('non_zakat')) {
+        if (type.contains('non-zakat') || type.contains('nonzakat') || type.contains('non_zakat')) {
           nz++;
           final rev = 100 * days;
           dispRev += rev;
@@ -170,6 +192,12 @@ Future<BranchStats> fetchLocalBranchStats(String branchId, DateTime date, {bool 
           gm++;
         } else if (type.contains('dasterkhwan')) {
           das++;
+        } else {
+          // Default to Zakat (standard dispensary token)
+          z++;
+          final rev = 20 * days;
+          dispRev += rev;
+          zRev += rev;
         }
 
         if (status == 'dispensed' || status == 'completed') {
@@ -434,6 +462,9 @@ Future<BranchStats?> _fetchFirestoreBranchStats(String branchId, DateTime date) 
               final key = '$bId-${doc.id}';
               if (!eBox.containsKey(key)) {
                 eBox.put(key, {
+                  'dateKey': dateKeyDmyy,
+                  'category': 'zakat',
+                  'queueType': 'zakat',
                   ...(doc.data() as Map<String, dynamic>),
                   'branchId': bId,
                   'serial': doc.id,
@@ -459,6 +490,9 @@ Future<BranchStats?> _fetchFirestoreBranchStats(String branchId, DateTime date) 
               final key = '$bId-${doc.id}';
               if (!eBox.containsKey(key)) {
                 eBox.put(key, {
+                  'dateKey': dateKeyDmyy,
+                  'category': 'non-zakat',
+                  'queueType': 'non-zakat',
                   ...(doc.data() as Map<String, dynamic>),
                   'branchId': bId,
                   'serial': doc.id,
@@ -470,8 +504,29 @@ Future<BranchStats?> _fetchFirestoreBranchStats(String branchId, DateTime date) 
         }
       }
 
-      // GMWF patients
-      gm = (results[2] as QuerySnapshot).size + (results[6] as QuerySnapshot).size + (results[9] as QuerySnapshot).size;
+      // GMWF patients (root + saddar + haji)
+      for (final i in [2, 6, 9]) {
+        for (final doc in (results[i] as QuerySnapshot).docs) {
+          gm++;
+          try {
+            if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
+              final eBox = Hive.box(LocalStorageService.entriesBox);
+              final key = '$bId-${doc.id}';
+              if (!eBox.containsKey(key)) {
+                eBox.put(key, {
+                  'dateKey': dateKeyDmyy,
+                  'category': 'gmwf',
+                  'queueType': 'gmwf',
+                  ...(doc.data() as Map<String, dynamic>),
+                  'branchId': bId,
+                  'serial': doc.id,
+                  'syncStatus': 'synced',
+                });
+              }
+            }
+          } catch (_) {}
+        }
+      }
 
       // Legacy serials subcollection dasterkhwan check
       if ((results[3] as QuerySnapshot).size > 0) {
@@ -1082,11 +1137,18 @@ class RecentActivity {
 
 class RecentActivityService {
   static String resolveBranchName(String branchId) {
-    final box = Hive.box(LocalStorageService.branchesBox);
-    final cached = box.get('branch:${branchId.toLowerCase().trim()}');
-    if (cached is Map) {
-      return (cached['name'] as String?) ?? branchId;
+    final cleanId = branchId.toLowerCase().trim();
+    if (Hive.isBoxOpen(LocalStorageService.branchesBox)) {
+      final box = Hive.box(LocalStorageService.branchesBox);
+      final cached = box.get('branch:$cleanId') ??
+          box.get('branch:${cleanId.replaceAll('_', '')}') ??
+          box.get(cleanId) ??
+          box.get(cleanId.replaceAll('_', ''));
+      if (cached is Map) {
+        return (cached['name'] as String?) ?? branchId;
+      }
     }
+    if (cleanId == 'jalalpurjattan' || cleanId == 'jalalpur_jattan') return 'Jalal Pur Jattan';
     if (branchId.isEmpty) return 'Global';
     return branchId[0].toUpperCase() + branchId.substring(1);
   }
@@ -1284,11 +1346,13 @@ class RecentActivityService {
   }
 
   static List<String> getAllBranchIds() {
-    final Set<String> idsSet = {'karachi', 'sialkot', 'gujrat', 'jalalpur_jattan', 'rawalpindi'};
+    final Set<String> idsSet = {'karachi', 'sialkot', 'gujrat', 'jalalpurjattan', 'rawalpindi'};
     void addBranchId(String raw) {
       final norm = raw.toLowerCase().trim();
       if (norm.isEmpty || norm == 'all' || norm == 'unknown') return;
-      if (norm.contains('karachi') || norm.contains('haji') || norm.contains('kapaya') || norm.contains('saddar')) {
+      if (norm.contains('jalal')) {
+        idsSet.add('jalalpurjattan');
+      } else if (norm.contains('karachi') || norm.contains('haji') || norm.contains('kapaya') || norm.contains('saddar')) {
         idsSet.add('karachi');
       } else {
         idsSet.add(norm);

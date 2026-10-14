@@ -1,6 +1,7 @@
 // lib/pages/dispensary/receptionist/token_screen.dart
 
 import 'package:gmwf/services/cloud/cloud_db.dart';
+import 'package:gmwf/services/quota_service.dart';
 import 'package:gmwf/utils/perf_trace.dart';
 import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'dart:async';
@@ -1461,7 +1462,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
     }
   }
 
-  // ── Firestore sync — only writes directly when LAN server is unavailable ───
+  // ── Firestore sync — writes via CloudDb REST or enqueues for SyncService ───
   Future<void> _syncToFirestoreInBackground(
     String dateKey,
     String queueType,
@@ -1469,7 +1470,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
     Map<String, dynamic> entryData,
   ) async {
     // [DEDUP] If connected to LAN server, the token already traveled via
-    // WebSocket → Server SSM → Firestore.  Skip direct write to avoid
+    // WebSocket → Server SSM → Firestore. Skip direct write to avoid
     // double/triple quota consumption.
     final lanConnected = RealtimeManager().isConnected;
     if (lanConnected) {
@@ -1480,7 +1481,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
     bool written = false;
     try {
       final online = NetworkHealthService().isStableOnline;
-      if (online) {
+      if (online && !QuotaService.isPausedForDailyReset) {
         final campDocKey = CampSessionService.getCampDateDocId(
           branchId: widget.branchId,
           dateKey: dateKey,
@@ -1488,25 +1489,25 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
           dispensaryTag: entryData['dispensaryTag']?.toString(),
           serial: serial,
         );
-        final dayRef = FirebaseFirestore.instance
+        final dayRef = CloudDb.instance
             .collection('branches')
-            .doc(widget.branchId)
+            .doc(widget.branchId.toLowerCase().trim())
             .collection('serials')
             .doc(campDocKey);
         await dayRef
             .collection(queueType)
             .doc(serial)
-            .set(entryData, SetOptions(merge: true))
-            .timeout(const Duration(seconds: 4));
+            .set(LocalStorageService.sanitizeForCloudUpload(entryData), SetOptions(merge: true))
+            .timeout(const Duration(seconds: 8));
         await dayRef.set(
           {'lastSerialNumber': int.tryParse(serial.split('-').last) ?? 0},
           SetOptions(merge: true),
         );
         debugPrint(
-            '[TokenScreen] ✅ Firestore serials/$campDocKey/$queueType/$serial');
+            '[TokenScreen] ✅ Firestore confirmed: serials/$campDocKey/$queueType/$serial');
         written = true;
 
-        // Update local entry so pendingSync is cleared
+        // Update local entry ONLY after confirmed CloudDb write
         try {
           if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
             final eBox = Hive.box(LocalStorageService.entriesBox);
@@ -1524,14 +1525,14 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
         } catch (_) {}
       }
     } catch (e) {
-      debugPrint('[TokenScreen] Firestore write failed: $e');
+      debugPrint('[TokenScreen] CloudDb direct write refused/failed: $e');
     }
 
     if (!written) {
       try {
         await LocalStorageService.enqueueSync({
           'type':      'save_entry',
-          'branchId':  widget.branchId,
+          'branchId':  widget.branchId.toLowerCase().trim(),
           'dateKey':   dateKey,
           'queueType': queueType,
           'serial':    serial,

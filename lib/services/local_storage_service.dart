@@ -4448,7 +4448,7 @@ class LocalStorageService {
       return 'rawalpindi';
     }
     if (raw.contains('jalalpur') || raw == 'jlj') {
-      return 'jalalpur_jattan';
+      return 'jalalpurjattan';
     }
     if (isValidBranchId(branchId)) {
       return branchId!.trim().toLowerCase();
@@ -6121,6 +6121,28 @@ class LocalStorageService {
             if (map['synced'] != true) {
               map['synced'] = true;
               changed = true;
+            }
+          }
+
+          // 3d. Check for newly issued tokens today that were never queued for cloud sync
+          if (!isOld && !isCompleted) {
+            final bId = (map['branchId'] ?? '').toString().trim();
+            final syncKey = 'save_entry_${bId}_$serial';
+            if (Hive.isBoxOpen(syncBox)) {
+              final sBox = Hive.box(syncBox);
+              if (!sBox.containsKey(syncKey) && !sBox.containsKey(serial) && !sBox.containsKey(k)) {
+                final queueType = (map['queueType'] ?? map['category'] ?? 'zakat').toString().toLowerCase();
+                await enqueueSync({
+                  'type': 'save_entry',
+                  'branchId': bId.isNotEmpty ? bId : 'jalalpurjattan',
+                  'dateKey': map['dateKey'] ?? getTodayDateKey(),
+                  'queueType': queueType,
+                  'serial': serial,
+                  'data': map,
+                });
+                map['pendingSync'] = true;
+                changed = true;
+              }
             }
           }
 

@@ -11,6 +11,8 @@ import 'package:hive_flutter/hive_flutter.dart';
 import 'package:gmwf/design/components/flushbar_compat.dart';
 
 import 'package:gmwf/services/local_storage_service.dart';
+import 'package:gmwf/services/cloud/cloud_db.dart';
+import 'package:gmwf/services/quota_service.dart';
 import 'package:gmwf/services/master_proforma_service.dart';
 import 'package:gmwf/services/camp_session_service.dart';
 import 'package:gmwf/services/sync_service.dart';
@@ -4987,8 +4989,8 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     try {
       final isOnline = NetworkHealthService().isStableOnline;
 
-      if (isOnline) {
-        final branchRef = FirebaseFirestore.instance.collection('branches').doc(widget.branchId);
+      if (isOnline && !QuotaService.isPausedForDailyReset) {
+        final branchRef = CloudDb.instance.collection('branches').doc(widget.branchId.toLowerCase().trim());
 
         final campDocKey = CampSessionService.getCampDateDocId(
           branchId: widget.branchId,
@@ -4998,7 +5000,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
           serial: serial,
         );
 
-        // Single canonical write: updates the serial doc with clinical details + status
+        // Single canonical write: updates the serial doc with clinical details + status via CloudDb REST
         await branchRef
             .collection('serials').doc(campDocKey)
             .collection(queueType).doc(serial)
@@ -5014,7 +5016,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
             }, SetOptions(merge: true))
             .timeout(const Duration(seconds: 15));
 
-        // Update local entry so pendingSync is cleared
+        // Update local entry ONLY after confirmed CloudDb write
         try {
           if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
             final eBox = Hive.box(LocalStorageService.entriesBox);
