@@ -19,6 +19,7 @@ import 'dart:async';
 
 import '../config/constants.dart';
 import '../services/camp_session_service.dart';
+import '../services/local_storage_service.dart';
 import '../services/python_runner_service.dart';
 import '../utils/network_utils.dart';
 import '../services/auto_update_service.dart';
@@ -60,7 +61,11 @@ class LanServer {
 
   // ── [FIX 5] In-memory & disk persisted record version arbiter map ──────────
   final Map<String, int> _recordVersionMap = {};
-  final Map<String, String> _recordDeviceMap = {};
+
+  /// Client -> server control messages that no other device needs (see _handleMessage).
+  static const Set<String> _serverOnlyEventTypes = {
+    'ack_serials', 'ack_stock_items', 'message_ack', 'request_catch_up', 'request_full_lan_sync',
+  };
 
   // ── [LIVENESS] Track last active timestamp for each socket to evict silent/dead sockets ──
   final Map<WebSocket, DateTime> _lastActiveTimes = {};
@@ -386,6 +391,11 @@ class LanServer {
         onStressMessage?.call(socketId, data);
         return;
       }
+      // A stress-test token sent back as a real event (a device still holding leftovers from
+      // an interrupted test) is dropped: never saved, broadcast to other devices or queued.
+      if (LocalStorageService.isStressTestMessage(data)) {
+        return;
+      }
 
       // ── Connected clients query ──────────────────────────────────────────
       if (eventType == 'get_connected_clients' || data['type'] == 'get_connected_clients') {
@@ -540,34 +550,28 @@ class LanServer {
       }
 
       // ── [FIX 5] Server Authoritative Version Check with Disk Persistence & Tie-Breaker ──
+      // 'version' is the sending PC's own clock. Comparing it across PCs dropped real updates
+      // (already ACKed, so lost): a doctor PC whose clock ran behind the receptionist PC had
+      // its prescription discarded as "older" than the token, and every PC sends the same
+      // deviceId ('device_local'). Offline, Windows cannot correct the drift, so this is what
+      // broke routing without internet. Versions are now only compared for the same event
+      // type from the same client (a genuinely re-ordered or repeated send).
       final innerData = (data['data'] as Map?)?.cast<String, dynamic>() ?? data;
       final recordId = (innerData['serial'] ?? innerData['patientId'] ?? innerData['userId'])?.toString();
       final incomingVersion = (data['version'] is int)
           ? (data['version'] as int)
           : (int.tryParse(data['version']?.toString() ?? '') ?? 0);
-      final incomingDeviceId = (data['deviceId'] ?? data['_clientId'] ?? '').toString();
+      final senderClientId = (_clientInfo[socket]?['clientId'] ?? data['_clientId'] ?? socketId).toString();
 
       if (recordId != null && recordId.isNotEmpty && incomingVersion > 0) {
-        final knownVersion = _recordVersionMap[recordId] ?? 0;
+        final versionKey = '$recordId|${eventType ?? ''}|$senderClientId';
+        final knownVersion = _recordVersionMap[versionKey] ?? 0;
         if (incomingVersion < knownVersion) {
-          print('[LanServer] 🛑 Stale update for recordId=$recordId (version $incomingVersion < $knownVersion) — dropping broadcast');
+          print('[LanServer] 🛑 Out-of-order update for $versionKey ($incomingVersion < $knownVersion) — dropping');
           return;
         }
-        if (incomingVersion == knownVersion) {
-          // Tie-breaker: compare deviceId or client timestamp to break concurrent ties
-          final knownDeviceId = _recordDeviceMap[recordId] ?? '';
-          if (incomingDeviceId.isNotEmpty && knownDeviceId.isNotEmpty && incomingDeviceId == knownDeviceId) {
-            print('[LanServer] 🛑 Duplicate version $incomingVersion from same device $incomingDeviceId — dropping');
-            return;
-          }
-        }
-        _recordVersionMap[recordId] = incomingVersion;
-        if (incomingDeviceId.isNotEmpty) _recordDeviceMap[recordId] = incomingDeviceId;
-        try {
-          if (Hive.isBoxOpen('server_record_versions')) {
-            Hive.box('server_record_versions').put(recordId, incomingVersion);
-          }
-        } catch (_) {}
+        _recordVersionMap[versionKey] = incomingVersion;
+        if (_recordVersionMap.length > 20000) _recordVersionMap.clear(); // bounded; per-run ordering only
       }
 
             // ── Enrich and route ──────────────────────────────────────────────────
@@ -588,7 +592,12 @@ class LanServer {
       // never executed. That meant NO connected peer received the broadcast,
       // even though the message was valid. Peer routing must never depend on
       // whether the server's own local bookkeeping succeeds.
-      _routeMessage(socket, enhanced);
+      // Acknowledgements and catch-up requests are for the server only. Forwarding them made
+      // every catch-up cost (PCs x tokens x PCs) frames: each client ACKs every token it is
+      // sent, and each ACK went to every other client, keeping the LAN busy all the time.
+      if (!_serverOnlyEventTypes.contains(eventType)) {
+        _routeMessage(socket, enhanced);
+      }
       try {
         onMessageReceived?.call(enhanced);
       } catch (e, st) {

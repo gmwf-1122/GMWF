@@ -184,7 +184,9 @@ class _PatientQueueState extends State<PatientQueue> {
         isTodayExact = true;
       } else {
         final dt = DateTime.tryParse(rawStr);
-        if (dt != null) {
+        // A token over 2 days old cannot resolve to today: skip the costly shift lookup, which ran
+        // for every historical token on every queue refresh.
+        if (dt != null && DateTime.now().difference(dt).inHours.abs() < 48) {
           final dtKey = CampSessionService.resolveShiftAndDateKey(dt, widget.branchId).dateKey;
           if (dtKey == currentTodayKey) isTodayExact = true;
         }
@@ -497,7 +499,7 @@ class _PatientQueueState extends State<PatientQueue> {
       } else if (type == 'dispense_completed') {
         final serial = (data['serial'] ?? data['id'] ?? event['serial'] ?? event['id'])?.toString();
         if (serial != null && serial.isNotEmpty) {
-          LocalStorageService.updateDispenseStatus(widget.branchId, serial, 'dispensed');
+          LocalStorageService.updateDispenseStatus(widget.branchId, serial, 'dispensed', receivedViaLan: true);
         }
         _debouncedRebuild();
       } else if (type == RealtimeEvents.savePrescription || type == 'prescription_created' || type == 'save_prescription') {
@@ -512,18 +514,40 @@ class _PatientQueueState extends State<PatientQueue> {
               if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
                 final eBox = Hive.box(LocalStorageService.entriesBox);
                 final normBranch = widget.branchId.toLowerCase().trim();
-                final key = '$normBranch-$serial';
-                final existing = eBox.get(key) ?? eBox.get('$normBranch-${serial.toUpperCase()}');
-                if (existing != null && existing is Map) {
+                final cleanSerial = CampSessionService.cleanSerial(serial, widget.branchId);
+                final normSerial = cleanSerial.toUpperCase();
+                final canonicalKey = '$normBranch-$normSerial';
+                final candidateKeys = <String>{
+                  canonicalKey,
+                  '$normBranch-$cleanSerial',
+                  normSerial,
+                  cleanSerial,
+                  if (serial != cleanSerial) serial,
+                  if (serial != cleanSerial) '$normBranch-${serial.toUpperCase()}',
+                };
+                Map<String, dynamic>? existing;
+                String matchedKey = canonicalKey;
+                for (final ck in candidateKeys) {
+                  final val = eBox.get(ck);
+                  if (val is Map) {
+                    existing = Map<String, dynamic>.from(val);
+                    matchedKey = ck;
+                    break;
+                  }
+                }
+                if (existing != null) {
                   final updated = Map<String, dynamic>.from(existing);
                   updated['status'] = 'completed';
                   updated['prescription'] = data;
-                  updated['prescriptionId'] = data['id'] ?? serial;
+                  updated['prescriptionId'] = data['id'] ?? cleanSerial;
                   updated['completedAt'] ??= data['completedAt'] ?? DateTime.now().toIso8601String();
                   if (data['doctorName'] != null) updated['doctorName'] = data['doctorName'];
                   if (data['doctorId'] != null) updated['doctorId'] = data['doctorId'];
                   if (data['daysOfMedicine'] != null) updated['daysOfMedicine'] = data['daysOfMedicine'];
-                  eBox.put(existing == eBox.get(key) ? key : '$normBranch-${serial.toUpperCase()}', updated);
+                  eBox.put(canonicalKey, updated);
+                  if (matchedKey != canonicalKey && eBox.containsKey(matchedKey)) {
+                    eBox.delete(matchedKey);
+                  }
                 }
               }
             } catch (_) {}
@@ -540,11 +564,19 @@ class _PatientQueueState extends State<PatientQueue> {
       } else if (type == RealtimeEvents.tokenExceptionRequest || type == 'token_exception_request') {
         final requestId = (data['requestId'] ?? data['id'])?.toString() ??
             'local_${DateTime.now().millisecondsSinceEpoch}';
+        final patientId = (data['patientId'] ?? '').toString().trim();
+        if (patientId.isNotEmpty && LocalStorageService.hasApprovedTokenException(widget.branchId, patientId)) {
+          return; // Already approved exception! Never re-display as pending.
+        }
+        final status = (data['status'] ?? '').toString().toLowerCase().trim();
+        if (status == 'approved' || status == 'rejected') {
+          return;
+        }
         final localReq = <String, dynamic>{
           'id':          requestId,
           'requestType': 'token_exception',
           'status':      'pending',
-          'patientId':   data['patientId'] ?? '',
+          'patientId':   patientId,
           'patientName': data['patientName'] ?? 'Unknown',
           'restriction': data['restriction'],
           'branchId':    widget.branchId,
@@ -671,8 +703,18 @@ class _PatientQueueState extends State<PatientQueue> {
   bool _isCloudPulling = false;
 
   Future<void> manualCloudPull({bool showToast = true, bool force = false}) async {
+    if (RealtimeManager().isConnected) {
+      await RealtimeManager().forceFlushAndCatchUp();
+      if (showToast && mounted) {
+        AppToast.showSnackBar(context, const SnackBar(
+          content: Text('Requested sync from LAN server'),
+          duration: Duration(seconds: 2),
+        ));
+      }
+      return;
+    }
     final now = DateTime.now();
-    final cooldown = RealtimeManager().isConnected ? const Duration(seconds: 30) : const Duration(seconds: 10);
+    final cooldown = const Duration(seconds: 10);
     if (!force && _lastCloudPullTime != null && now.difference(_lastCloudPullTime!) < cooldown) {
       if (showToast && mounted) {
         AppToast.showSnackBar(context, SnackBar(
@@ -778,21 +820,30 @@ class _PatientQueueState extends State<PatientQueue> {
     }
 
     try {
-      try {
-        await CloudDb.instance
-            .collection('branches')
-            .doc(widget.branchId)
-            .collection('edit_requests')
-            .doc(requestId)
-            .update({
-          'status': 'approved',
+      final approvedBy = RealtimeManager().role ?? 'Doctor';
+      final nowIso = DateTime.now().toIso8601String();
+      await LocalStorageService.markLocalRequestDecided(requestId, 'approved', fields: {
+        'doctorReason': doctorReason,
+        'approvedBy': approvedBy,
+        'reviewedAt': nowIso,
+      });
+      // The decision goes through the upload queue (retried until Firestore confirms it). A
+      // LAN client drops dispensary items such as approve_token_exception, so the status is
+      // also queued as a plain request update, which every PC uploads itself.
+      await LocalStorageService.enqueueSync({
+        'type':       'update_request_status',
+        'branchId':   widget.branchId,
+        'collection': 'edit_requests',
+        'requestId':  requestId,
+        'status':     'approved',
+        'requestStatus': 'approved', // enqueueSync overwrites 'status' with the queue state
+        'data': {
           'doctorReason': doctorReason,
-          'approvedBy': RealtimeManager().role ?? 'Doctor',
-          'approvedAt': FieldValue.serverTimestamp(),
-        });
-      } catch (e) {
-        debugPrint('[PatientQueue] Firestore offline update failed: $e');
-      }
+          'approvedBy':   approvedBy,
+          'approvedAt':   nowIso,
+          'reviewedAt':   nowIso,
+        },
+      });
 
       await LocalStorageService.enqueueSync({
         'type':      'approve_token_exception',
@@ -875,16 +926,33 @@ class _PatientQueueState extends State<PatientQueue> {
     if (rejected != true) return;
 
     try {
-      await FirebaseFirestore.instance
-          .collection('branches')
-          .doc(widget.branchId)
-          .collection('edit_requests')
-          .doc(requestId)
-          .update({
-        'status': 'rejected',
-        'doctorReason': reasonCtrl.text.trim(),
-        'rejectedBy': RealtimeManager().role ?? 'Doctor',
-        'rejectedAt': FieldValue.serverTimestamp(),
+      // Same path as an approval: local copy, upload queue, LAN. The old direct SDK update
+      // was the only record of a rejection; it hung when the quota was used up, failed when
+      // the request had not been uploaded yet, and no other PC ever heard of it.
+      final reason = reasonCtrl.text.trim();
+      final rejectedBy = RealtimeManager().role ?? 'Doctor';
+      final nowIso = DateTime.now().toIso8601String();
+      final decision = {
+        'doctorReason':    reason,
+        'rejectionReason': reason,
+        'rejectedBy':      rejectedBy,
+        'rejectedAt':      nowIso,
+        'reviewedAt':      nowIso,
+      };
+      await LocalStorageService.markLocalRequestDecided(requestId, 'rejected', fields: decision);
+      await LocalStorageService.enqueueSync({
+        'type':       'reject_request',
+        'branchId':   widget.branchId,
+        'collection': 'edit_requests',
+        'requestId':  requestId,
+        'data':       decision,
+      });
+      RealtimeManager().sendMessage({
+        ...RealtimeEvents.payload(
+          type: RealtimeEvents.requestRejected,
+          branchId: widget.branchId,
+          data: {'requestId': requestId, ...decision},
+        ),
       });
 
       Hive.box('app_settings').delete('pending_exception_$requestId');
@@ -1722,7 +1790,10 @@ class _PatientQueueState extends State<PatientQueue> {
             }
 
             if (query.isNotEmpty) {
-              if (!name.contains(query) && !formula.contains(query) && !code.contains(query) && !type.contains(query)) {
+              final qNum = int.tryParse(query);
+              final cNum = int.tryParse(code);
+              final numMatch = qNum != null && cNum != null && qNum == cNum;
+              if (!name.contains(query) && !formula.contains(query) && !code.contains(query) && !type.contains(query) && !numMatch) {
                 return false;
               }
             }
@@ -1778,7 +1849,7 @@ class _PatientQueueState extends State<PatientQueue> {
                           autofocus: true,
                           onChanged: (_) => setModalState(() {}),
                           decoration: InputDecoration(
-                            hintText: 'Search formulary by name, formula, or type...',
+                            hintText: 'Search formulary by name, formula, roll no, or type...',
                             prefixIcon: Icon(Icons.search, color: context.adapt(_teal)),
                             suffixIcon: queryCtrl.text.isNotEmpty
                                 ? IconButton(
@@ -3225,25 +3296,27 @@ class _PatientQueueState extends State<PatientQueue> {
     ));
     debugPrint('[PrescEdit] ✅ Broadcasted save_prescription (days=$daysOfMedicine)');
 
-    // 4. Firestore fire-and-forget or enqueue to sync if offline
-    if (_isOnline) {
-      _updateFirestore(
-        serial:         serial,
-        branchId:       branchId,
-        patientCnic:    patientCnic,
-        queueType:      queueType,
-        updatedPresc:   updatedPresc,
-        daysOfMedicine: daysOfMedicine,
-        now:            now,
-      );
-    } else {
-      await LocalStorageService.enqueueSync({
-        'type': 'save_prescription',
-        'branchId': branchId,
-        'serial': serial,
-        'data': updatedPresc,
-      });
-      debugPrint('[PrescEdit] 📡 Enqueued offline prescription update to sync: $serial');
+    // 4. Firestore fire-and-forget or enqueue to sync if offline (ONLY when not connected to LAN server)
+    if (!RealtimeManager().isConnected) {
+      if (_isOnline) {
+        _updateFirestore(
+          serial:         serial,
+          branchId:       branchId,
+          patientCnic:    patientCnic,
+          queueType:      queueType,
+          updatedPresc:   updatedPresc,
+          daysOfMedicine: daysOfMedicine,
+          now:            now,
+        );
+      } else {
+        await LocalStorageService.enqueueSync({
+          'type': 'save_prescription',
+          'branchId': branchId,
+          'serial': serial,
+          'data': updatedPresc,
+        });
+        debugPrint('[PrescEdit] 📡 Enqueued offline prescription update to sync: $serial');
+      }
     }
 
     if (mounted) {

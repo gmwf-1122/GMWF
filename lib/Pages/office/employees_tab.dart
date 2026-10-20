@@ -1550,6 +1550,27 @@ class _EmployeesTabState extends State<EmployeesTab> {
                           ),
                         );
                       }),
+                    // Custom Weekly Rest Day / Sunday Working Badge
+                    if (emp['isSundayOff'] == false || (emp['weeklyOffDays'] is List && (emp['weeklyOffDays'] as List).isNotEmpty && !(emp['weeklyOffDays'] as List).contains('Sunday')))
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: SoftPalette.amber300.withValues(alpha: isDark ? 0.2 : 0.12),
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: SoftPalette.amber300.withValues(alpha: isDark ? 0.45 : 0.3)),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.calendar_today_rounded, size: 10.5, color: SoftPalette.amber500),
+                            const SizedBox(width: 4),
+                            Text(
+                              FinanceLocalStorage.getEmployeeWeeklyOffDisplay(emp),
+                              style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: SoftPalette.amber500),
+                            ),
+                          ],
+                        ),
+                      ),
                     if (hasCnic)
                       InkWell(
                         onTap: () {

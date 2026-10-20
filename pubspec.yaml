@@ -2,7 +2,7 @@ name: gmwf
 description: "A dispensary management app (offline-first with Firebase)"
 publish_to: 'none'
 
-version: 1.6.2
+version: 1.6.3
 
 environment:
   sdk: ">=3.10.1 <4.0.0"
@@ -86,6 +86,7 @@ dependencies:
   arabic_reshaper: ^0.0.1
   motion_tab_bar_v2: ^0.4.0
   hijri: ^3.0.1
+  workmanager: ^0.10.10
 dev_dependencies:
   flutter_test:
     sdk: flutter

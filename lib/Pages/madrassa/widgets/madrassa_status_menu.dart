@@ -8,6 +8,7 @@ import '../madrassa_strings.dart';
 import 'madrassa_common_widgets.dart';
 import '../../../theme/app_theme.dart';
 import '../dialogs/enrollment_dialog.dart';
+import '../dialogs/change_student_branch_dialog.dart';
 import '../utils/madrassa_local_storage.dart';
 import '../../../widgets/media_upload_tile.dart';
 import '../../../realtime/realtime_manager.dart';
@@ -852,6 +853,14 @@ class StatusActionMenu extends StatelessWidget {
           _showRevertQaidaDialog(context);
         } else if (val == 'history') {
           _showHistoryDialog(context);
+        } else if (val == 'change_branch') {
+          showChangeStudentBranchDialog(
+            context,
+            student: sData,
+            currentBranch: branchId,
+            username: username,
+            role: role,
+          );
         } else if (val == 'delete_student') {
           _confirmDeleteStudent(context);
         } else {
@@ -1029,6 +1038,28 @@ class StatusActionMenu extends StatelessWidget {
         ),
         if (_isHQManager) ...[
           const PopupMenuDivider(),
+          PopupMenuItem(
+            value: 'change_branch',
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: ctx.adapt(SoftPalette.indigo500).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(Icons.swap_horiz_rounded, size: 16, color: ctx.adapt(SoftPalette.indigo500)),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  context.isUrdu ? 'برانچ تبدیل کریں (HQ)' : 'Change Branch (HQ)',
+                  style: context.urduStyle(
+                    style: TextStyle(fontWeight: FontWeight.bold, color: ctx.adapt(SoftPalette.indigo500), fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          ),
           PopupMenuItem(
             value: 'delete_student',
             child: Row(

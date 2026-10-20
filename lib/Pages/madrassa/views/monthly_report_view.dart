@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -7,6 +8,7 @@ import '../models/madrassa_fee_logic.dart';
 import '../widgets/madrassa_common_widgets.dart';
 import '../utils/madrassa_report_helper.dart';
 import '../madrassa_strings.dart';
+import '../student_fee_ledger.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -718,8 +720,13 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
     required int month,
     required bool isDark,
   }) {
-    final isPaid = payment != null && payment['status'] == 'paid';
-    final amountPaid = (payment?['amountPaid'] as num?)?.toDouble() ?? due;
+    final status = payment?['status']?.toString().toLowerCase();
+    final amountPaid = (payment?['amountPaid'] as num?)?.toDouble() ?? 0.0;
+    final discount = (payment?['discount'] as num?)?.toDouble() ?? 0.0;
+    final balanceDue = (payment?['balanceDue'] as num?)?.toDouble() ??
+        ((status == 'paid' || due <= 0) ? 0.0 : (due - amountPaid - discount).clamp(0.0, double.infinity));
+    final isPaid = status == 'paid' || (payment != null && balanceDue <= 0.0);
+    final isPartial = status == 'partial' || (payment != null && !isPaid && (amountPaid > 0.0 || discount > 0.0));
     final canManage = _canManageDues;
 
     final Color bg;
@@ -730,8 +737,13 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
     if (isPaid) {
       bg = isDark ? SoftPalette.emerald700 : SoftPalette.green100m;
       fg = isDark ? SoftPalette.emerald200 : SoftPalette.green550;
-      text = 'PAID (Rs. ${amountPaid.toInt()})';
+      text = 'PAID (Rs. ${amountPaid > 0 ? amountPaid.toInt() : due.toInt()})';
       icon = Icons.check_circle_rounded;
+    } else if (isPartial) {
+      bg = isDark ? SoftPalette.orange800.withValues(alpha: 0.3) : SoftPalette.yellow150;
+      fg = isDark ? SoftPalette.amber200 : SoftPalette.orange400;
+      text = 'PARTIAL (Rem: Rs. ${balanceDue.toInt()})';
+      icon = Icons.pie_chart_outline_rounded;
     } else if (due <= 0) {
       bg = isDark ? SoftPalette.emerald700 : SoftPalette.green100m;
       fg = isDark ? SoftPalette.emerald200 : SoftPalette.green550;
@@ -740,7 +752,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
     } else {
       bg = isDark ? SoftPalette.red700 : SoftPalette.pink100m;
       fg = isDark ? SoftPalette.red300 : SoftPalette.red500;
-      text = 'Rs. ${due.toInt()}';
+      text = 'Rs. ${balanceDue.toInt()}';
       icon = canManage ? Icons.edit_note_rounded : null;
     }
 
@@ -850,8 +862,14 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
       // Only show months where student had active working days or has an existing payment record
       if (activeDays > 0 || mPayment != null) {
         final mDue = ((mFee['amountDue'] as num?) ?? 0.0).toDouble();
-        final mStatus = mPayment?['status']?.toString() ?? (mDue <= 0 ? 'paid' : 'unpaid');
-        final mPaid = (mPayment?['amountPaid'] as num?)?.toDouble() ?? (mStatus == 'paid' ? mDue : 0.0);
+        final mStatus = mPayment?['status']?.toString().toLowerCase();
+        final mPaid = (mPayment?['amountPaid'] as num?)?.toDouble() ?? 0.0;
+        final mDiscount = (mPayment?['discount'] as num?)?.toDouble() ?? 0.0;
+        final mRemains = (mPayment?['balanceDue'] as num?)?.toDouble() ??
+            ((mStatus == 'paid' || mDue <= 0) ? 0.0 : (mDue - mPaid - mDiscount).clamp(0.0, double.infinity));
+        final isItemPaid = mStatus == 'paid' || (mPayment != null && mRemains <= 0.0) || (mPayment == null && mDue <= 0.0);
+        final isItemPartial = !isItemPaid && (mPaid > 0.0 || mDiscount > 0.0 || mStatus == 'partial');
+        final resolvedStatus = isItemPaid ? 'paid' : (isItemPartial ? 'partial' : 'unpaid');
         final mNote = mPayment?['note']?.toString() ?? '';
 
         monthItems.add({
@@ -860,15 +878,18 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
           'label': DateFormat('MMMM yyyy').format(DateTime(y, m)),
           'amountDue': mDue,
           'amountPaid': mPaid,
-          'status': mStatus,
-          'isPaid': mStatus == 'paid',
+          'discount': mDiscount,
+          'balanceDue': mRemains,
+          'status': resolvedStatus,
+          'isPaid': isItemPaid,
+          'isPartial': isItemPartial,
           'present': mFee['present'] ?? 0,
           'leave': mFee['leave'] ?? 0,
           'absent': mFee['absent'] ?? 0,
           'activeWorkingDays': activeDays,
           'note': mNote,
           'paymentRecord': mPayment,
-          'isSelected': mStatus != 'paid' && mDue > 0,
+          'isSelected': !isItemPaid && mRemains > 0,
         });
       }
 
@@ -880,18 +901,139 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
     }
 
     bool isSaving = false;
+    final paidDeductCtrl = TextEditingController();
+    final discountDeductCtrl = TextEditingController(text: '0');
+    final noteDeductCtrl = TextEditingController();
+    String paymentMethodDeduct = 'Cash';
+    bool showDeductPanel = false;
 
     showDialog(
       context: context,
       builder: (dialogCtx) {
         return StatefulBuilder(
           builder: (context, setDialogState) {
-            final unpaidItems = monthItems.where((item) => item['isPaid'] != true && (item['amountDue'] as double) > 0).toList();
-            final totalUnpaidDues = unpaidItems.fold<double>(0.0, (sum, item) => sum + (item['amountDue'] as double));
-            final selectedItems = monthItems.where((item) => item['isSelected'] == true && item['isPaid'] != true && (item['amountDue'] as double) > 0).toList();
-            final totalSelectedDues = selectedItems.fold<double>(0.0, (sum, item) => sum + (item['amountDue'] as double));
+            final unpaidItems = monthItems.where((item) => item['isPaid'] != true && (item['balanceDue'] as double) > 0).toList();
+            final totalUnpaidDues = unpaidItems.fold<double>(0.0, (sum, item) => sum + (item['balanceDue'] as double));
+            final totalPaidSoFar = monthItems.fold<double>(0.0, (sum, item) => sum + (item['amountPaid'] as double));
+            final totalDiscountSoFar = monthItems.fold<double>(0.0, (sum, item) => sum + (item['discount'] as double));
+
+            final selectedItems = monthItems.where((item) => item['isSelected'] == true && item['isPaid'] != true && (item['balanceDue'] as double) > 0).toList();
+            final totalSelectedDues = selectedItems.fold<double>(0.0, (sum, item) => sum + (item['balanceDue'] as double));
             final allUnpaidSelected = unpaidItems.isNotEmpty && unpaidItems.every((item) => item['isSelected'] == true);
 
+            final markUser = (widget.username != null && widget.username!.isNotEmpty)
+                ? widget.username!
+                : ((widget.role ?? '').toLowerCase().contains('chairman') ? 'Chairman' : 'HQ Manager');
+            final markRole = (widget.role != null && widget.role!.isNotEmpty)
+                ? widget.role!
+                : ((widget.role ?? '').toLowerCase().contains('chairman') ? 'Chairman' : 'HQ Manager');
+
+            // Deduct custom amount and concessions from total or selected dues
+            Future<void> performCustomDeduction({
+              required double amountPaidInput,
+              required double discountInput,
+              required List<Map<String, dynamic>> targetMonths,
+              required String method,
+              String? customNote,
+            }) async {
+              if (amountPaidInput <= 0 && discountInput <= 0) return;
+              setDialogState(() => isSaving = true);
+              try {
+                double remainingPaidToAlloc = amountPaidInput;
+                double remainingDiscToAlloc = discountInput;
+
+                // Sort chronological (oldest unpaid month first) so past arrears get cleared first
+                final sortedMonths = [...targetMonths]..sort((a, b) {
+                  final cmp = (a['year'] as int).compareTo(b['year'] as int);
+                  if (cmp != 0) return cmp;
+                  return (a['month'] as int).compareTo(b['month'] as int);
+                });
+
+                for (final item in sortedMonths) {
+                  if (remainingPaidToAlloc <= 0 && remainingDiscToAlloc <= 0) break;
+
+                  final y = item['year'] as int;
+                  final m = item['month'] as int;
+                  final mDue = item['amountDue'] as double;
+                  final mPriorPaid = item['amountPaid'] as double;
+                  final mPriorDisc = item['discount'] as double;
+                  final mRemains = (item['balanceDue'] as double);
+
+                  if (mRemains <= 0) continue;
+
+                  // Allocate discount first
+                  final allocDisc = math.min(mRemains, remainingDiscToAlloc);
+                  remainingDiscToAlloc -= allocDisc;
+                  final afterDiscRemains = mRemains - allocDisc;
+
+                  // Allocate paid amount
+                  final allocPaid = math.min(afterDiscRemains, remainingPaidToAlloc);
+                  remainingPaidToAlloc -= allocPaid;
+
+                  final newPaid = mPriorPaid + allocPaid;
+                  final newDisc = mPriorDisc + allocDisc;
+                  final newBalance = (mDue - newPaid - newDisc).clamp(0.0, double.infinity);
+                  final newStatus = newBalance <= 0 ? 'paid' : 'partial';
+
+                  await MadrassaLocalStorage.saveFeePaymentLocalAndSync(
+                    branchId: _effectiveBranch,
+                    studentId: studentId,
+                    studentName: studentName,
+                    rollNumber: rollNumber,
+                    year: y,
+                    month: m,
+                    amountDue: mDue,
+                    amountPaid: newPaid,
+                    discount: newDisc,
+                    balanceDue: newBalance,
+                    paymentMethod: method,
+                    status: newStatus,
+                    markedBy: markUser,
+                    markedByRole: markRole,
+                    note: customNote ?? (newBalance <= 0 ? 'Dues cleared' : 'Partial payment recorded by $markRole'),
+                  );
+
+                  item['amountPaid'] = newPaid;
+                  item['discount'] = newDisc;
+                  item['balanceDue'] = newBalance;
+                  item['status'] = newStatus;
+                  item['isPaid'] = newBalance <= 0;
+                  item['isPartial'] = newBalance > 0 && (newPaid > 0 || newDisc > 0);
+                  item['isSelected'] = newBalance > 0;
+                }
+
+                SyncService().triggerUpload();
+
+                if (context.mounted) {
+                  final totalRemainsAfter = monthItems
+                      .where((i) => i['isPaid'] != true)
+                      .fold<double>(0.0, (s, i) => s + (i['balanceDue'] as double));
+                  AppToast.showSnackBar(
+                    context,
+                    SnackBar(
+                      content: Text(
+                        'Deducted Rs. ${amountPaidInput.toInt()} from dues. Remaining balance: Rs. ${totalRemainsAfter.toInt()}.',
+                      ),
+                      backgroundColor: SoftPalette.teal550,
+                    ),
+                  );
+                }
+
+                setDialogState(() {
+                  isSaving = false;
+                  showDeductPanel = false;
+                  paidDeductCtrl.clear();
+                  discountDeductCtrl.text = '0';
+                });
+              } catch (e) {
+                setDialogState(() => isSaving = false);
+                if (context.mounted) {
+                  AppToast.showSnackBar(context, SnackBar(content: Text('Error saving deduction: $e'), backgroundColor: SoftPalette.red400));
+                }
+              }
+            }
+
+            // Quick pay full due for selected/all months
             Future<void> performPayment({
               required List<Map<String, dynamic>> itemsToPay,
               String? customNote,
@@ -899,17 +1041,14 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
               if (itemsToPay.isEmpty) return;
               setDialogState(() => isSaving = true);
               try {
-                final markUser = (widget.username != null && widget.username!.isNotEmpty)
-                    ? widget.username!
-                    : ((widget.role ?? '').toLowerCase().contains('chairman') ? 'Chairman' : 'HQ Manager');
-                final markRole = (widget.role != null && widget.role!.isNotEmpty)
-                    ? widget.role!
-                    : ((widget.role ?? '').toLowerCase().contains('chairman') ? 'Chairman' : 'HQ Manager');
-
                 for (final item in itemsToPay) {
                   final y = item['year'] as int;
                   final m = item['month'] as int;
                   final due = item['amountDue'] as double;
+                  final currentPaid = item['amountPaid'] as double;
+                  final currentDisc = item['discount'] as double;
+                  final neededToClear = (due - currentPaid - currentDisc).clamp(0.0, double.infinity);
+                  final finalPaid = currentPaid + neededToClear;
 
                   await MadrassaLocalStorage.saveFeePaymentLocalAndSync(
                     branchId: _effectiveBranch,
@@ -919,12 +1058,21 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                     year: y,
                     month: m,
                     amountDue: due,
-                    amountPaid: due,
+                    amountPaid: finalPaid,
+                    discount: currentDisc,
+                    balanceDue: 0.0,
                     status: 'paid',
                     markedBy: markUser,
                     markedByRole: markRole,
                     note: customNote ?? 'Fee Payment via Madrassa Portal',
                   );
+
+                  item['amountPaid'] = finalPaid;
+                  item['balanceDue'] = 0.0;
+                  item['status'] = 'paid';
+                  item['isPaid'] = true;
+                  item['isPartial'] = false;
+                  item['isSelected'] = false;
                 }
 
                 SyncService().triggerUpload();
@@ -933,9 +1081,10 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                   Navigator.pop(dialogCtx);
                 }
                 if (context.mounted) {
-                  AppToast.showSnackBar(context, 
+                  AppToast.showSnackBar(
+                    context,
                     SnackBar(
-                      content: Text('Recorded payment for ${itemsToPay.length} month(s) (Total: Rs. ${itemsToPay.fold<double>(0.0, (s, e) => s + (e['amountDue'] as double)).toInt()}).'),
+                      content: Text('Recorded full payment for ${itemsToPay.length} month(s).'),
                       backgroundColor: SoftPalette.teal550,
                     ),
                   );
@@ -943,11 +1092,197 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
               } catch (e) {
                 setDialogState(() => isSaving = false);
                 if (context.mounted) {
-                  AppToast.showSnackBar(context, 
-                    SnackBar(content: Text('Error saving payments: $e'), backgroundColor: SoftPalette.red400),
-                  );
+                  AppToast.showSnackBar(context, SnackBar(content: Text('Error saving payments: $e'), backgroundColor: SoftPalette.red400));
                 }
               }
+            }
+
+            // Single month edit dialog for granular deduction
+            void openSingleMonthDeductionDialog(Map<String, dynamic> item) {
+              final mDue = (item['amountDue'] as double);
+              final mPriorDisc = (item['discount'] as double);
+              final mRemains = (item['balanceDue'] as double);
+
+              final amtCtrl = TextEditingController(text: mRemains > 0 ? mRemains.toInt().toString() : '0');
+              final discCtrl = TextEditingController(text: mPriorDisc > 0 ? mPriorDisc.toInt().toString() : '0');
+              final noteCtrl = TextEditingController(text: item['note'] ?? '');
+              String mMethod = 'Cash';
+
+              showDialog(
+                context: context,
+                builder: (sCtx) => StatefulBuilder(
+                  builder: (sCtx, setSState) {
+                    final pInput = double.tryParse(amtCtrl.text.trim()) ?? 0.0;
+                    final dInput = double.tryParse(discCtrl.text.trim()) ?? 0.0;
+                    final computedRemains = (mDue - pInput - dInput).clamp(0.0, double.infinity);
+                    final isDone = computedRemains <= 0.0;
+
+                    return AlertDialog(
+                      backgroundColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                      title: Row(
+                        children: [
+                          Icon(Icons.edit_note_rounded, color: sCtx.adapt(SoftPalette.teal550)),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              '${item['label']} - Deduct / Pay',
+                              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                            ),
+                          ),
+                        ],
+                      ),
+                      content: SingleChildScrollView(
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(12),
+                              decoration: BoxDecoration(
+                                color: isDone
+                                    ? SoftPalette.green550.withValues(alpha: 0.12)
+                                    : SoftPalette.red500.withValues(alpha: 0.12),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: isDone ? SoftPalette.green550 : SoftPalette.red500),
+                              ),
+                              child: Column(
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      const Text('Month Total Fee:', style: TextStyle(fontSize: 12)),
+                                      Text('Rs. ${mDue.toInt()}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12)),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      const Text('Amount Paid (Deducted):', style: TextStyle(fontSize: 12, color: SoftPalette.green550)),
+                                      Text('- Rs. ${pInput.toInt()}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: SoftPalette.green550)),
+                                    ],
+                                  ),
+                                  if (dInput > 0) ...[
+                                    const SizedBox(height: 4),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        const Text('Concession / Discount:', style: TextStyle(fontSize: 12, color: SoftPalette.orange400)),
+                                        Text('- Rs. ${dInput.toInt()}', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: SoftPalette.orange400)),
+                                      ],
+                                    ),
+                                  ],
+                                  const Divider(height: 12),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      Text(
+                                        isDone ? 'Status: Fully Cleared 🎉' : 'Remaining Due:',
+                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13, color: isDone ? SoftPalette.green550 : SoftPalette.red500),
+                                      ),
+                                      Text(
+                                        'Rs. ${computedRemains.toInt()}',
+                                        style: TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: isDone ? SoftPalette.green550 : SoftPalette.red500),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(height: 12),
+                            TextField(
+                              controller: amtCtrl,
+                              keyboardType: TextInputType.number,
+                              onChanged: (_) => setSState(() {}),
+                              decoration: const InputDecoration(labelText: 'Amount Paid (PKR)', prefixText: 'Rs. ', border: OutlineInputBorder()),
+                            ),
+                            const SizedBox(height: 10),
+                            TextField(
+                              controller: discCtrl,
+                              keyboardType: TextInputType.number,
+                              onChanged: (_) => setSState(() {}),
+                              decoration: const InputDecoration(labelText: 'Concession / Discount (PKR)', prefixText: 'Rs. ', border: OutlineInputBorder()),
+                            ),
+                            const SizedBox(height: 10),
+                            DropdownButtonFormField<String>(
+                              value: mMethod,
+                              decoration: const InputDecoration(labelText: 'Payment Method', border: OutlineInputBorder()),
+                              items: const [
+                                DropdownMenuItem(value: 'Cash', child: Text('Cash')),
+                                DropdownMenuItem(value: 'Bank Transfer', child: Text('Bank Transfer')),
+                                DropdownMenuItem(value: 'JazzCash/EasyPaisa', child: Text('JazzCash / EasyPaisa')),
+                                DropdownMenuItem(value: 'Online', child: Text('Online / Card')),
+                              ],
+                              onChanged: (v) {
+                                if (v != null) setSState(() => mMethod = v);
+                              },
+                            ),
+                            const SizedBox(height: 10),
+                            TextField(
+                              controller: noteCtrl,
+                              decoration: const InputDecoration(labelText: 'Notes / Remarks', border: OutlineInputBorder()),
+                            ),
+                          ],
+                        ),
+                      ),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(sCtx),
+                          child: const Text('Cancel'),
+                        ),
+                        ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: SoftPalette.teal550,
+                            foregroundColor: SoftPalette.gray50,
+                          ),
+                          onPressed: () async {
+                            final y = item['year'] as int;
+                            final m = item['month'] as int;
+                            final statusStr = isDone ? 'paid' : (pInput > 0 || dInput > 0 ? 'partial' : 'unpaid');
+
+                            await MadrassaLocalStorage.saveFeePaymentLocalAndSync(
+                              branchId: _effectiveBranch,
+                              studentId: studentId,
+                              studentName: studentName,
+                              rollNumber: rollNumber,
+                              year: y,
+                              month: m,
+                              amountDue: mDue,
+                              amountPaid: pInput,
+                              discount: dInput,
+                              balanceDue: computedRemains,
+                              paymentMethod: mMethod,
+                              status: statusStr,
+                              markedBy: markUser,
+                              markedByRole: markRole,
+                              note: noteCtrl.text.trim(),
+                            );
+
+                            SyncService().triggerUpload();
+
+                            setDialogState(() {
+                              item['amountPaid'] = pInput;
+                              item['discount'] = dInput;
+                              item['balanceDue'] = computedRemains;
+                              item['status'] = statusStr;
+                              item['isPaid'] = isDone;
+                              item['isPartial'] = !isDone && (pInput > 0 || dInput > 0);
+                              item['isSelected'] = !isDone;
+                              item['note'] = noteCtrl.text.trim();
+                            });
+
+                            if (sCtx.mounted) {
+                              Navigator.pop(sCtx);
+                            }
+                          },
+                          child: const Text('Save & Update Month'),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              );
             }
 
             return Dialog(
@@ -955,7 +1290,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
               insetPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 20),
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 620, maxHeight: 720),
+                constraints: const BoxConstraints(maxWidth: 640, maxHeight: 760),
                 child: Padding(
                   padding: const EdgeInsets.all(20),
                   child: Column(
@@ -989,7 +1324,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                 ),
                                 const SizedBox(height: 2),
                                 Text(
-                                  'Roll #$rollNumber • Monthly Dues Breakdown',
+                                  'Roll #$rollNumber • Monthly Fee & Dues Management',
                                   style: TextStyle(
                                     fontSize: 12,
                                     color: isDark ? SoftPalette.slate350 : SoftPalette.slate550,
@@ -998,6 +1333,31 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                               ],
                             ),
                           ),
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: SoftPalette.blue500,
+                              foregroundColor: SoftPalette.gray50,
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                            icon: const Icon(Icons.receipt_long_rounded, size: 15),
+                            label: const Text('Ledger & Receipts', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                            onPressed: () {
+                              Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => StudentFeeLedgerScreen(
+                                    branchId: _effectiveBranch,
+                                    studentId: studentId,
+                                    studentName: studentName,
+                                    rollNumber: rollNumber,
+                                    monthlyFee: amountDue,
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                          const SizedBox(width: 4),
                           IconButton(
                             icon: const Icon(Icons.close, size: 20),
                             onPressed: () => Navigator.pop(dialogCtx),
@@ -1010,7 +1370,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
 
                       // Dues Summary Bar
                       Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
                         decoration: BoxDecoration(
                           color: totalUnpaidDues > 0
                               ? (isDark ? SoftPalette.red800 : SoftPalette.red100t)
@@ -1029,7 +1389,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  'Total Outstanding Dues',
+                                  'Remaining Outstanding Dues',
                                   style: TextStyle(
                                     fontSize: 11,
                                     color: isDark ? SoftPalette.gray50A70 : SoftPalette.gray550,
@@ -1040,34 +1400,213 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                 Text(
                                   'Rs. ${totalUnpaidDues.toInt()}',
                                   style: TextStyle(
-                                    fontSize: 18,
+                                    fontSize: 19,
                                     fontWeight: FontWeight.bold,
                                     color: totalUnpaidDues > 0 ? context.adapt(SoftPalette.red500) : context.adapt(SoftPalette.emerald500),
                                   ),
                                 ),
                               ],
                             ),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                              decoration: BoxDecoration(
-                                color: totalUnpaidDues > 0
-                                    ? context.adapt(SoftPalette.red500).withValues(alpha: 0.15)
-                                    : context.adapt(SoftPalette.emerald500).withValues(alpha: 0.15),
-                                borderRadius: BorderRadius.circular(8),
-                              ),
-                              child: Text(
-                                totalUnpaidDues > 0 ? '${unpaidItems.length} Unpaid Month(s)' : 'All Dues Clear',
-                                style: TextStyle(
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 12,
-                                  color: totalUnpaidDues > 0 ? context.adapt(SoftPalette.red500) : context.adapt(SoftPalette.emerald500),
-                                ),
-                              ),
+                            Row(
+                              children: [
+                                if (totalPaidSoFar > 0) ...[
+                                  Column(
+                                    crossAxisAlignment: CrossAxisAlignment.end,
+                                    children: [
+                                      Text('Paid: Rs. ${totalPaidSoFar.toInt()}', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.green550))),
+                                      if (totalDiscountSoFar > 0)
+                                        Text('Disc: Rs. ${totalDiscountSoFar.toInt()}', style: TextStyle(fontSize: 10, color: context.adapt(SoftPalette.orange400))),
+                                    ],
+                                  ),
+                                  const SizedBox(width: 10),
+                                ],
+                                if (canEdit && totalUnpaidDues > 0)
+                                  ElevatedButton.icon(
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: showDeductPanel ? SoftPalette.gray400 : SoftPalette.teal550,
+                                      foregroundColor: SoftPalette.gray50,
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                    ),
+                                    icon: Icon(showDeductPanel ? Icons.expand_less : Icons.remove_circle_outline, size: 15),
+                                    label: Text(
+                                      showDeductPanel ? 'Hide Deduction' : 'Deduct from Total',
+                                      style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold),
+                                    ),
+                                    onPressed: () {
+                                      setDialogState(() {
+                                        showDeductPanel = !showDeductPanel;
+                                        if (showDeductPanel && paidDeductCtrl.text.isEmpty) {
+                                          paidDeductCtrl.text = totalUnpaidDues.toInt().toString();
+                                        }
+                                      });
+                                    },
+                                  ),
+                              ],
                             ),
                           ],
                         ),
                       ),
-                      const SizedBox(height: 12),
+                      const SizedBox(height: 10),
+
+                      // Interactive Deduction Panel (when toggled by HQ Manager)
+                      if (showDeductPanel && canEdit && totalUnpaidDues > 0) ...[
+                        Builder(
+                          builder: (_) {
+                            final pVal = double.tryParse(paidDeductCtrl.text.trim()) ?? 0.0;
+                            final dVal = double.tryParse(discountDeductCtrl.text.trim()) ?? 0.0;
+                            final remVal = (totalUnpaidDues - pVal - dVal).clamp(0.0, double.infinity);
+                            final willClear = remVal <= 0.0;
+
+                            return Container(
+                              padding: const EdgeInsets.all(12),
+                              margin: const EdgeInsets.only(bottom: 10),
+                              decoration: BoxDecoration(
+                                color: isDark ? SoftPalette.slate700.withValues(alpha: 0.5) : SoftPalette.slate100,
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: context.adapt(SoftPalette.teal550).withValues(alpha: 0.4)),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Icon(Icons.calculate_rounded, size: 16, color: context.adapt(SoftPalette.teal550)),
+                                      const SizedBox(width: 6),
+                                      const Text(
+                                        'Deduct Payment from Outstanding Dues',
+                                        style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: TextField(
+                                          controller: paidDeductCtrl,
+                                          keyboardType: TextInputType.number,
+                                          onChanged: (_) => setDialogState(() {}),
+                                          decoration: const InputDecoration(
+                                            labelText: 'Amount Paid (PKR)',
+                                            prefixText: 'Rs. ',
+                                            isDense: true,
+                                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                            border: OutlineInputBorder(),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: TextField(
+                                          controller: discountDeductCtrl,
+                                          keyboardType: TextInputType.number,
+                                          onChanged: (_) => setDialogState(() {}),
+                                          decoration: const InputDecoration(
+                                            labelText: 'Concession / Discount (PKR)',
+                                            prefixText: 'Rs. ',
+                                            isDense: true,
+                                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                            border: OutlineInputBorder(),
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  // Live calculation banner: Total - Paid - Discount = Remains
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                                    decoration: BoxDecoration(
+                                      color: willClear
+                                          ? SoftPalette.green550.withValues(alpha: 0.12)
+                                          : SoftPalette.red500.withValues(alpha: 0.12),
+                                      borderRadius: BorderRadius.circular(8),
+                                    ),
+                                    child: Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                      children: [
+                                        Text(
+                                          'Total: Rs. ${totalUnpaidDues.toInt()} - Paid: Rs. ${pVal.toInt()} ${dVal > 0 ? "- Disc: Rs. ${dVal.toInt()}" : ""}',
+                                          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w500),
+                                        ),
+                                        Text(
+                                          willClear ? 'What Remains: Rs. 0 (Fully Cleared 🎉)' : 'What Remains: Rs. ${remVal.toInt()}',
+                                          style: TextStyle(
+                                            fontSize: 12,
+                                            fontWeight: FontWeight.bold,
+                                            color: willClear ? SoftPalette.green550 : SoftPalette.red500,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: DropdownButtonFormField<String>(
+                                          value: paymentMethodDeduct,
+                                          isDense: true,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Payment Method',
+                                            isDense: true,
+                                            contentPadding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                            border: OutlineInputBorder(),
+                                          ),
+                                          items: const [
+                                            DropdownMenuItem(value: 'Cash', child: Text('Cash', style: TextStyle(fontSize: 12))),
+                                            DropdownMenuItem(value: 'Bank Transfer', child: Text('Bank Transfer', style: TextStyle(fontSize: 12))),
+                                            DropdownMenuItem(value: 'JazzCash/EasyPaisa', child: Text('JazzCash / EasyPaisa', style: TextStyle(fontSize: 12))),
+                                            DropdownMenuItem(value: 'Online', child: Text('Online / Card', style: TextStyle(fontSize: 12))),
+                                          ],
+                                          onChanged: (v) {
+                                            if (v != null) setDialogState(() => paymentMethodDeduct = v);
+                                          },
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: TextField(
+                                          controller: noteDeductCtrl,
+                                          decoration: const InputDecoration(
+                                            labelText: 'Remarks / Receipt #',
+                                            isDense: true,
+                                            contentPadding: EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                            border: OutlineInputBorder(),
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      ElevatedButton.icon(
+                                        style: ElevatedButton.styleFrom(
+                                          backgroundColor: SoftPalette.teal550,
+                                          foregroundColor: SoftPalette.gray50,
+                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                        ),
+                                        icon: isSaving
+                                            ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50))
+                                            : const Icon(Icons.check_circle_outline, size: 16),
+                                        label: const Text('Confirm & Deduct', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                        onPressed: isSaving
+                                            ? null
+                                            : () => performCustomDeduction(
+                                                  amountPaidInput: pVal,
+                                                  discountInput: dVal,
+                                                  targetMonths: unpaidItems,
+                                                  method: paymentMethodDeduct,
+                                                  customNote: noteDeductCtrl.text.trim(),
+                                                ),
+                                      ),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                            );
+                          },
+                        ),
+                      ],
 
                       // Select All Header
                       if (canEdit && unpaidItems.isNotEmpty)
@@ -1077,7 +1616,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
                               Text(
-                                'Previous Months Dues',
+                                'Monthly Dues History (${monthItems.length} months)',
                                 style: TextStyle(
                                   fontSize: 13,
                                   fontWeight: FontWeight.bold,
@@ -1089,7 +1628,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                   setDialogState(() {
                                     final newVal = !allUnpaidSelected;
                                     for (final item in monthItems) {
-                                      if (item['isPaid'] != true && (item['amountDue'] as double) > 0) {
+                                      if (item['isPaid'] != true && (item['balanceDue'] as double) > 0) {
                                         item['isSelected'] = newVal;
                                       }
                                     }
@@ -1108,7 +1647,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                         onChanged: (val) {
                                           setDialogState(() {
                                             for (final item in monthItems) {
-                                              if (item['isPaid'] != true && (item['amountDue'] as double) > 0) {
+                                              if (item['isPaid'] != true && (item['balanceDue'] as double) > 0) {
                                                 item['isSelected'] = val ?? false;
                                               }
                                             }
@@ -1147,8 +1686,11 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                 itemBuilder: (ctx, idx) {
                                   final item = monthItems[idx];
                                   final isItemPaid = item['isPaid'] == true;
+                                  final isItemPartial = item['isPartial'] == true;
                                   final dueVal = (item['amountDue'] as double).toInt();
                                   final paidVal = (item['amountPaid'] as double).toInt();
+                                  final discVal = (item['discount'] as double).toInt();
+                                  final remainsVal = (item['balanceDue'] as double).toInt();
                                   final isSelected = item['isSelected'] == true;
 
                                   return Container(
@@ -1169,7 +1711,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                     ),
                                     child: Row(
                                       children: [
-                                        if (canEdit && !isItemPaid && dueVal > 0)
+                                        if (canEdit && !isItemPaid && remainsVal > 0)
                                           Checkbox(
                                             value: isSelected,
                                             activeColor: ctx.adapt(SoftPalette.teal550),
@@ -1183,9 +1725,13 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                           Padding(
                                             padding: const EdgeInsets.symmetric(horizontal: 10),
                                             child: Icon(
-                                              isItemPaid ? Icons.check_circle_rounded : Icons.radio_button_unchecked,
+                                              isItemPaid
+                                                  ? Icons.check_circle_rounded
+                                                  : (isItemPartial ? Icons.pie_chart_outline_rounded : Icons.radio_button_unchecked),
                                               size: 18,
-                                              color: isItemPaid ? ctx.adapt(SoftPalette.emerald500) : ctx.adapt(SoftPalette.gray300),
+                                              color: isItemPaid
+                                                  ? ctx.adapt(SoftPalette.emerald500)
+                                                  : (isItemPartial ? ctx.adapt(SoftPalette.orange350) : ctx.adapt(SoftPalette.gray300)),
                                             ),
                                           ),
                                         Expanded(
@@ -1208,15 +1754,25 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                                     decoration: BoxDecoration(
                                                       color: isItemPaid
                                                           ? ctx.adapt(SoftPalette.emerald350).withValues(alpha: 0.15)
-                                                          : ctx.adapt(SoftPalette.red400).withValues(alpha: 0.15),
+                                                          : (isItemPartial
+                                                              ? ctx.adapt(SoftPalette.orange350).withValues(alpha: 0.15)
+                                                              : ctx.adapt(SoftPalette.red400).withValues(alpha: 0.15)),
                                                       borderRadius: BorderRadius.circular(6),
                                                     ),
                                                     child: Text(
-                                                      isItemPaid ? 'PAID (Rs. $paidVal)' : 'UNPAID (Rs. $dueVal)',
+                                                      isItemPaid
+                                                          ? 'PAID (Rs. $paidVal)'
+                                                          : (isItemPartial
+                                                              ? 'PARTIAL (Paid: Rs. $paidVal • Rem: Rs. $remainsVal)'
+                                                              : 'UNPAID (Due: Rs. $remainsVal)'),
                                                       style: TextStyle(
                                                         fontSize: 11,
                                                         fontWeight: FontWeight.bold,
-                                                        color: isItemPaid ? ctx.adapt(SoftPalette.emerald500) : ctx.adapt(SoftPalette.red500),
+                                                        color: isItemPaid
+                                                            ? ctx.adapt(SoftPalette.emerald500)
+                                                            : (isItemPartial
+                                                                ? ctx.adapt(SoftPalette.orange350)
+                                                                : ctx.adapt(SoftPalette.red500)),
                                                       ),
                                                     ),
                                                   ),
@@ -1226,14 +1782,21 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                               Row(
                                                 children: [
                                                   Text(
-                                                    'P: ${item['present']} • L: ${item['leave']} • A: ${item['absent']}',
+                                                    'Total: Rs. $dueVal • P: ${item['present']} • L: ${item['leave']} • A: ${item['absent']}',
                                                     style: TextStyle(
                                                       fontSize: 11,
                                                       color: isDark ? SoftPalette.gray50A54 : SoftPalette.gray500,
                                                     ),
                                                   ),
+                                                  if (discVal > 0) ...[
+                                                    const SizedBox(width: 6),
+                                                    Text(
+                                                      '• Disc: Rs. $discVal',
+                                                      style: TextStyle(fontSize: 11, color: ctx.adapt(SoftPalette.orange400)),
+                                                    ),
+                                                  ],
                                                   if ((item['note'] as String).isNotEmpty) ...[
-                                                    const SizedBox(width: 8),
+                                                    const SizedBox(width: 6),
                                                     Flexible(
                                                       child: Text(
                                                         '• ${item['note']}',
@@ -1251,32 +1814,45 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                             ],
                                           ),
                                         ),
-                                        if (canEdit && isItemPaid)
+                                        if (canEdit) ...[
                                           IconButton(
-                                            tooltip: 'Mark as Unpaid',
-                                            icon: Icon(Icons.undo_rounded, size: 16, color: ctx.adapt(SoftPalette.amber300)),
-                                            onPressed: () async {
-                                              await MadrassaLocalStorage.saveFeePaymentLocalAndSync(
-                                                branchId: _effectiveBranch,
-                                                studentId: studentId,
-                                                studentName: studentName,
-                                                rollNumber: rollNumber,
-                                                year: item['year'] as int,
-                                                month: item['month'] as int,
-                                                amountDue: item['amountDue'] as double,
-                                                amountPaid: 0,
-                                                status: 'unpaid',
-                                                markedBy: widget.username ?? 'HQ',
-                                                markedByRole: widget.role ?? 'manager',
-                                                note: 'Marked unpaid by manager',
-                                              );
-                                              setDialogState(() {
-                                                item['status'] = 'unpaid';
-                                                item['isPaid'] = false;
-                                                item['isSelected'] = true;
-                                              });
-                                            },
+                                            tooltip: 'Deduct / Pay this Month',
+                                            icon: Icon(Icons.edit_note_rounded, size: 20, color: ctx.adapt(SoftPalette.teal550)),
+                                            onPressed: () => openSingleMonthDeductionDialog(item),
                                           ),
+                                          if (isItemPaid || isItemPartial)
+                                            IconButton(
+                                              tooltip: 'Reset to Unpaid',
+                                              icon: Icon(Icons.undo_rounded, size: 16, color: ctx.adapt(SoftPalette.amber300)),
+                                              onPressed: () async {
+                                                await MadrassaLocalStorage.saveFeePaymentLocalAndSync(
+                                                  branchId: _effectiveBranch,
+                                                  studentId: studentId,
+                                                  studentName: studentName,
+                                                  rollNumber: rollNumber,
+                                                  year: item['year'] as int,
+                                                  month: item['month'] as int,
+                                                  amountDue: item['amountDue'] as double,
+                                                  amountPaid: 0,
+                                                  discount: 0,
+                                                  balanceDue: item['amountDue'] as double,
+                                                  status: 'unpaid',
+                                                  markedBy: widget.username ?? 'HQ',
+                                                  markedByRole: widget.role ?? 'manager',
+                                                  note: 'Marked unpaid by manager',
+                                                );
+                                                setDialogState(() {
+                                                  item['status'] = 'unpaid';
+                                                  item['isPaid'] = false;
+                                                  item['isPartial'] = false;
+                                                  item['amountPaid'] = 0.0;
+                                                  item['discount'] = 0.0;
+                                                  item['balanceDue'] = item['amountDue'] as double;
+                                                  item['isSelected'] = true;
+                                                });
+                                              },
+                                            ),
+                                        ],
                                       ],
                                     ),
                                   );
@@ -1309,7 +1885,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                     ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50))
                                     : const Icon(Icons.check_box_rounded, size: 16),
                                 label: Text(
-                                  'Pay Selected (${selectedItems.length} • Rs. ${totalSelectedDues.toInt()})',
+                                  'Clear Selected (${selectedItems.length} • Rs. ${totalSelectedDues.toInt()})',
                                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
                                 ),
                                 onPressed: isSaving ? null : () => performPayment(itemsToPay: selectedItems),
@@ -1328,7 +1904,7 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                                     ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2, color: SoftPalette.gray50))
                                     : const Icon(Icons.done_all_rounded, size: 16),
                                 label: Text(
-                                  'Pay All Dues (Rs. ${totalUnpaidDues.toInt()})',
+                                  'Clear All Dues (Rs. ${totalUnpaidDues.toInt()})',
                                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12),
                                 ),
                                 onPressed: isSaving ? null : () => performPayment(itemsToPay: unpaidItems),
@@ -1378,7 +1954,13 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
     final textPrimary = isDark ? SoftPalette.gray50 : SoftPalette.gray900;
     final textMuted = isDark ? SoftPalette.slate350 : SoftPalette.gray500;
 
-    final isPaid = payment != null && payment['status'] == 'paid';
+    final status = payment?['status']?.toString().toLowerCase();
+    final amountPaid = (payment?['amountPaid'] as num?)?.toDouble() ?? 0.0;
+    final discount = (payment?['discount'] as num?)?.toDouble() ?? 0.0;
+    final balanceDue = (payment?['balanceDue'] as num?)?.toDouble() ??
+        ((status == 'paid' || due <= 0) ? 0.0 : (due - amountPaid - discount).clamp(0.0, double.infinity));
+    final isPaid = status == 'paid' || (payment != null && balanceDue <= 0.0);
+    final isPartial = status == 'partial' || (payment != null && !isPaid && (amountPaid > 0.0 || discount > 0.0));
 
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
@@ -1443,10 +2025,30 @@ class _MonthlyReportViewState extends ConsumerState<MonthlyReportView> {
                               mainAxisSize: MainAxisSize.min,
                               children: [
                                 Icon(Icons.check_circle_rounded, size: 11, color: context.adapt(SoftPalette.emerald500)),
-                                SizedBox(width: 3),
+                                const SizedBox(width: 3),
                                 Text(
                                   'PAID',
                                   style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.emerald500)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ] else if (isPartial) ...[
+                          const SizedBox(width: 8),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                            decoration: BoxDecoration(
+                              color: context.adapt(SoftPalette.orange350).withValues(alpha: 0.15),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.pie_chart_outline_rounded, size: 11, color: context.adapt(SoftPalette.orange400)),
+                                const SizedBox(width: 3),
+                                Text(
+                                  'PARTIAL (Rem: Rs. ${balanceDue.toInt()})',
+                                  style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: context.adapt(SoftPalette.orange400)),
                                 ),
                               ],
                             ),

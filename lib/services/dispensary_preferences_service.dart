@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'cloud/lan_firestore_gate.dart';
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
@@ -91,10 +93,10 @@ class DispensaryPreferencesService {
       // Background cloud sync
       final user = FirebaseAuth.instance.currentUser;
       if (user != null && !user.isAnonymous) {
-        FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+        unawaited(LanFirestoreGate.mergeDoc('users/${user.uid}', {
           'dispensaryHybridAllInOne': value,
           'lastPreferenceUpdate': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true)).catchError((_) {});
+        }));
       }
     } catch (e) {
       debugPrint('[DispensaryPreferencesService] Error setting hybrid layout: $e');
@@ -147,10 +149,10 @@ class DispensaryPreferencesService {
       // Background cloud sync
       final user = FirebaseAuth.instance.currentUser;
       if (user != null && !user.isAnonymous) {
-        FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+        unawaited(LanFirestoreGate.mergeDoc('users/${user.uid}', {
           'dispensaryShowUrduTiming': value,
           'lastPreferenceUpdate': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true)).catchError((_) {});
+        }));
       }
     } catch (e) {
       debugPrint('[DispensaryPreferencesService] Error setting timing format: $e');
@@ -266,10 +268,10 @@ class DispensaryPreferencesService {
       // Background cloud sync
       final user = FirebaseAuth.instance.currentUser;
       if (user != null && !user.isAnonymous) {
-        FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+        unawaited(LanFirestoreGate.mergeDoc('users/${user.uid}', {
           'dispensaryPharmacyPaneOrder': order,
           'lastPreferenceUpdate': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true)).catchError((_) {});
+        }));
       }
     } catch (e) {
       debugPrint('[DispensaryPreferencesService] Error setting pane order: $e');

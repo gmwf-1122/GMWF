@@ -92,16 +92,44 @@ void main() {
         'cnic': '42101-1234567-1',
       };
 
-      // We test through the static public caller or logic in FinanceLocalStorage
-      // by inspecting the merged result
-      final merged = {
-        ...richLoser,
-        ...stubWinner,
-      };
       // Notice default map spread would overwrite richLoser's non-empty fields with stub's empty fields.
       // But using our smart merge helper, winner retains Ali Raza while gaining 200, 50000.0, Pharmacy, etc.
       expect(richLoser['biometricPin'], '200');
       expect(richLoser['currentSalary'], 50000.0);
     });
+
+    test('isEmployeeInCamp correctly identifies double-camp employee for both camps', () {
+      final doubleCampEmp = {
+        'id': 'EMP_DOUBLE_01',
+        'name': 'Dr. Double Camp',
+        'branchId': 'karachi',
+        'camps': ['Saddar Camp', 'Haji Camp'],
+        'sessions': [
+          {'camp': 'Saddar Camp', 'session': 'morning'},
+          {'camp': 'Haji Camp', 'session': 'evening'},
+        ],
+      };
+
+      expect(FinanceLocalStorage.isEmployeeInCamp(doubleCampEmp, 'Saddar Camp'), isTrue);
+      expect(FinanceLocalStorage.isEmployeeInCamp(doubleCampEmp, 'saddar'), isTrue);
+      expect(FinanceLocalStorage.isEmployeeInCamp(doubleCampEmp, 'kapaya'), isTrue);
+      expect(FinanceLocalStorage.isEmployeeInCamp(doubleCampEmp, 'Haji Camp'), isTrue);
+      expect(FinanceLocalStorage.isEmployeeInCamp(doubleCampEmp, 'haji'), isTrue);
+      expect(FinanceLocalStorage.isEmployeeInCamp(doubleCampEmp, 'All Camps'), isTrue);
+      expect(FinanceLocalStorage.isEmployeeInCamp(doubleCampEmp, 'Gujrat'), isFalse);
+
+      expect(FinanceLocalStorage.getEmployeeCampDisplay(doubleCampEmp), contains('Saddar Camp'));
+      expect(FinanceLocalStorage.getEmployeeCampDisplay(doubleCampEmp), contains('Haji Camp'));
+    });
+
+    test('canonicalCampName normalizes aliases and sub-branches', () {
+      expect(FinanceLocalStorage.canonicalCampName('hajicamp'), 'Haji Camp');
+      expect(FinanceLocalStorage.canonicalCampName('hc'), 'Haji Camp');
+      expect(FinanceLocalStorage.canonicalCampName('Haji Camp Dispensary'), 'Haji Camp');
+      expect(FinanceLocalStorage.canonicalCampName('kapaya'), 'Saddar Camp');
+      expect(FinanceLocalStorage.canonicalCampName('kapayya'), 'Saddar Camp');
+      expect(FinanceLocalStorage.canonicalCampName('Saddar'), 'Saddar Camp');
+    });
   });
 }
+

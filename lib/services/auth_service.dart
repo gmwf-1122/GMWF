@@ -23,6 +23,7 @@ import '../services/offline_auth_service.dart';
 import '../services/camp_session_service.dart';
 import '../services/role_simulator_service.dart';
 import '../services/sync_service.dart';
+import '../services/cloud/lan_firestore_gate.dart';
 
 class AuthService {
   static void Function()? onSignOutCallback;
@@ -445,7 +446,7 @@ class AuthService {
         ));
       } catch (_) {}
       // Trigger immediate cloud sync so the user is available in Firestore instantly
-      SyncService().triggerUpload(force: true);
+      SyncService().triggerUpload(urgent: true);
 
       // Always cache locally (for both admin-initiated and direct registrations)
       await _cacheUserDataLocally(hiveUserData);
@@ -705,6 +706,8 @@ class AuthService {
   User? getCurrentUser() => _auth.currentUser;
 
   Future<Map<String, dynamic>?> getUserByUid(String uid) async {
+    // A dispensary desk on the LAN reads users from its local copy (kept current by the server).
+    if (LanFirestoreGate.isLanDesk) return LocalStorageService.getLocalUserByUid(uid);
     try {
       // 1. Check root collection (Legacy/Admin)
       final doc = await _firestore.collection('users').doc(uid).get();

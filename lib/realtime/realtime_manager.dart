@@ -116,6 +116,8 @@ class RealtimeManager {
 
   // Max consecutive send failures in _flushOutbox before moving to failed box.
   static const _maxOutboxRetries = 3;
+  /// Sends without a server ACK before a message is set aside in the failed outbox.
+  static const _maxUnackedSends = 20;
 
   // [BUG-3] Track serials to ACK — only cleared after a successful send.
   final Set<String> _pendingAckSerials = {};
@@ -147,6 +149,12 @@ class RealtimeManager {
   /// cached connection-manager snapshots, which can stay "connected" after the server is gone.
   bool get isLinkAlive =>
       _isConnected && _serverIdentified && _lastPong != null && DateTime.now().difference(_lastPong!).inSeconds < 15;
+
+  /// True once the server has accepted this PC on the current socket. [isConnected] alone
+  /// turns true as soon as a connection attempt starts (and stays true for a while on a
+  /// socket that died silently), so it must not decide whether local data is handed to the
+  /// server instead of being uploaded by this PC.
+  bool get hasServerLink => _isConnected && _serverIdentified;
   bool    get isLanHealthy         => isLanHealthyNotifier.value;
   bool    get isReconnecting       => _reconnectTimer != null && _reconnectTimer!.isActive;
   int     get reconnectAttempts    => _reconnectAttempts;
@@ -528,40 +536,11 @@ class RealtimeManager {
       }
 
       if (_handleStressMessage(decoded)) return;
+      // A stress-test token relayed as a real event (older server build) is never shown or saved.
+      if (LocalStorageService.isStressTestMessage(decoded)) return;
 
       if (decoded['event_type'] == 'identified' && !_serverIdentified) {
-        _serverIdentified = true;
-        // Safety net: remove any stress-test tokens left by a test this device missed.
-        purgeStressTestEntries();
-        _reconnectAttempts = 0;
-        if (kDebugMode) {
-          print('[RealtimeManager] Identified — flushing ${_pendingMessages.length} pending');
-        }
-
-        // [BUG-1] Flush in-memory pending directly (bypasses outbox write).
-        // [BUG-2] Only schedule outbox flush if nothing was in the pending queue.
-        final hadPending = _pendingMessages.isNotEmpty;
-        _sendPendingMessages();
-
-        if (!_flushedOnConnect) {
-          _flushedOnConnect = true;
-          Future.delayed(
-            hadPending
-                ? const Duration(milliseconds: 800)
-                : const Duration(milliseconds: 500),
-            _flushOutbox,
-          );
-        }
-
-        // Start periodic outbox sweep to catch stuck messages
-        _startOutboxSweepTimer();
-
-        // Request today's local records immediately. This fills a doctor or
-        // dispensary queue that missed a live broadcast without waiting for
-        // the periodic server catch-up timer. A fresh identification always
-        // sends (window reset); screens mounting right after are coalesced.
-        _lastCatchUpRequestAt = null;
-        requestCatchUp();
+        _onServerIdentified();
       }
 
       // [IMM-ACK] Handle ACK from server (server confirmed our message).
@@ -654,16 +633,64 @@ class RealtimeManager {
     }
   }
 
-  // ── Fallback flush ─────────────────────────────────────────────────────────
-  void _schedulePendingFallback() {
-    Future.delayed(const Duration(seconds: 3), () {
-      if (!_serverIdentified && _isConnected && _gotFirstFrame && _pendingMessages.isNotEmpty) {
-        _serverIdentified = true;
-        _sendPendingMessages();
+  /// Everything that follows the server accepting this PC. Used for the real 'identified'
+  /// frame and for the fallback below, so both leave the link in the same state (the fallback
+  /// used to set the flag only, skipping the outbox sweep and catch-up, and the real frame
+  /// arriving later was then ignored).
+  void _onServerIdentified() {
+    _serverIdentified = true;
+    // Safety net: remove any stress-test tokens left by a test this device missed.
+    purgeStressTestEntries();
+    LocalStorageService.purgeStressTestLeftovers().ignore();
+    _reconnectAttempts = 0;
+    if (kDebugMode) {
+      print('[RealtimeManager] Identified — flushing ${_pendingMessages.length} pending');
+    }
+
+    // [BUG-1] Flush in-memory pending directly (bypasses outbox write).
+    // [BUG-2] Only schedule outbox flush if nothing was in the pending queue.
+    final hadPending = _pendingMessages.isNotEmpty;
+    _sendPendingMessages();
+
+    if (!_flushedOnConnect) {
+      _flushedOnConnect = true;
+      Future.delayed(
+        hadPending
+            ? const Duration(milliseconds: 800)
+            : const Duration(milliseconds: 500),
+        _flushOutbox,
+      );
+    }
+
+    // Start periodic outbox sweep to catch stuck messages
+    _startOutboxSweepTimer();
+
+    // Request today's local records immediately. This fills a doctor or
+    // dispensary queue that missed a live broadcast without waiting for
+    // the periodic server catch-up timer. A fresh identification always
+    // sends (window reset); screens mounting right after are coalesced.
+    _lastCatchUpRequestAt = null;
+    requestCatchUp();
+
+    final ip = _serverIp;
+    if (ip != null) {
+      try {
+        onConnected?.call(ip, _port);
+      } catch (e) {
+        if (kDebugMode) print('[RealtimeManager] onConnected error: $e');
       }
-      if (_isConnected && !_flushedOnConnect) {
-        _flushedOnConnect = true;
-        _flushOutbox();
+    }
+  }
+
+  // ── Fallback flush ─────────────────────────────────────────────────────────
+  // Older server builds never send 'identified'; once the server has answered at all and
+  // messages are waiting, treat the link as accepted.
+  void _schedulePendingFallback() {
+    final gen = _connectGen;
+    Future.delayed(const Duration(seconds: 3), () {
+      if (gen != _connectGen) return; // a newer connection attempt owns the link now
+      if (!_serverIdentified && _isConnected && _gotFirstFrame && _pendingMessages.isNotEmpty) {
+        _onServerIdentified();
       }
     });
   }
@@ -674,11 +701,12 @@ class RealtimeManager {
     _pingTimer = Timer.periodic(const Duration(seconds: 10), (_) {
       if (!_isConnected || _channel == null) return;
       final now = DateTime.now();
-      // No pong for 45 s → treat the socket as dead. (It was 14 s: whenever the server's UI
+      // No pong for 30 s → treat the socket as dead. (It was 14 s: whenever the server's UI
       // thread was busy for a moment, every client dropped and reconnected at once, and each
-      // reconnect asked for a full catch-up, which made the server even busier.)
-      if (_lastPong != null && now.difference(_lastPong!).inSeconds > 45) {
-        debugPrint('[RealtimeManager] ⚠️ Pong timeout (>45s) → tearing down half-dead socket');
+      // reconnect asked for a full catch-up, which made the server even busier. 45 s then left
+      // a dead link looking alive for most of a minute; the server's long scans now yield.)
+      if (_lastPong != null && now.difference(_lastPong!).inSeconds > 30) {
+        debugPrint('[RealtimeManager] ⚠️ Pong timeout (>30s) → tearing down half-dead socket');
         _recordHealthFailure();
         _handleDisconnect();
         return;
@@ -1029,8 +1057,25 @@ class RealtimeManager {
 
         try {
           _channel!.sink.add(jsonEncode(msg));
-          toDelete.add(key);
           sentThisPass++;
+          // sink.add does not fail on a socket that died silently, so a sent message is not
+          // a delivered one. Messages with an id stay until the server's message_ack removes
+          // them (_removeFromOutboxByMessageId); deleting them here lost whatever was flushed
+          // into a dead link during a LAN blip. A message the server never acknowledges is
+          // set aside after many tries so it does not resend forever.
+          final hasAckId = (msg['_messageId'] ?? '').toString().isNotEmpty;
+          if (!hasAckId) {
+            toDelete.add(key);
+          } else {
+            final sends = ((item['_outboxSends'] as int?) ?? 0) + 1;
+            if (sends >= _maxUnackedSends) {
+              _moveToFailedOutbox(key, item, reason: 'no server acknowledgement after $sends sends');
+              toDelete.add(key);
+            } else {
+              item['_outboxSends'] = sends;
+              try { box.put(key, item); } catch (_) {}
+            }
+          }
           await Future.delayed(const Duration(milliseconds: 20));
         } catch (e) {
           if (kDebugMode) print('[RealtimeManager] Outbox resend failed: $e');

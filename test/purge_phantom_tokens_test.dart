@@ -48,14 +48,15 @@ void main() {
       'status': 'completed',
     });
 
-    // 3. Phantom synthetic entries (like #100, #101)
+    // 3. Phantom synthetic entries (like #100, #101): no name, no real CNIC, nobody worked on
+    //    them. A token with a status past waiting is real work and is kept by the purge.
     await eBox.put('$today-SADD-100', {
       'serial': '$today-SADD-100',
       'dateKey': today,
       'patientName': 'Unknown Patient',
       'patientCnic': 'unknown_cnic_1791359728673',
       'dispensaryTag': 'SADD',
-      'status': 'completed',
+      'status': 'waiting',
     });
     await eBox.put('$today-SADD-101', {
       'serial': '$today-SADD-101',
@@ -63,7 +64,7 @@ void main() {
       'patientName': 'Unknown Patient',
       'patientCnic': 'unknown_cnic_1791359728999',
       'dispensaryTag': 'SADD',
-      'status': 'completed',
+      'status': 'waiting',
     });
 
     expect(eBox.length, equals(4));

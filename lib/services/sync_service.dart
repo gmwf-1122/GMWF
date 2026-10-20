@@ -21,6 +21,7 @@ import 'package:gmwf/services/permission_service.dart';
 import 'package:gmwf/services/quota_service.dart';
 import 'package:gmwf/services/cloud/cloud_db.dart';
 import 'package:gmwf/services/cloud/sync_log.dart';
+import 'package:gmwf/services/cloud/lan_firestore_gate.dart';
 import 'package:collection/collection.dart';
 import 'package:uuid/uuid.dart';
 import 'package:gmwf/services/serials_service.dart';
@@ -28,7 +29,7 @@ import 'package:gmwf/services/camp_session_service.dart';
 import 'package:gmwf/services/queue_self_healing_service.dart';
 import 'package:gmwf/services/offline_auth_service.dart';
 import 'package:gmwf/services/auth_service.dart';
-import 'package:gmwf/services/hidden_force_uploader.dart';
+import 'package:gmwf/services/pre_login_security_service.dart';
 
 import 'package:gmwf/services/network_health_service.dart';
 import 'package:gmwf/services/auto_update_service.dart';
@@ -39,7 +40,24 @@ import 'package:gmwf/realtime/realtime_events.dart';
 import 'package:gmwf/realtime/server_sync_coordinator.dart';
 import 'package:gmwf/realtime/lan_server.dart';
 import 'package:gmwf/realtime/lan_host_manager.dart';
+import 'package:gmwf/services/hourly_dispensary_sync.dart';
 import 'package:gmwf/tools/firestore_structure_sanitizer.dart';
+
+class SyncQueueStats {
+  final int expressCount;
+  final int freightCount;
+  final int deferredCount;
+  final Duration? oldestAgeOverall;
+  final Duration? oldestAgeDue;
+
+  const SyncQueueStats({
+    this.expressCount = 0,
+    this.freightCount = 0,
+    this.deferredCount = 0,
+    this.oldestAgeOverall,
+    this.oldestAgeDue,
+  });
+}
 
 class SyncService {
   static final SyncService _instance = SyncService._internal();
@@ -63,6 +81,63 @@ class SyncService {
     );
   }
 
+  static const List<String> _decisionFields = [
+    'reviewedAt', 'reviewedBy', 'reviewedByName', 'decision', 'doctorReason',
+    'approvedAt', 'approvedBy', 'rejectedAt', 'rejectedBy', 'acknowledgedAt', 'acknowledgedBy',
+  ];
+
+  static bool isDecidedRequestStatus(dynamic status) => LocalStorageService.isDecidedRequestStatus(status);
+
+  /// Queue types handled by the request handlers, never by the generic collection writer.
+  static const Set<String> _requestEventTypes = {
+    'update_request_status', 'approve_request', 'reject_request', 'request_approved',
+    'request_rejected', 'token_exception_approved', 'request_created', 'save_edit_request',
+    'save_token_exception_request', 'token_exception_request', 'save_inventory_edit_request',
+    'save_token_reversal_request', 'save_restock_request',
+  };
+
+  /// Makes a request upload keep a decision taken elsewhere. A request is created pending on
+  /// one PC and decided on another; the creating PC's upload can land after the decision
+  /// (queue paused, quota, backlog) and used to turn it back to pending. With a decided
+  /// [local] copy its decision is sent; with a decided [cloud] doc the decision fields are
+  /// left out so the merge keeps the cloud's. Returns true when [data] was changed.
+  @visibleForTesting
+  static bool applyDecidedRequestStatus(Map<String, dynamic> data, {Map? local, Map? cloud}) {
+    if (isDecidedRequestStatus(data['status'])) return false;
+    if (local != null && isDecidedRequestStatus(local['status'])) {
+      data['status'] = local['status'];
+      for (final f in _decisionFields) {
+        if (local[f] != null) data[f] = local[f];
+      }
+      return true;
+    }
+    if (cloud != null && isDecidedRequestStatus(cloud['status'])) {
+      data.remove('status');
+      for (final f in _decisionFields) {
+        data.remove(f);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /// Runs [applyDecidedRequestStatus] for an upload to [docRef], reading the local copy from
+  /// [localBox] and, when that is not decided, the cloud doc (one read). A failed read throws,
+  /// so the item waits for the next pass instead of risking an overwrite.
+  Future<void> _keepDecidedRequestStatus(
+      CloudDoc docRef, Map<String, dynamic> data, {required String localBox, required String id}) async {
+    if (isDecidedRequestStatus(data['status'])) return;
+    Map? local;
+    try {
+      final box = Hive.isBoxOpen(localBox) ? Hive.box(localBox) : await LocalStorageService.openBoxSafe(localBox);
+      final v = box.get(id);
+      if (v is Map) local = v;
+    } catch (_) {}
+    if (applyDecidedRequestStatus(data, local: local)) return;
+    final snap = await docRef.get(const GetOptions(source: Source.server)).timeout(const Duration(seconds: 10));
+    applyDecidedRequestStatus(data, cloud: snap.data());
+  }
+
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
   StreamSubscription<DocumentSnapshot>? _cloudSyncTriggerSub;
   String? _lastProcessedCloudTrigger;
@@ -76,6 +151,7 @@ class SyncService {
   /// Universally broadcasts a force-upload command across BOTH LAN WebSockets AND Cloud Firestore.
   /// Every connected device and remote branch immediately executes an upload flush on its local queue.
   Future<void> broadcastUniversalForceUpload({String? branchId}) async {
+    if (LanFirestoreGate.isLanDesk) return; // a dispensary desk on the LAN leaves Firestore to the LAN server
     QuotaService.clearDailyResetPause();
     final effectiveBranch = branchId ?? _currentBranchId ?? 'karachi';
     final user = LocalStorageService.getActiveUsername();
@@ -121,6 +197,7 @@ class SyncService {
   void _setupCloudSyncTriggerListener() {
     _cloudSyncTriggerSub?.cancel();
     _cloudSyncTriggerSub = _db.collection('app_control').doc('sync_trigger').snapshots().listen((snap) {
+      if (LanFirestoreGate.isLanDesk) return; // the LAN server reacts to remote triggers for this desk
       if (!snap.exists) return;
       final data = snap.data();
       if (data == null) return;
@@ -210,6 +287,10 @@ class SyncService {
     // event-pump starvation and Windows (Not Responding) freezes.
     _scheduleBackgroundBackfill(branchId, moduleScope: moduleScope);
 
+    // Stock changes are uploaded once an hour, added up per medicine.
+    HourlyDispensarySync.start();
+    LanFirestoreGate.start(); // dispensary desks on the LAN leave Firestore to the server
+
     ConnectionManager().removeReconnectListener(_onLanReconnected);
     ConnectionManager().addReconnectListener(_onLanReconnected);
 
@@ -223,13 +304,105 @@ class SyncService {
   /// Set when the cloud cannot be reached; non-forced passes wait until then.
   DateTime? _stalledUntil;
 
+  /// Checks if an item is a Madrassa daily log, student profile, or status update that should upload first.
+  bool _isMadrassaDailyLog(Map item) {
+    final t = (item['type'] ?? '').toString();
+    return t == 'save_madrassa_log' ||
+        t == 'save_madrassa_daily_log' ||
+        t == 'save_madrassa_student' ||
+        t == 'save_madrassa_admission' ||
+        t == 'delete_madrassa_student' ||
+        t == 'offboard_madrassa_student' ||
+        t == 'update_madrassa_student';
+  }
+
+  /// Checks if an item belongs to the current calendar month.
+  bool _isCurrentMonthItem(Map item) {
+    final rawCreated = item['createdAt'] ?? item['enqueuedAt'];
+    final serial = item['serial'] ?? (item['data'] is Map ? item['data']['serial'] : null);
+    final dateKey = item['dateKey'] ?? item['date'] ?? (item['data'] is Map ? (item['data']['dateKey'] ?? item['data']['date']) : null);
+    return LocalStorageService.isCurrentMonth(dateKey) ||
+        LocalStorageService.isCurrentMonth(serial) ||
+        LocalStorageService.isCurrentMonth(rawCreated);
+  }
+
+  /// Snapshot of current sync queue status for telemetry and health cards. The server screen
+  /// asks every 30 s and the queue can hold thousands of items on days the cloud refuses
+  /// writes, so the count hands control back to the UI every few hundred items.
+  Future<SyncQueueStats> queueStats() async {
+    if (!Hive.isBoxOpen(LocalStorageService.syncBox)) {
+      return const SyncQueueStats();
+    }
+    final box = Hive.box(LocalStorageService.syncBox);
+    if (box.isEmpty) {
+      return const SyncQueueStats();
+    }
+
+    final now = DateTime.now();
+    int express = 0;
+    int freight = 0;
+    int deferred = 0;
+    DateTime? oldestOverall;
+    DateTime? oldestDue;
+
+    var counted = 0;
+    for (final val in box.values.toList()) {
+      if (++counted % 300 == 0) await Future<void>.delayed(Duration.zero);
+      if (val is! Map) continue;
+      final isBacklog = _isBacklogItem(val);
+      if (isBacklog) {
+        freight++;
+      } else {
+        express++;
+      }
+
+      bool isItemDeferred = false;
+      final retryStr = val['nextRetryAt']?.toString();
+      if (retryStr != null && retryStr.isNotEmpty) {
+        final retry = DateTime.tryParse(retryStr);
+        if (retry != null && retry.isAfter(now)) {
+          isItemDeferred = true;
+          deferred++;
+        }
+      }
+
+      final timeStr = (val['enqueuedAt'] ?? val['createdAt'])?.toString();
+      if (timeStr != null && timeStr.isNotEmpty) {
+        final t = DateTime.tryParse(timeStr);
+        if (t != null) {
+          if (oldestOverall == null || t.isBefore(oldestOverall)) {
+            oldestOverall = t;
+          }
+          if (!isItemDeferred) {
+            if (oldestDue == null || t.isBefore(oldestDue)) {
+              oldestDue = t;
+            }
+          }
+        }
+      }
+    }
+
+    return SyncQueueStats(
+      expressCount: express,
+      freightCount: freight,
+      deferredCount: deferred,
+      oldestAgeOverall: oldestOverall != null ? now.difference(oldestOverall) : null,
+      oldestAgeDue: oldestDue != null ? now.difference(oldestDue) : null,
+    );
+  }
+
   /// Dual-Lane Classification:
-  /// Express Lane (false) = today's live clinic work, real-time punches, live donations, instant updates.
-  /// Freight Lane (true) = records re-queued by sweeps, items older than 24h, or past dateKey serials.
+  /// Express Lane (false) = today's live clinic work, madrassa daily logs, current month data, instant updates.
+  /// Freight Lane (true) = records older than current month or historical freight.
   bool _isBacklogItem(Map item) {
+    // Madrassa daily logs and current month's records are ALWAYS live express items!
+    if (_isMadrassaDailyLog(item) || _isCurrentMonthItem(item)) {
+      return false;
+    }
+
     if (item['backlog'] == true) return true;
 
-    // Check creation timestamp: older than 24 hours is backlog
+    // Check creation timestamp: older than 24 hours is backlog (unless current month)
     final createdStr = (item['createdAt'] ?? item['enqueuedAt'])?.toString();
     if (createdStr != null && createdStr.isNotEmpty) {
       final created = DateTime.tryParse(createdStr);
@@ -243,41 +416,64 @@ class SyncService {
     if (serial != null && serial.isNotEmpty) {
       final dateKey = CampSessionService.getDateKeyFromSerial(serial);
       if (dateKey.length == 6) {
-        final todayKey = DateFormat('ddMMyy').format(DateTime.now());
-        if (dateKey != todayKey) return true;
+        if (dateKey != _todayKeys().dmyy) return true;
       }
     }
 
     // Check explicit dateKey or date field in item or data
     final dateKey = (item['dateKey'] ?? item['date'] ?? (item['data'] is Map ? (item['data']['dateKey'] ?? item['data']['date']) : null))?.toString().trim();
     if (dateKey != null && dateKey.isNotEmpty) {
-      if (dateKey.length == 6 && RegExp(r'^\d{6}$').hasMatch(dateKey)) {
-        final todayKey = DateFormat('ddMMyy').format(DateTime.now());
-        if (dateKey != todayKey) return true;
-      } else if (dateKey.length >= 10 && RegExp(r'^\d{4}-\d{2}-\d{2}').hasMatch(dateKey)) {
-        final todayIso = DateFormat('yyyy-MM-dd').format(DateTime.now());
-        if (!dateKey.startsWith(todayIso)) return true;
+      if (dateKey.length == 6 && _sixDigits.hasMatch(dateKey)) {
+        if (dateKey != _todayKeys().dmyy) return true;
+      } else if (dateKey.length >= 10 && _isoDatePrefix.hasMatch(dateKey)) {
+        if (!dateKey.startsWith(_todayKeys().iso)) return true;
       }
     }
 
     return false;
   }
 
+  // _isBacklogItem runs for every queued item on each pass and on every queue count; building
+  // the date formatters and patterns once per item made those whole-queue loops slow.
+  static final RegExp _sixDigits = RegExp(r'^\d{6}$');
+  static final RegExp _isoDatePrefix = RegExp(r'^\d{4}-\d{2}-\d{2}');
+  ({String dmyy, String iso})? _todayKeyCache;
+  DateTime? _todayKeyCacheAt;
+
+  ({String dmyy, String iso}) _todayKeys() {
+    final now = DateTime.now();
+    final at = _todayKeyCacheAt;
+    final cached = _todayKeyCache;
+    if (cached != null && at != null && at.year == now.year && at.month == now.month && at.day == now.day) {
+      return cached;
+    }
+    _todayKeyCacheAt = now;
+    return _todayKeyCache = (dmyy: DateFormat('ddMMyy').format(now), iso: DateFormat('yyyy-MM-dd').format(now));
+  }
+
   /// Causal Entity Precedence (Ensures parent docs precede child docs):
-  /// 1: save_patient (Root entity)
+  /// 0: save_madrassa_log, save_madrassa_daily_log, update_madrassa_student (Top Priority)
+  /// 1: save_patient (Root entity), save_madrassa_student, save_school_student, save_user
   /// 2: save_entry (Token entry)
   /// 3: save_prescription (Prescription referencing entry)
   /// 4: update_serial_status (Dispensing / lifecycle updates)
   /// 5: update_inventory, add_inventory_stock
   /// 6: save_donation
   /// 7: save_attendance_record, save_attendance, save_employee_attendance
-  /// 8: school / madrassa
+  /// 8: school / other madrassa
   /// 10: default / background
   int _actionPrecedence(Map action) {
     final type = (action['type'] ?? '').toString();
     switch (type) {
-      case 'save_patient':
+      case 'save_madrassa_log':
+      case 'save_madrassa_daily_log':
       case 'save_madrassa_student':
+      case 'save_madrassa_admission':
+      case 'delete_madrassa_student':
+      case 'offboard_madrassa_student':
+      case 'update_madrassa_student':
+        return 0; // Madrassa logs and students always upload first!
+      case 'save_patient':
       case 'save_school_student':
       case 'save_user':
         return 1;
@@ -298,8 +494,6 @@ class SyncService {
       case 'save_madrassa_teacher_attendance':
       case 'save_school_teacher_attendance':
         return 7;
-      case 'save_madrassa_log':
-      case 'save_madrassa_daily_log':
       case 'save_madrassa_attendance':
       case 'save_madrassa_fee_payment':
       case 'save_school_attendance':
@@ -312,12 +506,24 @@ class SyncService {
 
   /// Compares two sync actions for deterministic, causal, FIFO upload order.
   int _compareSyncActions(Map a, Map b) {
-    // 1. Causal precedence: parent before child
+    // 0. Madrassa daily logs ALWAYS upload first before anything else!
+    final isMadrassaLogA = _isMadrassaDailyLog(a);
+    final isMadrassaLogB = _isMadrassaDailyLog(b);
+    if (isMadrassaLogA && !isMadrassaLogB) return -1;
+    if (!isMadrassaLogA && isMadrassaLogB) return 1;
+
+    // 1. Current month data uploads ahead of past month backlog
+    final isCurrA = _isCurrentMonthItem(a);
+    final isCurrB = _isCurrentMonthItem(b);
+    if (isCurrA && !isCurrB) return -1;
+    if (!isCurrA && isCurrB) return 1;
+
+    // 2. Causal precedence: parent before child
     final precA = _actionPrecedence(a);
     final precB = _actionPrecedence(b);
     if (precA != precB) return precA.compareTo(precB);
 
-    // 2. FIFO: Earlier actions before later actions
+    // 3. FIFO: Earlier actions before later actions
     final timeA = (a['createdAt'] ?? a['enqueuedAt'] ?? '') as String;
     final timeB = (b['createdAt'] ?? b['enqueuedAt'] ?? '') as String;
     if (timeA.isNotEmpty && timeB.isNotEmpty) {
@@ -337,13 +543,9 @@ class SyncService {
         s.contains('[cloud_firestore/internal]') || s.contains('unauthenticated');
   }
 
-  /// Records that are typically edited several times in a row (a day's attendance or log
-  /// sheet, school/madrassa records, staff details). They wait [_coalesceDelay] after
-  /// their last change before uploading, so a burst of edits becomes one write. Tokens,
-  /// prescriptions, dispensing, donations and requests are never delayed.
+  /// Records that are typically edited several times in a row.
+  /// Madrassa daily logs and live current month records upload immediately with zero delay.
   static const Set<String> _coalescedTypes = {
-    'save_madrassa_daily_log',
-    'save_madrassa_log',
     'save_madrassa_attendance',
     'save_madrassa_teacher_attendance',
     'save_school_attendance',
@@ -362,6 +564,7 @@ class SyncService {
 
   /// When a coalesced record may upload, or null if it may upload now.
   DateTime? _coalesceUntil(Map item) {
+    if (_isMadrassaDailyLog(item) || _isCurrentMonthItem(item)) return null;
     if (!_coalescedTypes.contains(item['type']?.toString() ?? '')) return null;
     final changedAt = DateTime.tryParse((item['enqueuedAt'] ?? '').toString());
     if (changedAt == null) return null;
@@ -403,6 +606,7 @@ class SyncService {
   /// whether Firestore answers reads. Read-only — it used to write a probe document on
   /// every start, which was one more write that could get stuck in the SDK's queue.
   Future<void> _probeFirebaseHealth() async {
+    if (LanFirestoreGate.isLanDesk) return; // a dispensary desk on the LAN leaves Firestore to the LAN server
     if (_probedFirebaseHealth || kIsWeb) return;
     _probedFirebaseHealth = true;
     final sw = Stopwatch()..start();
@@ -473,12 +677,12 @@ class SyncService {
             for (final key in aBox.keys) {
               final raw = aBox.get(key);
               if (raw is Map &&
-                  raw['synced'] == true &&
                   raw['lastSyncedAt'] == null &&
-                  raw['syncStatus'] != 'synced') {
+                  (raw['synced'] == true || raw['syncStatus'] == 'synced')) {
                 await aBox.put(key, Map<String, dynamic>.from(raw)
                   ..['synced'] = false
-                  ..['syncStatus'] = 'pending');
+                  ..['syncStatus'] = 'pending'
+                  ..['pendingSync'] = true);
                 healedCount++;
               }
             }
@@ -492,10 +696,16 @@ class SyncService {
         // ── END HEAL ────────────────────────────────────────────────────────
 
         if (moduleScope == 'dispensary') {
-          await _enqueueMissingEntries(branchId);
-          await Future.delayed(const Duration(milliseconds: 50));
-          await _enqueueMissingPatients(branchId);
-          await Future.delayed(const Duration(milliseconds: 50));
+          final isClientOnLan = !LanServer.isRunning && !LanHostManager.isHostRunning && RealtimeManager().hasServerLink;
+          if (isClientOnLan) {
+            // Dispensary client on LAN delegates cloud sync to Server node
+            await _pushUnsyncedEntriesToLanServer(branchId);
+          } else {
+            await _enqueueMissingEntries(branchId);
+            await Future.delayed(const Duration(milliseconds: 50));
+            await _enqueueMissingPatients(branchId);
+            await Future.delayed(const Duration(milliseconds: 50));
+          }
         } else {
           // The full sweep queues every module (tokens, patients, donations, food, staff,
           // attendance, madrassa, school, users). Each of those used to run here first and
@@ -533,21 +743,22 @@ class SyncService {
     try {
       // Single-Writer Gateway Architecture:
       // If connected to LAN server, the Server is the authoritative single source of truth for the branch.
-      // We do not enqueue directly to Firestore from the client to prevent race conditions and duplicate writes.
-      // Instead, push any unsynced local tokens to the LAN server so it can ingest, serialize, and sync them.
+      // We do not enqueue directly to Firestore from client stations.
+      if (!LanServer.isRunning && !LanHostManager.isHostRunning && RealtimeManager().hasServerLink) {
+        Logger().d('[SyncService] LAN server connected — pushing unsynced tokens to LAN Server (delegated to Server)');
+        await _pushUnsyncedEntriesToLanServer(branchId);
+        return;
+      }
+
       if (!Hive.isBoxOpen(LocalStorageService.entriesBox)) {
         await LocalStorageService.ensureBoxOpen(LocalStorageService.entriesBox);
       }
       if (!Hive.isBoxOpen(LocalStorageService.syncBox)) {
         await LocalStorageService.ensureBoxOpen(LocalStorageService.syncBox);
       }
-      // LAN push (best-effort real-time delivery to server node)
-      if (RealtimeManager().isConnected) {
-        Logger().d('[SyncService] LAN server connected — also pushing to LAN Server for immediate delivery');
-        await _pushUnsyncedEntriesToLanServer(branchId);
-      }
       final entriesBox = Hive.box(LocalStorageService.entriesBox);
       final syncBox    = Hive.box(LocalStorageService.syncBox);
+      final todayDateKey = LocalStorageService.getTodayDateKey();
 
       final alreadyQueued = syncBox.values
           .where((v) => v is Map && (v['type'] == 'save_entry' || v['type'] == 'save_prescription'))
@@ -572,22 +783,21 @@ class SyncService {
         if (raw == null || raw is! Map) continue;
 
         final data = Map<String, dynamic>.from(raw);
+        if (LocalStorageService.isStressTestRecord(data, key)) continue;
+
+        final serial = (data['serial'] ?? key.toString().split('-').last).toString().trim().toUpperCase();
+        if (serial.isEmpty) continue;
+
+        final itemDateKey = (data['dateKey'] ?? '').toString();
+        final serialDateKey = CampSessionService.getDateKeyFromSerial(serial);
+        final bool isToday = (itemDateKey == todayDateKey) || (serialDateKey == todayDateKey);
+        final rawCreated = data['createdAt'] ?? data['time'] ?? data['timestamp'] ?? data['date'];
+        final bool isThisMonth = LocalStorageService.isCurrentMonth(itemDateKey) ||
+            LocalStorageService.isCurrentMonth(serialDateKey) ||
+            LocalStorageService.isCurrentMonth(rawCreated);
+
         final isSynced = (data['synced'] == true || data['syncStatus'] == 'synced') && data['pendingSync'] != true;
         if (isSynced) continue;
-
-        // Auto-heal old or completed historical entries so they are permanently marked synced and never loop
-        final rawCreated = data['createdAt'] ?? data['time'] ?? data['timestamp'] ?? data['date'];
-        final dt = rawCreated != null ? DateTime.tryParse(rawCreated.toString()) : null;
-        final isOld = dt != null && DateTime.now().difference(dt).inHours > 48;
-        final isCompleted = (data['status'] ?? '').toString().toLowerCase() == 'completed' ||
-            (data['dispenseStatus'] ?? '').toString().toLowerCase() == 'dispensed';
-
-        if (data['pendingSync'] != true && (isOld || isCompleted)) {
-          data['syncStatus'] = 'synced';
-          data['synced'] = true;
-          await entriesBox.put(key, data);
-          continue;
-        }
 
         // Skip phantom entries fabricated by old migrations
         final pCnic = (data['patientCnic'] ?? data['cnic'] ?? '').toString().trim();
@@ -596,10 +806,6 @@ class SyncService {
         final isPhantomName = pName.isEmpty || pName == 'unknown' || pName == 'unknown patient';
         if (isPhantomCnic && isPhantomName) continue;
 
-        final serial = (data['serial'] ?? key.toString().split('-').last).toString().trim().toUpperCase();
-        if (serial.isEmpty) continue;
-
-        final dateKey = (data['dateKey'] ?? LocalStorageService.getTodayDateKey()).toString();
         final effectiveBranch = (data['branchId']?.toString().isNotEmpty == true)
             ? data['branchId'].toString().toLowerCase().trim()
             : branchId.toLowerCase().trim();
@@ -608,12 +814,12 @@ class SyncService {
         if (alreadyQueued.contains(uniqueKey) && data['pendingSync'] != true) continue;
 
         final queueType = resolveQueueType(data['queueType']?.toString(), branchId: effectiveBranch);
+        final entryDateKey = serialDateKey.isNotEmpty ? serialDateKey : (itemDateKey.isNotEmpty ? itemDateKey : todayDateKey);
 
         await LocalStorageService.enqueueSync({
-          'backlog': true, // backfill: uses the backlog share of the daily quota
           'type':      'save_entry',
           'branchId':  effectiveBranch,
-          'dateKey':   dateKey,
+          'dateKey':   entryDateKey,
           'queueType': queueType,
           'serial':    serial,
           'campId':    campId,
@@ -667,6 +873,15 @@ class SyncService {
         final bool dispenseUnsynced = data['dispenseStatus'] == 'dispensed' && data['dispenseSynced'] != true;
 
         if (!entryUnsynced && !prescUnsynced && !dispenseUnsynced) continue;
+        if (LocalStorageService.isStressTestRecord(data, key)) continue;
+
+        // "Unsynced" means "not yet in Firestore", not "the LAN server lacks it". While the
+        // cloud refuses writes (daily quota) nothing ever becomes synced, so every device used
+        // to re-send every token it holds - including the ones the server itself sent it - on
+        // each sweep and reconnect, and the server broadcast them all to the doctor again.
+        // A token is now pushed once per state change, and never when it came from the server.
+        final pushSig = LocalStorageService.lanPushSignature(data);
+        if (data['lanPushSig'] == pushSig) continue;
 
         final serial = (data['serial'] ?? key.toString().split('-').last).toString().trim().toUpperCase();
         if (serial.isEmpty) continue;
@@ -746,6 +961,9 @@ class SyncService {
           ));
           pushed++;
         }
+
+        // RealtimeManager keeps undelivered messages in its outbox, so one send is enough.
+        await entriesBox.put(key, {...data, 'lanPushSig': pushSig});
       }
       if (pushed > 0) {
         Logger().d('[SyncService] 📤 Pushed $pushed unsynced local events (tokens/prescriptions/dispenses) to LAN Server');
@@ -753,6 +971,21 @@ class SyncService {
     } catch (e) {
       Logger().d('[SyncService] _pushUnsyncedEntriesToLanServer error: $e');
     }
+  }
+
+  /// Whether a backfill should upload this donation: not synced, not deleted, and taken on
+  /// this PC. The old test skipped anything with a firestoreId, but saveDonation sets one
+  /// before the first upload, so the backfill never picked up a single failed donation.
+  /// Records from before `originDevice` existed keep that old rule (a LAN copy from another
+  /// PC also had a firestoreId), so this change does not make every PC re-upload them.
+  static bool needsDonationBackfill(Map data, String deviceId) {
+    final synced = (data['syncStatus'] == 'synced' || data['synced'] == true) && data['pendingSync'] != true;
+    if (synced) return false;
+    if (data['syncStatus'] == 'deleted' || data['isDeleted'] == true) return false;
+    if (data['lanReceived'] == true) return false;
+    final origin = (data['originDevice'] ?? '').toString().trim();
+    if (origin.isNotEmpty) return origin == deviceId;
+    return data['firestoreId'] == null || data['pendingSync'] == true;
   }
 
   Future<void> _enqueueMissingDonations(String branchId) async {
@@ -775,6 +1008,7 @@ class SyncService {
         }
       }
 
+      final deviceId = await PreLoginSecurityService.getDeviceId();
       int queued = 0;
       int processed = 0;
       for (final key in donationsBox.keys) {
@@ -788,7 +1022,7 @@ class SyncService {
         if (raw == null || raw is! Map) continue;
 
         final data = Map<String, dynamic>.from(raw);
-        if ((data['syncStatus'] == 'synced' || data['synced'] == true || data['firestoreId'] != null) && data['pendingSync'] != true) continue;
+        if (!needsDonationBackfill(data, deviceId)) continue;
 
         final localId = data['localId']?.toString();
         if (localId == null || localId.isEmpty) continue;
@@ -815,7 +1049,60 @@ class SyncService {
     }
   }
 
-  Future<void> _enqueueMissingFoodTokens(String branchId) async {
+  /// True when this PC issued the food token and so is the one that must upload it.
+  /// Each upload adds to the day's totalTokens, so a token that reached this PC over the
+  /// LAN (another PC issued it and uploads it itself) must never be uploaded here again.
+  /// Tokens from before `originDevice` existed count as local unless a LAN receiver
+  /// marked them `lanReceived`.
+  static bool isFoodTokenOwnedHere(Map token, String deviceId) {
+    if (token['lanReceived'] == true) return false;
+    final origin = (token['originDevice'] ?? '').toString().trim();
+    if (origin.isEmpty) return true;
+    return origin == deviceId;
+  }
+
+  /// Picks the food tokens a backfill should upload: not yet synced, issued on this PC, and
+  /// not already inside a queued save_dasterkhwan_tokens item (whose batch id never
+  /// matches a backfill batch id, so the batch-id check alone queued them twice).
+  static List<Map<String, dynamic>> selectFoodTokensToUpload(
+    Iterable<dynamic> tokens, {
+    required String deviceId,
+    required Iterable<dynamic> queuedActions,
+  }) {
+    final queuedTokenIds = <String>{};
+    for (final v in queuedActions) {
+      if (v is! Map || v['type'] != 'save_dasterkhwan_tokens') continue;
+      final data = v['data'];
+      final list = data is Map ? data['tokens'] : null;
+      if (list is! List) continue;
+      for (final t in list) {
+        if (t is Map) {
+          final id = (t['id'] ?? t['localId'])?.toString();
+          if (id != null && id.isNotEmpty) queuedTokenIds.add(id);
+        }
+      }
+    }
+
+    final result = <Map<String, dynamic>>[];
+    for (final raw in tokens) {
+      if (raw is! Map) continue;
+      final t = Map<String, dynamic>.from(raw);
+      final unsynced = t['synced'] != true || t['syncStatus'] != 'synced' || t['pendingSync'] == true;
+      if (!unsynced) continue;
+      if (!isFoodTokenOwnedHere(t, deviceId)) continue;
+      final id = (t['id'] ?? t['localId'])?.toString();
+      if (id != null && queuedTokenIds.contains(id)) continue;
+      result.add(t);
+    }
+    return result;
+  }
+
+  /// Queues this PC's food tokens that never reached the cloud. Only [onlyBranch]'s tokens
+  /// when given; otherwise every branch's, each under its own branch.
+  Future<void> enqueueMissingFoodTokens(String branchId, {String? onlyBranch, bool backlog = true}) =>
+      _enqueueMissingFoodTokens(branchId, onlyBranch: onlyBranch, backlog: backlog);
+
+  Future<void> _enqueueMissingFoodTokens(String branchId, {String? onlyBranch, bool backlog = true}) async {
     UiStallMonitor.mark('sync: _enqueueMissingFoodTokens');
     try {
       if (!Hive.isBoxOpen('dasterkhwaan_tokens')) {
@@ -827,50 +1114,45 @@ class SyncService {
       final tBox = Hive.box('dasterkhwaan_tokens');
       final syncBox = Hive.box(LocalStorageService.syncBox);
 
-      final alreadyQueued = <String>{};
-      for (final v in syncBox.values) {
-        if (v is Map && v['type'] == 'save_dasterkhwan_tokens') {
-          final bId = v['batchId']?.toString() ?? v['entityId']?.toString();
-          if (bId != null) alreadyQueued.add(bId);
-        }
-      }
-
-      final unsynced = <Map<String, dynamic>>[];
-      for (final raw in tBox.values) {
-        if (raw is Map) {
-          final t = Map<String, dynamic>.from(raw);
-          if (t['synced'] != true || t['syncStatus'] != 'synced' || t['pendingSync'] == true) {
-            unsynced.add(t);
-          }
-        }
-      }
+      final deviceId = await PreLoginSecurityService.getDeviceId();
+      final onlyB = onlyBranch == null ? null : _cleanBranch(onlyBranch);
+      final unsynced = selectFoodTokensToUpload(
+        tBox.values,
+        deviceId: deviceId,
+        queuedActions: syncBox.values,
+      ).where((t) => onlyB == null || _cleanBranch(t['branchId'] ?? branchId) == onlyB).toList();
 
       if (unsynced.isNotEmpty) {
-        final byDate = <String, List<Map<String, dynamic>>>{};
+        // Group by branch AND date: one item writes one branch's day doc.
+        final groups = <String, List<Map<String, dynamic>>>{};
         for (final t in unsynced) {
+          final b = _cleanBranch(t['branchId'] ?? branchId);
           final dk = (t['dateKey']?.toString() ?? DateTime.now().toIso8601String().substring(0, 10)).trim();
-          byDate.putIfAbsent(dk, () => []).add(t);
+          groups.putIfAbsent('$b|$dk', () => []).add(t);
         }
-        for (final entry in byDate.entries) {
-          final targetBranch = _cleanBranch(entry.value.first['branchId'] ?? branchId);
-          final firstNum = entry.value.isNotEmpty ? (entry.value.first['number'] ?? '') : '';
-          final lastNum = entry.value.isNotEmpty ? (entry.value.last['number'] ?? '') : '';
-          final batchId = 'dst_sweep_${targetBranch}_${entry.key}_${firstNum}_$lastNum';
-          if (alreadyQueued.contains(batchId)) continue;
+        for (final entry in groups.entries) {
+          final sep = entry.key.indexOf('|');
+          final targetBranch = entry.key.substring(0, sep);
+          final dateKey = entry.key.substring(sep + 1);
+          final tokens = entry.value
+            ..sort((a, b) => ((a['number'] as num?) ?? 0).compareTo((b['number'] as num?) ?? 0));
+          final firstNum = tokens.first['number'] ?? '';
+          final lastNum = tokens.last['number'] ?? '';
+          final batchId = 'dst_sweep_${targetBranch}_${dateKey}_${firstNum}_$lastNum';
 
           await LocalStorageService.enqueueSync({
-            'backlog': true, // backfill: uses the backlog share of the daily quota
+            if (backlog) 'backlog': true, // backfill: uses the backlog share of the daily quota
             'type': 'save_dasterkhwan_tokens',
             'entityId': batchId,
             'batchId': batchId,
             'branchId': targetBranch,
-            'dateKey': entry.key,
+            'dateKey': dateKey,
             'data': {
               'branchId': targetBranch,
-              'dateKey': entry.key,
-              'quantity': entry.value.length,
-              'tokens': entry.value,
-              'issuedBy': entry.value.first['issuedBy'] ?? 'Office Boy',
+              'dateKey': dateKey,
+              'quantity': tokens.length,
+              'tokens': tokens,
+              'issuedBy': tokens.first['issuedBy'] ?? 'Office Boy',
               'batchId': batchId,
             },
           });
@@ -1020,22 +1302,19 @@ class SyncService {
         if (raw == null || raw is! Map) continue;
         final data = Map<String, dynamic>.from(raw);
 
-        final isSynced = (data['synced'] == true || data['syncStatus'] == 'synced') && data['pendingSync'] != true;
+        final isSynced = (data['synced'] == true && data['syncStatus'] == 'synced') && data['pendingSync'] != true && data['lastSyncedAt'] != null;
         if (isSynced) continue;
 
+        final flagsBox = Hive.isBoxOpen('app_flags') ? Hive.box('app_flags') : null;
         final flagSynced = flagsBox?.get('attendance_synced_$key') == true;
-        if (flagSynced && data['pendingSync'] != true) continue;
+        if (flagSynced && data['pendingSync'] != true && data['lastSyncedAt'] != null) continue;
 
-        // Copies received over LAN ('att_…' keys) belong to the PC that recorded the punch;
-        // queueing them here made every PC upload every punch.
-        if (data['receivedViaLan'] == true || key.toString().startsWith('att_')) continue;
-
-        final employeeId = (data['employeeId'] ?? data['empId'] ?? data['userId'])?.toString();
-        final dateStr = (data['date'] ?? data['dateKey'] ?? DateFormat('yyyy-MM-dd').format(DateTime.now())).toString();
-        if (employeeId == null || employeeId.isEmpty) continue;
+        final employeeId = (data['employeeId'] ?? data['empId'] ?? data['userId'] ?? (key.toString().contains('_') ? key.toString().split('_')[0] : '')).toString().trim();
+        final dateStr = (data['date'] ?? data['dateKey'] ?? (key.toString().contains('_') ? key.toString().split('_')[1] : DateFormat('yyyy-MM-dd').format(DateTime.now()))).toString().trim();
+        if (employeeId.isEmpty || dateStr.isEmpty) continue;
 
         final flagEmpSynced = flagsBox?.get('attendance_synced_${employeeId}_$dateStr') == true;
-        if (flagEmpSynced && data['pendingSync'] != true) continue;
+        if (flagEmpSynced && data['pendingSync'] != true && data['lastSyncedAt'] != null) continue;
 
         final queueKey = '${employeeId}_$dateStr';
         if (alreadyQueued.contains(queueKey)) continue;
@@ -1050,6 +1329,8 @@ class SyncService {
           'employeeId': employeeId,
           'localKey': key,
           'data': data,
+          'pendingSync': true,
+          'forceUpload': true,
         });
         alreadyQueued.add(queueKey);
         queued++;
@@ -1066,6 +1347,11 @@ class SyncService {
   Future<void> _enqueueMissingPatients(String branchId, {bool force = false}) async {
     UiStallMonitor.mark('sync: _enqueueMissingPatients');
     try {
+      // If connected to LAN server, server manages patients
+      if (!LanServer.isRunning && !LanHostManager.isHostRunning && RealtimeManager().hasServerLink) {
+        return;
+      }
+
       if (!Hive.isBoxOpen(LocalStorageService.patientsBox)) {
         await LocalStorageService.openBoxSafe(LocalStorageService.patientsBox);
       }
@@ -1074,6 +1360,7 @@ class SyncService {
       }
       final pBox = Hive.box(LocalStorageService.patientsBox);
       final syncBox = Hive.box(LocalStorageService.syncBox);
+      final todayIso = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
       final alreadyQueued = <String>{};
       for (final v in syncBox.values) {
@@ -1097,6 +1384,10 @@ class SyncService {
         final data = Map<String, dynamic>.from(raw);
         final pid = (data['patientId'] ?? data['id'] ?? key).toString().trim();
         if (pid.isEmpty || alreadyQueued.contains(pid)) continue;
+
+        // Daily Data Rule: Only enqueue patients created today or with explicit pendingSync
+        final rawCreated = (data['createdAt'] ?? data['created_at'] ?? '').toString();
+        if (!rawCreated.startsWith(todayIso) && data['pendingSync'] != true) continue;
 
         final pCnic = (data['cnic'] ?? pid).toString().trim();
         final pName = (data['name'] ?? '').toString().trim().toLowerCase();
@@ -1173,11 +1464,13 @@ class SyncService {
         final targetBranch = _cleanBranch(data['branchId'] ?? branchId);
 
         await LocalStorageService.enqueueSync({
-          'backlog': true, // backfill: uses the backlog share of the daily quota
           'type': 'save_madrassa_student',
           'branchId': targetBranch,
           'studentId': sid,
+          'entityId': sid,
           'data': data,
+          'localBox': LocalStorageService.madrassaStudentsBox,
+          'localKey': key,
         });
         alreadyQueued.add(sid);
         queued++;
@@ -1188,6 +1481,75 @@ class SyncService {
       }
     } catch (e) {
       Logger().d('[SyncService] _enqueueMissingMadrassaStudents error: $e');
+    }
+  }
+
+  Future<void> _enqueueMissingMadrassaLogs(String branchId) async {
+    UiStallMonitor.mark('sync: _enqueueMissingMadrassaLogs');
+    try {
+      if (!Hive.isBoxOpen(LocalStorageService.madrassaLogsBox)) {
+        await LocalStorageService.openBoxSafe(LocalStorageService.madrassaLogsBox);
+      }
+      if (!Hive.isBoxOpen(LocalStorageService.syncBox)) {
+        await LocalStorageService.openBoxSafe(LocalStorageService.syncBox);
+      }
+      final mBox = Hive.box(LocalStorageService.madrassaLogsBox);
+      final syncBox = Hive.box(LocalStorageService.syncBox);
+
+      final alreadyQueued = <String>{};
+      for (final v in syncBox.values) {
+        if (v is Map && (v['type'] == 'save_madrassa_log' || v['type'] == 'save_madrassa_daily_log')) {
+          final lKey = (v['localKey'] ?? v['entityId'] ?? '${v['branchId']}__log__${v['dateKey']}')?.toString();
+          if (lKey != null) alreadyQueued.add(lKey);
+        }
+      }
+
+      int queued = 0;
+      int processedL = 0;
+      for (final key in mBox.keys.toList()) {
+        processedL++;
+        if (processedL % 25 == 0) {
+          await Future.delayed(const Duration(milliseconds: 1));
+        }
+
+        final raw = mBox.get(key);
+        if (raw == null || raw is! Map) continue;
+        final isSynced = (raw['synced'] == true || raw['syncStatus'] == 'synced') && raw['pendingSync'] != true;
+        if (isSynced) continue;
+
+        final keyStr = key.toString();
+        if (alreadyQueued.contains(keyStr)) continue;
+
+        String bId = branchId;
+        String dateKey = keyStr;
+        if (keyStr.contains('__log__')) {
+          final parts = keyStr.split('__log__');
+          bId = _cleanBranch(parts[0]);
+          dateKey = parts.length > 1 ? parts[1] : keyStr;
+        } else if (keyStr.contains('_')) {
+          final parts = keyStr.split('_');
+          bId = parts.isNotEmpty ? _cleanBranch(parts.first) : branchId;
+          dateKey = parts.length >= 4 ? '${parts[1]}-${parts[2]}-${parts[3]}' : parts.last;
+        }
+
+        await LocalStorageService.enqueueSync({
+          'type': 'save_madrassa_daily_log',
+          'entityId': 'mlog_${bId}_$dateKey',
+          'branchId': bId,
+          'dateKey': dateKey,
+          'data': Map<String, dynamic>.from(raw)..remove('syncStatus'),
+          'localBox': LocalStorageService.madrassaLogsBox,
+          'localKey': keyStr,
+        });
+        alreadyQueued.add(keyStr);
+        queued++;
+      }
+
+      if (queued > 0) {
+        Logger().d('[SyncService] 📥 Backfill: queued $queued unsynced madrassa logs for upload');
+      }
+    } catch (e) {
+      Logger().d('[SyncService] _enqueueMissingMadrassaLogs error: $e');
     }
   }
 
@@ -1391,7 +1753,7 @@ class SyncService {
   @visibleForTesting
   static bool suppressUploadsForTests = false;
 
-  Future<void> triggerUpload({bool force = false}) async {
+  Future<void> triggerUpload({bool force = false, bool urgent = false}) async {
     if (suppressUploadsForTests) return;
     // Runs once per app session, whichever screen started the sync (the server screen
     // does not go through SyncService.start). Read-only except for one tiny probe doc.
@@ -1450,16 +1812,43 @@ class SyncService {
     if (isOnline || force) {
       // Dual Sync Rule:
       // If local LAN server is running on this machine, ServerSyncManager handles the scheduled cloud sync passes.
-      // If this is a client station connected to the LAN server, ServerSyncManager on the server handles the cloud sync passes.
-      // BUT if the server is NOT connected at the time of sync (standalone/offsite), the client independently runs its sync pass!
+      // If this is a client station connected to the LAN server:
+      //  - Dispensary client stations must NOT upload dispensary data directly to Firestore (LAN server handles it).
+      //  - Client dispensary queue items are purged to prevent bloat.
+      //  - Standalone items (Madrassa, Donations, School, Dasterkhwaan) still upload to Firestore.
       final bool isLocalServer = LanServer.isRunning || LanHostManager.isHostRunning;
-      final bool isServerConnected = ConnectionManager().isConnected;
-      final bool hasLocalPending = Hive.isBoxOpen(LocalStorageService.syncBox) &&
-          Hive.box(LocalStorageService.syncBox).isNotEmpty;
+      final bool isServerConnected = RealtimeManager().hasServerLink;
+      final bool isClientOnLan = !isLocalServer && isServerConnected;
 
-      if (!force && !isLocalServer && isServerConnected && !hasLocalPending) {
-        Logger().d("SyncService: LAN server is connected and active. Scheduled sync deferred to ServerSyncManager on the server.");
-        return;
+      if (isClientOnLan) {
+        // Dispensary client stations must not upload dispensary entries to Firestore
+        await LocalStorageService.purgeClientDispensaryQueue();
+
+        if (_currentUserRole == null) {
+          try {
+            final userData = await OfflineAuthService.getCachedUserData();
+            if (userData != null) {
+              _currentUserRole = userData['role'] as String?;
+            }
+          } catch (_) {}
+        }
+
+        final currentRole = _currentUserRole;
+        final isDispensary = LocalStorageService.isDispensaryRole(currentRole);
+
+        // If this station is exclusively dispensary, defer entirely to LAN server
+        if (isDispensary) {
+          debugPrint('[SyncService] 🏥 Dispensary client station connected to LAN Server. Upload deferred to server.');
+          return;
+        }
+
+        // If other role, check if any pending standalone items remain
+        final hasLocalPending = Hive.isBoxOpen(LocalStorageService.syncBox) &&
+            Hive.box(LocalStorageService.syncBox).isNotEmpty;
+        if (!hasLocalPending) {
+          Logger().d("SyncService: LAN server is connected and active. No standalone items queued. Sync deferred.");
+          return;
+        }
       }
 
       // Mutual exclusion coordinator: Prevent clashing with ServerSyncManager on the same server node
@@ -1477,7 +1866,7 @@ class SyncService {
         } catch (_) {}
       }
 
-      await _uploadPending(force: force);
+      await _uploadPending(force: force, urgent: urgent);
 
       if (!Hive.isBoxOpen(LocalStorageService.syncBox)) return;
       final remainingQueue = Hive.box(LocalStorageService.syncBox).length;
@@ -1514,13 +1903,17 @@ class SyncService {
 
   Future<void> _refreshDataForBranch(String branchId) async {
     try {
+      // Each download runs only where this PC's role uses its box (LocalStorageService
+      // .roleUsesBox): elsewhere the box is closed, and opening it would load a module this PC
+      // never shows.
+      const uses = LocalStorageService.roleUsesBox;
       await LocalStorageService.downloadUsers(branchId);
-      await LocalStorageService.downloadTodayTokens(branchId);
-      await LocalStorageService.downloadInventory(branchId);
-      await LocalStorageService.refreshPrescriptions(branchId);
-      await LocalStorageService.downloadMedicineRestrictions(branchId);
+      if (uses(LocalStorageService.entriesBox)) await LocalStorageService.downloadTodayTokens(branchId);
+      if (uses(LocalStorageService.stockBox)) await LocalStorageService.downloadInventory(branchId);
+      if (uses(LocalStorageService.prescriptionsBox)) await LocalStorageService.refreshPrescriptions(branchId);
+      if (uses(LocalStorageService.medicineRestrictionsBox)) await LocalStorageService.downloadMedicineRestrictions(branchId);
       // [FIX-4.1] Periodic attendance download (participates in FinanceLocalStorage internal TTL guard)
-      await FinanceLocalStorage.downloadAttendance(branchId);
+      if (uses(LocalStorageService.attendanceBox)) await FinanceLocalStorage.downloadAttendance(branchId);
 
       final role = _currentUserRole?.toLowerCase().trim();
 
@@ -1530,27 +1923,27 @@ class SyncService {
       final hasDonationsPerm = isExec || isDonationRole ||
           (_currentUserRole != null && (PermissionService().hasPermission(_currentUserRole!, AppPermission.viewDonations) ||
           PermissionService().hasPermission(_currentUserRole!, AppPermission.manageDonations)));
-      if (hasDonationsPerm) {
+      if (hasDonationsPerm && uses(LocalStorageService.donationsBox)) {
         await DonationsLocalStorage.downloadAllDonations(branchId);
         await DonationsLocalStorage.downloadDonors(branchId);
         await DonationBoxStorage.downloadBoxes(branchId);
       }
 
       // Download Dasterkhwaan tokens for branch
-      await LocalStorageService.downloadDasterkhwaanTokens(branchId);
+      if (uses(LocalStorageService.dasterkhwaanTokensBox)) await LocalStorageService.downloadDasterkhwaanTokens(branchId);
 
       // Download Madrassa data if the user has madrassa permissions or is a madrassa user / executive
       final isMadrassaRole = isExec || role.contains('madrassa') || role.contains('qari') || role.contains('nazim') || role.contains('teacher');
       final hasMadrassaPerm = isMadrassaRole ||
           (_currentUserRole != null && (PermissionService().hasPermission(_currentUserRole!, AppPermission.manageMadrassa) ||
           PermissionService().hasPermission(_currentUserRole!, AppPermission.manageMadrassaAdmin)));
-      if (hasMadrassaPerm) {
+      if (hasMadrassaPerm && uses(LocalStorageService.madrassaStudentsBox)) {
         await MadrassaLocalStorage.downloadAllMadrassaData(branchId);
       }
 
       // Download School data if the user has school permissions or is a school user / executive
       final isSchoolRole = isExec || role.contains('school') || role.contains('teacher') || role.contains('principal');
-      if (isSchoolRole) {
+      if (isSchoolRole && uses(LocalStorageService.schoolStudentsBox)) {
         await SchoolSyncService().fetchRemoteSchoolData(branchId);
       }
 
@@ -1592,11 +1985,18 @@ class SyncService {
   }
 
   /// Moves dead-lettered uploads back into the queue. Forced syncs revive everything; the
-  /// automatic revival (every 6 h) brings them back as backlog, so items that failed during
+  /// automatic revival (every 2 h) brings them back as backlog, so items that failed during
   /// an outage or a quota-exhausted day are retried instead of sitting there forever.
   DateTime? _lastDlqRevivalAt;
-  Future<void> _reviveDeadLetterQueue({bool asBacklog = false}) async {
+  Future<void> _reviveDeadLetterQueue({bool asBacklog = false, bool force = false}) async {
     try {
+      final now = DateTime.now();
+      // Throttle revival to at most once per 2 hours unless forced
+      if (!force && _lastDlqRevivalAt != null && now.difference(_lastDlqRevivalAt!) < const Duration(hours: 2)) {
+        return;
+      }
+      _lastDlqRevivalAt = now;
+
       final dlBoxName = LocalStorageService.deadLetterQueueBox;
       if (!Hive.isBoxOpen(dlBoxName)) await LocalStorageService.openBoxSafe(dlBoxName);
       if (Hive.isBoxOpen(dlBoxName)) {
@@ -1604,25 +2004,63 @@ class SyncService {
         if (dlBox.isNotEmpty && Hive.isBoxOpen(LocalStorageService.syncBox)) {
           final sBox = Hive.box(LocalStorageService.syncBox);
           final keys = List.from(dlBox.keys);
+          final todayKey = DateFormat('yyyy-MM-dd').format(now);
+          final bool isLocalServer = LanServer.isRunning || LanHostManager.isHostRunning;
+          final bool isServerConnected = RealtimeManager().hasServerLink;
+          final bool isClientOnLan = !isLocalServer && isServerConnected;
+
+          int revivedCount = 0;
           for (final k in keys) {
             final val = dlBox.get(k);
-            // A newer copy is already queued: keep that one.
-            // Automatic revival gives each item 3 more rounds; after that only a forced sync
-            // retries it, so a truly broken record can't loop forever.
-            final revived = val is Map ? ((val['autoRevivals'] as int?) ?? 0) : 0;
-            if (asBacklog && revived >= 3) continue;
-            if (val is Map && !sBox.containsKey(k)) {
+            if (val is! Map) {
+              await dlBox.delete(k);
+              continue;
+            }
+
+            final type = (val['type'] ?? '').toString();
+            final isDispensary = LocalStorageService.isDispensaryActionType(type);
+            final dateKey = (val['dateKey'] ?? val['datePart'] ?? (val['data'] is Map ? val['data']['dateKey'] : null))?.toString();
+
+            // Client dispensary actions on LAN belong to the LAN server; purge permanently from client DLQ
+            if (isDispensary && isClientOnLan) {
+              await dlBox.delete(k);
+              continue;
+            }
+
+
+            final reason = (val['reason'] ?? val['lastError'] ?? '').toString();
+            final isParked = val['parked'] == true;
+            // Items whose reason starts "PURGED:" or that are parked are skipped by automatic revival
+            if (!force && (isParked || reason.startsWith('PURGED:'))) {
+              continue;
+            }
+
+            final revived = (val['autoRevivals'] as int?) ?? 0;
+            // Never revive poison pill items more than 3 times: park instead of deleting
+            if (revived >= 3 && !force) {
+              if (val['parked'] != true) {
+                final parkedItem = Map<String, dynamic>.from(val);
+                parkedItem['parked'] = true;
+                await dlBox.put(k, parkedItem);
+              }
+              continue;
+            }
+
+            if (!sBox.containsKey(k)) {
               final action = Map<String, dynamic>.from(val);
-              if (asBacklog) action['autoRevivals'] = revived + 1;
+              action['autoRevivals'] = revived + 1;
               action['attempts'] = 0;
               action.remove('nextRetryAt');
               action.remove('lastError');
               if (asBacklog) action['backlog'] = true;
               await sBox.put(k, action);
+              revivedCount++;
             }
             await dlBox.delete(k);
           }
-          debugPrint('[SyncService] 🔄 Revived ${keys.length} items from DeadLetterQueue to syncBox');
+          if (revivedCount > 0) {
+            debugPrint('[SyncService] 🔄 Revived $revivedCount items from DeadLetterQueue to syncBox');
+          }
         }
       }
     } catch (e) {
@@ -1630,7 +2068,9 @@ class SyncService {
     }
   }
 
-  Future<void> _uploadPending({bool force = false}) async {
+  Future<void> _uploadPending({bool force = false, bool urgent = false}) async {
+    // Each item opens the boxes it writes to first (ensureBoxesForSyncType below): this PC
+    // keeps only its role's boxes open.
     if (!Hive.isBoxOpen(LocalStorageService.syncBox)) return;
     if (!ServerSyncCoordinator.canStartSync(isServer: false, force: force)) {
       debugPrint('[SyncService] ⏸️ ServerSyncManager is actively syncing. Yielding _uploadPending pass.');
@@ -1643,7 +2083,11 @@ class SyncService {
       } else {
         // Never run two passes at once (they upload the same items twice). A forced sync
         // asked for mid-pass runs right after the current pass.
-        if (force) _forceRequested = true;
+        if (force) {
+          _forceRequested = true;
+        } else if (urgent) {
+          _urgentRequested = true;
+        }
         return;
       }
     }
@@ -1655,13 +2099,16 @@ class SyncService {
 
     try {
       try {
-        await _reviveDeadLetterQueue();
+        await _reviveDeadLetterQueue(force: force);
       } catch (e) {
         debugPrint('[SyncService] _reviveDeadLetterQueue warning: $e');
       }
       if (force) {
         try {
           await QueueSelfHealingService().healEntireQueue(fallbackBranchId: _currentBranchId);
+          // A forced pass sends held stock changes too; add them up first so they go out as
+          // one write per medicine.
+          await HourlyDispensarySync.foldNow();
         } catch (e) {
           debugPrint('[SyncService] healEntireQueue warning: $e');
         }
@@ -1677,18 +2124,10 @@ class SyncService {
       // If cloud writes are paused due to daily quota exhaustion, stop here stably
       if (QuotaService.isPausedForDailyReset && !force) return;
 
-      // If the queue has substantial items, trigger Python high-speed bulk uploader first
-      if (queueBox.length >= 15 && !kIsWeb && Platform.isWindows) {
-        try {
-          await HiddenForceUploader.instance.runSilentForceUpload();
-          if (queueBox.isEmpty) {
-            debugPrint('[SyncService] ✅ Queue successfully drained by high-speed cloud engine!');
-            return;
-          }
-        } catch (e) {
-          debugPrint('[SyncService] High-speed uploader notice: $e (continuing standard sync)');
-        }
-      }
+      // The bulk "force" uploader is manual only (Ctrl+Shift+U / Settings). Started from here
+      // whenever 15+ items were queued (v1.6.2), it reset the quota pause and ran a forced
+      // whole-database sweep; while Firestore refused writes the queue never shrank, so every
+      // PC re-ran that sweep every few seconds and its UI froze.
 
       if (queueBox.length >= 8) {
         uploadStatus = BusyStatus.begin('Syncing offline data (${queueBox.length} items queued)', background: true);
@@ -1722,14 +2161,17 @@ class SyncService {
         }
       }
 
-      // Fast purge bloated duplicates before processing (throttled to at most once per 10 minutes unless forced)
-      final lastSyncPurge = _lastSyncPurgeAt;
-      if (force || lastSyncPurge == null || DateTime.now().difference(lastSyncPurge) > const Duration(minutes: 10)) {
-        if (queueBox.length > 50) {
-          _lastSyncPurgeAt = DateTime.now();
-          await LocalStorageService.purgeBloatedSyncQueue();
-        }
+      // Fast purge bloated duplicates before processing
+      if (force || queueBox.length > 20) {
+        _lastSyncPurgeAt = DateTime.now();
+        await LocalStorageService.purgeBloatedSyncQueue();
       }
+
+      // Gateway rule & daily data configuration
+      final bool isLocalServer = LanServer.isRunning || LanHostManager.isHostRunning;
+      final bool isServerConnected = RealtimeManager().hasServerLink;
+      final bool isClientOnLan = !isLocalServer && isServerConnected;
+      final String todayKey = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
       // Process in batches until queue is drained or max 80 batches (8,000 items)
       int batchesRun = 0;
@@ -1743,26 +2185,59 @@ class SyncService {
         if (uploadStatus != null && queueBox.isNotEmpty) {
           uploadStatus.update('Syncing offline data (${queueBox.length} remaining)');
         }
-        // Dual-Lane (Express & Freight) Key Partitioning
-        final allKeys = queueBox.keys.toList();
-        if (allKeys.isEmpty) break;
+
+        // Take only up to 120 candidate keys to avoid loading & sorting thousands of keys in memory
+        // Stock changes waiting for the hourly run (HourlyDispensarySync) are skipped here;
+        // counted in the 120 they would fill the window and stop everything behind them.
+        final candidateKeys = <dynamic>[];
+        for (final k in queueBox.keys) {
+          if (candidateKeys.length >= 120) break;
+          if (!force && HourlyDispensarySync.isHeld(queueBox.get(k))) continue;
+          candidateKeys.add(k);
+        }
+        if (candidateKeys.isEmpty) break;
+
+        // Cache candidate action data in memory to avoid repeated Hive disk reads during sorting/partitioning
+        final candidateData = <dynamic, Map<String, dynamic>>{};
         final rawLiveKeys = <dynamic>[], rawBacklogKeys = <dynamic>[];
-        int keyScanCounter = 0;
-        for (final k in allKeys) {
+
+        for (final k in candidateKeys) {
           final v = queueBox.get(k);
-          (v is Map && _isBacklogItem(v) ? rawBacklogKeys : rawLiveKeys).add(k);
-          if (++keyScanCounter % 25 == 0) {
-            await Future.delayed(Duration.zero);
+          if (v is! Map) {
+            await queueBox.delete(k);
+            continue;
           }
+          final map = Map<String, dynamic>.from(v);
+          final type = (map['type'] ?? '').toString();
+          final isDispensary = LocalStorageService.isDispensaryActionType(type);
+          final dateKey = (map['dateKey'] ?? map['datePart'] ?? (map['data'] is Map ? map['data']['dateKey'] : null))?.toString();
+
+          // Gate 1: Client dispensary actions on LAN belong to LAN Server, drop from client sync queue
+          if (isDispensary && isClientOnLan) {
+            await queueBox.delete(k);
+            continue;
+          }
+
+
+          candidateData[k] = map;
+          if (_isBacklogItem(map)) {
+            rawBacklogKeys.add(k);
+          } else {
+            rawLiveKeys.add(k);
+          }
+        }
+
+        if (candidateData.isEmpty) {
+          continue;
         }
 
         // Select ready keys (not in backoff window, unless forced)
         DateTime? earliestBackoff;
         bool isKeyReady(dynamic k) {
-          final raw = queueBox.get(k);
-          if (raw is! Map) return true;
+          final raw = candidateData[k];
+          if (raw == null) return false;
           final nextRetryAtStr = raw['nextRetryAt'] as String?;
-          final coalesceUntil = (force || queueBox.length > 5) ? null : _coalesceUntil(raw);
+          final coalesceUntil = (force || urgent || queueBox.length > 5) ? null : _coalesceUntil(raw);
           if (coalesceUntil != null) {
             if (earliestBackoff == null || coalesceUntil.isBefore(earliestBackoff!)) {
               earliestBackoff = coalesceUntil;
@@ -1799,13 +2274,13 @@ class SyncService {
         final liveSerials = <String>{};
         final liveStudentIds = <String>{};
         for (final k in readyLiveKeys) {
-          final raw = queueBox.get(k);
-          if (raw is Map) {
+          final raw = candidateData[k];
+          if (raw != null) {
             final pid = (raw['patientId'] ?? (raw['data'] is Map ? raw['data']['patientId'] : null) ?? raw['id'])?.toString().trim();
             if (pid != null && pid.isNotEmpty) livePatientIds.add(pid);
             final s = (raw['serial'] ?? (raw['data'] is Map ? raw['data']['serial'] : null))?.toString().trim();
             if (s != null && s.isNotEmpty) liveSerials.add(s);
-            final sid = (raw['studentId'] ?? (raw['data'] is Map ? raw['data']['studentId'] : null))?.toString().trim();
+            final sid = (raw['studentId'] ?? (raw['data'] is Map ? (raw['data']['studentId'] ?? raw['data']['id']) : null) ?? raw['id'])?.toString().trim();
             if (sid != null && sid.isNotEmpty) liveStudentIds.add(sid);
           }
         }
@@ -1813,8 +2288,8 @@ class SyncService {
         if (livePatientIds.isNotEmpty || liveSerials.isNotEmpty || liveStudentIds.isNotEmpty) {
           final promoted = <dynamic>[];
           for (final bk in readyBacklogKeys) {
-            final raw = queueBox.get(bk);
-            if (raw is Map) {
+            final raw = candidateData[bk];
+            if (raw != null) {
               final type = (raw['type'] ?? '').toString();
               if (type == 'save_patient') {
                 final pid = (raw['patientId'] ?? (raw['data'] is Map ? raw['data']['patientId'] : null) ?? raw['id'])?.toString().trim();
@@ -1834,20 +2309,20 @@ class SyncService {
           }
         }
 
-        // Sort both lanes with Causal Precedence and FIFO timestamps
+        // Sort both lanes in memory with Causal Precedence and FIFO timestamps (no Hive disk reads)
         readyLiveKeys.sort((a, b) {
-          final rawA = queueBox.get(a);
-          final rawB = queueBox.get(b);
-          if (rawA is Map && rawB is Map) {
+          final rawA = candidateData[a];
+          final rawB = candidateData[b];
+          if (rawA != null && rawB != null) {
             return _compareSyncActions(rawA, rawB);
           }
           return 0;
         });
 
         readyBacklogKeys.sort((a, b) {
-          final rawA = queueBox.get(a);
-          final rawB = queueBox.get(b);
-          if (rawA is Map && rawB is Map) {
+          final rawA = candidateData[a];
+          final rawB = candidateData[b];
+          if (rawA != null && rawB != null) {
             return _compareSyncActions(rawA, rawB);
           }
           return 0;
@@ -1887,7 +2362,7 @@ class SyncService {
         }
 
         for (final key in batchKeys) {
-        final raw = queueBox.get(key);
+        final raw = candidateData[key] ?? queueBox.get(key);
         if (raw == null || raw is! Map) {
           await queueBox.delete(key);
           continue;
@@ -1921,12 +2396,20 @@ class SyncService {
           continue;
         }
 
-        // Only defer backlog if a temporary rate-limit cooldown is active (at most 30s)
-        if (!force && _isBacklogItem(action) && QuotaService.isPausedForDailyReset) {
-          action['nextRetryAt'] = DateTime.now().add(const Duration(seconds: 30)).toIso8601String();
-          await queueBox.put(key, action);
-          backlogDeferred++;
-          continue;
+        // Defer backlog item if the per-PC daily backlog budget is exhausted
+        if (!force && _isBacklogItem(action)) {
+          if (!QuotaService.backlogBudgetAvailable) {
+            action['nextRetryAt'] = QuotaService.nextDailyReset().toLocal().toIso8601String();
+            await queueBox.put(key, action);
+            backlogDeferred++;
+            continue;
+          }
+          if (QuotaService.isPausedForDailyReset) {
+            action['nextRetryAt'] = DateTime.now().add(const Duration(seconds: 30)).toIso8601String();
+            await queueBox.put(key, action);
+            backlogDeferred++;
+            continue;
+          }
         }
 
         try {
@@ -1941,7 +2424,11 @@ class SyncService {
           // ignore: no_leading_underscores_for_local_identifiers
           final _db = CloudDb.instance;
           Future<void> work() async {
-          if (action['collection'] != null) {
+          // Request status items name their collection too ('edit_requests', ...) but have no
+          // docId: the generic collection writer below skipped them without writing anything
+          // and the item was removed as uploaded, so a decision queued on the phone never
+          // reached Firestore. They go to their own handler further down.
+          if (action['collection'] != null && !_requestEventTypes.contains(type)) {
             final colPath = action['collection'].toString().trim();
             final docId = action['docId']?.toString().trim();
             final act = (action['action'] ?? 'set').toString().toLowerCase().trim();
@@ -2245,6 +2732,7 @@ class SyncService {
                     upd['pendingSync'] = false;
                     upd['synced'] = true;
                     upd['syncStatus'] = 'synced';
+                    upd['cloudSyncedAt'] = DateTime.now().toIso8601String(); // proof of a real upload (see purgeBloatedSyncQueue)
                     await eBox.put(canonicalKey, upd);
                   }
                 }
@@ -2312,6 +2800,7 @@ class SyncService {
                   upd['pendingSync'] = false;
                   upd['synced'] = true;
                   upd['syncStatus'] = 'synced';
+                  upd['cloudSyncedAt'] = DateTime.now().toIso8601String();
                   await eBox.put(canonicalKey, upd);
                 }
               }
@@ -2388,10 +2877,12 @@ class SyncService {
                 serial: serialHint,
               );
               final docRef = _db.collection('branches').doc(branchId).collection(invCol).doc(medicineId);
-              // Zero-read atomic update using FieldValue.increment
+              // Zero-read atomic update using FieldValue.increment. 'updatedAt' is what the
+              // inventory delta download filters on; without it stock changes never came back.
               await docRef.set({
                 'quantity': FieldValue.increment(delta),
                 'lastUpdated': FieldValue.serverTimestamp(),
+                'updatedAt': FieldValue.serverTimestamp(),
               }, SetOptions(merge: true));
             }
           }
@@ -2413,10 +2904,12 @@ class SyncService {
                 serial: serialHint,
               );
               final docRef = _db.collection('branches').doc(branchId).collection(invCol).doc(medicineId);
-              // Zero-read atomic update using FieldValue.increment
+              // Zero-read atomic update using FieldValue.increment. 'updatedAt' is what the
+              // other PCs' inventory delta pull filters on.
               await docRef.set({
                 'quantity': FieldValue.increment(qty),
                 'lastUpdated': FieldValue.serverTimestamp(),
+                'updatedAt': FieldValue.serverTimestamp(),
               }, SetOptions(merge: true));
 
               // Add to audit log using txId as document ID to prevent duplicate log items on retry
@@ -2489,11 +2982,16 @@ class SyncService {
               'timestamp': FieldValue.serverTimestamp(),
             });
           }
-          else if (type == 'save_token_exception_request') {
+          else if (type == 'save_token_exception_request' || type == 'token_exception_request') {
+            // token_exception_request: forwarded by the LAN server for a client receptionist.
             final data = Map<String, dynamic>.from(action['data'] ?? {});
-            final requestId = action['requestId']?.toString() ?? action['docId']?.toString() ?? data['id']?.toString() ?? action['syncId']?.toString() ?? const Uuid().v4();
+            final requestId = action['requestId']?.toString() ?? action['docId']?.toString() ?? data['id']?.toString() ?? data['requestId']?.toString() ?? action['syncId']?.toString() ?? const Uuid().v4();
+            data['status'] ??= 'pending';
+            data['requestType'] ??= 'token_exception';
             final bId = action['branchId']?.toString() ?? branchId;
-            
+            final docRef = _db.collection('branches').doc(bId).collection('edit_requests').doc(requestId);
+            await _keepDecidedRequestStatus(docRef, data, localBox: 'local_edit_requests', id: requestId);
+
             for (final f in ['requestedAt', 'reviewedAt']) {
               if (data[f] is String) {
                 try {
@@ -2501,13 +2999,8 @@ class SyncService {
                 } catch (_) {}
               }
             }
-            
-            await _db
-                .collection('branches')
-                .doc(bId)
-                .collection('edit_requests')
-                .doc(requestId)
-                .set(data, SetOptions(merge: true));
+
+            await docRef.set(LocalStorageService.sanitizeForCloudUpload(data), SetOptions(merge: true));
           }
           else if (type == 'approve_token_exception') {
             final data = Map<String, dynamic>.from(action['data'] ?? {});
@@ -2526,6 +3019,8 @@ class SyncService {
             }
 
             if (requestId != null) {
+              data['status'] = 'approved';
+              data['reviewedAt'] ??= DateTime.now().toIso8601String();
               for (final f in ['requestedAt', 'reviewedAt', 'approvedAt']) {
                 if (data[f] is String) {
                   try {
@@ -2541,25 +3036,65 @@ class SyncService {
                   .set(data, SetOptions(merge: true));
             }
           }
-          else if (type == 'update_request_status' || type == 'approve_request' || type == 'reject_request') {
-            final data = Map<String, dynamic>.from(action['data'] ?? {});
-            final requestId = action['docId']?.toString() ?? action['requestId']?.toString() ?? data['id']?.toString() ?? action['id']?.toString();
-            final bId = _cleanBranch(action['branchId']?.toString() ?? branchId);
+          else if (type == 'update_request_status' || type == 'approve_request' || type == 'reject_request' || type == 'request_approved' || type == 'request_rejected' || type == 'token_exception_approved') {
+            final data = action['data'] is Map
+                ? Map<String, dynamic>.from(action['data'] as Map)
+                : Map<String, dynamic>.from(action);
+            final requestId = action['docId']?.toString() ?? action['requestId']?.toString() ?? data['requestId']?.toString() ?? data['id']?.toString() ?? action['id']?.toString();
+            // cloudBranch: the exact branch doc the request was read from. Some requests live
+            // under a raw id (grt, jalalpur_jattan); the cleaned id would write the decision to
+            // a different, new doc and leave the real request pending.
+            final cloudBranch = action['cloudBranch']?.toString().trim() ?? '';
+            final bId = cloudBranch.isNotEmpty
+                ? cloudBranch
+                : _cleanBranch(action['branchId']?.toString() ?? data['branchId']?.toString() ?? branchId);
+            data.remove('cloudBranch');
+            if (action['data'] is! Map) {
+              // The queue item itself is the payload: its own bookkeeping (createdAt is when
+              // it was queued) must not overwrite the request's fields.
+              for (final f in ['createdAt', 'enqueuedAt', 'syncId', 'txId', 'backlog', 'priority', 'lastAttemptAt']) {
+                data.remove(f);
+              }
+            }
             final col = action['collection']?.toString() ?? data['collection']?.toString() ?? 'edit_requests';
             if (requestId != null && requestId.isNotEmpty) {
-              for (final f in ['requestedAt', 'reviewedAt', 'approvedAt']) {
+              if (type == 'approve_request' || type == 'request_approved' || type == 'token_exception_approved') {
+                data['status'] = 'approved';
+              } else if (type == 'reject_request' || type == 'request_rejected') {
+                data['status'] = 'rejected';
+              } else {
+                // update_request_status. The decision is in 'requestStatus': enqueueSync
+                // overwrites a queue item's 'status' with its own state ('pending'), and reading
+                // that uploaded every approval made on the phone as pending again, right after
+                // its direct write had set it approved.
+                final resolved = action['requestStatus'] ?? data['requestStatus'] ??
+                    (action['data'] is Map ? data['status'] : null);
+                if (!isDecidedRequestStatus(resolved)) {
+                  // An older item whose decision was overwritten: sending it would only revert
+                  // the request. The approver's direct write (and the re-send in the Requests
+                  // page) carries the decision instead.
+                  SyncLog.write('Skipped $col/$requestId status update with no decision (queued before 2026-10-18)');
+                  await queueBox.delete(key);
+                  return;
+                }
+                data['status'] = resolved;
+              }
+              data.remove('requestStatus');
+              for (final f in ['requestedAt', 'reviewedAt', 'approvedAt', 'rejectedAt', 'acknowledgedAt']) {
                 if (data[f] is String) {
                   try {
                     data[f] = Timestamp.fromDate(DateTime.parse(data[f] as String));
                   } catch (_) {}
                 }
               }
+              data.remove('type');
+              data.remove('data');
               await _db
                   .collection('branches')
                   .doc(bId)
                   .collection(col)
                   .doc(requestId)
-                  .set(data, SetOptions(merge: true));
+                  .set(LocalStorageService.sanitizeForCloudUpload(data), SetOptions(merge: true));
             }
           }
           else if (type == 'save_donation') {
@@ -3081,6 +3616,19 @@ class SyncService {
                 .doc(employeeId)
                 .set(fsData, SetOptions(merge: true));
 
+            // Mirror to primary Karachi branch doc if this is a Karachi sub-camp
+            if (bId != 'karachi' && CampSessionService.isKarachiFamily(bId)) {
+              await _db
+                  .collection('branches')
+                  .doc('karachi')
+                  .collection('employee_attendance')
+                  .doc(dateStr)
+                  .collection('records')
+                  .doc(employeeId)
+                  .set(fsData, SetOptions(merge: true))
+                  .catchError((_) {});
+            }
+
             if (type == 'save_biometric_log' || action['punchSequence'] != null) {
               await _db.collection('branches').doc(bId).collection('biometric_logs').doc(logId).set(fsData, SetOptions(merge: true)).catchError((_) {});
             }
@@ -3462,7 +4010,9 @@ class SyncService {
                 final tokenId = tMap['id']?.toString() ?? tokensColRef.doc().id;
                 final fsToken = {
                   'number': tMap['number'] ?? 1,
-                  'served': tMap['served'] == true,
+                  // Only ever set served: the kitchen PC may have served the token (and
+                  // uploaded that) before this issue upload landed; served:false undid it.
+                  if (tMap['served'] == true) 'served': true,
                   'session': tMap['session'] ?? session,
                   'time': tMap['time'] != null
                       ? Timestamp.fromDate(DateTime.tryParse(tMap['time'].toString()) ?? DateTime.now())
@@ -3541,7 +4091,7 @@ class SyncService {
           }
           else if (type == 'serve_dasterkhwan_token') {
             final data = Map<String, dynamic>.from(action['data'] ?? {});
-            final bId = action['branchId']?.toString() ?? branchId;
+            final bId = _cleanBranch(action['branchId']?.toString() ?? data['branchId']?.toString() ?? branchId);
             final dateKey = (action['dateKey'] ?? data['dateKey'] ?? DateTime.now().toIso8601String().substring(0, 10)).toString();
             final tokenId = data['tokenId']?.toString();
             final session = data['session']?.toString() ?? 'lunch';
@@ -3634,7 +4184,10 @@ class SyncService {
               final lKey = action['localKey'] ?? '${bId}__log__$dateKey';
               final local = mBox.get(lKey);
               if (local is Map) {
-                await mBox.put(lKey, Map<String, dynamic>.from(local)..['syncStatus'] = 'synced');
+                await mBox.put(lKey, Map<String, dynamic>.from(local)
+                  ..['syncStatus'] = 'synced'
+                  ..['synced'] = true
+                  ..['pendingSync'] = false);
               }
             }
           }
@@ -3655,14 +4208,22 @@ class SyncService {
             final boxId = (action['boxId'] ?? action['entityId'] ?? data['id'])?.toString();
             if (boxId == null || boxId.isEmpty) throw Exception('Missing boxId');
 
-            final fsData = Map<String, dynamic>.from(data)..remove('syncStatus');
-            await _db.collection('branches').doc(bId).collection('donation_boxes').doc(boxId).set(fsData, SetOptions(merge: true));
+            // A box that came from the cloud keeps its cloud doc id (firestoreId); writing to
+            // its local key created a second doc for the same box.
+            final fsId = (data['firestoreId'] ?? '').toString().trim();
+            final docId = fsId.isNotEmpty ? fsId : DonationBoxStorage.boxCloudDocId(boxId);
+            final fsData = Map<String, dynamic>.from(data)
+              ..remove('syncStatus')
+              ..['id'] = docId;
+            await _db.collection('branches').doc(bId).collection('donation_boxes').doc(docId).set(fsData, SetOptions(merge: true));
 
             if (Hive.isBoxOpen(DonationBoxStorage.boxesBoxName)) {
               final bBox = Hive.box(DonationBoxStorage.boxesBoxName);
               final local = bBox.get(boxId);
               if (local is Map) {
-                await bBox.put(boxId, Map<String, dynamic>.from(local)..['syncStatus'] = 'synced');
+                await bBox.put(boxId, Map<String, dynamic>.from(local)
+                  ..['syncStatus'] = 'synced'
+                  ..['firestoreId'] = docId);
               }
             }
           }
@@ -3672,14 +4233,27 @@ class SyncService {
             final openingId = (action['openingId'] ?? action['entityId'] ?? data['id'])?.toString();
             if (openingId == null || openingId.isEmpty) throw Exception('Missing openingId');
 
-            final fsData = Map<String, dynamic>.from(data)..remove('syncStatus');
-            await _db.collection('branches').doc(bId).collection('donation_box_openings').doc(openingId).set(fsData, SetOptions(merge: true));
+            // Openings live under their box: donation_boxes/{box}/openings/{opening}, which is
+            // where every reader looks. They used to go to a separate donation_box_openings
+            // collection that nothing read.
+            final boxLocalId = (action['boxId'] ?? data['boxId'] ?? '').toString().trim();
+            if (boxLocalId.isEmpty) throw Exception('Missing boxId for opening $openingId');
+            final boxDocId = DonationBoxStorage.boxCloudDocId(boxLocalId);
+            final fsId = (data['firestoreId'] ?? '').toString().trim();
+            final openingDocId = fsId.isNotEmpty ? fsId : openingId;
+            final fsData = Map<String, dynamic>.from(data)
+              ..remove('syncStatus')
+              ..['id'] = openingDocId;
+            await _db.collection('branches').doc(bId).collection('donation_boxes').doc(boxDocId)
+                .collection('openings').doc(openingDocId).set(fsData, SetOptions(merge: true));
 
             if (Hive.isBoxOpen(DonationBoxStorage.openingsBoxName)) {
               final oBox = Hive.box(DonationBoxStorage.openingsBoxName);
               final local = oBox.get(openingId);
               if (local is Map) {
-                await oBox.put(openingId, Map<String, dynamic>.from(local)..['syncStatus'] = 'synced');
+                await oBox.put(openingId, Map<String, dynamic>.from(local)
+                  ..['syncStatus'] = 'synced'
+                  ..['firestoreId'] = openingDocId);
               }
             }
           }
@@ -3720,11 +4294,26 @@ class SyncService {
             await _db.collection('branches').doc(bId).collection('madrassa_students').doc(studentId).set(fsData, SetOptions(merge: true));
             if (Hive.isBoxOpen(LocalStorageService.madrassaStudentsBox)) {
               final sBox = Hive.box(LocalStorageService.madrassaStudentsBox);
-              for (final k in sBox.keys) {
-                final r = sBox.get(k);
-                if (r is Map && (r['id'] == studentId || r['studentId'] == studentId || k.toString().endsWith('__$studentId') || k.toString() == studentId)) {
-                  await sBox.put(k, Map<String, dynamic>.from(r)..['syncStatus'] = 'synced');
-                  break;
+              // O(1) lookup via the queued localKey; full key scan only as a fallback.
+              dynamic hitKey;
+              final lk = action['localKey'];
+              if (lk != null && sBox.get(lk) is Map) {
+                hitKey = lk;
+              } else {
+                for (final k in sBox.keys) {
+                  final r = sBox.get(k);
+                  if (r is Map && (r['id'] == studentId || r['studentId'] == studentId || k.toString().endsWith('__$studentId') || k.toString() == studentId)) {
+                    hitKey = k;
+                    break;
+                  }
+                }
+              }
+              if (hitKey != null) {
+                final r = Map<String, dynamic>.from(sBox.get(hitKey) as Map);
+                // A newer local edit made while this upload was in flight stays pending.
+                final sentIso = (action['data'] is Map ? action['data']['lastUpdatedAt'] : null)?.toString();
+                if (sentIso == null || r['lastUpdatedAt']?.toString() == sentIso) {
+                  await sBox.put(hitKey, r..['syncStatus'] = 'synced'..['synced'] = true..['pendingSync'] = false);
                 }
               }
             }
@@ -3749,12 +4338,14 @@ class SyncService {
           }
           else if (type == 'update_madrassa_student') {
             final studentId = action['studentId'] as String?;
-            final currentLines = action['currentLines'] as int?;
+            final currentLines = (action['currentLines'] as num?)?.toInt();
             if (studentId == null || currentLines == null) throw Exception('Missing studentId/currentLines');
-            await _db.collection('branches').doc(branchId).collection('madrassa_students').doc(studentId).update({
+            final ubId = _cleanBranch(action['branchId'] ?? branchId);
+            // merge-set (not update) so it also works before the student doc has uploaded
+            await _db.collection('branches').doc(ubId).collection('madrassa_students').doc(studentId).set({
               'currentLines': currentLines,
               'lastUpdatedAt': FieldValue.serverTimestamp(),
-            });
+            }, SetOptions(merge: true));
           }
           else if (type == 'save_madrassa_fee_payment' || type == 'save_madrassa_fee') {
             final bId = (action['branchId']?.toString() ?? branchId).toLowerCase().trim();
@@ -3854,14 +4445,22 @@ class SyncService {
             final data = Map<String, dynamic>.from(action['data'] ?? {});
             final id = (action['id'] ?? data['id'])?.toString().trim() ?? '';
             if (id.isEmpty) throw Exception('save_restock_request without id');
-            await _db.collection('branches').doc(bId).collection('restock_requests').doc(id)
-                .set(LocalStorageService.sanitizeForCloudUpload(data), SetOptions(merge: true));
+            final docRef = _db.collection('branches').doc(bId).collection('restock_requests').doc(id);
+            await _keepDecidedRequestStatus(docRef, data, localBox: LocalStorageService.restockRequestsBox, id: id);
+            await docRef.set(LocalStorageService.sanitizeForCloudUpload(data), SetOptions(merge: true));
           }
-          else if (type == 'save_inventory_edit_request' || type == 'save_token_reversal_request') {
-            final bId = _cleanBranch(action['branchId']);
+          else if (type == 'save_inventory_edit_request' || type == 'save_token_reversal_request' ||
+              type == 'request_created' || type == 'save_edit_request') {
+            // request_created: the LAN server forwards a client's new request under the event
+            // name (clients on the LAN do not upload). It used to fall through to sync_records,
+            // so the request never reached edit_requests and the phone never saw it.
+            final bId = _cleanBranch(action['branchId'] ?? (action['data'] is Map ? action['data']['branchId'] : null));
             final data = Map<String, dynamic>.from(action['data'] ?? {});
-            final requestId = (action['requestId'] ?? data['id'])?.toString().trim() ?? '';
+            final requestId = (action['requestId'] ?? data['id'] ?? data['requestId'])?.toString().trim() ?? '';
             if (requestId.isEmpty) throw Exception('$type without requestId');
+            final col = (data['collection'] ?? action['collection'] ?? 'edit_requests').toString();
+            final docRef = _db.collection('branches').doc(bId).collection(col).doc(requestId);
+            await _keepDecidedRequestStatus(docRef, data, localBox: 'local_edit_requests', id: requestId);
             for (final f in ['requestedAt', 'reviewedAt', 'approvedAt']) {
               if (data[f] is String) {
                 try {
@@ -3869,8 +4468,43 @@ class SyncService {
                 } catch (_) {}
               }
             }
-            await _db.collection('branches').doc(bId).collection('edit_requests').doc(requestId)
-                .set(LocalStorageService.sanitizeForCloudUpload(data), SetOptions(merge: true));
+            await docRef.set(LocalStorageService.sanitizeForCloudUpload(data), SetOptions(merge: true));
+          }
+          else if (type == LanFirestoreGate.relayEvent) {
+            // A desk's write handed to the LAN server (LanFirestoreGate.relayWrite).
+            final data = Map<String, dynamic>.from(action['data'] ?? {});
+            final path = (data['path'] ?? '').toString().trim();
+            final segs = path.split('/').where((s) => s.isNotEmpty).length;
+            if (path.isNotEmpty && segs.isEven) {
+              final ref = _db.doc(path);
+              if (data['delete'] == true) {
+                await ref.delete();
+              } else {
+                final fields = Map<String, dynamic>.from(data['fields'] as Map? ?? const {});
+                for (final k in (data['serverTimeKeys'] as List? ?? const [])) {
+                  fields[k.toString()] = FieldValue.serverTimestamp();
+                }
+                await ref.set(fields, SetOptions(merge: data['merge'] != false));
+              }
+            }
+          }
+          else if (type == 'save_prescription_template' || type == 'delete_prescription_template') {
+            // Forwarded by the LAN server for a doctor desk (desks on the LAN do not write).
+            final data = Map<String, dynamic>.from(action['data'] ?? {});
+            final id = (data['id'] ?? action['id'])?.toString().trim() ?? '';
+            if (id.isEmpty) throw Exception('$type without id');
+            final doctorId = (data['doctorId'] ?? data['userId'] ?? '').toString().trim();
+            final refs = [
+              _db.collection('branches').doc(branchId).collection('doctor_templates').doc(id),
+              if (doctorId.isNotEmpty) _db.collection('users').doc(doctorId).collection('doctor_templates').doc(id),
+            ];
+            for (final ref in refs) {
+              if (type == 'delete_prescription_template') {
+                await ref.delete();
+              } else {
+                await ref.set(LocalStorageService.sanitizeForCloudUpload(data), SetOptions(merge: true));
+              }
+            }
           }
           else if (type == 'token_reversal') {
             // Removes the reversed token from the cloud (the same document the request
@@ -3952,6 +4586,9 @@ class SyncService {
           }
           // The time limit only guards against a read that never answers; REST writes have
           // their own limits. A timed-out item is simply retried (its writes are idempotent).
+          // Boxes this item writes to after its cloud write: on a PC whose role doesn't use them
+          // they may be closed, and failing after a cloud increment would repeat the increment.
+          await LocalStorageService.ensureBoxesForSyncType(type, collection: action['collection']?.toString());
           await CloudDb.runWith(CloudWriteContext(force: force, backlog: _isBacklogItem(action)), work)
               .timeout(const Duration(seconds: 120));
           consecutiveNetworkFailures = 0;
@@ -4074,11 +4711,15 @@ class SyncService {
       if (_forceRequested) {
         _forceRequested = false;
         Timer(const Duration(milliseconds: 500), () => triggerUpload(force: true));
+      } else if (_urgentRequested) {
+        _urgentRequested = false;
+        Timer(const Duration(milliseconds: 50), () => triggerUpload(urgent: true));
       }
     }
   }
 
   bool _forceRequested = false;
+  bool _urgentRequested = false;
 
   /// Marks the local record a queued action came from as synced, when the action names it
   /// ('localBox'/'localKey'); otherwise the backfill sweep would queue it again forever.
@@ -4109,6 +4750,7 @@ class SyncService {
   }
 
   Future<void> syncTodayOnly(String branchId) async {
+    if (LanFirestoreGate.isLanDesk) return; // a dispensary desk on the LAN leaves Firestore to the LAN server
     final normBranchId = branchId.toLowerCase().trim();
     await LocalStorageService.downloadTodayTokens(normBranchId);
     await LocalStorageService.downloadDasterkhwaanTokens(normBranchId, days: 2);
@@ -4121,6 +4763,7 @@ class SyncService {
   }
 
   Future<void> initialFullDownload(String branchId) async {
+    if (LanFirestoreGate.isLanDesk) return; // a dispensary desk on the LAN leaves Firestore to the LAN server
     final normBranchId = branchId.toLowerCase().trim();
     final settings = Hive.box('app_settings');
     final key      = 'initial_download_done_$normBranchId';
@@ -4329,6 +4972,7 @@ class SyncService {
   /// Donation boxes, Box openings, Donations, Clinic Tokens across all branches)
   /// and ensures any pending/unsynced records are pushed to Firestore directly.
   Future<void> sweepAllPendingLocalData({bool force = false}) async {
+    if (LanFirestoreGate.isLanDesk) return; // a dispensary desk on the LAN leaves Firestore to the LAN server
     // Connectivity check — works on all platforms including Windows desktop
     bool canSync = false;
     try {
@@ -4376,49 +5020,8 @@ class SyncService {
       debugPrint('[SyncService] 🧹 Starting comprehensive sweep of all pending local data...');
       await LocalStorageService.healLegacyHistoricalData();
 
-      // Everything below only QUEUES records; the upload pass sends them. The sweep used to
-      // write madrassa, food-token, donation and school records to Firestore directly, with
-      // no timeout: when Firestore stopped answering the first write hung forever, so the
-      // rest of the sweep (and the forced upload at its end) never ran, and every later
-      // sweep stacked the same writes again. It also bypassed the quota checks, and the food
-      // tokens it wrote were counted twice (it and the queue both incremented totalTokens).
-      // Madrassa students, food tokens, donations and school records are queued by the
-      // _enqueueMissing* backfills below; the three record kinds with no backfill are queued here.
-      try {
-        if (Hive.isBoxOpen(LocalStorageService.madrassaLogsBox)) {
-          final mBox = Hive.box(LocalStorageService.madrassaLogsBox);
-          for (final key in mBox.keys.toList()) {
-            final raw = mBox.get(key);
-            if (raw is! Map || raw['syncStatus'] == 'synced') continue;
-            final keyStr = key.toString();
-            String bId = _currentBranchId ?? 'karachi';
-            String dateKey = keyStr;
-            if (keyStr.contains('__log__')) {
-              final parts = keyStr.split('__log__');
-              bId = _cleanBranch(parts[0]);
-              dateKey = parts.length > 1 ? parts[1] : keyStr;
-            } else if (keyStr.contains('_')) {
-              final parts = keyStr.split('_');
-              bId = parts.isNotEmpty ? _cleanBranch(parts.first) : (_currentBranchId ?? 'karachi');
-              dateKey = parts.length >= 4 ? '${parts[1]}-${parts[2]}-${parts[3]}' : parts.last;
-            }
-            await LocalStorageService.enqueueSync({
-              'backlog': true,
-              'type': 'save_madrassa_daily_log',
-              'entityId': 'mlog_${bId}_$dateKey',
-              'branchId': bId,
-              'dateKey': dateKey,
-              'data': Map<String, dynamic>.from(raw)..remove('syncStatus'),
-              'localBox': LocalStorageService.madrassaLogsBox,
-              'localKey': keyStr,
-            });
-          }
-        }
-      } catch (e) {
-        debugPrint('[SyncService] Sweep madrassa logs notice: $e');
-      }
+      // Everything below only QUEUES records; the upload pass sends them.
 
-      await Future.delayed(const Duration(milliseconds: 50));
 
       try {
         for (final (boxName, type) in [
@@ -4451,38 +5054,62 @@ class SyncService {
       // Backlog harvesting. Each backfill scans ALL local records and uses the record's own
       // branchId (the argument is only the fallback), so one call covers every branch.
       final b = _currentBranchId ?? 'karachi';
+      // A module is swept when its box is open, this PC's role uses it, or a forced sweep was requested.
+      bool sweeps(String box) => force || Hive.isBoxOpen(box) || LocalStorageService.roleUsesBox(box);
       // Quiet background status so the user can see why things may feel slower right now.
       final status = BusyStatus.begin('Checking records to sync', background: true);
       try {
-        status.update('Checking tokens to sync');
-        await _enqueueMissingEntries(b, force: force);
-        await Future.delayed(const Duration(milliseconds: 75));
+        if (sweeps(LocalStorageService.entriesBox)) {
+          status.update('Checking tokens to sync');
+          await _enqueueMissingEntries(b, force: force);
+          await Future.delayed(const Duration(milliseconds: 75));
+        }
 
-        status.update('Checking donations to sync');
-        await _enqueueMissingDonations(b);
-        await Future.delayed(const Duration(milliseconds: 75));
+        if (sweeps(DonationsLocalStorage.donationsBox)) {
+          status.update('Checking donations to sync');
+          await _enqueueMissingDonations(b);
+          await Future.delayed(const Duration(milliseconds: 75));
+        }
 
         status.update('Checking food records to sync');
-        await _enqueueMissingFoodTokens(b);
-        await Future.delayed(const Duration(milliseconds: 50));
-        await _enqueueMissingFoodLogs(b);
-        await Future.delayed(const Duration(milliseconds: 75));
+        if (sweeps(LocalStorageService.dasterkhwaanTokensBox)) {
+          await _enqueueMissingFoodTokens(b);
+          await Future.delayed(const Duration(milliseconds: 50));
+        }
+        if (sweeps(LocalStorageService.dasterkhwaanFoodLogsBox)) {
+          await _enqueueMissingFoodLogs(b);
+          await Future.delayed(const Duration(milliseconds: 75));
+        }
 
         status.update('Checking staff records to sync');
-        await _enqueueMissingEmployees(b);
-        await Future.delayed(const Duration(milliseconds: 50));
-        await _enqueueMissingAttendance(b, force: force);
-        await Future.delayed(const Duration(milliseconds: 75));
+        if (sweeps(LocalStorageService.employeesBox)) {
+          await _enqueueMissingEmployees(b);
+          await Future.delayed(const Duration(milliseconds: 50));
+        }
+        if (sweeps(LocalStorageService.attendanceBox)) {
+          await _enqueueMissingAttendance(b, force: force);
+          await Future.delayed(const Duration(milliseconds: 75));
+        }
 
-        status.update('Checking patient records to sync');
-        await _enqueueMissingPatients(b, force: force);
-        await Future.delayed(const Duration(milliseconds: 75));
+        if (sweeps(LocalStorageService.patientsBox)) {
+          status.update('Checking patient records to sync');
+          await _enqueueMissingPatients(b, force: force);
+          await Future.delayed(const Duration(milliseconds: 75));
+        }
 
         status.update('Checking madrassa & school records');
-        await _enqueueMissingMadrassaStudents(b);
-        await Future.delayed(const Duration(milliseconds: 50));
-        await _enqueueMissingSchoolData(b);
-        await Future.delayed(const Duration(milliseconds: 75));
+        if (sweeps(LocalStorageService.madrassaStudentsBox)) {
+          await _enqueueMissingMadrassaStudents(b);
+          await Future.delayed(const Duration(milliseconds: 50));
+        }
+        if (sweeps(LocalStorageService.madrassaLogsBox)) {
+          await _enqueueMissingMadrassaLogs(b);
+          await Future.delayed(const Duration(milliseconds: 50));
+        }
+        if (sweeps(LocalStorageService.schoolStudentsBox)) {
+          await _enqueueMissingSchoolData(b);
+          await Future.delayed(const Duration(milliseconds: 75));
+        }
 
         // Synchronize all local users (including recently created ones) to Firestore
         status.update('Syncing user accounts');

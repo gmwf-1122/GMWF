@@ -26,6 +26,7 @@ import '../realtime/realtime_manager.dart';
 import '../realtime/realtime_events.dart';
 import 'serials_service.dart';
 import 'camp_session_service.dart';
+import 'cloud/lan_firestore_gate.dart';
 
 class FirestoreService {
   final FirebaseFirestore _db = FirebaseFirestore.instance;
@@ -45,6 +46,7 @@ class FirestoreService {
   }
 
   Future<bool> _isFirestoreAvailable() async {
+    if (LanFirestoreGate.isLanDesk) return false; // a dispensary desk on the LAN uses local data
     if (kIsWeb || !Platform.isWindows) return true;
 
     // Return cached result if it's still fresh
@@ -126,6 +128,11 @@ class FirestoreService {
     } catch (e) {
       Logger().d('[FirestoreService] LAN broadcast failed: $e');
     }
+
+    // On a dispensary desk connected to the LAN server, STEP 2 is the whole job: the server
+    // saves the patient and uploads it. Queuing it here as well (save_patient is not dropped
+    // on LAN desks) uploaded it again later, and the direct write below went past the server.
+    if (LanFirestoreGate.isLanDesk) return;
 
     // STEP 3 — Enqueue for sync immediately (0ms durable write)
     final sanitized = LocalStorageService.sanitize(data);

@@ -650,7 +650,7 @@ Stream<BranchStats> _streamTodayStatsFromHive(String branchId, {DashboardFilter?
     final donBox = Hive.box(LocalStorageService.donationsBox);
     for (final raw in donBox.values) {
       if (raw is! Map) continue;
-      final data = Map<String, dynamic>.from(raw);
+      final data = raw;
       final recBranch = data['branchId']?.toString().toLowerCase().trim() ?? '';
       if (recBranch != branchId.toLowerCase().trim()) continue;
       final date = data['date']?.toString() ?? '';
@@ -677,7 +677,7 @@ Stream<BranchStats> _streamTodayStatsFromHive(String branchId, {DashboardFilter?
       final tokenBox = Hive.box(LocalStorageService.dasterkhwaanTokensBox);
       for (final raw in tokenBox.values) {
         if (raw is! Map) continue;
-        final t = Map<String, dynamic>.from(raw);
+        final t = raw;
         final recBranch = t['branchId']?.toString().toLowerCase().trim() ?? '';
         if (recBranch.isNotEmpty && recBranch != branchId.toLowerCase().trim()) continue;
         final date = t['dateKey']?.toString() ?? '';
@@ -708,7 +708,9 @@ Stream<BranchStats> _streamTodayStatsFromHive(String branchId, {DashboardFilter?
   if (Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)) streams.add(Hive.box(LocalStorageService.dasterkhwaanTokensBox).watch());
 
   if (streams.isNotEmpty) {
-    await for (final _ in Rx.merge(streams).debounceTime(const Duration(milliseconds: 300))) {
+    // Each recompute goes through four whole boxes on the UI thread; during a LAN catch-up the
+    // boxes change every few milliseconds, so recompute only once they have been quiet for a second.
+    await for (final _ in Rx.merge(streams).debounceTime(const Duration(seconds: 1))) {
       yield _compute();
     }
   }
@@ -741,7 +743,7 @@ Stream<BranchStats> _streamCombinedTodayStatsFromHive(List<String> ids, {Dashboa
       final entriesBox = Hive.box(LocalStorageService.entriesBox);
       for (final raw in entriesBox.values) {
         if (raw is! Map) continue;
-        final e = Map<String, dynamic>.from(raw);
+        final e = raw;
         if ((e['dateKey'] ?? '') != today) continue;
         final bId = (e['branchId'] as String?)?.toLowerCase().trim() ?? '';
         if (!matchAll && !targetSet.contains(bId)) continue;
@@ -774,7 +776,7 @@ Stream<BranchStats> _streamCombinedTodayStatsFromHive(List<String> ids, {Dashboa
       final dispBox = Hive.box(LocalStorageService.dispensaryBox);
       for (final raw in dispBox.values) {
         if (raw is! Map) continue;
-        final d = Map<String, dynamic>.from(raw);
+        final d = raw;
         if ((d['dateKey'] ?? '') != today) continue;
         final bId = (d['branchId'] as String?)?.toLowerCase().trim() ?? '';
         if (!matchAll && !targetSet.contains(bId)) continue;
@@ -788,7 +790,7 @@ Stream<BranchStats> _streamCombinedTodayStatsFromHive(List<String> ids, {Dashboa
       final donBox = Hive.box(LocalStorageService.donationsBox);
       for (final raw in donBox.values) {
         if (raw is! Map) continue;
-        final data = Map<String, dynamic>.from(raw);
+        final data = raw;
         final recBranch = data['branchId']?.toString().toLowerCase().trim() ?? '';
         if (!matchAll && !targetSet.contains(recBranch)) continue;
 
@@ -817,7 +819,7 @@ Stream<BranchStats> _streamCombinedTodayStatsFromHive(List<String> ids, {Dashboa
       final tokenBox = Hive.box(LocalStorageService.dasterkhwaanTokensBox);
       for (final raw in tokenBox.values) {
         if (raw is! Map) continue;
-        final t = Map<String, dynamic>.from(raw);
+        final t = raw;
         final recBranch = t['branchId']?.toString().toLowerCase().trim() ?? '';
         if (!matchAll && !targetSet.contains(recBranch)) continue;
         final date = t['dateKey']?.toString() ?? '';
@@ -846,7 +848,9 @@ Stream<BranchStats> _streamCombinedTodayStatsFromHive(List<String> ids, {Dashboa
   if (Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)) streams.add(Hive.box(LocalStorageService.dasterkhwaanTokensBox).watch());
 
   if (streams.isNotEmpty) {
-    await for (final _ in Rx.merge(streams).debounceTime(const Duration(milliseconds: 300))) {
+    // Each recompute goes through four whole boxes on the UI thread; during a LAN catch-up the
+    // boxes change every few milliseconds, so recompute only once they have been quiet for a second.
+    await for (final _ in Rx.merge(streams).debounceTime(const Duration(seconds: 1))) {
       yield _compute();
     }
   }

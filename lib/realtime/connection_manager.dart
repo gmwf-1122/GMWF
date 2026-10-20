@@ -175,7 +175,21 @@ class ConnectionManager {
       debugPrint('[ConnectionManager] RealtimeManager requested rediscovery after failed retries');
       _reconnectAttempts = 0;
       _reconnectTimer?.cancel();
-      _reconnectTimer = Timer(const Duration(milliseconds: 300), _tryConnect);
+      _reconnectTimer = Timer(const Duration(milliseconds: 300), () {
+        _reconnectTimer = null;
+        _tryConnect();
+      });
+    };
+
+    // RealtimeManager also retries the last server on its own. When that succeeds outside a
+    // discovery run, nothing here used to hear of it: desk screens kept showing "Server not
+    // found" and the reconnect listeners (which re-push this PC's pending work) never ran.
+    RealtimeManager().onConnected = (ip, port) {
+      if (!_running || _disposed || _discovering) return; // _connectTo handles its own success
+      _reconnectTimer?.cancel();
+      _reconnectTimer = null;
+      _reconnectAttempts = 0;
+      _onLinkUp(ip, port);
     };
 
     debugPrint('[ConnectionManager] Starting: role=$_role branch=$_branchId'
@@ -206,6 +220,11 @@ class ConnectionManager {
     _discovering = true;
     try {
       await _tryConnectInner();
+    } catch (e) {
+      // An error here used to end the retry chain for good (nothing scheduled the next try).
+      debugPrint('[ConnectionManager] Connect attempt failed: $e');
+      _discovering = false;
+      _scheduleReconnect();
     } finally {
       _discovering = false;
     }
@@ -253,8 +272,9 @@ class ConnectionManager {
         final ok = await _connectTo(saved.$1, saved.$2);
         if (ok) return;
       }
-      // Retain saved server across transient network drops (DHCP lease remains valid)
-      debugPrint('[ConnectionManager] Saved server ${saved.$1} not responding on quick probe — retaining saved IP and continuing full discovery');
+      // In offline clinics, DHCP leases or static IPs stay the same. Never delete the saved server IP
+      // automatically — doing so leaves the client with no known address if UDP broadcast is filtered by the router.
+      debugPrint('[ConnectionManager] Saved server ${saved.$1} not responding on quick probe — retaining saved IP and continuing discovery');
     }
 
     final now = DateTime.now();
@@ -449,41 +469,11 @@ class ConnectionManager {
       }
 
       _saveServer(ip, port);
-      
-      // Publish active server IP to Firestore for Web clients in this branch
-      if (_isFirebaseReady && _branchId != null && _branchId!.isNotEmpty && ip != '127.0.0.1' && ip != 'localhost') {
-        try {
-          FirebaseFirestore.instance
-              .collection('branches').doc(_branchId)
-              .set({'activeServerIp': ip, 'serverLastSeen': FieldValue.serverTimestamp()}, SetOptions(merge: true))
-              .catchError((e) => debugPrint('[ConnectionManager] Could not publish activeServerIp: $e'));
-        } catch (e) {
-          debugPrint('[ConnectionManager] Exception publishing activeServerIp: $e');
-        }
-      }
+      // Desks never publish the server's address to Firestore: the server does that itself
+      // when it starts (server.dart). This was one Firestore write per desk on every reconnect.
 
       _reconnectAttempts = 0;
-
-      _emit(ConnectionStatus(
-        state: LanConnectionState.connected,
-        ip: ip,
-        port: port,
-        message: 'Connected to $ip:$port',
-      ));
-
-      // [FIX-P1] [BUG-9] Notify all registered listeners.
-      Future.delayed(const Duration(milliseconds: 300), () {
-        if (!_disposed) {
-          for (final cb in List<VoidCallback>.from(_reconnectListeners)) {
-            try { cb(); } catch (e) {
-              debugPrint('[ConnectionManager] reconnect listener error: $e');
-            }
-          }
-        }
-      });
-
-      _startHeartbeat(ip, port);
-      debugPrint('[ConnectionManager] ✅ Connected at $ip:$port');
+      _onLinkUp(ip, port);
       return true;
     } catch (e) {
       debugPrint('[ConnectionManager] Connect failed: $e');
@@ -493,6 +483,30 @@ class ConnectionManager {
       ));
       return false;
     }
+  }
+
+  /// The server accepted this PC: show it, re-run the reconnect listeners and watch the link.
+  void _onLinkUp(String ip, int port) {
+    _emit(ConnectionStatus(
+      state: LanConnectionState.connected,
+      ip: ip,
+      port: port,
+      message: 'Connected to $ip:$port',
+    ));
+
+    // [FIX-P1] [BUG-9] Notify all registered listeners.
+    Future.delayed(const Duration(milliseconds: 300), () {
+      if (!_disposed) {
+        for (final cb in List<VoidCallback>.from(_reconnectListeners)) {
+          try { cb(); } catch (e) {
+            debugPrint('[ConnectionManager] reconnect listener error: $e');
+          }
+        }
+      }
+    });
+
+    _startHeartbeat(ip, port);
+    debugPrint('[ConnectionManager] ✅ Connected at $ip:$port');
   }
 
   // ── Wait for 'identified' ──────────────────────────────────────────────────
@@ -560,7 +574,9 @@ class ConnectionManager {
     _heartbeatTimer?.cancel();
     _reconnectTimer?.cancel();
 
-    const delays = [2, 3, 5, 10, 15, 30, 45, 60];
+    // Capped at 10 s: a clinic PC waiting a minute between attempts looked permanently
+    // disconnected after a short server restart (each discovery round itself takes ~12 s).
+    const delays = [2, 3, 5, 10];
     final delay =
         delays[_reconnectAttempts.clamp(0, delays.length - 1)];
     _reconnectAttempts++;
@@ -568,14 +584,25 @@ class ConnectionManager {
     if (_reconnectAttempts <= 5 || _reconnectAttempts % 5 == 0) {
       debugPrint('[ConnectionManager] Reconnect in ${delay}s (attempt $_reconnectAttempts)');
     }
-    _reconnectTimer = Timer(Duration(seconds: delay), _tryConnect);
+    // Cleared when it fires: the heartbeat's "nothing scheduled" check relies on it.
+    _reconnectTimer = Timer(Duration(seconds: delay), () {
+      _reconnectTimer = null;
+      _tryConnect();
+    });
   }
 
   // ── Manual retry ───────────────────────────────────────────────────────────
   Future<void> reconnectNow() async {
     _reconnectTimer?.cancel();
+    _reconnectTimer = null;
     _heartbeatTimer?.cancel();
     _reconnectAttempts = 0;
+    // The Retry button must work even if something stopped the manager (stop() is meant
+    // for logout only, but a stopped manager used to ignore every retry until next login).
+    if (_role != null && _branchId != null) {
+      _running = true;
+      _disposed = false;
+    }
     await _tryConnect();
   }
 

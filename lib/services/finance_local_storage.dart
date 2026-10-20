@@ -555,6 +555,51 @@ class FinanceLocalStorage {
     return matches(role) || matches(dept);
   }
 
+  /// Canonicalizes camp names and aliases into uniform display names.
+  static String canonicalCampName(String raw) {
+    final lower = raw.trim().toLowerCase();
+    if (lower.contains('haji') || lower == 'hc' || lower.contains('hajicamp')) {
+      return 'Haji Camp';
+    }
+    if (lower.contains('saddar') || lower.contains('kapaya') || lower.contains('kapayya')) {
+      return 'Saddar Camp';
+    }
+    return raw.trim();
+  }
+
+  /// Determines whether [emp] belongs to or works at [targetCamp].
+  /// Accurately supports multi-camp/double-camp employees assigned to both Saddar and Haji Camp.
+  static bool isEmployeeInCamp(Map<String, dynamic> emp, String? targetCamp) {
+    if (targetCamp == null) return true;
+    final t = targetCamp.trim().toLowerCase();
+    if (t.isEmpty || t == 'all' || t == 'all camps' || t == 'all branches') return true;
+
+    final camps = getEmployeeCamps(emp).map((c) => c.toLowerCase()).toList();
+    if (camps.isEmpty) {
+      final b = (emp['branchId'] ?? '').toString().toLowerCase();
+      if (t.contains('haji') && b.contains('haji')) return true;
+      if ((t.contains('saddar') || t.contains('kapaya')) && (b.contains('saddar') || b.contains('kapaya'))) return true;
+      return true; // Not camp-restricted
+    }
+
+    for (final c in camps) {
+      if (c == t) return true;
+      if (t.contains('haji') && c.contains('haji')) return true;
+      if ((t.contains('saddar') || t.contains('kapaya')) && (c.contains('saddar') || c.contains('kapaya'))) return true;
+    }
+    final empBranch = (emp['branchId'] ?? '').toString().toLowerCase();
+    if (t.contains('haji') && empBranch.contains('haji')) return true;
+    if ((t.contains('saddar') || t.contains('kapaya')) && (empBranch.contains('saddar') || empBranch.contains('kapaya'))) return true;
+    return false;
+  }
+
+  /// Returns a clean human-readable camp affiliation string, e.g. "Saddar Camp & Haji Camp".
+  static String getEmployeeCampDisplay(Map<String, dynamic> emp) {
+    final camps = getEmployeeCamps(emp);
+    if (camps.isEmpty) return '';
+    return camps.join(' & ');
+  }
+
   /// Extracts the specific camp affiliation for Karachi employees:
   /// returns 'Haji Camp' or 'Saddar Camp' (or empty string if not camp-affiliated).
   static String getEmployeeCamp(Map<String, dynamic> emp) {
@@ -857,12 +902,38 @@ class FinanceLocalStorage {
     final rawList = emp['camps'] ?? emp['campLocations'];
     if (rawList is List) {
       for (final c in rawList) {
-        final s = c.toString().trim();
-        if (s.isNotEmpty) list.add(s);
+        final s = canonicalCampName(c.toString().trim());
+        if (s.isNotEmpty && s.toLowerCase() != 'multiple camps') list.add(s);
+      }
+    }
+    final sessionsList = emp['sessions'];
+    if (sessionsList is List) {
+      for (final s in sessionsList) {
+        if (s is Map) {
+          final campStr = (s['camp'] ?? s['location'] ?? s['branchName'] ?? s['campId'])?.toString().trim();
+          if (campStr != null && campStr.isNotEmpty) {
+            final canon = canonicalCampName(campStr);
+            if (canon.isNotEmpty && canon.toLowerCase() != 'multiple camps') list.add(canon);
+          }
+        }
+      }
+    }
+    final shiftsMap = emp['shifts'];
+    if (shiftsMap is Map) {
+      for (final sVal in shiftsMap.values) {
+        if (sVal is Map) {
+          final campStr = (sVal['location'] ?? sVal['branchName'] ?? sVal['camp'])?.toString().trim();
+          if (campStr != null && campStr.isNotEmpty) {
+            final canon = canonicalCampName(campStr);
+            if (canon.isNotEmpty && canon.toLowerCase() != 'multiple camps') list.add(canon);
+          }
+        }
       }
     }
     final singleCamp = getEmployeeCamp(emp);
-    if (singleCamp.isNotEmpty) list.add(singleCamp);
+    if (singleCamp.isNotEmpty && singleCamp.toLowerCase() != 'multiple camps') {
+      list.add(canonicalCampName(singleCamp));
+    }
     return list.toList();
   }
 
@@ -1097,10 +1168,10 @@ class FinanceLocalStorage {
         final reqIsHaji = cleanBranch.contains('haji');
         final reqIsSaddar = cleanBranch.contains('saddar') || cleanBranch.contains('kapaya');
 
-        if (reqIsHaji && !empCamp.contains('haji') && !empBranch.contains('haji')) {
+        if (reqIsHaji && !isEmployeeInCamp(record, 'Haji Camp')) {
           continue;
         }
-        if (reqIsSaddar && !empCamp.contains('saddar') && !empBranch.contains('saddar') && !empBranch.contains('kapaya')) {
+        if (reqIsSaddar && !isEmployeeInCamp(record, 'Saddar Camp')) {
           continue;
         }
 
@@ -2129,6 +2200,7 @@ class FinanceLocalStorage {
     merged['remoteId'] = existingRecord?['remoteId'];
     merged['updatedAt'] = now;
     merged['syncStatus'] = 'pending';
+    merged['pendingSync'] = true;
     merged['markedBy'] = performedBy;
     merged['markedAt'] ??= now;
 
@@ -2139,14 +2211,25 @@ class FinanceLocalStorage {
     }
     await attendanceBox.flush();
 
+    // Invalidate app_flags sync markers so updated punches/checkouts are enqueued and uploaded
+    if (Hive.isBoxOpen('app_flags')) {
+      final flags = Hive.box('app_flags');
+      await flags.delete('attendance_synced_$attendanceKey');
+      await flags.delete('attendance_synced_${employeeId}_$dateStr');
+    }
+
     // Mirror to sync
     await LocalStorageService.enqueueSync({
       'type': 'save_attendance_record',
       'branchId': branchId,
       'date': dateStr,
       'employeeId': employeeId,
+      'localKey': attendanceKey,
       'data': sanitized,
+      'pendingSync': true,
+      'forceUpload': true,
     });
+    unawaited(SyncService().triggerUpload(urgent: true));
 
     return attendanceKey;
   }
@@ -2520,6 +2603,128 @@ class FinanceLocalStorage {
       }
     }
   }
+
+  /// Determines whether [date] is a weekly rest day (off day) for [employee].
+  /// By default in HQ, Sunday is the weekly off day.
+  /// However, employees can be configured with:
+  /// - `isSundayOff`: bool (if false, Sunday is a normal working day)
+  /// - `weeklyOffDays`: `List<String>` (e.g. ['Sunday'], ['Friday'], ['Saturday', 'Sunday'], or [] for continuous shifts)
+  /// - `weeklyOffDay`: String (single day string e.g. 'Sunday', 'Friday', 'None')
+  static bool isEmployeeWeeklyOff(Map<String, dynamic>? employee, DateTime date) {
+    if (employee == null) {
+      return date.weekday == DateTime.sunday;
+    }
+
+    // 1. Explicit multi-day or single-day list in 'weeklyOffDays'
+    final rawList = employee['weeklyOffDays'];
+    if (rawList is List) {
+      if (rawList.isEmpty) {
+        // Empty list = continuous 7-day schedule with no weekly off day
+        return false;
+      }
+      const dayNames = [
+        '',
+        'monday',
+        'tuesday',
+        'wednesday',
+        'thursday',
+        'friday',
+        'saturday',
+        'sunday',
+      ];
+      final currentDay = (date.weekday >= 1 && date.weekday <= 7) ? dayNames[date.weekday] : '';
+      for (final item in rawList) {
+        final s = item?.toString().trim().toLowerCase();
+        if (s == null || s.isEmpty) continue;
+        if (s == currentDay || currentDay.startsWith(s) || s.startsWith(currentDay)) {
+          return true;
+        }
+      }
+      return false;
+    }
+
+    // 2. Explicit boolean flag for Sunday
+    final isSundayOff = employee['isSundayOff'];
+    if (isSundayOff is bool) {
+      if (!isSundayOff && date.weekday == DateTime.sunday) {
+        // Sunday is explicitly a working day
+        return false;
+      }
+      if (isSundayOff && date.weekday == DateTime.sunday) {
+        return true;
+      }
+      // Check if another day is specified in 'weeklyOffDay'
+      final offDayStr = employee['weeklyOffDay']?.toString().trim().toLowerCase();
+      if (offDayStr != null && offDayStr.isNotEmpty && offDayStr != 'none' && offDayStr != 'no off day') {
+        const dayNames = [
+          '',
+          'monday',
+          'tuesday',
+          'wednesday',
+          'thursday',
+          'friday',
+          'saturday',
+          'sunday',
+        ];
+        final currentDay = (date.weekday >= 1 && date.weekday <= 7) ? dayNames[date.weekday] : '';
+        return offDayStr == currentDay || currentDay.startsWith(offDayStr);
+      }
+      return false;
+    }
+
+    // 3. Fallback to scalar 'weeklyOffDay'
+    final offDayStr = employee['weeklyOffDay']?.toString().trim().toLowerCase();
+    if (offDayStr != null && offDayStr.isNotEmpty) {
+      if (offDayStr == 'none' || offDayStr == 'no off day') {
+        return false;
+      }
+      const dayNames = [
+        '',
+        'monday',
+        'tuesday',
+        'wednesday',
+        'thursday',
+        'friday',
+        'saturday',
+        'sunday',
+      ];
+      final currentDay = (date.weekday >= 1 && date.weekday <= 7) ? dayNames[date.weekday] : '';
+      return offDayStr == currentDay || currentDay.startsWith(offDayStr);
+    }
+
+    // 4. Default: Sunday is off
+    return date.weekday == DateTime.sunday;
+  }
+
+  /// Returns a clean, human-readable display string for an employee's weekly off schedule.
+  static String getEmployeeWeeklyOffDisplay(Map<String, dynamic>? employee) {
+    if (employee == null) return 'Sunday Off (HQ Default)';
+
+    final customDisplay = employee['weeklyOffDisplay']?.toString().trim();
+    if (customDisplay != null && customDisplay.isNotEmpty) {
+      return customDisplay;
+    }
+
+    final rawList = employee['weeklyOffDays'];
+    if (rawList is List) {
+      if (rawList.isEmpty) return 'No Weekly Off (7 Days Working)';
+      final valid = rawList.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList();
+      if (valid.isEmpty) return 'No Weekly Off (7 Days Working)';
+      if (valid.length == 1 && valid.first.toLowerCase() == 'sunday') return 'Sunday Off (HQ Default)';
+      return '${valid.join(' & ')} Off';
+    }
+
+    if (employee['isSundayOff'] == false) {
+      final off = employee['weeklyOffDay']?.toString().trim();
+      if (off != null && off.isNotEmpty && off.toLowerCase() != 'none') {
+        return '$off Off';
+      }
+      return 'Sunday Working (No Off Day)';
+    }
+
+    return 'Sunday Off (HQ Default)';
+  }
+
   static Map<String, dynamic> getPayrollAttendanceSummary(String employeeId, String monthKey) {
     final emp = getEmployee(employeeId);
     final branchId = emp?['branchId']?.toString() ?? '';
@@ -2651,6 +2856,7 @@ class FinanceLocalStorage {
       final hasRecord = val != null;
 
       final isHolidayDay = branchHolidays.contains(dateStr);
+      final isWeeklyOff = isEmployeeWeeklyOff(emp, date);
       final isSunday = date.weekday == DateTime.sunday;
 
       // Skip future dates if they do not have any explicit attendance record marked.
@@ -2661,7 +2867,7 @@ class FinanceLocalStorage {
       totalEmployedDays++;
       baseSalaryEarned += dailyRate;
 
-      if (!hasRecord && date.weekday != DateTime.sunday) {
+      if (!hasRecord && !isWeeklyOff) {
         if (!isFutureDay) {
           unmarkedDays++;
         }
@@ -2690,10 +2896,10 @@ class FinanceLocalStorage {
           status = 'present';
         }
       } else {
-        if (isFutureDay && !isSunday && !isHolidayDay) continue;
+        if (isFutureDay && !isWeeklyOff && !isHolidayDay) continue;
 
-        // Defaults: Sunday defaults to 'off', other days default to 'unmarked'
-        if (isSunday) {
+        // Defaults: Weekly off day defaults to 'off', other days default to 'unmarked'
+        if (isWeeklyOff) {
           status = 'off';
         } else {
           status = 'unmarked';
@@ -2711,6 +2917,7 @@ class FinanceLocalStorage {
         'checkOutTime': recMap != null ? (recMap['checkOutTime'] ?? recMap['departureTime'])?.toString() : null,
         'shifts': recMap != null ? recMap['shifts'] : null,
         'isSunday': isSunday,
+        'isWeeklyOff': isWeeklyOff,
         'isHoliday': isHolidayDay,
         'isFuture': isFutureDay,
         'note': recMap != null ? recMap['note']?.toString() : null,
@@ -2720,12 +2927,12 @@ class FinanceLocalStorage {
         holidayCount++;
       }
 
-      if (date.weekday == DateTime.sunday) {
-        // Evaluate Sunday Eligibility
-        bool isSundayPayable = true;
+      if (isWeeklyOff) {
+        // Evaluate Weekly Off Eligibility
+        bool isOffDayPayable = true;
 
-        // Sunday Weekly Work Check: Must work at least one day in the preceding weekdays (Monday to Saturday) of this week
-        if (isSundayPayable) {
+        // Weekly Work Check: Must work at least one day in the preceding weekdays (past 6 days) of this week
+        if (isOffDayPayable) {
           bool workedInWeek = false;
           int eligibleWeekdaysCount = 0;
 
@@ -2762,19 +2969,19 @@ class FinanceLocalStorage {
             }
           }
 
-          // If there are no preceding weekdays in the week that fall within their employment period, they get paid for Sunday by default.
+          // If there are no preceding weekdays in the week that fall within their employment period, they get paid for off day by default.
           if (eligibleWeekdaysCount > 0 && !workedInWeek) {
-            isSundayPayable = false;
+            isOffDayPayable = false;
           }
         }
 
-        if (!isSundayPayable) {
-          // Forfeited Sunday contributes Rs. 0 to earned salary.
+        if (!isOffDayPayable) {
+          // Forfeited off day contributes Rs. 0 to earned salary.
           // Since baseSalaryEarned += dailyRate was already done, we subtract it here to make it Rs. 0.
           baseSalaryEarned -= dailyRate;
           forfeitedSundaysCount++;
         } else {
-          // Sundays are off. We only check for overtime.
+          // Off days are off. We only check for overtime.
           if (status == 'overtime') {
             if (overtimeDuration == 'half') {
               sundayOvertimeDays += 0.5;
@@ -2786,7 +2993,7 @@ class FinanceLocalStorage {
           }
         }
       } else {
-        // Weekdays (Monday - Saturday)
+        // Regular Working Days (not a weekly off day)
         if (isHolidayDay) {
           if (status == 'present' || status == 'late') {
             holidayWorkedDays += 1.0;
@@ -3621,14 +3828,8 @@ class FinanceLocalStorage {
   static List<String> _getKnownBranchIds(String branchId) {
     final clean = branchId.toLowerCase().trim();
     if (clean.isNotEmpty && clean != 'all' && clean != 'global') {
-      if (clean == 'karachi') {
+      if (clean == 'karachi' || clean.contains('saddar') || clean.contains('kapaya') || clean.contains('haji')) {
         return ['karachi', 'saddar', 'haji_camp', 'kapaya'];
-      }
-      if (clean.contains('saddar') || clean.contains('kapaya')) {
-        return ['saddar', 'kapaya'];
-      }
-      if (clean.contains('haji')) {
-        return ['haji_camp'];
       }
       return [clean];
     }
@@ -3685,22 +3886,13 @@ class FinanceLocalStorage {
         }
 
         // Strict Camp isolation: Ensure Saddar downloads only Saddar, and Haji downloads only Haji
-        final empCamp = getEmployeeCamp(data).toLowerCase();
-        final empBranch = (data['branchId'] ?? '').toString().toLowerCase().trim();
-
         final reqIsSaddar = branchId.toLowerCase().contains('saddar') || (camp != null && camp.toLowerCase().contains('saddar'));
         final reqIsHaji = branchId.toLowerCase().contains('haji') || (camp != null && camp.toLowerCase().contains('haji'));
 
-        if (reqIsSaddar) {
-          final isSaddar = empCamp.contains('saddar') || empBranch.contains('saddar') || empBranch.contains('kapaya');
-          if (!isSaddar && (empCamp.contains('haji') || empBranch.contains('haji'))) {
-            continue; // Skip Haji Camp staff when downloading Saddar Camp
-          }
-        } else if (reqIsHaji) {
-          final isHaji = empCamp.contains('haji') || empBranch.contains('haji');
-          if (!isHaji && (empCamp.contains('saddar') || empBranch.contains('saddar') || empBranch.contains('kapaya'))) {
-            continue; // Skip Saddar Camp staff when downloading Haji Camp
-          }
+        if (reqIsSaddar && !isEmployeeInCamp(data, 'Saddar Camp')) {
+          continue; // Skip non-Saddar Camp staff when downloading Saddar Camp
+        } else if (reqIsHaji && !isEmployeeInCamp(data, 'Haji Camp')) {
+          continue; // Skip non-Haji Camp staff when downloading Haji Camp
         }
 
         final localRecord = box.get(localId);
@@ -3900,13 +4092,11 @@ class FinanceLocalStorage {
         if (reqIsSaddar || reqIsHaji) {
           final matchedEmp = getEmployee(employeeId) ?? (empId != null ? getEmployee(empId) : null);
           if (matchedEmp != null) {
-            final empCamp = getEmployeeCamp(matchedEmp).toLowerCase();
-            final empBranch = (matchedEmp['branchId'] ?? '').toString().toLowerCase().trim();
-            if (reqIsSaddar && !empCamp.contains('saddar') && !empBranch.contains('saddar') && !empBranch.contains('kapaya')) {
-              return; // Exclude Haji Camp attendance when downloading Saddar
+            if (reqIsSaddar && !isEmployeeInCamp(matchedEmp, 'Saddar Camp')) {
+              return; // Exclude non-Saddar attendance when downloading Saddar
             }
-            if (reqIsHaji && !empCamp.contains('haji') && !empBranch.contains('haji')) {
-              return; // Exclude Saddar attendance when downloading Haji Camp
+            if (reqIsHaji && !isEmployeeInCamp(matchedEmp, 'Haji Camp')) {
+              return; // Exclude non-Haji attendance when downloading Haji Camp
             }
           }
         }
@@ -4930,6 +5120,20 @@ class FinanceLocalStorage {
 
         mergedCount++;
         debugPrint('[FinanceLS] 🧹 Merged double attendance for $canonicalKey');
+
+        if (needsMerge && merged['syncStatus'] == 'pending') {
+          final targetBranch = (merged['branchId'] ?? 'karachi').toString();
+          LocalStorageService.enqueueSync({
+            'type': 'save_attendance_record',
+            'branchId': targetBranch,
+            'date': cDate,
+            'employeeId': cEmpId,
+            'localKey': canonicalKey,
+            'data': _sanitize(merged),
+            'pendingSync': true,
+            'forceUpload': true,
+          }).ignore();
+        }
       }
     }
 

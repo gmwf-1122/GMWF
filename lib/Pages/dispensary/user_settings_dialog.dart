@@ -6,6 +6,7 @@ import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:gmwf/design/components/app_toast.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:gmwf/services/cloud/lan_firestore_gate.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../services/offline_auth_service.dart';
 import '../../services/local_storage_service.dart';
@@ -247,22 +248,28 @@ class DispensaryUserSettingsDialog {
                                               'name': newName,
                                               'displayName': newName,
                                             };
-                                            await FirebaseFirestore.instance
-                                                .collection('branches')
-                                                .doc(branchId)
-                                                .collection('users')
-                                                .doc(currentUid)
-                                                .update(updates)
-                                                .catchError((_) {});
+                                            if (LanFirestoreGate.isLanDesk) {
+                                              // Desk on the LAN: the server uploads it.
+                                              LanFirestoreGate.relayWrite('branches/$branchId/users/$currentUid', updates);
+                                              LanFirestoreGate.relayWrite('users/$currentUid', updates);
+                                            } else {
+                                              await FirebaseFirestore.instance
+                                                  .collection('branches')
+                                                  .doc(branchId)
+                                                  .collection('users')
+                                                  .doc(currentUid)
+                                                  .update(updates)
+                                                  .catchError((_) {});
 
-                                            await FirebaseFirestore.instance
-                                                .collection('users')
-                                                .doc(currentUid)
-                                                .update(updates)
-                                                .catchError((_) {});
+                                              await FirebaseFirestore.instance
+                                                  .collection('users')
+                                                  .doc(currentUid)
+                                                  .update(updates)
+                                                  .catchError((_) {});
+                                            }
 
                                             // Enqueue for offline durable cloud sync
-                                            try {
+                                            if (!LanFirestoreGate.isLanDesk) try {
                                               await LocalStorageService.enqueueSync({
                                                 'type': 'save_user',
                                                 'uid': currentUid,

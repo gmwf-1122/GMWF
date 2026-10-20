@@ -1803,7 +1803,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
 
   void _showVisitDetailsDialog(BuildContext context, Map<String, dynamic> p, RoleThemeData t, String branchId) {
     final tokenSerial = (p['serial'] ?? p['id'] ?? 'TK-000').toString();
-    final rawName = (p['patientName'] ?? p['name'] ?? p['fullName'] ?? '').toString().trim();
+    final rawName = LocalStorageService.firstRealValue([p['patientName'], p['name'], p['fullName']]);
     final name = (rawName.isEmpty || rawName.toLowerCase() == 'unknown' || rawName.toLowerCase() == 'unknown patient')
         ? 'Unknown Patient'
         : rawName;
@@ -1812,7 +1812,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
     final rawPhone = (p['phone'] ?? p['patientPhone'] ?? p['contactPhone'] ?? '').toString().trim();
     final hasPhone = rawPhone.isNotEmpty && rawPhone != 'N/A' && rawPhone != '-';
 
-    final rawCnic = (p['displayCnic'] ?? p['cnic'] ?? p['patientCnic'] ?? p['guardianCnic'] ?? '').toString().trim();
+    final rawCnic = LocalStorageService.firstRealValue([p['displayCnic'], p['patientCnic'], p['cnic'], p['guardianCnic']]);
     final hasCnic = rawCnic.isNotEmpty && rawCnic != 'N/A' && rawCnic != '0000000000000' && rawCnic != '-';
     final formattedCnic = hasCnic ? _formatCnic(rawCnic) : '—';
     final isChild = p['isChild'] == true ||
@@ -2319,7 +2319,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
             final p = entry.value;
             final pid = p['patientId']?.toString() ?? p['id']?.toString() ?? '';
             final tokenSerial = p['serial']?.toString() ?? p['id']?.toString() ?? 'TK-000';
-            final rawName = (p['patientName'] ?? p['name'] ?? p['fullName'] ?? '').toString().trim();
+            final rawName = LocalStorageService.firstRealValue([p['patientName'], p['name'], p['fullName']]);
             final name = (rawName.isEmpty || rawName.toLowerCase() == 'unknown' || rawName.toLowerCase() == 'unknown patient')
                 ? 'Unknown Patient'
                 : rawName;
@@ -2339,7 +2339,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
                 ? 'Waiting for Dispensary'
                 : 'Waiting for Doctor';
 
-            final rawCnic = (p['displayCnic'] ?? p['cnic'] ?? p['patientCnic'] ?? p['guardianCnic'] ?? '').toString().trim();
+            final rawCnic = LocalStorageService.firstRealValue([p['displayCnic'], p['patientCnic'], p['cnic'], p['guardianCnic']]);
             final hasCnic = rawCnic.isNotEmpty && rawCnic != 'N/A' && rawCnic != '0000000000000' && rawCnic != '-';
             final formattedCnic = hasCnic ? _formatCnic(rawCnic) : '—';
             final isChild = p['isChild'] == true ||
@@ -2746,7 +2746,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
   Widget _buildMobilePatientCard(BuildContext context, RoleThemeData t, Map<String, dynamic> p, String branchId, {int? index}) {
     final pid = p['patientId']?.toString() ?? p['id']?.toString() ?? '';
     final tokenSerial = p['serial']?.toString() ?? p['id']?.toString() ?? 'TK-000';
-    final rawName = (p['patientName'] ?? p['name'] ?? p['fullName'] ?? '').toString().trim();
+    final rawName = LocalStorageService.firstRealValue([p['patientName'], p['name'], p['fullName']]);
     final name = (rawName.isEmpty || rawName.toLowerCase() == 'unknown' || rawName.toLowerCase() == 'unknown patient')
         ? 'Unknown Patient'
         : rawName;
@@ -2766,7 +2766,7 @@ class _BranchesState extends ConsumerState<Branches> with AutomaticKeepAliveClie
             ? 'Waiting Dispensary'
             : 'Waiting Doctor';
 
-    final rawCnic = (p['displayCnic'] ?? p['cnic'] ?? p['patientCnic'] ?? p['guardianCnic'] ?? '').toString().trim();
+    final rawCnic = LocalStorageService.firstRealValue([p['displayCnic'], p['patientCnic'], p['cnic'], p['guardianCnic']]);
     final hasCnic = rawCnic.isNotEmpty && rawCnic != 'N/A' && rawCnic != '0000000000000' && rawCnic != '-';
     final formattedCnic = hasCnic ? _formatCnic(rawCnic) : '—';
     final isChild = p['isChild'] == true ||

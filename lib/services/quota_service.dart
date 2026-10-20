@@ -93,6 +93,29 @@ class QuotaService {
         errStr.contains('usage limit');
   }
 
+  static const List<int> pauseStepsMinutes = [2, 5, 15, 30, 60];
+  static const String _pauseStepCountKey = 'quota_pause_step_count';
+
+  /// Number of consecutive refusals recorded.
+  static int get pauseStepCount {
+    try {
+      return int.tryParse(_getFlag(_pauseStepCountKey) ?? '0') ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// The step duration (in minutes) of the current or most recent pause.
+  static int get currentStepMinutes {
+    final count = pauseStepCount;
+    if (count <= 0) return pauseStepsMinutes.first;
+    final idx = count - 1;
+    if (idx < pauseStepsMinutes.length) {
+      return pauseStepsMinutes[idx];
+    }
+    return pauseStepsMinutes.last;
+  }
+
   /// Informational: a read or other non-upload call hit a quota error. Uploads are only
   /// paused by [pauseUntilDailyReset], when a write itself is refused.
   static void recordQuotaExceeded({String? reason, dynamic error}) {
@@ -100,9 +123,12 @@ class QuotaService {
     debugPrint('[QuotaService] Notice: $effectiveReason');
   }
 
-  /// A write was accepted, so any stored pause is stale.
+  /// A write was accepted, so any stored pause is stale and refusal count resets.
   static void recordSuccess() {
     if (isPausedForDailyReset) clearDailyResetPause();
+    if (pauseStepCount > 0) {
+      _setFlag(_pauseStepCountKey, '0');
+    }
   }
 
   // ── Daily quota pause (Spark plan) ───────────────────────────────────────
@@ -124,25 +150,40 @@ class QuotaService {
     return DateTime.utc(pacific.year, pacific.month, pacific.day + 1).add(Duration(hours: offsetHours));
   }
 
-  /// Firestore refused a write for quota: pause until the daily reset.
-  static void pauseUntilDailyReset({String? reason}) {
-    final until = nextDailyReset();
+  /// Firestore refused a write for quota: pause until min(nextDailyReset(), now + step).
+  /// Step follows consecutive refusals: 2, 5, 15, 30, 60 minutes, then stays at 60.
+  static void pauseUntilDailyReset({String? reason, DateTime? now}) {
+    final currentTime = now ?? DateTime.now();
+    final count = pauseStepCount;
+    final stepMinutes = (count < pauseStepsMinutes.length)
+        ? pauseStepsMinutes[count]
+        : pauseStepsMinutes.last;
+    _setFlag(_pauseStepCountKey, '${count + 1}');
+
+    final resetUtc = nextDailyReset(currentTime.toUtc());
+    final candidateUntil = currentTime.toUtc().add(Duration(minutes: stepMinutes));
+    final until = candidateUntil.isBefore(resetUtc) ? candidateUntil : resetUtc;
+
     _setFlag(_resetPauseKey, until.toIso8601String());
     _pauseUntilMemo = until;
     isQuotaExhaustedNotifier.value = true;
-    quotaExhaustedReasonNotifier.value = reason ?? 'Firestore daily write quota used up';
-    quotaExhaustedTimestampNotifier.value = DateTime.now();
-    debugPrint('[QuotaService] ⛔ Daily write quota exceeded — uploads paused until ${until.toLocal()}');
+    final localRetry = until.toLocal();
+    final timeStr = "${localRetry.hour.toString().padLeft(2, '0')}:${localRetry.minute.toString().padLeft(2, '0')}:${localRetry.second.toString().padLeft(2, '0')}";
+    quotaExhaustedReasonNotifier.value = reason != null
+        ? '$reason (retrying at $timeStr)'
+        : 'Firestore daily write quota used up (retrying at $timeStr)';
+    quotaExhaustedTimestampNotifier.value = currentTime;
+    debugPrint('[QuotaService] ⛔ Daily write quota exceeded (step $stepMinutes m) — uploads paused until $localRetry');
   }
 
   static DateTime? _pauseUntilMemo;
 
   /// When the current pause ends (UTC), or null when uploads are not paused.
-  static DateTime? get dailyResetPauseUntil {
+  static DateTime? dailyResetPauseUntilAt([DateTime? nowUtc]) {
     final rawStr = _getFlag(_resetPauseKey);
     final until = _pauseUntilMemo ?? (rawStr != null ? DateTime.tryParse(rawStr) : null);
     if (until == null) return null;
-    final now = DateTime.now().toUtc();
+    final now = (nowUtc ?? DateTime.now()).toUtc();
     if (!now.isBefore(until)) {
       clearDailyResetPause();
       return null;
@@ -150,9 +191,15 @@ class QuotaService {
     return until;
   }
 
-  static bool get isPausedForDailyReset => dailyResetPauseUntil != null;
+  /// When the current pause ends (UTC), or null when uploads are not paused.
+  static DateTime? get dailyResetPauseUntil => dailyResetPauseUntilAt();
 
-  /// Lifts the pause (daily reset passed, a write succeeded, or a manual "Sync now").
+  static bool isPausedForDailyResetAt([DateTime? nowUtc]) => dailyResetPauseUntilAt(nowUtc) != null;
+
+  static bool get isPausedForDailyReset => isPausedForDailyResetAt();
+
+  /// Lifts the pause (pause duration elapsed, a write succeeded, or a manual "Sync now").
+  /// Note: Step counter is NOT reset here; it resets only on recordSuccess().
   static void clearDailyResetPause() {
     _pauseUntilMemo = null;
     _setFlag(_resetPauseKey, null);

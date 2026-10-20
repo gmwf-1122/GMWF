@@ -35,6 +35,7 @@ import '../../theme/role_theme_provider.dart';
 import '../../realtime/realtime_manager.dart';
 import '../../realtime/realtime_events.dart';
 import '../../services/sync_service.dart';
+import '../../services/pre_login_security_service.dart';
 import 'food_log_screen.dart';
 
 // ─────────────────────────── Design Tokens ──────────────────────────────────
@@ -550,6 +551,9 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
 
       final nowIso = DateTime.now().toIso8601String();
       final tokensList = <Map<String, dynamic>>[];
+      // Marks the PC that issued these tokens: only it uploads them (see
+      // SyncService.isFoodTokenOwnedHere); LAN copies on other PCs are never re-uploaded.
+      final originDevice = await PreLoginSecurityService.getDeviceId();
 
       for (int i = 0; i < quantity; i++) {
         final num = startNum + i;
@@ -566,6 +570,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
           'issuedBy': _effectiveUserName,
           'pricePerToken': _pricePerToken,
           'syncStatus': 'pending',
+          'originDevice': originDevice,
         });
       }
 
@@ -631,46 +636,9 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
           },
         });
 
-        // Direct cloud write fallback if device is online and branch is valid
-        try {
-          if (LocalStorageService.isValidBranchId(_branchId)) {
-            final dayDocRef = FirebaseFirestore.instance
-                .collection('branches')
-                .doc(_branchId)
-                .collection('dasterkhwaan')
-                .doc(today);
-            final tokensCol = dayDocRef.collection('tokens');
-            final batch = FirebaseFirestore.instance.batch();
-            for (final t in tokensList) {
-              if (t is Map) {
-                final tokenId = t['id']?.toString() ?? tokensCol.doc().id;
-                batch.set(tokensCol.doc(tokenId), {
-                  'number': t['number'] ?? 1,
-                  'served': t['served'] == true,
-                  'session': t['session'] ?? _selectedSession,
-                  'time': t['time'] != null
-                      ? Timestamp.fromDate(DateTime.tryParse(t['time'].toString()) ?? DateTime.now())
-                      : FieldValue.serverTimestamp(),
-                  'issuedBy': t['issuedBy'] ?? '',
-                  'localId': tokenId,
-                  'branchId': _branchId,
-                  'dateKey': today,
-                }, SetOptions(merge: true));
-              }
-            }
-            batch.set(dayDocRef, {
-              'totalTokens': FieldValue.increment(quantity),
-              'session_${_selectedSession}_total': FieldValue.increment(quantity),
-              'lastUpdated': FieldValue.serverTimestamp(),
-              'date': today,
-              'dateKey': today,
-              'branchId': _branchId,
-            }, SetOptions(merge: true));
-            unawaited(batch.commit().catchError((_) {}));
-          }
-        } catch (_) {}
-
-        SyncService().triggerUpload(force: true);
+        // No direct Firestore write here: the queued save_dasterkhwan_tokens item already
+        // increments totalTokens/session totals, so a second write counted every token twice.
+        SyncService().triggerUpload(urgent: true);
       } catch (e) {
         debugPrint('[OfficeBoy] Sync enqueue error: $e');
       }
@@ -719,9 +687,12 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
 
     // Also fetch cloud docs if reachable to get full list
     try {
-      final unservedSnap = await _tokensCol.where('served', isEqualTo: false).get().timeout(const Duration(seconds: 2));
-      for (final d in unservedSnap.docs) {
+      // Token uploads only ever write served:true (never false, so a serve is not undone),
+      // so an unserved token may have no 'served' field: filter here, not in the query.
+      final daySnap = await _tokensCol.get().timeout(const Duration(seconds: 2));
+      for (final d in daySnap.docs) {
         final data = d.data();
+        if (data['served'] == true) continue;
         final docId = data['localId'] ?? d.id;
         if (!localUnserved.any((x) => x['id'] == docId || x['localId'] == docId)) {
           localUnserved.add({
@@ -900,7 +871,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
             'batchId': revBatchId,
           },
         });
-        SyncService().triggerUpload(force: true);
+        SyncService().triggerUpload(urgent: true);
       } catch (_) {}
 
       if (!mounted) return;
@@ -928,8 +899,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
       _branchId = effectiveBranch;
       if (!LocalStorageService.isValidBranchId(_branchId)) return;
       final box = await _getTokensBox();
-      final unsynced = <Map<String, dynamic>>[];
-      for (final raw in box.values) {
+      for (final raw in box.values.toList()) {
         if (raw is Map) {
           final t = Map<String, dynamic>.from(raw);
           var tBranch = (t['branchId']?.toString() ?? '').toLowerCase().trim();
@@ -939,42 +909,14 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
             t['branchId'] = tBranch;
             await box.put(t['id'], t);
           }
-          if (tBranch != _branchId!.toLowerCase().trim()) continue;
-          if (t['synced'] != true && t['syncStatus'] != 'synced') {
-            unsynced.add(t);
-          }
         }
       }
-      if (unsynced.isNotEmpty) {
-        debugPrint('[OfficeBoy] Found ${unsynced.length} unsynced tokens. Enqueuing to sync queue...');
-        final byDate = <String, List<Map<String, dynamic>>>{};
-        for (final t in unsynced) {
-          final dk = (t['dateKey']?.toString() ?? today).trim();
-          byDate.putIfAbsent(dk, () => []).add(t);
-        }
-        for (final entry in byDate.entries) {
-          final firstNum = entry.value.isNotEmpty ? (entry.value.first['number'] ?? '') : '';
-          final lastNum = entry.value.isNotEmpty ? (entry.value.last['number'] ?? '') : '';
-          final batchId = 'dst_backfill_${_branchId}_${entry.key}_${firstNum}_${lastNum}_${DateTime.now().millisecondsSinceEpoch}';
-          await LocalStorageService.enqueueSync({
-            'type': 'save_dasterkhwan_tokens',
-            'entityId': batchId,
-            'batchId': batchId,
-            'branchId': _branchId,
-            'dateKey': entry.key,
-            'data': {
-              'branchId': _branchId,
-              'dateKey': entry.key,
-              'quantity': entry.value.length,
-              'tokens': entry.value,
-              'issuedBy': _effectiveUserName,
-              'pricePerToken': _pricePerToken,
-              'batchId': batchId,
-            },
-          });
-        }
-        SyncService().triggerUpload(force: true);
-      }
+      // Same rules as the background sweep: only tokens this PC issued, and none already
+      // waiting in the queue. This used a fresh timestamped batch id on every screen open,
+      // so tokens still waiting in their first batch were queued (and counted) again, and
+      // tokens that came from other PCs over the LAN were uploaded a second time.
+      await SyncService().enqueueMissingFoodTokens(_branchId!, onlyBranch: _branchId, backlog: false);
+      SyncService().triggerUpload(urgent: true);
     } catch (e) {
       debugPrint('[OfficeBoy] Token backfill error: $e');
     }

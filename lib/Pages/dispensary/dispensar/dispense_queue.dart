@@ -58,7 +58,9 @@ class DispenseQueue {
         isTodayExact = true;
       } else {
         final dt = DateTime.tryParse(rawStr);
-        if (dt != null) {
+        // A token over 2 days old cannot resolve to today: skip the costly shift lookup, which ran
+        // for every historical token on every queue refresh.
+        if (dt != null && DateTime.now().difference(dt).inHours.abs() < 48) {
           final dtKey = CampSessionService.resolveShiftAndDateKey(dt, branchId).dateKey;
           if (dtKey == currentTodayKey) isTodayExact = true;
         }
@@ -233,6 +235,31 @@ class DispenseQueue {
             }
           }
         });
+
+        // Always prioritize newer prescription data from doctor
+        final inRx = e['prescription'];
+        final exRx = target['prescription'];
+        if (inRx is Map && inRx.isNotEmpty) {
+          if (exRx is! Map || exRx.isEmpty) {
+            target['prescription'] = inRx;
+          } else {
+            final inTime = DateTime.tryParse(inRx['updatedAt']?.toString() ?? inRx['completedAt']?.toString() ?? e['completedAt']?.toString() ?? '')?.millisecondsSinceEpoch ?? 0;
+            final exTime = DateTime.tryParse(exRx['updatedAt']?.toString() ?? exRx['completedAt']?.toString() ?? target['completedAt']?.toString() ?? '')?.millisecondsSinceEpoch ?? 0;
+            if (inTime >= exTime) {
+              target['prescription'] = inRx;
+            }
+          }
+        }
+
+        final inCompleted = e['status'] == 'completed' || e['status'] == 'dispensed';
+        final exCompleted = target['status'] == 'completed' || target['status'] == 'dispensed';
+        if (inCompleted && !exCompleted) {
+          target['status'] = e['status'];
+          if (e['completedAt'] != null) target['completedAt'] = e['completedAt'];
+          if (e['doctorName'] != null) target['doctorName'] = e['doctorName'];
+          if (e['doctorId'] != null) target['doctorId'] = e['doctorId'];
+        }
+
         final eDisp = (e['dispenseStatus'] ?? e['status'] ?? '').toString().toLowerCase();
         final tDisp = (target['dispenseStatus'] ?? target['status'] ?? '').toString().toLowerCase();
         if (eDisp == 'dispensed' || tDisp == 'dispensed') {

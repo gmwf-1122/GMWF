@@ -13,6 +13,7 @@ import 'package:path/path.dart' as path;
 import 'package:open_filex/open_filex.dart';
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'cloud/lan_firestore_gate.dart';
 
 class UpdateInfo {
   final String latestVersion;
@@ -34,7 +35,7 @@ class UpdateInfo {
 
 class AutoUpdateService {
   /// Default fallback version of the GMWF application if PackageInfo is unavailable.
-  static const String fallbackVersion = '1.6.2';
+  static const String fallbackVersion = '1.6.3';
 
   /// Dynamically retrieves current installed application version (from pubspec.yaml via PackageInfo).
   /// Falls back to [fallbackVersion] if not yet resolved.
@@ -170,7 +171,7 @@ class AutoUpdateService {
                 minRequiredVersion: installedVer,
                 downloadUrl: downloadUrl,
                 releaseNotes: 'Performance improvements, stability updates, and feature enhancements.',
-                forceUpdate: false,
+                forceUpdate: true,
                 hasUpdate: downloadUrl.isNotEmpty,
               );
             }
@@ -185,6 +186,7 @@ class AutoUpdateService {
 
   /// Checks Firestore `app_config/version` for available updates with platform-specific fallback.
   static Future<UpdateInfo?> checkFirestoreVersion() async {
+    if (LanFirestoreGate.isLanDesk) return null; // desks on the LAN rely on the GitHub check only
     try {
       final doc = await FirebaseFirestore.instance.collection('app_config').doc('version').get();
       if (!doc.exists) {
@@ -222,7 +224,7 @@ class AutoUpdateService {
 
       final isHigher = compareVersions(installedVer, latestVersion) > 0;
       final isMinRequiredHigher = compareVersions(installedVer, minRequiredVersion) > 0;
-      final forceUpdate = forceUpdateFlag || isMinRequiredHigher;
+      final forceUpdate = (isHigher && downloadUrl.isNotEmpty) || forceUpdateFlag || isMinRequiredHigher;
 
       return UpdateInfo(
         latestVersion: latestVersion,
@@ -364,7 +366,7 @@ class AutoUpdateService {
           minRequiredVersion: installedVer,
           downloadUrl: downloadUrl,
           releaseNotes: notes,
-          forceUpdate: false,
+          forceUpdate: hasUpdate,
           hasUpdate: hasUpdate,
         );
       }
@@ -476,10 +478,17 @@ class AutoUpdateService {
       await sink.close();
       httpClient.close();
 
-      // Integrity Check: Reject empty or tiny HTML error responses
+      // Integrity Check: Reject empty, tiny HTML error responses, or truncated downloads
       final fileSize = await file.length();
       if (fileSize < 1024 * 500) {
         onProgress(0.0, 'Download Failed: File size is invalid ($fileSize bytes). Please try again or download via browser.');
+        try {
+          await file.delete();
+        } catch (_) {}
+        return null;
+      }
+      if (contentLength > 0 && receivedBytes < contentLength) {
+        onProgress(0.0, 'Download Incomplete: Received $receivedBytes of $contentLength bytes. Please retry or download via browser.');
         try {
           await file.delete();
         } catch (_) {}
@@ -504,43 +513,49 @@ class AutoUpdateService {
   /// Path to the last successfully downloaded APK, so users can locate it manually.
   static String? lastDownloadedApkPath;
 
-  /// Returns the external Downloads directory for Android, falling back to external storage or temp.
+  /// Returns the app's cache or external cache directory for Android,
+  /// avoiding Scoped Storage permission denials on Android 10+ while maintaining 100% FileProvider compatibility.
   static Future<String> _getAndroidDownloadDir() async {
     try {
-      // Try /storage/emulated/0/Download first (visible in file managers)
-      final downloadsDir = Directory('/storage/emulated/0/Download');
-      if (await downloadsDir.exists()) {
-        return downloadsDir.path;
-      }
-    } catch (_) {}
-
-    try {
-      // Fallback to app external files dir (still accessible via file manager)
-      final extDirs = await getExternalStorageDirectories();
+      final extDirs = await getExternalCacheDirectories();
       if (extDirs != null && extDirs.isNotEmpty) {
         return extDirs.first.path;
       }
     } catch (_) {}
 
-    // Last resort: app cache (may not be accessible to package installer)
+    try {
+      final extStorageDirs = await getExternalStorageDirectories();
+      if (extStorageDirs != null && extStorageDirs.isNotEmpty) {
+        return extStorageDirs.first.path;
+      }
+    } catch (_) {}
+
     final tempDir = await getTemporaryDirectory();
     return tempDir.path;
   }
+
+  static String? _lastNativeInstallError;
 
   /// Attempts to install an APK using Android's native ACTION_INSTALL_PACKAGE intent
   /// via a platform MethodChannel. This ensures proper FLAG_GRANT_READ_URI_PERMISSION
   /// is set, which is required on Android 7+ (API 24+) for content:// URIs.
   /// Returns true if the install intent was launched successfully.
   static Future<bool> _installApkViaIntent(String filePath) async {
+    _lastNativeInstallError = null;
     try {
       const channel = MethodChannel('com.gmwf.app/install');
       final result = await channel.invokeMethod<bool>('installApk', {'filePath': filePath});
       return result == true;
+    } on PlatformException catch (e) {
+      debugPrint('[AutoUpdateService] Native install intent error: ${e.code} - ${e.message}');
+      _lastNativeInstallError = e.message ?? e.code;
+      return false;
     } on MissingPluginException {
       debugPrint('[AutoUpdateService] Native install channel not available, falling back to OpenFilex');
       return false;
     } catch (e) {
       debugPrint('[AutoUpdateService] Native install intent failed: $e');
+      _lastNativeInstallError = e.toString();
       return false;
     }
   }
@@ -682,10 +697,11 @@ class AutoUpdateService {
         }
 
         if (installed) {
-          onProgress(1.0, 'Package installer opened. Complete installation on your screen.\n\nAPK saved to: $filePath');
+          onProgress(1.0, 'Package installer opened. Please complete the installation on your screen.');
           return true;
         } else {
-          onProgress(0.0, 'Could not open installer automatically.\n\nAPK saved to: $filePath\n\nPlease open your file manager, navigate to the Downloads folder, and tap GMWF_Update.apk to install.');
+          final errorReason = _lastNativeInstallError ?? 'Could not launch package installer automatically.';
+          onProgress(0.0, '$errorReason\n\nIf updating from a previous test/debug build, Android requires uninstalling the old version first due to signature protection.\n\nAPK saved to: $filePath');
           return false;
         }
       } else {

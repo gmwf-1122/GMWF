@@ -290,7 +290,8 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
         final doc = await FirebaseFirestore.instance
             .collection('users')
             .doc(uid)
-            .get();
+            .get()
+            .timeout(const Duration(seconds: 3));
         if (doc.exists && doc.data() != null) {
           final firestoreName = resolveUserDisplayName(doc.data());
           if (!isInvalid(firestoreName) && firestoreName != _dispenserName) {
@@ -313,6 +314,11 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
     if (!mounted || _reconnectSyncing) return;
     _reconnectSyncing = true;
     try {
+      if (RealtimeManager().isConnected) {
+        await RealtimeManager().forceFlushAndCatchUp();
+        debugPrint('[Dispenser] ✅ Requested catchup from LAN Server on reconnect');
+        return;
+      }
       // triggerUpload() handles upload → conditional download in the right order
       await SyncService().triggerUpload();
       if (mounted) setState(() {});
@@ -535,8 +541,15 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
           box.put(lowerKey, updated);
         }
 
-        if (cleanSerial.toUpperCase() == (_selectedQueueEntry?['serial'] ?? _selectedQueueEntry?['id'] ?? '').toString().toUpperCase()) {
-          _selectedQueueEntry = updated;
+        final curSelectedSerial = (_selectedQueueEntry?['serial'] ?? _selectedQueueEntry?['id'] ?? '').toString();
+        if (CampSessionService.isSameSerial(cleanSerial, curSelectedSerial, widget.branchId)) {
+          if (mounted) {
+            setState(() {
+              _selectedQueueEntry = updated;
+            });
+          } else {
+            _selectedQueueEntry = updated;
+          }
           if (widget.headless) widget.onSelectedEntryChanged?.call(updated);
         }
       }
@@ -593,7 +606,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
       }
 
     } else if (type == 'dispense_completed') {
-      LocalStorageService.updateDispenseStatus(widget.branchId, serial, 'dispensed');
+      LocalStorageService.updateDispenseStatus(widget.branchId, serial, 'dispensed', receivedViaLan: true);
       final cleanSerial = serial.trim();
       final normBranch = widget.branchId.toLowerCase().trim();
       final normSerial = cleanSerial.toLowerCase();
@@ -617,8 +630,8 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
           }
         }
       }
-      final curSerial = (_selectedQueueEntry?['serial'] ?? _selectedQueueEntry?['id'] ?? '').toString().trim().toUpperCase();
-      if (upperSerial == curSerial && mounted) {
+      final curSerial = (_selectedQueueEntry?['serial'] ?? _selectedQueueEntry?['id'] ?? '').toString();
+      if (CampSessionService.isSameSerial(upperSerial, curSerial, widget.branchId) && mounted) {
         setState(() {
           _selectedQueueEntry = null;
           _showingForm = false;
@@ -673,7 +686,9 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
         });
         if (isOnline) {
           RealtimeManager().forceFlushAndCatchUp().ignore();
-          SyncService().triggerUpload().ignore();
+          if (!RealtimeManager().isConnected) {
+            SyncService().triggerUpload().ignore();
+          }
         }
       }
     });
@@ -686,8 +701,8 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
       // 1. Force-flush LAN WebSocket outbox & request catch-up from LAN server
       await RealtimeManager().forceFlushAndCatchUp();
 
-      // 2. If online, sync pending and today records with cloud
-      if (_online) {
+      // 2. If online and not connected to LAN server, sync pending and today records with cloud (server handles cloud sync when connected)
+      if (_online && !RealtimeManager().isConnected) {
         await SyncService().syncTodayOnly(widget.branchId);
         await SyncService().triggerUpload();
       }
@@ -965,7 +980,8 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
           .snapshots()
           .listen((snap) {
         if (!mounted) return;
-        final alerts = snap.docs.map((d) {
+        // Dismissed here but the cloud has not caught up yet: keep it dismissed.
+        final alerts = snap.docs.where((d) => !LocalStorageService.isLocalRequestDecided(d.id)).map((d) {
           final data = Map<String, dynamic>.from(d.data());
           data['id'] = d.id;
           LocalStorageService.saveRestockRequest(widget.branchId, data);
@@ -988,15 +1004,7 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
     } else {
       _pendingRestockAlerts.removeWhere((r) => r['id'] == reqId);
     }
-    await LocalStorageService.updateRestockRequestStatus(widget.branchId, reqId, 'acknowledged');
-    try {
-      await FirebaseFirestore.instance
-          .collection('branches')
-          .doc(widget.branchId)
-          .collection('restock_requests')
-          .doc(reqId)
-          .update({'status': 'acknowledged', 'acknowledgedAt': FieldValue.serverTimestamp()});
-    } catch (_) {}
+    await LocalStorageService.acknowledgeRestockRequest(widget.branchId, reqId);
   }
 
   Widget _buildRestockBanner(bool isDark) {
@@ -1158,9 +1166,9 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
     }
     // [BUG-13] Unregister from ConnectionManager's listener list
     _removeReconnectListener?.call();
-    if (!widget.isEmbedded) {
-      ConnectionManager().stop();
-    }
+    // The LAN link is shared by every desk screen and only logout stops it. Stopping it here
+    // (e.g. when this screen was replaced or popped) left the PC disconnected, with Retry
+    // doing nothing, until the next login.
     _connectionSub?.cancel();
     _connSub?.cancel();
     _realtimeSub?.cancel();

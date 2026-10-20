@@ -491,7 +491,7 @@ class _UsersScreenState extends State<UsersScreen>
         'uid': uid,
         'data': sanitized,
       });
-      SyncService().triggerUpload(force: true);
+      SyncService().triggerUpload(urgent: true);
 
       // Attempt direct push to Firestore
       bool directWriteSucceeded = false;
@@ -2943,7 +2943,7 @@ class _UsersScreenState extends State<UsersScreen>
       } catch (_) {}
 
       try {
-        SyncService().triggerUpload(force: true);
+        SyncService().triggerUpload(urgent: true);
       } catch (_) {}
 
       final deleteMessage = authDeleted
@@ -3719,48 +3719,53 @@ class _UsersScreenState extends State<UsersScreen>
       if (!isAllow) 'rejectedAt': FieldValue.serverTimestamp(),
     };
 
-    // Update root /users
-    for (final docId in targetDocIds) {
-      try {
-        await FirebaseFirestore.instance.collection('users').doc(docId).set(fsPayload, SetOptions(merge: true));
-      } catch (e) {
-        debugPrint('[Users] root users update failed for $docId: $e');
-      }
-    }
-
-    // Update branch-level collections
-    for (final bId in candidateBranches) {
+    // Direct cloud writes run in the background via CloudDb: the queue item and LAN event
+    // below must not wait on them. An awaited SDK set() on root /users never returned when
+    // the quota was used up, so the decision was never queued or broadcast.
+    unawaited(() async {
+      // Update root /users
       for (final docId in targetDocIds) {
         try {
-          await CloudDb.instance
-              .collection('branches')
-              .doc(bId)
-              .collection('users')
-              .doc(docId)
-              .set(fsPayload, SetOptions(merge: true));
-        } catch (_) {}
+          await CloudDb.instance.collection('users').doc(docId).set(fsPayload, SetOptions(merge: true));
+        } catch (e) {
+          debugPrint('[Users] root users update failed for $docId: $e');
+        }
       }
 
-      final empId = (data['linkedEmployeeId'] ?? data['localId'] ?? data['id'] ?? '').toString().trim();
-      if (empId.isNotEmpty) {
-        try {
-          await CloudDb.instance
-              .collection('branches')
-              .doc(bId)
-              .collection('employees')
-              .doc(empId)
-              .set({
-            'restoreRequested': false,
-            'restoreRequestStatus': isAllow ? 'approved' : 'rejected',
-            'isActive': isAllow,
-            'status': isAllow ? 'active' : 'offboarded',
-            'employeeStatus': isAllow ? 'active' : 'offboarded',
-            if (isAllow) 'restoredAt': FieldValue.serverTimestamp(),
-            if (!isAllow) 'rejectedAt': FieldValue.serverTimestamp(),
-          }, SetOptions(merge: true));
-        } catch (_) {}
+      // Update branch-level collections
+      for (final bId in candidateBranches) {
+        for (final docId in targetDocIds) {
+          try {
+            await CloudDb.instance
+                .collection('branches')
+                .doc(bId)
+                .collection('users')
+                .doc(docId)
+                .set(fsPayload, SetOptions(merge: true));
+          } catch (_) {}
+        }
+
+        final empId = (data['linkedEmployeeId'] ?? data['localId'] ?? data['id'] ?? '').toString().trim();
+        if (empId.isNotEmpty) {
+          try {
+            await CloudDb.instance
+                .collection('branches')
+                .doc(bId)
+                .collection('employees')
+                .doc(empId)
+                .set({
+              'restoreRequested': false,
+              'restoreRequestStatus': isAllow ? 'approved' : 'rejected',
+              'isActive': isAllow,
+              'status': isAllow ? 'active' : 'offboarded',
+              'employeeStatus': isAllow ? 'active' : 'offboarded',
+              if (isAllow) 'restoredAt': FieldValue.serverTimestamp(),
+              if (!isAllow) 'rejectedAt': FieldValue.serverTimestamp(),
+            }, SetOptions(merge: true));
+          } catch (_) {}
+        }
       }
-    }
+    }());
 
     // 4. Enqueue in offline sync queue
     await LocalStorageService.enqueueSync({
@@ -3776,7 +3781,7 @@ class _UsersScreenState extends State<UsersScreen>
     });
 
     try {
-      SyncService().triggerUpload(force: true);
+      SyncService().triggerUpload(urgent: true);
     } catch (_) {}
 
     // 5. Broadcast LAN event

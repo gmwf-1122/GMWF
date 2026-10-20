@@ -1185,8 +1185,7 @@ class FinanceReportHelper {
 
         // Filter specific camp if requested
         if (camp != null && camp.isNotEmpty && camp != 'All' && camp != 'All Camps') {
-          final empCamp = FinanceLocalStorage.getEmployeeCamp(emp);
-          if (empCamp.toLowerCase() != camp.toLowerCase()) return false;
+          if (!FinanceLocalStorage.isEmployeeInCamp(emp, camp)) return false;
         }
 
         // Filter specific people if selected
@@ -1567,8 +1566,7 @@ class FinanceReportHelper {
 
         // Filter specific camp if requested
         if (camp != null && camp.isNotEmpty && camp != 'All' && camp != 'All Camps') {
-          final empCamp = FinanceLocalStorage.getEmployeeCamp(emp);
-          if (empCamp.toLowerCase() != camp.toLowerCase()) return false;
+          if (!FinanceLocalStorage.isEmployeeInCamp(emp, camp)) return false;
         }
 
         // Filter specific people if selected

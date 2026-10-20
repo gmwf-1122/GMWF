@@ -26,6 +26,7 @@ import '../../services/camp_session_service.dart';
 import '../../realtime/realtime_manager.dart';
 import '../../realtime/realtime_events.dart';
 import '../../services/sync_service.dart';
+import '../../services/cloud/cloud_db.dart';
 import '../settings_page.dart';
 import 'food_log_screen.dart';
 
@@ -284,7 +285,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
           snap.docs.map((e) => StockItem.fromMap(e.data(), e.id)).toList();
 
       if (items.isEmpty) {
-        final batch = FirebaseFirestore.instance.batch();
+        final batch = CloudDb.instance.batch();
         for (final item in _defaultStockItems) {
           batch.set(
             FirebaseFirestore.instance
@@ -356,7 +357,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
         await dayRef.collection('cooking_sessions').get();
     if (cookingSnap.docs.isEmpty) return;
 
-    final batch = FirebaseFirestore.instance.batch();
+    final batch = CloudDb.instance.batch();
     bool hasCarryOver = false;
 
     for (final doc in cookingSnap.docs) {
@@ -387,7 +388,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
       await batch.commit();
       await _loadAllStockItems();
     } else {
-      await dayRef.update({'savedCarriedOver': true});
+      await CloudDb.instance.ref(dayRef).update({'savedCarriedOver': true});
     }
   } catch (e) {
     debugPrint('[Kitchen] _applyPreviousDaySaved error: $e');
@@ -400,7 +401,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
         .doc(_branchId)
         .collection('dasterkhwaan_stock')
         .doc(itemName);
-    await ref.update({
+    await CloudDb.instance.ref(ref).update({
       'quantity':    FieldValue.increment(delta),
       'lastUpdated': FieldValue.serverTimestamp(),
     });
@@ -443,7 +444,34 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
       debugPrint('[Kitchen] Local serve token write error: $e');
     }
 
-    // 2. Delegate to LAN Server gateway if connected
+    // 2. Queue the cloud upload on this PC. A serve adds to the day's servedTokens, so
+    // exactly one PC may upload it: the one that served it. The LAN server only updates
+    // its local copy (it used to file the LAN event under sync_records, so serves made
+    // while on the LAN never reached the cloud). No direct Firestore write either: the
+    // queued item already increments the counters, and both together counted it twice.
+    try {
+      final ts = DateTime.now().toIso8601String();
+      await LocalStorageService.enqueueSync({
+        'type': 'serve_dasterkhwan_token',
+        'entityId': 'serve_$tokenId',
+        'branchId': _branchId,
+        'dateKey': today,
+        'data': {
+          'branchId': _branchId,
+          'dateKey': today,
+          'tokenId': tokenId,
+          'tokenNumber': tokenNumber,
+          'session': session,
+          'servedBy': _username,
+          'timestamp': ts,
+        },
+      });
+      SyncService().triggerUpload();
+    } catch (e) {
+      debugPrint('[Kitchen] Serve enqueue error: $e');
+    }
+
+    // 3. Tell the LAN so other PCs show the token as served.
     final isLanConnected = RealtimeManager().isConnected;
     if (isLanConnected) {
       try {
@@ -464,42 +492,6 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
       } catch (e) {
         debugPrint('[Kitchen] Realtime LAN broadcast error: $e');
       }
-    } else {
-      // 3. Fallback: direct Firestore write when no LAN server is available + background sync queue
-      try {
-        await LocalStorageService.enqueueSync({
-          'type': 'serve_dasterkhwan_token',
-          'branchId': _branchId,
-          'dateKey': today,
-          'data': {
-            'branchId': _branchId,
-            'dateKey': today,
-            'tokenId': tokenId,
-            'tokenNumber': tokenNumber,
-            'session': session,
-            'servedBy': _username,
-            'timestamp': DateTime.now().toIso8601String(),
-          },
-        });
-        SyncService().triggerUpload();
-      } catch (_) {}
-
-      try {
-        final batch = FirebaseFirestore.instance.batch();
-        batch.set(_tokensCol(today).doc(tokenId), {
-          'served':     true,
-          'servedTime': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true));
-        batch.set(
-          _dayDoc(today),
-          {
-            'servedTokens': FieldValue.increment(1),
-            'session_${session}_served': FieldValue.increment(1),
-          },
-          SetOptions(merge: true),
-        );
-        await batch.commit();
-      } catch (_) {}
     }
 
     if (mounted) {
@@ -518,7 +510,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
       String docId, Map<String, dynamic> data) async {
     final isReceived  = data['isReceivedFood'] as bool? ?? false;
     final isSavedFood = data['isSavedFood']    as bool? ?? false;
-    final batch       = FirebaseFirestore.instance.batch();
+    final batch       = CloudDb.instance.batch();
 
     // Only restore stock for cooked-in-house sessions
     if (!isReceived && !isSavedFood) {
@@ -541,7 +533,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
     }
 
     batch.delete(_cookingCol(today).doc(docId));
-    await batch.commit();
+    if (!await commitKitchenBatch(context, batch)) return;
     await _loadAllStockItems();
 
     if (mounted) {

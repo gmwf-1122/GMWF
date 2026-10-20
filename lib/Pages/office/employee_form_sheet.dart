@@ -237,6 +237,20 @@ void openEmployeeFormSheet(
   final winterShiftController = TextEditingController(text: workSchedule?['winter']?.toString() ?? '');
   final summerShiftController = TextEditingController(text: workSchedule?['summer']?.toString() ?? '');
 
+  // Weekly Rest & Sunday Off Configuration (HQ Default: Sunday is off)
+  final rawWeeklyOffDays = existing['weeklyOffDays'];
+  final List<String> selectedWeeklyOffDays = (rawWeeklyOffDays is List)
+      ? rawWeeklyOffDays.map((e) => e.toString().trim()).where((e) => e.isNotEmpty).toList()
+      : (existing.containsKey('isSundayOff') && existing['isSundayOff'] == false
+          ? (existing['weeklyOffDay'] != null &&
+                  existing['weeklyOffDay'].toString().isNotEmpty &&
+                  existing['weeklyOffDay'].toString().toLowerCase() != 'none'
+              ? [existing['weeklyOffDay'].toString().trim()]
+              : <String>[])
+          : <String>['Sunday']);
+
+  bool isSundayOff = selectedWeeklyOffDays.contains('Sunday');
+
   final rawContacts = existing['emergencyContacts'];
   List<Map<String, String>> emergencyContacts = (rawContacts is List)
       ? rawContacts.whereType<Map>().map((e) => <String, String>{
@@ -1399,6 +1413,394 @@ void openEmployeeFormSheet(
 
                   const SizedBox(height: 12),
 
+                  // ── Weekly Rest Days & Sunday Off Configuration ─────────
+                  Container(
+                    margin: const EdgeInsets.only(top: 4, bottom: 12),
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: t.bgCardAlt,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(
+                        color: !isSundayOff
+                            ? SoftPalette.amber300.withValues(alpha: isDark ? 0.45 : 0.65)
+                            : t.bgRule,
+                        width: !isSundayOff ? 1.5 : 1.0,
+                      ),
+                      boxShadow: [
+                        BoxShadow(
+                          color: SoftPalette.gray900.withValues(alpha: isDark ? 0.2 : 0.04),
+                          blurRadius: 8,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Header
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(7),
+                              decoration: BoxDecoration(
+                                color: isSundayOff
+                                    ? t.accent.withValues(alpha: 0.15)
+                                    : SoftPalette.amber300.withValues(alpha: 0.18),
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Icon(
+                                isSundayOff ? Icons.weekend_rounded : Icons.calendar_today_rounded,
+                                size: 16,
+                                color: isSundayOff ? t.accent : SoftPalette.amber500,
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Text(
+                                        'Weekly Rest Days & Sunday Schedule',
+                                        style: TextStyle(
+                                          color: t.textPrimary,
+                                          fontWeight: FontWeight.bold,
+                                          fontSize: 12.5,
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: isSundayOff
+                                              ? t.accent.withValues(alpha: 0.12)
+                                              : SoftPalette.amber300.withValues(alpha: 0.15),
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: Text(
+                                          isSundayOff ? 'HQ Standard' : 'Custom Shift',
+                                          style: TextStyle(
+                                            fontSize: 9.5,
+                                            fontWeight: FontWeight.w700,
+                                            color: isSundayOff ? t.accent : SoftPalette.amber500,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'HQ default is Sunday off. Customize if this employee works on Sundays or has different rest days.',
+                                    style: TextStyle(color: t.textSecondary, fontSize: 10.5),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        // Primary Sunday Toggle Card
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                          decoration: BoxDecoration(
+                            color: isSundayOff
+                                ? (isDark ? SoftPalette.emerald700.withValues(alpha: 0.18) : SoftPalette.emerald50m.withValues(alpha: 0.5))
+                                : (isDark ? SoftPalette.slate800 : SoftPalette.slate100),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: isSundayOff
+                                  ? SoftPalette.emerald350.withValues(alpha: 0.4)
+                                  : t.bgRule,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                isSundayOff ? Icons.check_circle_rounded : Icons.info_outline_rounded,
+                                size: 18,
+                                color: isSundayOff ? SoftPalette.emerald350 : SoftPalette.amber500,
+                              ),
+                              const SizedBox(width: 10),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      isSundayOff ? 'Sunday is Off (Weekly Rest)' : 'Sunday is a Working Day (Not Off)',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color: isSundayOff
+                                            ? (isDark ? SoftPalette.emerald200 : SoftPalette.emerald700)
+                                            : t.textPrimary,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 1),
+                                    Text(
+                                      isSundayOff
+                                          ? 'Excused from punch requirement. Unmarked Sundays will not be recorded as absent.'
+                                          : 'Employee must check in on Sundays. Unmarked Sundays will be treated as regular work shifts.',
+                                      style: TextStyle(
+                                        fontSize: 10,
+                                        color: t.textSecondary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Switch.adaptive(
+                                value: isSundayOff,
+                                activeTrackColor: SoftPalette.emerald350,
+                                onChanged: (val) {
+                                  setState(() {
+                                    isSundayOff = val;
+                                    if (val) {
+                                      if (!selectedWeeklyOffDays.contains('Sunday')) {
+                                        selectedWeeklyOffDays.add('Sunday');
+                                      }
+                                    } else {
+                                      selectedWeeklyOffDays.remove('Sunday');
+                                    }
+                                  });
+                                },
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        // Quick Presets
+                        Text(
+                          'Quick Presets:',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.bold,
+                            color: t.textSecondary,
+                            letterSpacing: 0.2,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 6,
+                          children: [
+                            _buildWeeklyOffPresetChip(
+                              label: 'Sunday Off (HQ Default)',
+                              icon: Icons.check_circle_outline_rounded,
+                              isSelected: selectedWeeklyOffDays.length == 1 && selectedWeeklyOffDays.contains('Sunday'),
+                              t: t,
+                              isDark: isDark,
+                              onTap: () {
+                                setState(() {
+                                  selectedWeeklyOffDays.clear();
+                                  selectedWeeklyOffDays.add('Sunday');
+                                  isSundayOff = true;
+                                });
+                              },
+                            ),
+                            _buildWeeklyOffPresetChip(
+                              label: 'Friday Off',
+                              icon: Icons.mosque_rounded,
+                              isSelected: selectedWeeklyOffDays.length == 1 && selectedWeeklyOffDays.contains('Friday'),
+                              t: t,
+                              isDark: isDark,
+                              onTap: () {
+                                setState(() {
+                                  selectedWeeklyOffDays.clear();
+                                  selectedWeeklyOffDays.add('Friday');
+                                  isSundayOff = false;
+                                });
+                              },
+                            ),
+                            _buildWeeklyOffPresetChip(
+                              label: 'Saturday & Sunday Off',
+                              icon: Icons.beach_access_rounded,
+                              isSelected: selectedWeeklyOffDays.length == 2 &&
+                                  selectedWeeklyOffDays.contains('Saturday') &&
+                                  selectedWeeklyOffDays.contains('Sunday'),
+                              t: t,
+                              isDark: isDark,
+                              onTap: () {
+                                setState(() {
+                                  selectedWeeklyOffDays.clear();
+                                  selectedWeeklyOffDays.addAll(['Saturday', 'Sunday']);
+                                  isSundayOff = true;
+                                });
+                              },
+                            ),
+                            _buildWeeklyOffPresetChip(
+                              label: 'No Off Day (7 Days / Continuous)',
+                              icon: Icons.all_inclusive_rounded,
+                              isSelected: selectedWeeklyOffDays.isEmpty,
+                              t: t,
+                              isDark: isDark,
+                              onTap: () {
+                                setState(() {
+                                  selectedWeeklyOffDays.clear();
+                                  isSundayOff = false;
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+
+                        const SizedBox(height: 12),
+
+                        // 7-Day Interactive Weekday Strip
+                        Text(
+                          'Select Rest Day(s) Across the Week:',
+                          style: TextStyle(
+                            fontSize: 10.5,
+                            fontWeight: FontWeight.bold,
+                            color: t.textSecondary,
+                            letterSpacing: 0.2,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        LayoutBuilder(
+                          builder: (cCtx, cConstraints) {
+                            final days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+                            return Row(
+                              children: days.map((dayName) {
+                                final isOff = selectedWeeklyOffDays.contains(dayName);
+                                final isSun = dayName == 'Sunday';
+                                final shortName = dayName.substring(0, 3).toUpperCase();
+
+                                return Expanded(
+                                  child: Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                                    child: InkWell(
+                                      onTap: () {
+                                        setState(() {
+                                          if (isOff) {
+                                            selectedWeeklyOffDays.remove(dayName);
+                                            if (isSun) isSundayOff = false;
+                                          } else {
+                                            selectedWeeklyOffDays.add(dayName);
+                                            if (isSun) isSundayOff = true;
+                                          }
+                                        });
+                                      },
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: AnimatedContainer(
+                                        duration: const Duration(milliseconds: 150),
+                                        padding: const EdgeInsets.symmetric(vertical: 8),
+                                        decoration: BoxDecoration(
+                                          color: isOff
+                                              ? (isDark
+                                                  ? SoftPalette.emerald700.withValues(alpha: 0.35)
+                                                  : SoftPalette.emerald50m)
+                                              : t.bgCard,
+                                          borderRadius: BorderRadius.circular(8),
+                                          border: Border.all(
+                                            color: isOff
+                                                ? SoftPalette.emerald350
+                                                : t.bgRule,
+                                            width: isOff ? 1.5 : 1.0,
+                                          ),
+                                          boxShadow: isOff
+                                              ? [
+                                                  BoxShadow(
+                                                    color: SoftPalette.emerald350.withValues(alpha: 0.15),
+                                                    blurRadius: 4,
+                                                    offset: const Offset(0, 1),
+                                                  )
+                                                ]
+                                              : null,
+                                        ),
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(
+                                              shortName,
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                fontWeight: FontWeight.w800,
+                                                color: isOff
+                                                    ? (isDark ? SoftPalette.emerald200 : SoftPalette.emerald700)
+                                                    : t.textSecondary,
+                                              ),
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1.5),
+                                              decoration: BoxDecoration(
+                                                color: isOff
+                                                    ? SoftPalette.emerald350
+                                                    : (isDark ? SoftPalette.slate700 : SoftPalette.slate200),
+                                                borderRadius: BorderRadius.circular(4),
+                                              ),
+                                              child: Text(
+                                                isOff ? 'OFF' : 'WORK',
+                                                style: TextStyle(
+                                                  fontSize: 8.5,
+                                                  fontWeight: FontWeight.w900,
+                                                  color: isOff
+                                                      ? SoftPalette.gray50
+                                                      : (isDark ? SoftPalette.slate350 : SoftPalette.slate600),
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
+                            );
+                          },
+                        ),
+
+                        const SizedBox(height: 10),
+
+                        // Dynamic Schedule Impact Summary
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+                          decoration: BoxDecoration(
+                            color: t.bgCard,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(color: t.bgRule),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                selectedWeeklyOffDays.isEmpty
+                                    ? Icons.all_inclusive_rounded
+                                    : (!isSundayOff ? Icons.warning_amber_rounded : Icons.info_outline_rounded),
+                                size: 14,
+                                color: selectedWeeklyOffDays.isEmpty
+                                    ? SoftPalette.blue500
+                                    : (!isSundayOff ? SoftPalette.amber500 : t.accent),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  selectedWeeklyOffDays.isEmpty
+                                      ? 'Continuous Shift (7 days working/week) • No automatic rest days'
+                                      : '${7 - selectedWeeklyOffDays.length} Working Days • ${selectedWeeklyOffDays.length} Off Day(s) (${selectedWeeklyOffDays.join(', ')})'
+                                          '${!isSundayOff ? ' • Sunday is a Working Day' : ''}',
+                                  style: TextStyle(
+                                    fontSize: 10.5,
+                                    fontWeight: FontWeight.w600,
+                                    color: !isSundayOff ? SoftPalette.amber500 : t.textSecondary,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
                   // Work Schedule Timings
                   Text(
                     'Work Schedule (Optional)',
@@ -1653,6 +2055,14 @@ void openEmployeeFormSheet(
                   'currentAddress': addressController.text.trim().isNotEmpty ? addressController.text.trim() : null,
                   'emergencyContacts': validContacts,
                   'workScheduleOverride': scheduleOverride,
+                  'isSundayOff': isSundayOff,
+                  'weeklyOffDays': selectedWeeklyOffDays,
+                  'weeklyOffDay': selectedWeeklyOffDays.isNotEmpty ? selectedWeeklyOffDays.first : 'None',
+                  'weeklyOffDisplay': selectedWeeklyOffDays.isEmpty
+                      ? 'No Weekly Off (7 Days Working)'
+                      : (selectedWeeklyOffDays.length == 1 && selectedWeeklyOffDays.first == 'Sunday'
+                          ? 'Sunday Off (HQ Default)'
+                          : '${selectedWeeklyOffDays.join(' & ')} Off'),
                   'camps': computedCamps,
                   'sessions': finalSessions,
                   'shiftHours': formattedShiftHours,
@@ -1965,6 +2375,55 @@ Widget _buildStepTab(int stepIndex, String title, IconData icon, int currentStep
             ),
           ],
         ),
+      ),
+    ),
+  );
+}
+
+Widget _buildWeeklyOffPresetChip({
+  required String label,
+  required IconData icon,
+  required bool isSelected,
+  required RoleThemeData t,
+  required bool isDark,
+  required VoidCallback onTap,
+}) {
+  return InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(8),
+    child: AnimatedContainer(
+      duration: const Duration(milliseconds: 150),
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+      decoration: BoxDecoration(
+        color: isSelected
+            ? (isDark ? SoftPalette.emerald700.withValues(alpha: 0.3) : SoftPalette.emerald50m)
+            : t.bgCard,
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: isSelected ? SoftPalette.emerald350 : t.bgRule,
+          width: isSelected ? 1.5 : 1.0,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            icon,
+            size: 13,
+            color: isSelected ? SoftPalette.emerald350 : t.textTertiary,
+          ),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 10.5,
+              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+              color: isSelected
+                  ? (isDark ? SoftPalette.emerald200 : SoftPalette.emerald700)
+                  : t.textSecondary,
+            ),
+          ),
+        ],
       ),
     ),
   );

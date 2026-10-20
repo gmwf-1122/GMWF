@@ -346,16 +346,17 @@ class _AttendanceTabState extends State<AttendanceTab> {
                     dateStr: dateStr,
                   );
 
+                  final isEmpOff = FinanceLocalStorage.isEmployeeWeeklyOff(emp, widget.date);
                   final Map<String, dynamic> defaultRec = {
                     'employeeId': empId,
                     'date': dateStr,
-                    'status': isSunday ? 'off' : (isHoliday ? 'holiday' : 'absent'),
+                    'status': isEmpOff ? 'off' : (isHoliday ? 'holiday' : 'absent'),
                     'leaveType': null,
                     'checkInTime': null,
                     'arrivalTime': null,
                     'checkOutTime': null,
                     'departureTime': null,
-                    'note': isHoliday ? 'Public Holiday' : null,
+                    'note': isHoliday ? 'Public Holiday' : (isEmpOff ? 'Weekly Off' : null),
                     'overtimeDuration': null,
                     'halfDayType': null,
                   };
@@ -387,6 +388,10 @@ class _AttendanceTabState extends State<AttendanceTab> {
                   record['department'] = emp['department'];
                   record['pin'] = pin;
                   record['biometricPin'] = pin;
+                  record['isSundayOff'] = emp['isSundayOff'];
+                  record['weeklyOffDays'] = emp['weeklyOffDays'];
+                  record['weeklyOffDay'] = emp['weeklyOffDay'];
+                  record['weeklyOffDisplay'] = emp['weeklyOffDisplay'];
                   return record;
                 }).toList();
 
@@ -1442,7 +1447,10 @@ class _AttendanceTabState extends State<AttendanceTab> {
   }) {
     final isDark = UserThemeService.isDarkMode() || t.isDarkCanvas;
 
-    if (isSunday) {
+    final bool hasWorkingStaff = records.any((r) => !FinanceLocalStorage.isEmployeeWeeklyOff(r, widget.date));
+    final bool allEmployeesOff = isSunday && !hasWorkingStaff && (p == 0);
+
+    if (allEmployeesOff) {
       return Container(
         margin: const EdgeInsets.fromLTRB(14, 8, 14, 4),
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
@@ -1455,7 +1463,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
           children: [
             Icon(Icons.weekend_outlined, size: 16, color: t.textSecondary),
             const SizedBox(width: 8),
-            Text('Sunday Weekend (Off Day)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: t.textPrimary)),
+            Text('Sunday Weekend (HQ Default Off Day)', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: t.textPrimary)),
             const Spacer(),
             Text('Working Overtime: $ot', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: t.accent)),
           ],
@@ -1631,6 +1639,11 @@ class _AttendanceTabState extends State<AttendanceTab> {
       final isLocked = r['isLockedByAdmin'] == true || r['isManagerLocked'] == true;
       if (isLocked) continue;
 
+      // Do not overwrite employees who are officially on their scheduled off day
+      if (FinanceLocalStorage.isEmployeeWeeklyOff(r, widget.date) && r['status'] == 'off') {
+        continue;
+      }
+
       r['status'] = 'present';
       r['checkInTime'] ??= '08:30 AM';
       r['leaveType'] = null;
@@ -1664,7 +1677,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
     final role = record['role']?.toString() ?? 'Staff';
     final dept = record['department']?.toString() ?? '';
     final status = (record['status']?.toString() ?? 'absent').toLowerCase();
-    final isSunday = widget.date.weekday == DateTime.sunday;
+    final isEmpOff = FinanceLocalStorage.isEmployeeWeeklyOff(record, widget.date);
     final checkIn = record['checkInTime']?.toString() ?? record['arrivalTime']?.toString();
     final checkOut = record['checkOutTime']?.toString() ?? record['departureTime']?.toString();
     final note = record['note']?.toString() ?? '';
@@ -1921,7 +1934,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
           const SizedBox(width: 14),
 
           // The Elegant Single-Pill Status Selector
-          isSunday
+          isEmpOff
               ? _buildSundayOvertimeControls(record, empId, t)
               : _buildStatusPill(status, empId, record, t),
 
@@ -1951,7 +1964,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
     final role = record['role']?.toString() ?? 'Staff';
     final dept = record['department']?.toString() ?? '';
     final status = (record['status']?.toString() ?? 'absent').toLowerCase();
-    final isSunday = widget.date.weekday == DateTime.sunday;
+    final isEmpOff = FinanceLocalStorage.isEmployeeWeeklyOff(record, widget.date);
     final checkIn = record['checkInTime']?.toString() ?? record['arrivalTime']?.toString();
     final checkOut = record['checkOutTime']?.toString() ?? record['departureTime']?.toString();
     final note = record['note']?.toString() ?? '';
@@ -2036,7 +2049,7 @@ class _AttendanceTabState extends State<AttendanceTab> {
                   ),
                 ),
               ),
-              isSunday
+              isEmpOff
                   ? _buildSundayOvertimeControls(record, empId, t)
                   : _buildStatusPill(status, empId, record, t),
             ],

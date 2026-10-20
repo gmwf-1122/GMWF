@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'cloud/lan_firestore_gate.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -93,10 +95,10 @@ class UserThemeService {
       // Sync to Firestore user profile in background if available
       final user = FirebaseAuth.instance.currentUser;
       if (user != null && !user.isAnonymous) {
-        FirebaseFirestore.instance.collection('users').doc(user.uid).set({
+        unawaited(LanFirestoreGate.mergeDoc('users/${user.uid}', {
           'isDarkMode': isDark,
           'lastThemeUpdate': FieldValue.serverTimestamp(),
-        }, SetOptions(merge: true)).catchError((_) {});
+        }));
       }
     } catch (e) {
       debugPrint('[UserThemeService] Error setting dark mode: $e');

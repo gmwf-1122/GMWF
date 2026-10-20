@@ -1152,6 +1152,9 @@ class _HomeRouterState extends State<HomeRouter> {
           await box.put('currentUser', userData);
           await box.put('user_role', userData['role']);
         }
+        // Open this role's boxes before its screen is built (a no-op when startup already
+        // opened them for the same role).
+        await LocalStorageService.activateRole(role);
       }
       await LocalStorageService.saveLocalUser(userData);
       UserThemeService.notifyThemeChanged();
@@ -1999,6 +2002,7 @@ class _UnassignedRoleRecoveryScreenState extends State<_UnassignedRoleRecoverySc
         await box.put('currentUser', updatedUser);
         await box.put('user_role', chosenRole);
       }
+      await LocalStorageService.activateRole(chosenRole);
 
       // Persist to Firestore in background
       final uid = (widget.uid.isNotEmpty ? widget.uid : updatedUser['uid'] ?? '').toString();

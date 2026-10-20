@@ -226,7 +226,7 @@ class _PatientListState extends State<PatientList> {
         if (data != null) {
           final serial = (data['serial'] ?? data['id'])?.toString();
           if (serial != null && serial.isNotEmpty) {
-            LocalStorageService.updateDispenseStatus(widget.branchId, serial, 'dispensed');
+            LocalStorageService.updateDispenseStatus(widget.branchId, serial, 'dispensed', receivedViaLan: true);
           }
         }
         _debouncedRebuild();

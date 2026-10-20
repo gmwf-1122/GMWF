@@ -307,7 +307,9 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
     final isDark = _isDark;
     final nameCtrl = TextEditingController();
     final doseCtrl = TextEditingController(text: '500 mg');
-    final barcodeCtrl = TextEditingController();
+    final nextBarcode = MasterProformaService.getNextRollNumber();
+    final barcodeCtrl = TextEditingController(text: nextBarcode);
+    final itemCodeCtrl = TextEditingController();
     final reasonCtrl = TextEditingController();
     String selectedType = 'Tablet';
 
@@ -428,20 +430,55 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                   ),
                   const SizedBox(height: 12),
 
-                  // Barcode (Optional)
-                  Text('Item Code / Barcode (Optional)', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.sky350 : _teal)),
-                  const SizedBox(height: 4),
-                  TextField(
-                    controller: barcodeCtrl,
-                    style: TextStyle(color: isDark ? SoftPalette.gray50 : _textDark, fontSize: 13),
-                    decoration: InputDecoration(
-                      hintText: 'Leave empty to auto-generate (e.g. MED-GEN-1234)',
-                      hintStyle: TextStyle(color: isDark ? SoftPalette.slate550 : SoftPalette.gray300, fontSize: 12),
-                      filled: true,
-                      fillColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                    ),
+                  // Barcode & Item Code (Separate Fields)
+                  Row(
+                    children: [
+                      Expanded(
+                        flex: 2,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Barcode *', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.sky350 : _teal)),
+                            const SizedBox(height: 4),
+                            TextField(
+                              controller: barcodeCtrl,
+                              style: TextStyle(color: isDark ? SoftPalette.gray50 : _textDark, fontSize: 13),
+                              decoration: InputDecoration(
+                                hintText: 'e.g. $nextBarcode',
+                                hintStyle: TextStyle(color: isDark ? SoftPalette.slate550 : SoftPalette.gray300, fontSize: 12),
+                                filled: true,
+                                fillColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        flex: 3,
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Item Code (Optional)', style: TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.sky350 : _teal)),
+                            const SizedBox(height: 4),
+                            TextField(
+                              controller: itemCodeCtrl,
+                              style: TextStyle(color: isDark ? SoftPalette.gray50 : _textDark, fontSize: 13),
+                              decoration: InputDecoration(
+                                hintText: 'Leave empty to auto-generate',
+                                hintStyle: TextStyle(color: isDark ? SoftPalette.slate550 : SoftPalette.gray300, fontSize: 12),
+                                filled: true,
+                                fillColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
+                                contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 14),
 
@@ -497,10 +534,11 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                 final role = (uData['role'] ?? uData['userRole'] ?? 'HQ Manager').toString();
                 final uid = (uData['uid'] ?? uData['id'] ?? FirebaseAuth.instance.currentUser?.uid ?? '').toString();
 
-                String code = barcodeCtrl.text.trim();
-                if (code.isEmpty) {
+                final barcode = barcodeCtrl.text.trim().isEmpty ? MasterProformaService.getNextRollNumber() : barcodeCtrl.text.trim().padLeft(3, '0');
+                String itemCode = itemCodeCtrl.text.trim();
+                if (itemCode.isEmpty) {
                   final initials = name.split(RegExp(r'\s+')).take(3).map((w) => w.isNotEmpty ? w[0].toUpperCase() : '').join();
-                  code = 'MED-$initials-${DateTime.now().millisecondsSinceEpoch % 10000}';
+                  itemCode = 'MED-$initials-${DateTime.now().millisecondsSinceEpoch % 10000}';
                 }
 
                 final cleanFormula = MasterProformaService.cleanBrandToFormula(name);
@@ -508,10 +546,13 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                 final auditLog = {
                   'id': 'audit_${DateTime.now().millisecondsSinceEpoch}',
                   'action': 'add_proforma_medicine',
-                  'medicineCode': code,
+                  'medicineCode': itemCode,
                   'medicineName': cleanFormula,
                   'medicineType': selectedType,
                   'medicineDose': dose,
+                  'rollNo': barcode,
+                  'barcode': barcode,
+                  'itemCode': itemCode,
                   'reason': reason,
                   'performedBy': uid,
                   'performedByName': performedBy,
@@ -521,7 +562,10 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                 };
 
                 final newItem = {
-                  'code': code,
+                  'code': itemCode,
+                  'itemCode': itemCode,
+                  'barcode': barcode,
+                  'rollNo': barcode,
                   'name': cleanFormula,
                   'formula': cleanFormula,
                   'type': selectedType,
@@ -1051,17 +1095,30 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
 
   void _filterData() {
     final query = _searchCtrl.text.trim().toLowerCase();
+    final queryNum = int.tryParse(query);
     setState(() {
       var directMatches = _proformaMasterList.where((item) {
         final name = (item['name'] as String? ?? '').toLowerCase();
         final formula = (item['formula'] as String? ?? '').toLowerCase();
         final code = (item['code'] as String? ?? '').toLowerCase();
+        final barcode = (item['barcode'] as String? ?? '').toLowerCase();
+        final rollNo = (item['rollNo'] as String? ?? '').toLowerCase();
         final type = item['type'] as String? ?? 'Tablet';
+
+        bool rollMatches = rollNo.contains(query);
+        if (!rollMatches && queryNum != null) {
+          final rNum = int.tryParse(rollNo);
+          if (rNum != null && rNum == queryNum) {
+            rollMatches = true;
+          }
+        }
 
         final matchesQuery = query.isEmpty ||
             name.contains(query) ||
             formula.contains(query) ||
-            code.contains(query);
+            code.contains(query) ||
+            barcode.contains(query) ||
+            rollMatches;
 
         final matchesType = _selectedTypeFilter == 'All' ||
             type == _selectedTypeFilter ||
@@ -1383,12 +1440,16 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
         }
 
         final docId = RequestUtils.generateDocId(name, type, dose, exp, campId: activeCamp);
+        final barcode = (prof['barcode'] ?? prof['rollNo'] ?? '').toString();
+        final itemCode = (prof['itemCode'] ?? prof['code'] ?? '').toString();
         final stockData = {
           'docId': docId,
           'id': docId,
           'medicineId': docId,
-          'code': code,
-          'barcode': code,
+          'code': itemCode.isNotEmpty ? itemCode : code,
+          'itemCode': itemCode.isNotEmpty ? itemCode : code,
+          'barcode': barcode.isNotEmpty ? barcode : code,
+          'rollNo': barcode,
           'name': name,
           'formula': formula,
           'type': type,
@@ -1631,7 +1692,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                   controller: _searchCtrl,
                   style: TextStyle(color: isDark ? SoftPalette.gray50 : _textDark),
                   decoration: InputDecoration(
-                    hintText: 'Search Proforma by Name, Formula, Barcode...',
+                    hintText: 'Search Proforma by Barcode, Item Code, Name, Formula...',
                     hintStyle: TextStyle(color: isDark ? SoftPalette.slate350 : _textLight),
                     prefixIcon: Icon(Icons.search, color: isDark ? SoftPalette.sky350 : _teal),
                     suffixIcon: _searchCtrl.text.isNotEmpty
@@ -1813,7 +1874,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                   child: Row(
                     children: [
                       SizedBox(
-                        width: 110,
+                        width: 100,
                         child: Row(
                           children: [
                             Checkbox(
@@ -1826,7 +1887,9 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                         ),
                       ),
                       _vDivider(borderColor),
-                      SizedBox(width: 145, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 10), child: Text('Code / Barcode', style: TextStyle(fontWeight: FontWeight.bold, color: headerTextColor, fontSize: 13.5)))),
+                      SizedBox(width: 85, child: Center(child: Text('Barcode', style: TextStyle(fontWeight: FontWeight.bold, color: headerTextColor, fontSize: 13.5)))),
+                      _vDivider(borderColor),
+                      SizedBox(width: 145, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 10), child: Text('Item Code', style: TextStyle(fontWeight: FontWeight.bold, color: headerTextColor, fontSize: 13.5)))),
                       _vDivider(borderColor),
                       Expanded(flex: 4, child: Padding(padding: const EdgeInsets.symmetric(horizontal: 10), child: Text('Medicine Formula (Generic)', style: TextStyle(fontWeight: FontWeight.bold, color: headerTextColor, fontSize: 13.5)))),
                       if (_canManageProforma) ...[
@@ -1853,6 +1916,12 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                     itemBuilder: (context, index) {
                       final item = _filteredList[index];
                       final code = item['code'] as String? ?? 'MED-GEN';
+                      final itemCode = (item['itemCode'] ?? item['code'] ?? '').toString();
+                      final barcode = (item['barcode'] ?? item['rollNo'] ?? '').toString().trim().isNotEmpty && int.tryParse((item['barcode'] ?? item['rollNo'] ?? '').toString().trim()) != null
+                          ? (item['barcode'] ?? item['rollNo'] ?? '').toString().trim().padLeft(3, '0')
+                          : (item['rollNo'] ?? '').toString().trim().isNotEmpty
+                              ? (item['rollNo'] ?? '').toString().trim().padLeft(3, '0')
+                              : (index + 1).toString().padLeft(3, '0');
                       final inStockQty = _inStockQuantities[code] ?? 0;
                       final isInStock = inStockQty > 0;
                       final isChecked = _selectedItems[code] ?? false;
@@ -1866,7 +1935,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                           children: [
                             // Select Checkbox
                             SizedBox(
-                              width: 110,
+                              width: 100,
                               child: Center(
                                 child: Tooltip(
                                   message: isChecked ? 'Deselect item' : 'Select item to add stock',
@@ -1891,7 +1960,34 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                             ),
                             _vDivider(borderColor),
 
-                            // Code / Barcode
+                            // Barcode (Numeric 3-digit badge)
+                            SizedBox(
+                              width: 85,
+                              child: Center(
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: isDark ? SoftPalette.teal550.withValues(alpha: 0.25) : _teal.withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(6),
+                                    border: Border.all(
+                                      color: isDark ? SoftPalette.sky350.withValues(alpha: 0.4) : _teal.withValues(alpha: 0.3),
+                                    ),
+                                  ),
+                                  child: Text(
+                                    barcode,
+                                    style: TextStyle(
+                                      fontFamily: 'monospace',
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                      color: isDark ? SoftPalette.sky350 : _teal,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                            _vDivider(borderColor),
+
+                            // Item Code (Alphanumeric formulation code)
                             SizedBox(
                               width: 145,
                               child: Padding(
@@ -1906,7 +2002,7 @@ class _UniversalProformaSheetPageState extends State<UniversalProformaSheetPage>
                                     ),
                                   ),
                                   child: Text(
-                                    code,
+                                    itemCode.isNotEmpty ? itemCode : code,
                                     overflow: TextOverflow.ellipsis,
                                     style: TextStyle(
                                       fontFamily: 'monospace',

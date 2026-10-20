@@ -614,15 +614,16 @@ class DispensaryNotifier
         final merged = Map<String, dynamic>.from(existing);
         incoming.forEach((k, v) {
           if (v == null || v == '') return;
-          final strV = v.toString().trim();
-          final isIncomingUnknown = strV.toLowerCase() == 'unknown' || strV.toLowerCase() == 'unknown patient';
+          // 'N/A' and '-' count as missing too: an earlier enrichment of a partial copy
+          // stored displayCnic 'N/A' / name 'Unknown', and those used to block the real
+          // values from the full cloud document.
+          final isIncomingUnknown = LocalStorageService.isPlaceholderValue(v);
           final existingVal = merged[k];
-          final existingStr = existingVal?.toString().trim() ?? '';
-          final isExistingUnknown = existingVal == null || existingStr.isEmpty || existingStr.toLowerCase() == 'unknown' || existingStr.toLowerCase() == 'unknown patient';
+          final isExistingUnknown = LocalStorageService.isPlaceholderValue(existingVal);
 
           if (isExistingUnknown && !isIncomingUnknown) {
             merged[k] = v;
-          } else if (existingVal == null || existingStr.isEmpty) {
+          } else if (existingVal == null || existingVal.toString().trim().isEmpty) {
             merged[k] = v;
           }
         });
@@ -774,10 +775,11 @@ class DispensaryNotifier
         _lastFirestoreFetch[fetchKey] = DateTime.now();
         final candidateBranches = <String>{};
         if (targetBranchId.isEmpty || targetBranchId == 'all') {
-          candidateBranches.addAll(['karachi', 'gujrat', 'sialkot', 'rawalpindi', 'jalalpurjattan']);
+          candidateBranches.addAll(['karachi', 'gujrat', 'sialkot', 'rawalpindi', 'jalalpurjattan', 'jalalpur_jattan']);
         } else {
           final canonical = LocalStorageService.sanitizeBranchId(targetBranchId, fallback: targetBranchId.toLowerCase().trim());
-          candidateBranches.add(canonical);
+          // Jalalpur Jattan's older tokens are under 'jalalpur_jattan' (renamed in 61acae2).
+          candidateBranches.addAll(CampSessionService.firestoreBranchIds(canonical));
         }
 
         final queues = ['zakat', 'non-zakat', 'gmwf'];
@@ -925,8 +927,10 @@ class DispensaryNotifier
 
     return rawDocs.map((d) => {
           ...d,
-          'name': firstNonEmpty(
-              [d['patientName'], d['name'], 'Unknown']),
+          'name': firstNonEmpty([
+            LocalStorageService.firstRealValue([d['patientName'], d['name'], d['fullName']]),
+            'Unknown',
+          ]),
           'phone': d['phone']?.toString() ?? 'N/A',
           'age': d['age']?.toString() ??
               d['patientAge']?.toString() ??
@@ -935,9 +939,7 @@ class DispensaryNotifier
               d['patientGender']?.toString() ??
               'N/A',
           'displayCnic': firstNonEmpty([
-            d['patientCnic'],
-            d['cnic'],
-            d['guardianCnic'],
+            LocalStorageService.firstRealValue([d['patientCnic'], d['cnic'], d['guardianCnic']]),
             'N/A',
           ]),
           'isChild':

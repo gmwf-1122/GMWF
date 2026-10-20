@@ -16,6 +16,31 @@ import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:gmwf/design/components/app_toast.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../models/stock_item.dart';
+import '../../../services/cloud/cloud_db.dart';
+
+/// Kitchen writes go through [CloudDb]: Firestore answers or the call fails within seconds.
+/// An SDK commit on Windows never returns when the daily quota is used up, which left these
+/// dialogs spinning forever. Returns false (and tells the user) when the save did not happen.
+Future<bool> commitKitchenBatch(BuildContext ctx, CloudBatch batch) async {
+  try {
+    await batch.commit();
+    return true;
+  } catch (e) {
+    debugPrint('[CookDialog] save failed: $e');
+    if (ctx.mounted) {
+      AppToast.showSnackBar(ctx, SnackBar(
+        content: Text(e is FirebaseException && e.code == 'resource-exhausted'
+            ? 'Not saved: today\'s cloud write limit is used up. Try again after the daily reset.'
+            : 'Not saved: could not reach the cloud. Check the internet and try again.'),
+        backgroundColor: kAccent,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ));
+    }
+    return false;
+  }
+}
 
 // ─── Palette (shared across files) ──────────────────────────────────────────
 const Color kPrimary   = SoftPalette.slate800;
@@ -686,7 +711,7 @@ void showSavedFoodDialog(
                                           .doc(today);
                                       final cookCol =
                                           dayDoc.collection('cooking_sessions');
-                                      final batch = fs.batch();
+                                      final batch = CloudDb.instance.batch();
 
                                       if (isEdit) {
                                         batch.update(cookCol.doc(docId), data);
@@ -694,7 +719,7 @@ void showSavedFoodDialog(
                                         batch.set(cookCol.doc(), data);
                                       }
 
-                                      await batch.commit();
+                                      if (!await commitKitchenBatch(ctx, batch)) return;
                                       await onDone();
                                       if (ctx.mounted) Navigator.pop(ctx);
 
@@ -1247,7 +1272,7 @@ void showCookDialog(
                               .collection('branches').doc(branchId)
                               .collection('dasterkhwaan').doc(today);
                           final cookCol  = dayDoc.collection('cooking_sessions');
-                          final batch    = fs.batch();
+                          final batch    = CloudDb.instance.batch();
 
                           if (isEdit) {
                             if (!(existing['isReceivedFood'] as bool? ?? false)) {
@@ -1280,7 +1305,9 @@ void showCookDialog(
                                   .collection('branches').doc(branchId)
                                   .collection('dasterkhwaan_stock')
                                   .doc(ing['name'] as String);
-                              final snap = await stockRef.get();
+                              final snap = await stockRef.get().timeout(
+                                  const Duration(seconds: 8),
+                                  onTimeout: () => stockRef.get(const GetOptions(source: Source.cache)));
                               if (snap.exists) {
                                 batch.update(stockRef, {
                                   'quantity': FieldValue.increment(
@@ -1298,7 +1325,7 @@ void showCookDialog(
                             }
                           }
 
-                          await batch.commit();
+                          if (!await commitKitchenBatch(ctx, batch)) return;
                           await onDone();
                           if (ctx.mounted) Navigator.pop(ctx);
 

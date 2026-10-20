@@ -942,7 +942,7 @@ class _RegisterState extends State<Register>
 
       try {
         unawaited(LocalStorageService.pushLocalUsersToFirestore());
-        SyncService().triggerUpload(force: true);
+        SyncService().triggerUpload(urgent: true);
       } catch (_) {}
 
       final registeredName = _usernameController.text.trim();

@@ -27,6 +27,7 @@ import 'package:uuid/uuid.dart';
 
 import 'local_storage_service.dart';
 import 'sync_service.dart';
+import 'pre_login_security_service.dart';
 import '../models/donation_models.dart';
 import '../pages/donations/donations_shared.dart';
 import '../realtime/realtime_manager.dart';
@@ -410,6 +411,10 @@ class DonationsLocalStorage {
     final cleanRcpt = recordMap['receiptNoClean'] as String;
     // Append localId to guarantee uniqueness and prevent collisions/overwriting in Firestore.
     recordMap['firestoreId'] = cleanRcpt.isNotEmpty ? '${cleanRcpt}_$localId' : localId;
+    // Only the PC that took the donation re-uploads it in a backfill (SyncService.isDonationOwnedHere).
+    try {
+      recordMap['originDevice'] ??= await PreLoginSecurityService.getDeviceId();
+    } catch (_) {}
     
     final sanitized = _sanitize(recordMap);
 
@@ -444,7 +449,7 @@ class DonationsLocalStorage {
 
     // Immediately trigger cloud upload
     try {
-      SyncService().triggerUpload(force: true);
+      SyncService().triggerUpload(urgent: true);
     } catch (_) {}
 
     debugPrint('[DonationsLS] Sync enqueued. Queue size: ${Hive.box(LocalStorageService.syncBox).length}');
@@ -1563,7 +1568,7 @@ class DonationsLocalStorage {
 
     // 7. Trigger cloud upload immediately
     try {
-      SyncService().triggerUpload(force: true);
+      SyncService().triggerUpload(urgent: true);
     } catch (_) {}
     
     debugPrint('[DonationsLS] Transaction tombstoned and deletion enqueued: $hiveKey');

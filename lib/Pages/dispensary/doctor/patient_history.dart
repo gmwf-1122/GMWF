@@ -1985,13 +1985,31 @@ class _HistoryEntry {
           .toString()
           .trim();
       if (name.isEmpty) return;
-      if (meds.any((existing) => existing.name.toLowerCase() == name.toLowerCase())) return;
+      // Saved records carry 'dosage': '' next to the real strength in 'dose', so the first
+      // non-empty one wins (taking 'dosage' first lost 250 mg vs 500 mg).
+      final dosage = [m['dose'], m['strength'], m['dosage']]
+          .map((v) => (v ?? '').toString().trim())
+          .firstWhere((v) => v.isNotEmpty && v.toLowerCase() != 'null', orElse: () => '');
+      final type = (m['type'] ?? m['form'] ?? '').toString().trim();
+      // The same medicine in another form or strength is a separate line.
+      if (meds.any((existing) =>
+          existing.name.toLowerCase() == name.toLowerCase() &&
+          existing.type.toLowerCase() == type.toLowerCase() &&
+          existing.dosage.toLowerCase() == dosage.toLowerCase())) {
+        return;
+      }
+      String? idOf(Object? v) {
+        final s = v?.toString().trim();
+        return (s == null || s.isEmpty || s == 'null') ? null : s;
+      }
       meds.add(_MedEntry(
         name: name,
-        type: (m['type'] ?? m['form'] ?? '').toString().trim(),
+        type: type,
+        inventoryId: idOf(m['inventoryId'] ?? m['medicineId']),
+        formula: idOf(m['formula']),
         timing: (m['timing'] ?? m['time'] ?? m['schedule'] ?? '').toString().trim(),
         meal: (m['meal'] ?? m['instruction'] ?? '').toString().trim(),
-        dosage: (m['dosage'] ?? m['dose'] ?? m['strength'] ?? '').toString().trim(),
+        dosage: dosage,
         quantity: (m['quantity'] is num
             ? (m['quantity'] as num).toInt()
             : (m['qty'] is num
@@ -2365,11 +2383,14 @@ class _HistoryEntry {
 class _MedEntry {
   final String name, type, timing, meal, dosage, frequency;
   final int quantity;
+  /// Stock item it was given from, and its generic name; Repeat needs both to find the
+  /// medicine in today's stock instead of adding it as a custom one.
+  final String? inventoryId, formula;
 
   const _MedEntry({
     required this.name, required this.type, required this.timing,
     required this.meal, required this.dosage, required this.quantity,
-    required this.frequency,
+    required this.frequency, this.inventoryId, this.formula,
   });
 
   bool get isInjectable {
@@ -2400,5 +2421,8 @@ class _MedEntry {
     'quantity': quantity,
     'qty': quantity,
     'frequency': frequency,
+    if (inventoryId != null) 'inventoryId': inventoryId,
+    if (inventoryId != null) 'medicineId': inventoryId,
+    if (formula != null) 'formula': formula,
   };
 }

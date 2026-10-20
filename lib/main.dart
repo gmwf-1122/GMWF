@@ -47,6 +47,8 @@ import 'services/auto_update_service.dart';
 import 'services/hidden_force_uploader.dart';
 import 'services/quota_service.dart';
 import 'services/sync_service.dart';
+import 'services/background_sync_service.dart';
+import 'package:workmanager/workmanager.dart';
 import 'widgets/self_healing_error_boundary.dart';
 import 'widgets/blurred_dialog_observer.dart';
 import 'utils/ui_stall_monitor.dart';
@@ -69,6 +71,16 @@ class TimestampAdapter extends TypeAdapter<Timestamp> {
     writer.writeInt(obj.seconds);
     writer.writeInt(obj.nanoseconds);
   }
+}
+
+/// WorkManager entry point for the Android background upload (BackgroundSyncService).
+@pragma('vm:entry-point')
+void backgroundSyncDispatcher() {
+  Workmanager().executeTask((task, inputData) => BackgroundSyncService.runJob(
+        registerHiveAdapters: () {
+          if (!Hive.isAdapterRegistered(100)) Hive.registerAdapter(TimestampAdapter());
+        },
+      ));
 }
 
 int _errorLogCountInWindow = 0;
@@ -239,6 +251,8 @@ Future<void> main() async {
           LocalStorageService.setHiveDirectoryPath(hiveDir);
           await Hive.initFlutter(hiveDir);
         } else {
+          // A background upload job may hold the boxes right now (app was closed); let it finish.
+          await BackgroundSyncService.waitForBackgroundJob();
           final appSupportDir = await getApplicationSupportDirectory();
           LocalStorageService.setHiveDirectoryPath(appSupportDir.path);
           await Hive.initFlutter();
@@ -273,10 +287,12 @@ Future<void> main() async {
         AuthService.onSignOutCallback = AuthHomeWrapper.clearSession;
 
         // Load dynamic version from pubspec via package_info (max 400ms)
-        await AutoUpdateService.getAppVersion().timeout(const Duration(milliseconds: 400), onTimeout: () => '1.6.2');
+        await AutoUpdateService.getAppVersion().timeout(const Duration(milliseconds: 400), onTimeout: () => '1.6.3');
         unawaited(CloudMessagingService().initialize().catchError((e) {
           debugPrint('[Init] CloudMessagingService init warning: $e');
         }));
+        // Android: keep uploading queued records about every 15 min, also when the app is closed.
+        unawaited(BackgroundSyncService.init(backgroundSyncDispatcher));
 
         if (!kIsWeb) {
           unawaited(ZkTecoNetworkService.startServer().catchError((e) {
@@ -319,23 +335,32 @@ Future<void> _runBackgroundCleanups() async {
     // with zero main-thread contention, eliminating the "(Not Responding)" startup hang.
     await Future.delayed(const Duration(seconds: 30));
 
-    await FinanceV2Migration.runMigration();
-    await Future.delayed(const Duration(milliseconds: 300));
+    // Each clean-up runs only where this PC's role uses the boxes it goes through: on a
+    // madrassa or kitchen PC they would open (decode) the dispensary's and finance's files.
+    if (LocalStorageService.roleUsesBox(LocalStorageService.salaryLedgerBox)) {
+      await FinanceV2Migration.runMigration();
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
 
-    await LocalStorageService.forceDeduplicatePatients();
-    await Future.delayed(const Duration(milliseconds: 300));
+    final clinical = LocalStorageService.roleUsesBox(LocalStorageService.entriesBox);
+    if (clinical) {
+      await LocalStorageService.forceDeduplicatePatients();
+      await Future.delayed(const Duration(milliseconds: 300));
 
-    await LocalStorageService.repairMisassignedShiftSessions();
-    await Future.delayed(const Duration(milliseconds: 300));
+      await LocalStorageService.repairMisassignedShiftSessions();
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
 
     await LocalStorageService.repairAndSanitizeLocalAccounts();
     await Future.delayed(const Duration(milliseconds: 300));
 
-    await LocalStorageService.purgePhantomUnknownTokens();
-    await Future.delayed(const Duration(milliseconds: 300));
+    if (clinical) {
+      await LocalStorageService.purgePhantomUnknownTokens();
+      await Future.delayed(const Duration(milliseconds: 300));
 
-    await LocalStorageService.healAndRestorePatientCnics();
-    await Future.delayed(const Duration(milliseconds: 300));
+      await LocalStorageService.healAndRestorePatientCnics();
+      await Future.delayed(const Duration(milliseconds: 300));
+    }
 
     await LocalStorageService.purgeBloatedSyncQueue();
     await Future.delayed(const Duration(milliseconds: 300));

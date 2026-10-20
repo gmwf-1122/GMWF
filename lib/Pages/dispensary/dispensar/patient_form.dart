@@ -192,12 +192,9 @@ class _PatientFormState extends State<PatientForm> {
     
     final serial = _resolvedSerial;
     if (serial.isNotEmpty) {
-      final entryRaw = Hive.box(LocalStorageService.entriesBox).get('${widget.branchId}-$serial');
-      if (entryRaw != null) {
-        final entry = Map<String, dynamic>.from(entryRaw);
-        final sd = entry['suggestedDays'];
-        if (sd is int && sd >= 1) return sd;
-      }
+      final entry = LocalStorageService.getLocalEntry(widget.branchId, serial);
+      final eDays = entry?['suggestedDays'];
+      if (eDays is int && eDays >= 1) return eDays;
     }
     return 1;
   }
@@ -211,13 +208,32 @@ class _PatientFormState extends State<PatientForm> {
       final type = event['event_type'] as String?;
       final data = event['data'] as Map<String, dynamic>? ?? {};
       if (type == null) return;
-      final eventSerial = data['serial']?.toString().trim().toLowerCase();
-      final mySerial = _resolvedSerial.toLowerCase();
+      final eventSerial = data['serial']?.toString().trim();
+      final mySerial = _resolvedSerial.trim();
       final eventBranch = data['branchId']?.toString().trim().toLowerCase();
       final myBranch = widget.branchId.toLowerCase().trim();
-      if (eventBranch != null && eventBranch != myBranch) return;
+      if (eventBranch != null && eventBranch.isNotEmpty && myBranch.isNotEmpty &&
+          eventBranch != myBranch && !CampSessionService.areBranchesMatching(eventBranch, myBranch)) return;
       if (eventSerial != null && eventSerial.isNotEmpty &&
-          mySerial.isNotEmpty && eventSerial != mySerial) return;
+          mySerial.isNotEmpty && !CampSessionService.isSameSerial(eventSerial, mySerial, myBranch)) return;
+
+      // When prescription arrives from doctor for this active patient, apply immediately!
+      if (type == RealtimeEvents.savePrescription || type == 'prescription_created') {
+        final rxList = data['prescriptions'] ?? data['medicines'];
+        if (rxList is List && rxList.isNotEmpty) {
+          if (mounted) {
+            setState(() {
+              _data = Map<String, dynamic>.from(data);
+              _gender = _resolveGender();
+              _age = _resolveAge();
+              _isDispensed = (data['dispenseStatus'] ?? widget.queueEntry['dispenseStatus'] ?? '').toString().toLowerCase() == 'dispensed';
+              _isLoadingPrescription = false;
+            });
+          }
+          return;
+        }
+      }
+
       if (type == RealtimeEvents.savePrescription ||
           type == RealtimeEvents.saveEntry ||
           type == 'dispense_completed') {
@@ -265,6 +281,7 @@ class _PatientFormState extends State<PatientForm> {
   void didUpdateWidget(covariant PatientForm oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.queueEntry != widget.queueEntry || oldWidget.branchId != widget.branchId) {
+      _data = {};
       _selectedSyringeCount = null;
       _selectedSyringeHiveKey = null;
       _selectedNeedleCount = null;
@@ -296,8 +313,10 @@ class _PatientFormState extends State<PatientForm> {
       String serial = '';
       for (final f in ['serial', 'id', 'tokenSerial', 'tokenId', 'serialNumber']) {
         final v = widget.queueEntry[f]?.toString().trim() ?? '';
-        if (v.isNotEmpty) { serial = v.toLowerCase(); break; }
+        if (v.isNotEmpty) { serial = v; break; }
       }
+      final cleanS = CampSessionService.cleanSerial(serial, widget.branchId);
+
       String cnic = '';
       for (final f in ['patientCnic', 'cnic', 'guardianCnic', 'patientCNIC', 'guardianCNIC']) {
         final v = (widget.queueEntry[f]?.toString() ?? '')
@@ -305,35 +324,33 @@ class _PatientFormState extends State<PatientForm> {
         if (v.isNotEmpty && v != '0000000000000') { cnic = v; break; }
       }
       Map<String, dynamic> found = {};
-      found = _searchHive(serial, cnic);
-      if (found.isEmpty && serial.isNotEmpty) {
-        final presc = LocalStorageService.getLocalPrescription(serial);
-        if (presc != null) {
+      final pId = widget.queueEntry['patientId']?.toString() ?? _data['patientId']?.toString();
+      final pDateKey = widget.queueEntry['dateKey']?.toString() ?? _data['dateKey']?.toString();
+      found = _searchHive(cleanS, cnic, patientId: pId, dateKey: pDateKey);
+      if (found.isEmpty && cleanS.isNotEmpty) {
+        final presc = LocalStorageService.getLocalPrescription(
+          cleanS,
+          cnic: cnic,
+          patientName: widget.queueEntry['patientName'] ?? widget.queueEntry['name'] ?? widget.queueEntry['fullName'],
+          patientId: pId,
+          branchId: widget.branchId,
+          dateKey: pDateKey,
+        );
+        if (presc != null && presc.isNotEmpty) {
           found = presc;
         }
       }
       if (found.isEmpty && Hive.isBoxOpen(LocalStorageService.entriesBox)) {
         final normB = widget.branchId.toLowerCase().trim();
-        final normS = serial.toLowerCase();
+        final normS = cleanS.toLowerCase();
+        final normSUpper = cleanS.toUpperCase();
         final eBox = Hive.box(LocalStorageService.entriesBox);
         final direct = eBox.get('$normB-$normS') ??
-            eBox.get('$normB-${normS.toUpperCase()}') ??
+            eBox.get('$normB-$normSUpper') ??
             eBox.get(normS) ??
-            eBox.get(normS.toUpperCase());
+            eBox.get(normSUpper);
         if (direct is Map && direct['prescription'] is Map && (direct['prescription'] as Map).isNotEmpty) {
           found = Map<String, dynamic>.from(direct['prescription'] as Map);
-        } else {
-          for (final k in eBox.keys) {
-            final kStr = k.toString().toLowerCase();
-            if (kStr == '$normB-$normS' || kStr.endsWith('-$normS') || kStr == normS) {
-              final entry = eBox.get(k);
-              final embedded = (entry is Map) ? entry['prescription'] : null;
-              if (embedded is Map && embedded.isNotEmpty) {
-                found = Map<String, dynamic>.from(embedded);
-                break;
-              }
-            }
-          }
         }
       }
       final status = (widget.queueEntry['status'] ?? '').toString().toLowerCase();
@@ -390,8 +407,9 @@ class _PatientFormState extends State<PatientForm> {
     }
   }
 
-  Map<String, dynamic> _searchHive(String serial, String cnic) {
-    final normSerial = serial.trim().toLowerCase();
+  Map<String, dynamic> _searchHive(String serial, String cnic, {String? patientId, String? dateKey}) {
+    final cleanS = CampSessionService.cleanSerial(serial, widget.branchId);
+    final normSerial = cleanS.trim().toLowerCase();
     final normCnic   = cnic.trim().replaceAll('-', '').replaceAll(' ', '').toLowerCase();
     final normBranch = widget.branchId.trim().toLowerCase();
     final patientName = (widget.queueEntry['patientName'] ??
@@ -408,7 +426,8 @@ class _PatientFormState extends State<PatientForm> {
         final entriesBox = Hive.box(LocalStorageService.entriesBox);
         final directEntry = entriesBox.get('$normBranch-$normSerial') ??
             entriesBox.get('$normBranch-${normSerial.toUpperCase()}') ??
-            entriesBox.get(normSerial);
+            entriesBox.get(normSerial) ??
+            entriesBox.get(normSerial.toUpperCase());
         if (directEntry is Map && directEntry['prescription'] is Map) {
           final emb = Map<String, dynamic>.from(directEntry['prescription'] as Map);
           emb['doctorName'] ??= directEntry['doctorName'] ?? directEntry['prescribedBy'];
@@ -424,7 +443,9 @@ class _PatientFormState extends State<PatientForm> {
       normSerial,
       cnic: normCnic,
       patientName: patientName,
+      patientId: patientId,
       branchId: widget.branchId,
+      dateKey: dateKey,
     );
     if (presc != null && presc.isNotEmpty) return presc;
 

@@ -665,7 +665,9 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
     int activeCount = 0;
     int skippedCount = 0;
     for (final e in entries) {
-      if (!_isEntryFromToday(e, targetDateKey: targetDate)) return false;
+      // The list holds the whole token history in key order; an older token is skipped. (It
+      // used to end the check, so the first old token made every patient look token-free.)
+      if (!_isEntryFromToday(e, targetDateKey: targetDate)) continue;
 
       final status = (e['status'] ?? '').toString().toLowerCase();
       if (status == 'deleted' || status == 'cancelled' || status == 'expired' || status == 'void') {
@@ -1529,6 +1531,10 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
     }
 
     if (!written) {
+      if (RealtimeManager().isConnected) {
+        debugPrint('[TokenScreen] LAN connected — skipping cloud enqueue for $serial');
+        return;
+      }
       try {
         await LocalStorageService.enqueueSync({
           'type':      'save_entry',
@@ -1539,7 +1545,7 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
           'data':      entryData,
         });
         debugPrint('[TokenScreen] 📥 Queued for sync: $queueType/$serial');
-        SyncService().triggerUpload();
+        SyncService().triggerUpload(urgent: true);
       } catch (e) {
         debugPrint('[TokenScreen] Enqueue failed: $e');
       }

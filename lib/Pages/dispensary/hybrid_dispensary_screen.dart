@@ -235,7 +235,7 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
     _startReadyToDispenseCounter();
 
     // Start services once
-    SyncService().start(widget.branchId);
+    SyncService().start(widget.branchId, moduleScope: 'dispensary'); // like the other desks: no full-PC sweep
     _listenConnectivity();
     _loadBranchName();
 
@@ -604,7 +604,7 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
       _tabController.removeListener(_onTabControllerChanged);
       _tabController.dispose();
     }
-    ConnectionManager().stop();
+    // The LAN link is shared by every desk screen and only logout stops it (see _logout).
     debugPrint("[Lifecycle] HybridDispensaryScreen dispose");
     super.dispose();
   }
@@ -1024,6 +1024,8 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
         if (!mounted) return;
         final alerts = <Map<String, dynamic>>[];
         for (final doc in snap.docs) {
+          // Dismissed here but the cloud has not caught up yet: keep it dismissed.
+          if (LocalStorageService.isLocalRequestDecided(doc.id)) continue;
           final d = Map<String, dynamic>.from(doc.data());
           d['id'] = doc.id;
           alerts.add(d);
@@ -1042,15 +1044,7 @@ class _HybridDispensaryScreenState extends State<HybridDispensaryScreen>
     setState(() {
       _pendingRestockAlerts.removeWhere((r) => r['id'] == reqId);
     });
-    await LocalStorageService.updateRestockRequestStatus(widget.branchId, reqId, 'acknowledged');
-    try {
-      await FirebaseFirestore.instance
-          .collection('branches')
-          .doc(widget.branchId)
-          .collection('restock_requests')
-          .doc(reqId)
-          .update({'status': 'acknowledged', 'acknowledgedAt': FieldValue.serverTimestamp()});
-    } catch (_) {}
+    await LocalStorageService.acknowledgeRestockRequest(widget.branchId, reqId);
   }
 
   Widget _buildRestockBanner(bool isDark) {

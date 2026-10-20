@@ -5,6 +5,7 @@ import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:gmwf/services/cloud/lan_firestore_gate.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:intl/intl.dart';
@@ -1570,8 +1571,10 @@ class _InventoryPageState extends State<InventoryPage>
       }
       SyncService().triggerUpload();
 
-      // 4. Background cloud delete from all potential collections
-      unawaited(() async {
+      // 4. Background cloud delete from all potential collections. A desk on the LAN leaves it
+      // to the server (the deleteStockItem LAN message above); an SDK write here would wait in
+      // the SDK's queue while the desk is offline from Firestore and land later.
+      if (!LanFirestoreGate.isLanDesk) unawaited(() async {
         try {
           final db = FirebaseFirestore.instance;
           final batch = db.batch();
@@ -1809,8 +1812,10 @@ class _InventoryPageState extends State<InventoryPage>
       }
       SyncService().triggerUpload();
 
-      // 4. Background cloud delete from all potential collections
-      unawaited(() async {
+      // 4. Background cloud delete from all potential collections. A desk on the LAN leaves it
+      // to the server (the deleteStockItem LAN message above); an SDK write here would wait in
+      // the SDK's queue while the desk is offline from Firestore and land later.
+      if (!LanFirestoreGate.isLanDesk) unawaited(() async {
         try {
           final db = FirebaseFirestore.instance;
           final collections = <CollectionReference>{
@@ -3182,8 +3187,9 @@ class _InventoryPageState extends State<InventoryPage>
         ));
       } catch (_) {}
 
-      // Background permanent Firestore purge for ONLY this camp
-      unawaited(() async {
+      // Background permanent Firestore purge for ONLY this camp (not from a desk on the LAN:
+      // only the server talks to Firestore there; run it on the server PC).
+      if (!LanFirestoreGate.isLanDesk) unawaited(() async {
         try {
           final db = FirebaseFirestore.instance;
           final isHaji = activeCamp.toLowerCase().contains('haji');
@@ -5788,8 +5794,9 @@ class _EditMedicineSheetState extends State<_EditMedicineSheet> {
         } catch (_) {}
       }
 
-      // Commit to Firestore in background without blocking UI
-      unawaited(batch.commit().catchError((e) {
+      // Commit to Firestore in background without blocking UI. A desk on the LAN skips it: the
+      // saveStockItem message above reaches the server, which uploads the change.
+      if (!LanFirestoreGate.isLanDesk) unawaited(batch.commit().catchError((e) {
         debugPrint('[Inventory] Background batch commit error: $e');
       }));
       SyncService().triggerUpload();

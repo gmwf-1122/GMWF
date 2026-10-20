@@ -11,6 +11,8 @@ import '../../../realtime/realtime_events.dart';
 import '../../../services/zkteco_network_service.dart';
 import '../../../services/network_health_service.dart';
 import '../models/madrassa_config.dart';
+import '../madrassa_strings.dart';
+
 
 class MadrassaLocalStorage {
   static const String studentsBox = LocalStorageService.madrassaStudentsBox;
@@ -154,8 +156,9 @@ class MadrassaLocalStorage {
     };
     await box.put(canonicalKey, _sanitize(merged));
 
-    // Clean up any legacy or duplicate keys for the same student id
-    final duplicateKeys = box.keys.where((k) {
+    // Clean up any legacy or duplicate keys for the same student id. Scanning every key is
+    // O(n), so only do it when the canonical record is new (updates cannot create duplicates).
+    final duplicateKeys = (rawExisting is Map ? const [] : box.keys.toList()).where((k) {
       final str = k.toString();
       if (str == canonicalKey) return false;
       final kId = str.contains('__std__')
@@ -183,7 +186,17 @@ class MadrassaLocalStorage {
     final effectiveStudentId = studentId.isNotEmpty 
         ? studentId 
         : 'madrassa_std_${DateTime.now().millisecondsSinceEpoch}';
-    final effectiveBranchId = normalizeBranch(branchId);
+
+    var effectiveBranchId = normalizeBranch(branchId);
+    if (effectiveBranchId == 'all' || effectiveBranchId == 'global' || effectiveBranchId.isEmpty) {
+      final studentBranch = (data['branchId'] ?? data['branch'] ?? '').toString().toLowerCase().trim();
+      if (studentBranch.isNotEmpty && studentBranch != 'all' && studentBranch != 'global') {
+        effectiveBranchId = normalizeBranch(studentBranch);
+      } else {
+        final activeB = LocalStorageService.getActiveUserBranchId();
+        effectiveBranchId = LocalStorageService.isValidBranchId(activeB) ? normalizeBranch(activeB) : 'gujrat';
+      }
+    }
 
     final cleanData = Map<String, dynamic>.from(data);
     cleanData['id'] = effectiveStudentId;
@@ -194,7 +207,43 @@ class MadrassaLocalStorage {
     // 1. Immediately cache in Hive and flush to disk
     await cacheStudent(effectiveBranchId, effectiveStudentId, cleanData);
 
-    // 2. Assign PIN in ZKTeco Biometrics in background (non-blocking)
+    // 2. Direct cloud write if online (instant upload on mobile/tablet just like daily logs)
+    try {
+      if (NetworkHealthService().isStableOnline) {
+        final fsData = LocalStorageService.sanitizeForCloudUpload(cleanData);
+        fsData['lastUpdatedAt'] = FieldValue.serverTimestamp();
+        unawaited(FirebaseFirestore.instance
+            .collection('branches')
+            .doc(effectiveBranchId)
+            .collection('madrassa_students')
+            .doc(effectiveStudentId)
+            .set(fsData, SetOptions(merge: true))
+            .then((_) async {
+              // Only mark synced if no newer local edit happened meanwhile; otherwise the
+              // stale copy would overwrite it and the newer edit would never upload.
+              final box = await LocalStorageService.ensureBoxOpen(studentsBox);
+              final cur = box.get(_studentKey(effectiveBranchId, effectiveStudentId));
+              if (cur is Map && cur['lastUpdatedAt']?.toString() != cleanData['lastUpdatedAt']?.toString()) {
+                return;
+              }
+              await cacheStudent(effectiveBranchId, effectiveStudentId, {
+                'syncStatus': 'synced',
+                'synced': true,
+                'pendingSync': false,
+              });
+              // Direct write succeeded: drop the queued duplicate so it is not written twice.
+              if (Hive.isBoxOpen(LocalStorageService.syncBox)) {
+                await Hive.box(LocalStorageService.syncBox)
+                    .delete('sync_save_madrassa_student_${effectiveBranchId}_$effectiveStudentId');
+              }
+            })
+            .catchError((e) {
+              debugPrint('[MadrassaLocalStorage] Direct cloud save error (queued): $e');
+            }));
+      }
+    } catch (_) {}
+
+    // 3. Assign PIN in ZKTeco Biometrics in background (non-blocking)
     final pin = cleanData['biometricPin']?.toString().trim();
     if (pin != null && pin.isNotEmpty) {
       unawaited(
@@ -211,7 +260,7 @@ class MadrassaLocalStorage {
       );
     }
 
-    // 3. Broadcast to LAN WebSocket (Server and peers)
+    // 4. Broadcast to LAN WebSocket (Server and peers)
     try {
       final payload = RealtimeEvents.payload(
         type: RealtimeEvents.saveMadrassaStudent,
@@ -226,7 +275,7 @@ class MadrassaLocalStorage {
       debugPrint('[MadrassaLocalStorage] LAN broadcast error: $e');
     }
 
-    // 4. Always enqueue into LocalStorageService.syncBox for durable background Firestore upload
+    // 5. Always enqueue into LocalStorageService.syncBox for durable background Firestore upload
     try {
       await LocalStorageService.enqueueSync({
         'type': 'save_madrassa_student',
@@ -239,11 +288,7 @@ class MadrassaLocalStorage {
         'isNew': isNew,
       });
 
-      // Uploaded by the queued item above. The direct write that was here was a second
-      // write of the same document, left in the SDK's hidden queue whenever Firestore
-      // did not answer (and sent again later, costing quota twice).
-
-      unawaited(SyncService().triggerUpload());
+      unawaited(SyncService().triggerUpload(urgent: true));
     } catch (e) {
       debugPrint('[MadrassaLocalStorage] enqueueSync error: $e');
     }
@@ -374,7 +419,7 @@ class MadrassaLocalStorage {
         'effectiveDate': (effectiveDate ?? now).toIso8601String(),
         'data': student,
       });
-      unawaited(SyncService().triggerUpload());
+      unawaited(SyncService().triggerUpload(urgent: true));
     } catch (e) {
       debugPrint('[MadrassaLocalStorage] enqueueSync error: $e');
     }
@@ -434,11 +479,138 @@ class MadrassaLocalStorage {
         'branchId': effectiveBranchId,
         'studentId': studentId,
       });
-      unawaited(SyncService().triggerUpload());
+      unawaited(SyncService().triggerUpload(urgent: true));
     } catch (e) {
       debugPrint('[MadrassaLocalStorage] enqueueSync error: $e');
     }
   }
+
+  /// Returns normalized, human-readable branches available for student enrollment or transfer
+  static List<Map<String, String>> getAvailableBranchesForSelection() {
+    final seen = <String>{};
+    final result = <Map<String, String>>[];
+
+    final localList = LocalStorageService.getLocalBranchesList();
+    for (final b in localList) {
+      final id = normalizeBranch(b['id']?.toString() ?? '');
+      if (id.isEmpty || id == 'all' || id == 'global' || id == 'unknown') continue;
+      if (seen.add(id)) {
+        final name = (b['name'] ?? id).toString();
+        result.add({'id': id, 'name': name.isEmpty ? id.toUpperCase() : name});
+      }
+    }
+
+    final defaultBranches = [
+      {'id': 'gujrat', 'name': 'Gujrat Branch (گجرات)'},
+      {'id': 'karachi', 'name': 'Karachi Branch (کراچی)'},
+      {'id': 'saddar', 'name': 'Karachi - Saddar'},
+      {'id': 'haji', 'name': 'Karachi - Haji'},
+      {'id': 'sialkot', 'name': 'Sialkot Branch'},
+      {'id': 'jalalpur_jattan', 'name': 'Jalalpur Jattan Branch'},
+    ];
+
+    for (final b in defaultBranches) {
+      final id = b['id']!;
+      if (seen.add(id)) {
+        result.add(b);
+      }
+    }
+
+    return result;
+  }
+
+  /// Transfers a student from oldBranch to newBranch:
+  /// - Updates student data to new branch and stores in Hive under newBranch__std__id
+  /// - Immediately removes oldBranch__std__id and any other branch duplicates from Hive
+  /// - Deletes cloud Firestore record from branches/oldBranch/madrassa_students/studentId
+  /// - Enqueues offline deletion from oldBranch and upload to newBranch
+  /// - Logs central audit action
+  static Future<void> transferStudentBranch({
+    required String oldBranch,
+    required String newBranch,
+    required String studentId,
+    Map<String, dynamic>? studentData,
+    String? editorUsername,
+    String? editorRole,
+  }) async {
+    final normOld = normalizeBranch(oldBranch);
+    final normNew = normalizeBranch(newBranch);
+    final cleanId = studentId.contains('__std__') ? studentId.split('__std__').last.trim() : studentId.trim();
+    if (cleanId.isEmpty || normOld == normNew) return;
+
+    final box = await LocalStorageService.ensureBoxOpen(studentsBox);
+
+    // 1. Fetch current data
+    final existingData = studentData ??
+        getStudentCached(normOld, cleanId) ??
+        getStudentCached(normNew, cleanId) ??
+        <String, dynamic>{};
+
+    final updatedData = Map<String, dynamic>.from(existingData);
+    updatedData['id'] = cleanId;
+    updatedData['branchId'] = normNew;
+    updatedData['lastUpdatedAt'] = DateTime.now().toIso8601String();
+    updatedData['syncStatus'] = 'pending';
+
+    // 2. Save under new branch in Hive and queue sync
+    await saveStudentLocalAndSync(
+      branchId: normNew,
+      studentId: cleanId,
+      data: updatedData,
+      isNew: false,
+    );
+
+    // 3. Remove old branch key and all other duplicate branch keys from Hive
+    final oldKey = _studentKey(normOld, cleanId);
+    await box.delete(oldKey);
+
+    final otherBranchKeys = box.keys.where((k) {
+      final str = k.toString();
+      final kId = str.contains('__std__') ? str.split('__std__').last.trim() : str.trim();
+      return kId == cleanId && !str.startsWith('${normNew}__std__');
+    }).toList();
+    for (final k in otherBranchKeys) {
+      await box.delete(k);
+    }
+    await box.flush();
+
+    // 4. Remove from old branch collection in Firestore
+    try {
+      if (NetworkHealthService().isStableOnline) {
+        unawaited(FirebaseFirestore.instance
+            .collection('branches')
+            .doc(normOld)
+            .collection('madrassa_students')
+            .doc(cleanId)
+            .delete()
+            .catchError((_) {}));
+      }
+    } catch (_) {}
+
+    // Enqueue cloud deletion for old branch so sync service handles it if offline
+    try {
+      await LocalStorageService.enqueueSync({
+        'type': 'permanent_delete_madrassa_student',
+        'branchId': normOld,
+        'studentId': cleanId,
+      });
+      unawaited(SyncService().triggerUpload(urgent: true));
+    } catch (e) {
+      debugPrint('[MadrassaLocalStorage] Error enqueuing old branch delete on transfer: $e');
+    }
+
+    // 5. Central audit log
+    unawaited(MadrassaAuditService.logAction(
+      branchId: normNew,
+      editor: editorUsername ?? 'HQ Manager',
+      role: editorRole ?? 'hqmanager',
+      type: 'student_transfer',
+      message: 'Transferred student ${updatedData['name'] ?? cleanId} (Roll: ${updatedData['rollNumber'] ?? '-'}) from branch ${normOld.toUpperCase()} to ${normNew.toUpperCase()}',
+      studentId: cleanId,
+      studentName: updatedData['name'] as String?,
+    ));
+  }
+
 
   static Map<String, dynamic>? getStudentCached(String branchId, String studentId) {
     if (!Hive.isBoxOpen(studentsBox)) return null;
@@ -491,7 +663,21 @@ class MadrassaLocalStorage {
           final isDeleted = s['isDeleted'] == true ||
               s['deleted'] == true ||
               s['status']?.toString().toLowerCase() == 'deleted';
-          return name.isNotEmpty && !isDeleted;
+          if (name.isEmpty || isDeleted) return false;
+
+          // STRICT BRANCH ISOLATION: A student must ONLY belong to their enrolled branch
+          if (!isGlobal) {
+            final sBranch = (s['branchId'] ?? '').toString().toLowerCase().trim();
+            if (sBranch.isNotEmpty) {
+              final isKarachiFam = (sBranch.contains('karachi') || sBranch.contains('saddar') || sBranch.contains('haji')) &&
+                  (cleanBranch.contains('karachi') || cleanBranch.contains('saddar') || cleanBranch.contains('haji'));
+              if (!isKarachiFam && sBranch != cleanBranch) {
+                return false;
+              }
+            }
+          }
+
+          return true;
         })
         .toList();
 
@@ -525,11 +711,12 @@ class MadrassaLocalStorage {
   }
 
   static int _studentRepairVersion = 0;
-  static const int _targetStudentRepairVersion = 3;
+  static const int _targetStudentRepairVersion = 6;
 
   /// Self-healing routine: Recovers full student records from sync queue,
   /// resolves multiple-prefixed keys, cleans corrupt or guardian placeholder names,
-  /// and ensures all 31 real students enrolled by teachers with their authentic
+  /// strictly removes cross-enrolled student duplicates across branches,
+  /// and ensures all real students enrolled by teachers with their authentic
   /// Urdu/English names and biometric PINs are correctly preserved and synced.
   static Future<void> repairMissingStudentsFromLocalData({bool force = false}) async {
     if (_studentRepairVersion >= _targetStudentRepairVersion && !force) return;
@@ -538,26 +725,68 @@ class MadrassaLocalStorage {
       final box = await LocalStorageService.ensureBoxOpen(studentsBox);
       bool changesMade = false;
 
-      // 1. Clean up multi-prefixed, corrupt or orphaned keys
+      // 1. Clean up multi-prefixed, corrupt or cross-enrolled/misplaced keys
       final keysToClean = box.keys.where((k) {
         final str = k.toString();
         if (str == 'gujrat__std__gujrat' || str == 'karachi__std__gujrat') return true;
-        if (str.startsWith('karachi__std__69f')) return true; // Gujrat students misplaced under Karachi
-        return str.contains('__std__') && (
+        if (str.contains('__std__') && (
           str.startsWith('gujrat__std__gujrat__std__') ||
           str.startsWith('karachi__std__gujrat__std__') ||
           str.startsWith('all__std__')
-        );
+        )) {
+          return true;
+        }
+
+        if (str.contains('__std__')) {
+          final raw = box.get(k);
+          if (raw is Map) {
+            final keyBranch = str.split('__std__').first.toLowerCase().trim();
+            final actualBranch = (raw['branchId'] ?? '').toString().toLowerCase().trim();
+            final cleanId = str.split('__std__').last.trim();
+
+            final isKnownGujratStd = cleanId == 'w8lgevxVEV1XQ4oYUou1' ||
+                cleanId == 'bHUKkS2pdOcnT1lnBBbJ' ||
+                cleanId == 'madrassa_std_1790174346830' ||
+                cleanId == 'madrassa_std_1792048734875' ||
+                cleanId == 'PUaTVDBQqRWv0cAu9s5k' ||
+                cleanId == 'WMBYKles2V4EkcvUuAd1' ||
+                cleanId.startsWith('69f');
+            if (isKnownGujratStd && keyBranch != 'gujrat') {
+              return true;
+            }
+
+            if (actualBranch.isNotEmpty && actualBranch != 'all' && actualBranch != 'global') {
+              final isKarachiFam = (actualBranch.contains('karachi') || actualBranch.contains('saddar') || actualBranch.contains('haji')) &&
+                  (keyBranch.contains('karachi') || keyBranch.contains('saddar') || keyBranch.contains('haji'));
+              if (!isKarachiFam && keyBranch != actualBranch) {
+                return true; // Misplaced under wrong branch key!
+              }
+            }
+          }
+        }
+        return false;
       }).toList();
 
       for (final badKey in keysToClean) {
         final raw = box.get(badKey);
+        final cleanId = badKey.toString().split('__std__').last.trim();
+        final badBranch = badKey.toString().split('__std__').first.toLowerCase().trim();
+
         if (raw is Map) {
           final data = Map<String, dynamic>.from(raw);
-          final cleanId = badKey.toString().split('__std__').last.trim();
-          final targetBranch = (data['branchId'] ?? 'gujrat').toString().toLowerCase().trim();
-          final canonicalKey = _studentKey(targetBranch, cleanId);
+          var targetBranch = (data['branchId'] ?? '').toString().toLowerCase().trim();
+          if (targetBranch.isEmpty || targetBranch == 'all' || targetBranch == 'global') {
+            final isKnownGujratStd = cleanId == 'w8lgevxVEV1XQ4oYUou1' ||
+                cleanId == 'bHUKkS2pdOcnT1lnBBbJ' ||
+                cleanId == 'madrassa_std_1790174346830' ||
+                cleanId == 'madrassa_std_1792048734875' ||
+                cleanId == 'PUaTVDBQqRWv0cAu9s5k' ||
+                cleanId == 'WMBYKles2V4EkcvUuAd1' ||
+                cleanId.startsWith('69f');
+            targetBranch = isKnownGujratStd ? 'gujrat' : badBranch;
+          }
 
+          final canonicalKey = _studentKey(targetBranch, cleanId);
           final existingCanonical = box.get(canonicalKey);
           final merged = <String, dynamic>{
             if (existingCanonical is Map) ...Map<String, dynamic>.from(existingCanonical),
@@ -565,9 +794,20 @@ class MadrassaLocalStorage {
             'id': cleanId,
             'branchId': targetBranch,
           };
-          if (!badKey.toString().startsWith('karachi__std__69f')) {
-            await box.put(canonicalKey, _sanitize(merged));
-          }
+          await box.put(canonicalKey, _sanitize(merged));
+
+          // Also remove foreign student document from Firestore under the bad branch!
+          try {
+            if (NetworkHealthService().isStableOnline) {
+              unawaited(FirebaseFirestore.instance
+                  .collection('branches')
+                  .doc(badBranch)
+                  .collection('madrassa_students')
+                  .doc(cleanId)
+                  .delete()
+                  .catchError((_) {}));
+            }
+          } catch (_) {}
         }
         await box.delete(badKey);
         changesMade = true;
@@ -1100,6 +1340,24 @@ class MadrassaLocalStorage {
         final box = await LocalStorageService.ensureBoxOpen(studentsBox);
         final Map<String, dynamic> studentUpdates = {};
         for (final doc in snap.docs) {
+          final data = doc.data();
+          final rawDocBranch = (data['branchId'] ?? data['branch'] ?? '').toString().toLowerCase().trim();
+          final effectiveStudentBranch = rawDocBranch.isNotEmpty ? normalizeBranch(rawDocBranch) : normBranch;
+          final isKarachiFam = (effectiveStudentBranch.contains('karachi') || effectiveStudentBranch.contains('saddar') || effectiveStudentBranch.contains('haji')) &&
+              (normBranch.contains('karachi') || normBranch.contains('saddar') || normBranch.contains('haji'));
+
+          if (effectiveStudentBranch != normBranch && !isKarachiFam) {
+            // Foreign student document - save under true branch only, skip normBranch
+            final trueKey = _studentKey(effectiveStudentBranch, doc.id);
+            final rawExisting = box.get(trueKey);
+            final merged = _resolveStudentConflict(
+              local: rawExisting is Map ? rawExisting : null,
+              remote: data,
+            );
+            studentUpdates[trueKey] = _sanitize(merged);
+            continue;
+          }
+
           final key = _studentKey(normBranch, doc.id);
           final rawExisting = box.get(key);
           final merged = _resolveStudentConflict(
@@ -1180,10 +1438,8 @@ class MadrassaLocalStorage {
       final normBranch = normalizeBranch(branchId);
       if (normBranch.isEmpty || normBranch == 'unknown') return;
 
-      // Ensure local records are healed and restored for Gujrat if applicable
-      if (normBranch == 'gujrat' || normBranch == 'all') {
-        await repairMissingStudentsFromLocalData(force: force);
-      }
+      // Ensure local records are healed and cross-enrolled duplicates cleaned across branches
+      await repairMissingStudentsFromLocalData(force: force);
 
       if (normBranch == 'all' || normBranch == 'global') {
         final branches = _getAllBranchIds();
@@ -1212,6 +1468,37 @@ class MadrassaLocalStorage {
 
       for (final doc in snap.docs) {
         final data = doc.data();
+        final rawDocBranch = (data['branchId'] ?? data['branch'] ?? '').toString().toLowerCase().trim();
+        final effectiveStudentBranch = rawDocBranch.isNotEmpty ? normalizeBranch(rawDocBranch) : normBranch;
+
+        final isKarachiFam = (effectiveStudentBranch.contains('karachi') || effectiveStudentBranch.contains('saddar') || effectiveStudentBranch.contains('haji')) &&
+            (normBranch.contains('karachi') || normBranch.contains('saddar') || normBranch.contains('haji'));
+
+        if (effectiveStudentBranch != normBranch && !isKarachiFam) {
+          // Foreign student document under branches/$normBranch/madrassa_students belongs to another branch!
+          final trueKey = _studentKey(effectiveStudentBranch, doc.id);
+          final rawExisting = box.get(trueKey);
+          final merged = _resolveStudentConflict(
+            local: rawExisting is Map ? rawExisting : null,
+            remote: data,
+          );
+          studentUpdates[trueKey] = _sanitize(merged);
+
+          // Purge from wrong branch collection in Firestore
+          try {
+            if (NetworkHealthService().isStableOnline) {
+              unawaited(FirebaseFirestore.instance
+                  .collection('branches')
+                  .doc(normBranch)
+                  .collection('madrassa_students')
+                  .doc(doc.id)
+                  .delete()
+                  .catchError((_) {}));
+            }
+          } catch (_) {}
+          continue;
+        }
+
         final key = _studentKey(normBranch, doc.id);
         final rawExisting = box.get(key);
         final merged = _resolveStudentConflict(
@@ -1248,23 +1535,58 @@ class MadrassaLocalStorage {
   static Future<void> downloadStudentsForGuardian(String branchId, List<String> studentIds) async {
     if (studentIds.isEmpty) return;
     try {
+      final normBranch = normalizeBranch(branchId);
       final box = await LocalStorageService.ensureBoxOpen(studentsBox);
       final Map<String, dynamic> updates = {};
       for (final id in studentIds) {
-        final doc = await FirebaseFirestore.instance
-            .collection('branches')
-            .doc(branchId)
-            .collection('madrassa_students')
-            .doc(id)
-            .get();
-        if (doc.exists && doc.data() != null) {
-          final key = _studentKey(branchId, doc.id);
+        DocumentSnapshot<Map<String, dynamic>>? doc;
+        try {
+          doc = await FirebaseFirestore.instance
+              .collection('branches')
+              .doc(normBranch)
+              .collection('madrassa_students')
+              .doc(id)
+              .get()
+              .timeout(const Duration(seconds: 4));
+        } catch (_) {}
+
+        // Fallback: check alternate branch (e.g. karachi if gujrat, or gujrat if karachi)
+        if (doc == null || !doc.exists) {
+          final candidateBranches = normBranch == 'gujrat' 
+              ? const ['karachi', 'saddar', 'jalalpurjattan']
+              : const ['gujrat', 'saddar', 'jalalpurjattan'];
+          for (final altBranch in candidateBranches) {
+            try {
+              final altDoc = await FirebaseFirestore.instance
+                  .collection('branches')
+                  .doc(altBranch)
+                  .collection('madrassa_students')
+                  .doc(id)
+                  .get()
+                  .timeout(const Duration(seconds: 3));
+              if (altDoc.exists && altDoc.data() != null) {
+                doc = altDoc;
+                break;
+              }
+            } catch (_) {}
+          }
+        }
+
+        if (doc != null && doc.exists && doc.data() != null) {
+          final data = doc.data()!;
+          final effectiveStudentBranch = (data['branchId'] ?? normBranch).toString().toLowerCase().trim();
+          final key = _studentKey(effectiveStudentBranch, doc.id);
           final rawExisting = box.get(key);
           final merged = _resolveStudentConflict(
             local: rawExisting is Map ? rawExisting : null,
-            remote: doc.data()!,
+            remote: data,
           );
           updates[key] = _sanitize(merged);
+          // Also cache under query branch key if different to ensure fast retrieval
+          if (effectiveStudentBranch != normBranch) {
+            final altKey = _studentKey(normBranch, doc.id);
+            updates[altKey] = _sanitize(merged);
+          }
         }
       }
       if (updates.isNotEmpty) {
@@ -1322,7 +1644,7 @@ class MadrassaLocalStorage {
         if (raw is Map) {
           foundAny = true;
           // Primary takes precedence, only fill in missing keys
-          for (final entry in (raw as Map).entries) {
+          for (final entry in raw.entries) {
             if (!merged.containsKey(entry.key.toString())) {
               merged[entry.key.toString()] = entry.value;
             }
@@ -1350,6 +1672,30 @@ class MadrassaLocalStorage {
 
   static Map<String, dynamic>? getDailyLogCached(String branchId, String dateKey) =>
       getLogCached(branchId, dateKey);
+
+  /// Stores a fee record received from another PC (LAN), as it is. The PC that took the
+  /// payment uploads it; re-saving it here re-queued and re-broadcast it on every peer and,
+  /// on a peer without the record, replaced the payment method with 'Cash' and blanked the
+  /// receipt. An older copy never replaces a newer one.
+  static Future<void> cacheFeePayment(String branchId, Map<String, dynamic> data) async {
+    final studentId = (data['studentId'] ?? '').toString().trim();
+    final year = (data['year'] as num?)?.toInt();
+    final month = (data['month'] as num?)?.toInt();
+    if (studentId.isEmpty || year == null || month == null) return;
+    final key = _feeKey(branchId.toLowerCase().trim(), year, month, studentId);
+    final box = await LocalStorageService.ensureBoxOpen(feesBox);
+    final existing = box.get(key);
+    if (existing is Map) {
+      final mine = _parseTimestamp(existing['lastUpdatedAt'] ?? existing['markedAt']);
+      final theirs = _parseTimestamp(data['lastUpdatedAt'] ?? data['markedAt']);
+      if (mine != null && theirs != null && theirs.isBefore(mine)) return;
+    }
+    await box.put(key, _sanitize({
+      if (existing is Map) ...Map<String, dynamic>.from(existing),
+      ...data,
+    }));
+    await box.flush();
+  }
 
   static Future<void> cacheDailyLog(String branchId, String dateKey, Map<String, dynamic> data) async {
     final normBranch = normalizeBranch(branchId);
@@ -1402,6 +1748,7 @@ class MadrassaLocalStorage {
     final updated = Map<String, dynamic>.from(existing);
 
     // Merge changes
+    final studentWrites = <Future<void>>[];
     logData.forEach((sId, data) {
       if (data is Map) {
         final existingStudentLog = updated[sId] is Map ? Map<String, dynamic>.from(updated[sId] as Map) : <String, dynamic>{};
@@ -1417,11 +1764,14 @@ class MadrassaLocalStorage {
           final studentCache = getStudentCached(effectiveBranch, sId);
           if (studentCache != null) {
             studentCache['currentLines'] = data['currentLines'];
-            cacheStudent(effectiveBranch, sId, studentCache);
+            studentWrites.add(cacheStudent(effectiveBranch, sId, studentCache));
           }
         }
       }
     });
+    if (studentWrites.isNotEmpty) {
+      await Future.wait(studentWrites);
+    }
 
     final sanitized = _sanitize(updated);
     await box.put(key, sanitized);
@@ -1460,12 +1810,13 @@ class MadrassaLocalStorage {
       // Enqueue sync actions for changed students' currentLines
       logData.forEach((sId, data) {
         if (data is Map && data.containsKey('currentLines')) {
-          LocalStorageService.enqueueSync({
+          unawaited(LocalStorageService.enqueueSync({
             'type': 'update_madrassa_student',
             'branchId': effectiveBranch,
             'studentId': sId,
+            'entityId': sId, // stable key: repeated edits coalesce instead of piling up
             'currentLines': data['currentLines'],
-          });
+          }));
         }
       });
 
@@ -1473,7 +1824,7 @@ class MadrassaLocalStorage {
       // write of the same document, left in the SDK's hidden queue whenever Firestore
       // did not answer (and sent again later, costing quota twice).
 
-      unawaited(SyncService().triggerUpload());
+      unawaited(SyncService().triggerUpload(urgent: true));
     } catch (e) {
       debugPrint('[MadrassaLocalStorage] enqueueSync error: $e');
     }
@@ -1661,7 +2012,7 @@ class MadrassaLocalStorage {
         'id': dateKey,
         'data': data,
       });
-      unawaited(SyncService().triggerUpload());
+      unawaited(SyncService().triggerUpload(urgent: true));
     } catch (e) {
       debugPrint('[MadrassaLocalStorage] enqueueSync error: $e');
     }
@@ -1695,7 +2046,7 @@ class MadrassaLocalStorage {
         'branchId': effectiveBranchId,
         'id': holidayId,
       });
-      unawaited(SyncService().triggerUpload());
+      unawaited(SyncService().triggerUpload(urgent: true));
     } catch (e) {
       debugPrint('[MadrassaLocalStorage] enqueueSync error: $e');
     }
@@ -1832,9 +2183,13 @@ class MadrassaLocalStorage {
     required int month,
     required double amountDue,
     required double amountPaid,
-    required String status, // 'paid' or 'unpaid'
+    required String status, // 'paid', 'partial', or 'unpaid'
     required String markedBy,
     required String markedByRole,
+    double? discount,
+    double? balanceDue,
+    String? paymentMethod,
+    String? receiptId,
     String? note,
   }) async {
     final effectiveBranchId = branchId.toLowerCase().trim();
@@ -1846,17 +2201,30 @@ class MadrassaLocalStorage {
     final existing = box.get(key);
     final currentRecord = existing is Map ? Map<String, dynamic>.from(existing) : <String, dynamic>{};
 
+    final effDiscount = (discount ?? (currentRecord['discount'] as num?)?.toDouble() ?? 0.0);
+    final effBalanceDue = balanceDue ??
+        ((status == 'unpaid')
+            ? amountDue
+            : (amountDue - amountPaid - effDiscount).clamp(0.0, double.infinity));
+    final resolvedStatus = (status == 'unpaid')
+        ? 'unpaid'
+        : (effBalanceDue <= 0.0 ? 'paid' : ((amountPaid > 0 || effDiscount > 0) ? 'partial' : 'unpaid'));
+
     final auditList = List<Map<String, dynamic>>.from(
       (currentRecord['auditLog'] as List? ?? []).whereType<Map>().map((e) => Map<String, dynamic>.from(e)),
     );
     auditList.add({
-      'status': status,
+      'status': resolvedStatus,
       'by': markedBy,
       'role': markedByRole,
       'timestamp': now.toIso8601String(),
       'note': note ?? '',
       'amountPaid': amountPaid,
       'amountDue': amountDue,
+      'discount': effDiscount,
+      'balanceDue': effBalanceDue,
+      'paymentMethod': paymentMethod ?? currentRecord['paymentMethod'] ?? 'Cash',
+      'receiptId': receiptId ?? currentRecord['receiptId'] ?? '',
     });
 
     final data = <String, dynamic>{
@@ -1869,8 +2237,13 @@ class MadrassaLocalStorage {
       'year': year,
       'month': month,
       'amountDue': amountDue,
+      'totalFee': amountDue,
       'amountPaid': amountPaid,
-      'status': status,
+      'discount': effDiscount,
+      'balanceDue': effBalanceDue,
+      'paymentMethod': paymentMethod ?? currentRecord['paymentMethod'] ?? 'Cash',
+      'receiptId': receiptId ?? currentRecord['receiptId'] ?? '',
+      'status': resolvedStatus,
       'markedBy': markedBy,
       'markedByRole': markedByRole,
       'markedAt': now.toIso8601String(),
@@ -1926,7 +2299,7 @@ class MadrassaLocalStorage {
         }
       });
 
-      unawaited(SyncService().triggerUpload());
+      unawaited(SyncService().triggerUpload(urgent: true));
     } catch (e) {
       debugPrint('[MadrassaLocalStorage] enqueueSync error: $e');
     }
@@ -2212,7 +2585,7 @@ class MadrassaLocalStorage {
       // write of the same document, left in the SDK's hidden queue whenever Firestore
       // did not answer (and sent again later, costing quota twice).
 
-      unawaited(SyncService().triggerUpload());
+      unawaited(SyncService().triggerUpload(urgent: true));
     } catch (e) {
       debugPrint('[MadrassaLocalStorage] enqueueSync error: $e');
     }
@@ -2297,7 +2670,7 @@ class MadrassaLocalStorage {
       // write of the same document, left in the SDK's hidden queue whenever Firestore
       // did not answer (and sent again later, costing quota twice).
 
-      unawaited(SyncService().triggerUpload());
+      unawaited(SyncService().triggerUpload(urgent: true));
     } catch (e) {
       debugPrint('[MadrassaLocalStorage] enqueueSync error: $e');
     }

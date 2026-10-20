@@ -6,7 +6,6 @@ import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:flutter/material.dart';
 import 'package:gmwf/design/components/app_toast.dart';
 import 'package:flutter/services.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:hive_flutter/hive_flutter.dart';
@@ -343,12 +342,18 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
     // 2. Check local stock items in active camp
     final localItems =
         LocalStorageService.getAllLocalStockItems(branchId: _effectiveBranchId, filterByCamp: true);
+    final queryInt = int.tryParse(normalized);
     final localMatch = localItems.any((item) {
       final itemCode = (item['code']?.toString().trim().toLowerCase() ?? item['barcode']?.toString().trim().toLowerCase() ?? '');
-      if (itemCode.isEmpty || itemCode != normalized) return false;
+      if (itemCode.isEmpty) return false;
       final itemDocId = item['_docId'] ?? item['id'] ?? item['docId'];
       if (excludeDocId != null && itemDocId == excludeDocId) return false;
-      return true;
+      if (itemCode == normalized) return true;
+      if (queryInt != null) {
+        final itemInt = int.tryParse(itemCode);
+        if (itemInt != null && itemInt == queryInt) return true;
+      }
+      return false;
     });
     return localMatch;
   }
@@ -362,10 +367,15 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
     if (profMatch != null) return profMatch;
 
     final localItems = LocalStorageService.getAllLocalStockItems(branchId: _effectiveBranchId, filterByCamp: true);
+    final queryInt = int.tryParse(cleanCode);
     for (final item in localItems) {
       final itemCode = (item['code']?.toString().trim().toLowerCase() ?? item['barcode']?.toString().trim().toLowerCase() ?? '');
-      if (itemCode.isNotEmpty && itemCode == cleanCode) {
-        return item;
+      if (itemCode.isNotEmpty) {
+        if (itemCode == cleanCode) return item;
+        if (queryInt != null) {
+          final itemInt = int.tryParse(itemCode);
+          if (itemInt != null && itemInt == queryInt) return item;
+        }
       }
     }
     return null;
@@ -407,7 +417,6 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
       Map<String, dynamic> originalMed, Map<String, dynamic> updatedFields) async {
     try {
       final userInfo = await _getUserInfo();
-      final db = FirebaseFirestore.instance;
 
       if (widget.isAdmin || widget.isDoctor) {
         final docId = (originalMed['_docId'] ?? originalMed['id'] ?? originalMed['medicineId'])?.toString();
@@ -436,7 +445,7 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
             'logData': logData,
           });
 
-          // Always enqueue sync and update Firestore directly to ensure durable cloud persistence
+          // Upload through the sync queue only (a second direct SDK write cost quota for nothing).
           await LocalStorageService.enqueueSync({
             'type': 'register_medicine',
             'branchId': widget.branchId,
@@ -444,17 +453,6 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
             'data': updatedItem,
             'logData': logData,
           });
-
-          unawaited(FirebaseFirestore.instance
-              .collection('branches')
-              .doc(widget.branchId)
-              .collection('inventory')
-              .doc(docId)
-              .set(Map<String, dynamic>.from(updatedFields)..addAll({
-                'updatedAt': FieldValue.serverTimestamp(),
-              }), SetOptions(merge: true)).catchError((e) {
-                debugPrint('[InventoryUpdate] Firestore direct update error: $e');
-              }));
           SyncService().triggerUpload();
 
           _snack('Medicine updated successfully!');
@@ -527,21 +525,9 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         ),
       });
 
-      try {
-        unawaited(db
-            .collection('branches')
-            .doc(widget.branchId)
-            .collection('edit_requests')
-            .doc(requestId)
-            .set({
-          ...reqMap,
-          'requestedAt': FieldValue.serverTimestamp(),
-        }).catchError((e) {
-          debugPrint('[InventoryUpdate] Background Firestore edit request upload note: $e');
-        }));
-      } catch (e) {
-        debugPrint('[InventoryUpdate] Firestore offline, saved locally: $e');
-      }
+      // The queue item above is the only cloud write: a direct SDK set() (no merge, status
+      // pending) could land after the decision and turn the request back to pending.
+      SyncService().triggerUpload();
 
       try {
         CloudMessagingService().notifySupervisorPendingRequests(
@@ -825,7 +811,10 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         final name = (item['name'] ?? '').toString().toLowerCase();
         final barcode = (item['barcode'] ?? item['code'] ?? '').toString().toLowerCase();
         final formula = (item['formula'] ?? '').toString().toLowerCase();
-        if (name.contains(q) || barcode.contains(q) || formula.contains(q)) {
+        final qNum = int.tryParse(q);
+        final bNum = int.tryParse(barcode);
+        final numMatch = qNum != null && bNum != null && qNum == bNum;
+        if (name.contains(q) || barcode.contains(q) || formula.contains(q) || numMatch) {
           final docId = (item['_docId'] ?? item['id'] ?? item['docId'])?.toString() ?? '';
           processDoc(item, docId);
         }
@@ -922,7 +911,8 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         });
       }
 
-      // STEP 3: Always enqueue sync and update Firestore directly so quantities stay in sync
+      // STEP 3: Upload through the sync queue only. A direct SDK increment as well counted the
+      // restock twice in the cloud.
       await LocalStorageService.enqueueSync({
         'type': 'add_inventory_stock',
         'branchId': _effectiveBranchId,
@@ -936,18 +926,6 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         'performedByName': userInfo['username'],
         'logData': logData,
       });
-
-      unawaited(FirebaseFirestore.instance
-          .collection('branches')
-          .doc(_effectiveBranchId)
-          .collection('inventory')
-          .doc(medId)
-          .update({
-            'quantity': FieldValue.increment(qty),
-            'updatedAt': FieldValue.serverTimestamp(),
-          }).catchError((e) {
-            debugPrint('[InventoryUpdate] Direct Firestore addStock error: $e');
-          }));
       SyncService().triggerUpload();
 
       _snack('+$qty added to ${_selectedMed!['name']} at $campLabel (${_currentBranchId.toUpperCase()})!');
@@ -2409,7 +2387,8 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         'logData': logData,
       });
 
-      // STEP 3: Always enqueue sync and update Firestore directly so quantities stay in sync
+      // STEP 3: Upload through the sync queue only. A direct SDK increment as well counted the
+      // restock twice in the cloud.
       await LocalStorageService.enqueueSync({
         'type': 'add_inventory_stock',
         'branchId': _effectiveBranchId,
@@ -2423,18 +2402,6 @@ class _InventoryUpdatePageState extends State<InventoryUpdatePage>
         'performedByName': userInfo['username'],
         'logData': logData,
       });
-
-      unawaited(FirebaseFirestore.instance
-          .collection('branches')
-          .doc(_effectiveBranchId)
-          .collection('inventory')
-          .doc(medId)
-          .update({
-            'quantity': FieldValue.increment(qty),
-            'updatedAt': FieldValue.serverTimestamp(),
-          }).catchError((e) {
-            debugPrint('[InventoryUpdate] Direct Firestore addStock error: $e');
-          }));
       SyncService().triggerUpload();
 
       _snack('+$qty added to $medName at $campLabel (${_currentBranchId.toUpperCase()})!');

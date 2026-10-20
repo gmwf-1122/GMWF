@@ -1670,7 +1670,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
         }
       }());
 
-      SyncService().triggerUpload(force: true);
+      SyncService().triggerUpload(urgent: true);
 
       _snack('User updated successfully!', success: true);
       if (mounted) {
@@ -1855,7 +1855,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
         }
       } catch (_) {}
 
-      SyncService().triggerUpload(force: true);
+      SyncService().triggerUpload(urgent: true);
 
       final authMessage = authDeleted
           ? 'User deleted successfully.'
@@ -4883,7 +4883,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
         }
 
         try {
-          SyncService().triggerUpload(force: true);
+          SyncService().triggerUpload(urgent: true);
         } catch (_) {}
       }
 
@@ -5397,7 +5397,7 @@ class _UserDetailScreenState extends State<UserDetailScreen>
     } catch (_) {}
 
     try {
-      SyncService().triggerUpload(force: true);
+      SyncService().triggerUpload(urgent: true);
     } catch (_) {}
 
     if (mounted) setState(() {});

@@ -95,6 +95,28 @@ void showAddStudentDialog(
     effectiveBranch = 'gujrat';
   }
 
+  final bool isHQManager = role.toLowerCase().contains('hqmanager') ||
+      role.toLowerCase().contains('hq manager') ||
+      role.toLowerCase().contains('hq_manager') ||
+      role.toLowerCase() == 'hq' ||
+      role.toLowerCase().contains('admin') ||
+      role.toLowerCase().contains('superadmin') ||
+      role.toLowerCase().contains('director') ||
+      role.toLowerCase().contains('chairman') ||
+      role.toLowerCase().contains('ceo');
+
+  final availableBranches = MadrassaLocalStorage.getAvailableBranchesForSelection();
+
+  // If editing an existing student, detect the student's authentic initial branch
+  final rawStudentBranch = (studentData?['branchId'] ?? studentData?['branch'] ?? '').toString().trim().toLowerCase();
+  String initialStudentBranch = rawStudentBranch.isNotEmpty 
+      ? MadrassaLocalStorage.normalizeBranch(rawStudentBranch) 
+      : effectiveBranch;
+  if (initialStudentBranch.isEmpty || initialStudentBranch == 'all') {
+    initialStudentBranch = effectiveBranch;
+  }
+  String selectedBranch = initialStudentBranch;
+
   final programMode = LocalStorageService.getMadrassaProgramMode(effectiveBranch);
   final isNazraOnly = programMode == 'nazra_only';
   final isHifzOnly = programMode == 'hifz_only';
@@ -839,7 +861,63 @@ void showAddStudentDialog(
                     ),
                   ],
                 ),
-                const SizedBox(height: 12),
+                if (isHQManager) ...[
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: SoftPalette.indigo500.withValues(alpha: 0.08),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: SoftPalette.indigo500.withValues(alpha: 0.25)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.business_rounded, size: 16, color: SoftPalette.indigo500),
+                            const SizedBox(width: 6),
+                            Text(
+                              context.isUrdu ? 'طالب علم کی برانچ (صرف HQ)' : 'Student Branch (HQ Only)',
+                              style: context.urduStyle(
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                  color: SoftPalette.indigo500,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 8),
+                        DropdownButtonFormField<String>(
+                          value: availableBranches.any((b) => b['id'] == selectedBranch)
+                              ? selectedBranch
+                              : (availableBranches.isNotEmpty ? availableBranches.first['id'] : selectedBranch),
+                          decoration: InputDecoration(
+                            isDense: true,
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
+                          ),
+                          items: availableBranches.map((b) {
+                            return DropdownMenuItem<String>(
+                              value: b['id'] as String,
+                              child: Text(
+                                b['name'] as String,
+                                style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
+                              ),
+                            );
+                          }).toList(),
+                          onChanged: (val) {
+                            if (val != null) {
+                              setDs(() => selectedBranch = val);
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
                 buildTf(
                   nameCtrl,
                   context.l.studentFullName,
@@ -1649,7 +1727,7 @@ void showAddStudentDialog(
                         'branchId': effectiveBranch,
                         'data': gUpdates,
                       });
-                      unawaited(SyncService().triggerUpload(force: true));
+                      unawaited(SyncService().triggerUpload(urgent: true));
 
                       try {
                         unawaited(FirebaseFirestore.instance
@@ -1707,44 +1785,61 @@ void showAddStudentDialog(
                   };
 
                   final now = DateTime.now();
-                  final finalStudentId = await MadrassaLocalStorage.saveStudentLocalAndSync(
-                    branchId: effectiveBranch,
-                    studentId: isEdit ? studentId : '',
-                    data: {
-                      if (studentData != null) ...studentData,
-                      ...finalData,
-                      'branchId': effectiveBranch,
-                      'status': studentData?['status'] ?? 'active',
-                      'batch': studentData?['batch'] ?? 'active',
-                      if (!isEdit) ...{
-                        'currentLines': 0,
-                        'enrolledMonth': DateFormat('yyyy-MM').format(now),
-                        'createdAt': now.toIso8601String(),
-                        'enrolledBy': username,
-                        'enrolledByRole': role,
-                        'auditLog': [
-                          {
-                            'status': 'active',
-                            'type': 'enrollment',
-                            'date': joinDate.toIso8601String(),
-                            'reason': 'Initial Enrollment',
-                            'by': username,
-                          }
-                        ],
-                      },
+                  final mergedStudentData = {
+                    if (studentData != null) ...studentData,
+                    ...finalData,
+                    'branchId': selectedBranch,
+                    'status': studentData?['status'] ?? 'active',
+                    'batch': studentData?['batch'] ?? 'active',
+                    if (!isEdit) ...{
+                      'currentLines': 0,
+                      'enrolledMonth': DateFormat('yyyy-MM').format(now),
+                      'createdAt': now.toIso8601String(),
+                      'enrolledBy': username,
+                      'enrolledByRole': role,
+                      'auditLog': [
+                        {
+                          'status': 'active',
+                          'type': 'enrollment',
+                          'date': joinDate.toIso8601String(),
+                          'reason': 'Initial Enrollment',
+                          'by': username,
+                        }
+                      ],
                     },
-                    isNew: !isEdit,
-                  );
+                  };
+
+                  String finalStudentId;
+                  if (isEdit && selectedBranch != initialStudentBranch) {
+                    await MadrassaLocalStorage.transferStudentBranch(
+                      oldBranch: initialStudentBranch,
+                      newBranch: selectedBranch,
+                      studentId: studentId,
+                      studentData: mergedStudentData,
+                      editorUsername: username,
+                      editorRole: role,
+                    );
+                    finalStudentId = studentId;
+                  } else {
+                    finalStudentId = await MadrassaLocalStorage.saveStudentLocalAndSync(
+                      branchId: selectedBranch,
+                      studentId: isEdit ? studentId : '',
+                      data: mergedStudentData,
+                      isNew: !isEdit,
+                    );
+                  }
 
                   // Central audit log - run in background so UI never blocks
                   unawaited(MadrassaAuditService.logAction(
-                    branchId: effectiveBranch,
+                    branchId: selectedBranch,
                     editor: username,
                     role: role,
-                    type: isEdit ? 'student_edit' : 'student_enrollment',
+                    type: isEdit ? (selectedBranch != initialStudentBranch ? 'student_transfer' : 'student_edit') : 'student_enrollment',
                     message: isEdit
-                        ? 'Updated details for student ${finalData['name']} (Roll: ${finalData['rollNumber']})'
-                        : 'Enrolled new student ${finalData['name']} (Roll: ${finalData['rollNumber']}) in branch ${effectiveBranch.toUpperCase()}',
+                        ? (selectedBranch != initialStudentBranch
+                            ? 'Transferred student ${finalData['name']} (Roll: ${finalData['rollNumber']}) to branch ${selectedBranch.toUpperCase()}'
+                            : 'Updated details for student ${finalData['name']} (Roll: ${finalData['rollNumber']})')
+                        : 'Enrolled new student ${finalData['name']} (Roll: ${finalData['rollNumber']}) in branch ${selectedBranch.toUpperCase()}',
                     studentId: finalStudentId,
                     studentName: finalData['name'] as String?,
                   ));
@@ -1754,7 +1849,7 @@ void showAddStudentDialog(
                       entityId: finalStudentId,
                       entityName: nameCtrl.text.trim(),
                       entityType: 'madrassa_student',
-                      branchId: effectiveBranch,
+                      branchId: selectedBranch,
                       customPin: enteredPin,
                     ));
                   }
@@ -1772,8 +1867,8 @@ void showAddStudentDialog(
                               studentIds.add(finalStudentId);
                             }
                             map['studentIds'] = studentIds;
-                            // Enforce guardian's branch matches the teacher's branch
-                            map['branchId'] = effectiveBranch;
+                            // Enforce guardian's branch matches the student's branch
+                            map['branchId'] = selectedBranch;
                             map['role'] = 'Madrassa Guardian';
                             await uBox.put(key, map);
                             await uBox.flush();
@@ -1782,14 +1877,14 @@ void showAddStudentDialog(
                               RealtimeManager().sendMessage(RealtimeEvents.payload(
                                 type: RealtimeEvents.saveUser,
                                 data: map,
-                                branchId: effectiveBranch,
+                                branchId: selectedBranch,
                               ));
                             } catch (_) {}
 
                             await LocalStorageService.enqueueSync({
                               'type': 'save_user',
                               'uid': gUid,
-                              'branchId': effectiveBranch,
+                              'branchId': selectedBranch,
                               'data': map,
                             });
                             unawaited(SyncService().triggerUpload());
@@ -1800,12 +1895,12 @@ void showAddStudentDialog(
                                   .doc(gUid)
                                   .set({
                                     'studentIds': studentIds,
-                                    'branchId': effectiveBranch,
+                                    'branchId': selectedBranch,
                                     'role': 'Madrassa Guardian',
                                   }, SetOptions(merge: true)).catchError((_) {}));
                               unawaited(FirebaseFirestore.instance
                                   .collection('branches')
-                                  .doc(effectiveBranch)
+                                  .doc(selectedBranch)
                                   .collection('users')
                                   .doc(gUid)
                                   .set(map, SetOptions(merge: true)).catchError((_) {}));

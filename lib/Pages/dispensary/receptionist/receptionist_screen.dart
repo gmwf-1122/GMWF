@@ -156,7 +156,7 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     lss.LocalStorageService.ensureBoxOpen(lss.LocalStorageService.entriesBox);
 
     if (!widget.isEmbedded) {
-      SyncService().start(widget.branchId);
+      SyncService().start(widget.branchId, moduleScope: 'dispensary'); // like the other desks: no full-PC sweep
     }
     _loadBranchName();
     _listenConnectivity();
@@ -824,19 +824,9 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         ),
       });
 
-      try {
-        await FirebaseFirestore.instance
-            .collection('branches')
-            .doc(widget.branchId)
-            .collection('edit_requests')
-            .doc(requestId)
-            .set({
-          ...reqPayload,
-          'requestedAt': FieldValue.serverTimestamp(),
-        });
-      } catch (e) {
-        debugPrint('[ReceptionistScreen] Firestore offline, saved locally: $e');
-      }
+      // The queue item above is the only cloud write. A direct SDK set() here as well (no
+      // merge, status pending) sat in the SDK's offline queue when the quota ran out and was
+      // sent after the supervisor's decision, turning the request back to pending.
 
       // Notify supervisor via Cloud Messaging (works even if supervisor's app is closed)
       try {
@@ -983,7 +973,9 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
         return true;
       } else {
         final dt = DateTime.tryParse(rawStr);
-        if (dt != null) {
+        // A token over 2 days old cannot resolve to today: skip the costly shift lookup, which ran
+        // for every historical token on every queue refresh.
+        if (dt != null && DateTime.now().difference(dt).inHours.abs() < 48) {
           final dtKey = CampSessionService.resolveShiftAndDateKey(dt, widget.branchId).dateKey;
           if (dtKey == currentTodayKey) return true;
         }
@@ -2997,9 +2989,9 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     ConnectionManager().removeReconnectListener(_onLanReconnected);
     _refreshNotifier.dispose();
     _mobileTabController.dispose();
-    if (!widget.isEmbedded) {
-      ConnectionManager().stop();
-    }
+    // The LAN link is shared by every desk screen and only logout stops it. Stopping it here
+    // (e.g. when this screen was replaced or popped) left the PC disconnected, with Retry
+    // doing nothing, until the next login.
     _connectionSub?.cancel();
     _connSub?.cancel();
     _realtimeSub?.cancel();

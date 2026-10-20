@@ -1,4 +1,6 @@
 import 'package:gmwf/services/cloud/cloud_db.dart';
+import 'package:gmwf/services/cloud/lan_firestore_gate.dart';
+import 'package:gmwf/services/network_health_service.dart';
 import 'dart:async';
 import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:flutter/material.dart';
@@ -175,6 +177,15 @@ class RequestPage extends StatefulWidget {
 /// are the source of truth here and the sync queue pushes to the cloud later, so a cloud write
 /// must never block an approval: wait briefly, then carry on.
 Future<void> _bestEffort(Future<dynamic> f, [String label = 'cloud write']) async {
+  // No internet (or a desk whose LAN server does the uploading): the write cannot finish, so
+  // do not make the user wait for the timeout on every approval. Local save + LAN broadcast +
+  // the sync queue already carry the change.
+  if (LanFirestoreGate.isLanDesk || !NetworkHealthService().isStableOnline) {
+    unawaited(f.timeout(const Duration(seconds: 3)).then<void>((_) {}, onError: (Object e) {
+      debugPrint('[RequestPage] $label skipped (queued for sync): $e');
+    }));
+    return;
+  }
   try {
     await f.timeout(const Duration(seconds: 3));
   } catch (e) {
@@ -360,6 +371,36 @@ class _StableRequestTabState extends State<_StableRequestTab>
 
   final Map<String, String> _nameCache = {};
   final List<StreamSubscription> _firestoreSubs = [];
+
+  /// Branch doc each request was read from (shared by the tabs). A decision is written there
+  /// only; writing it to every branch alias created half-empty request docs in the others.
+  static final Map<String, String> _cloudBranchOf = {};
+
+  /// Requests whose decision this device already re-sent in this app session.
+  static final Set<String> _reasserted = {};
+
+  /// This device decided the request (or heard the decision) but the cloud says pending
+  /// again: an older PC's unsent "pending" write reached Firestore after the decision (the
+  /// SDK keeps unsent writes on disk and sends them when the daily quota resets). Send the
+  /// decision again through the upload queue, once per session.
+  void _reassertDecision(Map existing, String docId, String col, String bId) {
+    if (!_reasserted.add('$col/$docId')) return;
+    final decision = <String, dynamic>{
+      for (final f in ['reviewedAt', 'reviewedBy', 'reviewedByName', 'doctorReason', 'rejectionReason', 'acknowledgedAt'])
+        if (existing[f] != null) f: existing[f],
+    };
+    debugPrint('[RequestPage] $col/$docId reverted to pending in the cloud; re-sending ${existing['status']}');
+    unawaited(LocalStorageService.enqueueSync({
+      'type': 'update_request_status',
+      'requestId': docId,
+      'collection': col,
+      'branchId': bId,
+      'cloudBranch': bId,
+      'status': existing['status'],
+      'requestStatus': existing['status'], // enqueueSync overwrites 'status' with the queue state
+      'data': decision,
+    }).then((_) => SyncService().triggerUpload()).catchError((_) {}));
+  }
   bool _isApprovingAll = false;
   bool _toastShownForPending = false;
 
@@ -461,13 +502,22 @@ class _StableRequestTabState extends State<_StableRequestTab>
                 }
               }
               // [CRITICAL FIX] Protect locally approved/rejected requests from stale remote pending snapshot
-              final existing = box.get(doc.id);
+              final existing = box.get(doc.id) ??
+                  (d['requestId'] != null ? box.get(d['requestId']) : null) ??
+                  (Hive.isBoxOpen(LocalStorageService.restockRequestsBox)
+                      ? (Hive.box(LocalStorageService.restockRequestsBox).get(doc.id) ?? (d['requestId'] != null ? Hive.box(LocalStorageService.restockRequestsBox).get(d['requestId']) : null))
+                      : null);
+              _cloudBranchOf[doc.id] = bId;
               if (existing is Map) {
-                final localStatus = (existing['status'] ?? '').toString().toLowerCase().trim();
                 final remoteStatus = (d['status'] ?? 'pending').toString().toLowerCase().trim();
-                if ((localStatus == 'approved' || localStatus == 'rejected') && remoteStatus == 'pending') {
+                if (LocalStorageService.isDecidedRequestStatus(existing['status']) &&
+                    !LocalStorageService.isDecidedRequestStatus(remoteStatus)) {
+                  _reassertDecision(existing, doc.id, col, bId);
                   continue; // Never revert a local resolution to pending!
                 }
+              }
+              if (col == 'restock_requests' && Hive.isBoxOpen(LocalStorageService.restockRequestsBox)) {
+                await Hive.box(LocalStorageService.restockRequestsBox).put(doc.id, d);
               }
               await box.put(doc.id, d);
             }
@@ -512,13 +562,22 @@ class _StableRequestTabState extends State<_StableRequestTab>
                 }
               }
               // [CRITICAL FIX] Protect locally approved/rejected requests from stale remote pending snapshot
-              final existing = box.get(doc.id);
+              final existing = box.get(doc.id) ??
+                  (d['requestId'] != null ? box.get(d['requestId']) : null) ??
+                  (Hive.isBoxOpen(LocalStorageService.restockRequestsBox)
+                      ? (Hive.box(LocalStorageService.restockRequestsBox).get(doc.id) ?? (d['requestId'] != null ? Hive.box(LocalStorageService.restockRequestsBox).get(d['requestId']) : null))
+                      : null);
+              _cloudBranchOf[doc.id] = bId;
               if (existing is Map) {
-                final localStatus = (existing['status'] ?? '').toString().toLowerCase().trim();
                 final remoteStatus = (d['status'] ?? 'pending').toString().toLowerCase().trim();
-                if ((localStatus == 'approved' || localStatus == 'rejected') && remoteStatus == 'pending') {
+                if (LocalStorageService.isDecidedRequestStatus(existing['status']) &&
+                    !LocalStorageService.isDecidedRequestStatus(remoteStatus)) {
+                  _reassertDecision(existing, doc.id, col, bId);
                   continue; // Never revert a local resolution to pending!
                 }
+              }
+              if (col == 'restock_requests' && Hive.isBoxOpen(LocalStorageService.restockRequestsBox)) {
+                Hive.box(LocalStorageService.restockRequestsBox).put(doc.id, d);
               }
               box.put(doc.id, d);
             }
@@ -2434,7 +2493,8 @@ class _StableRequestTabState extends State<_StableRequestTab>
         ? data['branchId'].toString()
         : ((widget.branchId.isNotEmpty && widget.branchId != 'all' && widget.branchId != 'global') ? widget.branchId : 'gujrat');
 
-    final candidateBranches = _resolveTargetBranches();
+    // Only the branch doc the request lives in (writing to every alias made empty docs).
+    final candidateBranches = {_cloudBranchOf[docId] ?? targetBranch};
     for (final bId in candidateBranches) {
       try {
         final ref = CloudDb.instance
@@ -2461,8 +2521,10 @@ class _StableRequestTabState extends State<_StableRequestTab>
       'requestId': docId,
       'id': docId,
       'status': 'approved',
+      'requestStatus': 'approved', // enqueueSync overwrites 'status' with the queue state
       'collection': collection,
       'branchId': targetBranch,
+      if (_cloudBranchOf[docId] != null) 'cloudBranch': _cloudBranchOf[docId],
       'reviewedAt': DateTime.now().toIso8601String(),
       'reviewedBy': reviewerUid,
       if (reviewerName != null) 'reviewedByName': reviewerName,
@@ -2848,7 +2910,8 @@ class _StableRequestTabState extends State<_StableRequestTab>
           await box.put(docId, updated);
         }
 
-        final candidateBranches = _resolveTargetBranches();
+        // Only the branch doc the request lives in (writing to every alias made empty docs).
+        final candidateBranches = {_cloudBranchOf[docId] ?? targetBranch};
         for (final bId in candidateBranches) {
           try {
             final targetRef = CloudDb.instance
@@ -2876,8 +2939,10 @@ class _StableRequestTabState extends State<_StableRequestTab>
           'requestId': docId,
           'id': docId,
           'status': newStatus,
+          'requestStatus': newStatus, // enqueueSync overwrites 'status' with the queue state
           'collection': collection,
           'branchId': targetBranch,
+          if (_cloudBranchOf[docId] != null) 'cloudBranch': _cloudBranchOf[docId],
           'reviewedAt': DateTime.now().toIso8601String(),
           'reviewedBy': reviewerUid,
           if (reviewerName != null) 'reviewedByName': reviewerName,

@@ -672,6 +672,25 @@ class DonationBoxStorage {
 
   static final Map<String, DateTime> _lastDownloadTimes = {};
 
+  /// Local key for a cloud doc. Ids made on a PC already read `<branch>_box_<uuid>` /
+  /// `<branch>_opening_<uuid>` and are used as they are; other ids get that prefix.
+  static String localKeyFor(String branchId, String kind, String docId) {
+    final prefix = '${branchId}_${kind}_';
+    return docId.startsWith(prefix) ? docId : '$prefix$docId';
+  }
+
+  /// The cloud doc id of a box: its firestoreId when it came from the cloud, else its local id.
+  static String boxCloudDocId(String boxLocalId) {
+    try {
+      if (Hive.isBoxOpen(boxesBoxName)) {
+        final raw = Hive.box(boxesBoxName).get(boxLocalId);
+        final fsId = raw is Map ? (raw['firestoreId'] ?? '').toString().trim() : '';
+        if (fsId.isNotEmpty) return fsId;
+      }
+    } catch (_) {}
+    return boxLocalId;
+  }
+
   static Future<void> downloadBoxes(String branchId, {bool force = false}) async {
     try {
       final now = DateTime.now();
@@ -695,6 +714,21 @@ class DonationBoxStorage {
       final openingsBox = Hive.box(openingsBoxName);
       int totalBoxes = 0;
 
+      // Stores a cloud doc under the local key the creating PC used, so the same box or
+      // opening is one record everywhere. A local edit not uploaded yet is kept.
+      Future<void> store(Box target, String bId, String kind, String docId, Map<String, dynamic> raw) async {
+        final key = localKeyFor(bId, kind, docId);
+        final existing = target.get(key);
+        if (existing is Map && existing['syncStatus'] == 'pending') return;
+        final data = LocalStorageService.sanitize(raw)
+          ..['firestoreId'] = docId
+          ..['syncStatus'] = 'synced';
+        await target.put(key, data);
+        // Earlier downloads prefixed ids that already carried the prefix; drop that copy.
+        final legacyKey = '${bId}_${kind}_$docId';
+        if (legacyKey != key && target.containsKey(legacyKey)) await target.delete(legacyKey);
+      }
+
       for (final bId in targetBranches) {
         final snap = await db
             .collection('branches')
@@ -703,11 +737,7 @@ class DonationBoxStorage {
             .get();
         totalBoxes += snap.docs.length;
         for (var doc in snap.docs) {
-          final data = doc.data();
-          data['firestoreId'] = doc.id;
-          data['syncStatus'] = 'synced';
-          final key = '${bId}_box_${doc.id}';
-          await hiveBox.put(key, data);
+          await store(hiveBox, bId, 'box', doc.id, doc.data());
         }
 
         // Download openings for each box
@@ -720,13 +750,18 @@ class DonationBoxStorage {
               .collection('openings')
               .get();
           for (var openDoc in openSnap.docs) {
-            final data = openDoc.data();
-            data['firestoreId'] = openDoc.id;
-            data['syncStatus'] = 'synced';
-            final key = '${bId}_opening_${openDoc.id}';
-            await openingsBox.put(key, data);
+            await store(openingsBox, bId, 'opening', openDoc.id, openDoc.data());
           }
         }
+
+        // Openings the upload queue used to write to a separate collection (before
+        // 2026-10-18) are read too, so they are not lost.
+        try {
+          final legacy = await db.collection('branches').doc(bId).collection('donation_box_openings').get();
+          for (var openDoc in legacy.docs) {
+            await store(openingsBox, bId, 'opening', openDoc.id, openDoc.data());
+          }
+        } catch (_) {}
       }
       await hiveBox.flush();
       await openingsBox.flush();
@@ -750,14 +785,14 @@ class DonationBoxStorage {
         RealtimeManager().sendMessage(
           RealtimeEvents.payload(
             type: RealtimeEvents.saveDonationBox,
-            data: box.toMap(),
+            data: {...box.toMap(), 'id': box.id}, // peers key the record by id
           ),
         );
       }
       // Uploaded by the queued item above. The direct write that was here was a second
       // write of the same document, left in the SDK's hidden queue whenever Firestore
       // did not answer (and sent again later, costing quota twice).
-      SyncService().triggerUpload(force: true);
+      SyncService().triggerUpload(urgent: true);
     } catch (e) {
       debugPrint('[DonationBoxStorage] Enqueue box sync failed: $e');
     }
@@ -778,14 +813,14 @@ class DonationBoxStorage {
         RealtimeManager().sendMessage(
           RealtimeEvents.payload(
             type: RealtimeEvents.saveBoxOpening,
-            data: opening.toMap(),
+            data: {...opening.toMap(), 'id': opening.id}, // peers key the record by id
           ),
         );
       }
       // Uploaded by the queued item above. The direct write that was here was a second
       // write of the same document, left in the SDK's hidden queue whenever Firestore
       // did not answer (and sent again later, costing quota twice).
-      SyncService().triggerUpload(force: true);
+      SyncService().triggerUpload(urgent: true);
     } catch (e) {
       debugPrint('[DonationBoxStorage] Enqueue opening sync failed: $e');
     }
@@ -920,7 +955,7 @@ class DonationBoxStorage {
 
       if (boxedQueued > 0 || openingsQueued > 0) {
         debugPrint('[DonationBoxStorage] Backfilled $boxedQueued boxes and $openingsQueued openings into sync queue');
-        SyncService().triggerUpload(force: true);
+        SyncService().triggerUpload(urgent: true);
       }
     } catch (e) {
       debugPrint('[DonationBoxStorage] backfillUnsyncedBoxes error: $e');

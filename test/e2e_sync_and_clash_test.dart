@@ -260,7 +260,8 @@ void main() {
         campId: 'haji',
         serial: 'H-12',
       );
-      expect(karachiHajiKey, equals('2026-10-06_haji_camp'));
+      // '<date>_haji' is the doc every reader uses (v1.6.2 briefly wrote '<date>_haji_camp').
+      expect(karachiHajiKey, equals('2026-10-06_haji'));
     });
   });
 

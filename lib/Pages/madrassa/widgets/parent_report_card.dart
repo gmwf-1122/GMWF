@@ -247,6 +247,16 @@ class _ParentReportCardState extends State<ParentReportCard> {
     _logsStream = MadrassaLocalStorage.streamLogsForMonthCached(widget.branchId, _selectedYear, _selectedMonth);
     _configStream = MadrassaLocalStorage.streamConfigCached(widget.branchId);
     _holidaysStream = MadrassaLocalStorage.streamHolidaysCached(widget.branchId);
+
+    // Refresh current month daily logs from cloud in background so parent sees latest dates
+    if (widget.branchId.isNotEmpty) {
+      final now = DateTime.now();
+      final isCurrent = _selectedYear == now.year && _selectedMonth == now.month;
+      final cached = MadrassaLocalStorage.getLogsForMonthCached(widget.branchId, _selectedYear, _selectedMonth);
+      if (cached.isEmpty || isCurrent) {
+        MadrassaLocalStorage.downloadLogsForMonth(widget.branchId, _selectedYear, _selectedMonth);
+      }
+    }
   }
 
   @override
@@ -2129,9 +2139,10 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
   void _onMonthChanged() {
     _updateSelectedDateForNewMonth();
     _logsStream = MadrassaLocalStorage.streamLogsForMonthCached(widget.branchId, _selectedYear, _selectedMonth);
-    // Hive-first: only download from Firestore if this month's logs are completely absent from local storage
+    final now = DateTime.now();
+    final isCurrent = _selectedYear == now.year && _selectedMonth == now.month;
     final cached = MadrassaLocalStorage.getLogsForMonthCached(widget.branchId, _selectedYear, _selectedMonth);
-    if (cached.isEmpty && widget.branchId.isNotEmpty) {
+    if ((cached.isEmpty || isCurrent) && widget.branchId.isNotEmpty) {
       MadrassaLocalStorage.downloadLogsForMonth(widget.branchId, _selectedYear, _selectedMonth);
     }
   }
@@ -4870,9 +4881,13 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
     required String monthYearStr,
   }) {
     final paymentRecord = MadrassaLocalStorage.getFeePaymentCached(widget.branchId, _selectedYear, _selectedMonth, widget.studentId);
-    final status = paymentRecord?['status']?.toString() ?? (due <= 0 ? 'paid' : 'unpaid');
-    final amountPaid = (paymentRecord?['amountPaid'] as num?)?.toDouble() ?? (status == 'paid' ? due : 0.0);
-    final isPaid = status == 'paid';
+    final status = paymentRecord?['status']?.toString().toLowerCase();
+    final amountPaid = (paymentRecord?['amountPaid'] as num?)?.toDouble() ?? 0.0;
+    final discount = (paymentRecord?['discount'] as num?)?.toDouble() ?? 0.0;
+    final balanceDue = (paymentRecord?['balanceDue'] as num?)?.toDouble() ??
+        ((status == 'paid' || due <= 0) ? 0.0 : (due - amountPaid - discount).clamp(0.0, double.infinity));
+    final isPaid = status == 'paid' || (paymentRecord != null && balanceDue <= 0.0);
+    final isPartial = status == 'partial' || (paymentRecord != null && !isPaid && (amountPaid > 0.0 || discount > 0.0));
 
     return Container(
       decoration: BoxDecoration(
@@ -4930,15 +4945,39 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
           _formFeeRow(context.t('PTM Meeting Reward'), '- Rs. ${ptmSavings.toStringAsFixed(0)}', color: SoftPalette.amber300),
           Divider(height: 20, thickness: 1, color: dividerColor),
           _formFeeRow(context.t('Total Discounts & Savings'), '- Rs. ${totalSavings.toStringAsFixed(0)}', isBold: true, color: SoftPalette.green400),
+          if (amountPaid > 0) ...[
+            const SizedBox(height: 4),
+            _formFeeRow(
+              context.isUrdu ? 'والدین کی طرف سے ادا شدہ رقم (منہا شدہ)' : 'Amount Paid by Parent (Deducted)',
+              '- Rs. ${amountPaid.toStringAsFixed(0)}',
+              isBold: true,
+              color: SoftPalette.green550,
+            ),
+          ],
+          if (discount > 0) ...[
+            const SizedBox(height: 4),
+            _formFeeRow(
+              context.isUrdu ? 'خصوصی رعایت / چھوٹ' : 'Special Concession / Discount',
+              '- Rs. ${discount.toStringAsFixed(0)}',
+              isBold: true,
+              color: SoftPalette.orange400,
+            ),
+          ],
           const SizedBox(height: 12),
           Container(
             padding: const EdgeInsets.all(14),
             decoration: BoxDecoration(
-              color: isPaid || due <= 0
+              color: isPaid || balanceDue <= 0
                   ? (isDarkMode ? SoftPalette.emerald750 : SoftPalette.emerald100)
-                  : (isDarkMode ? SoftPalette.red800 : SoftPalette.red100m),
+                  : (isPartial
+                      ? (isDarkMode ? SoftPalette.orange800.withValues(alpha: 0.3) : SoftPalette.yellow150)
+                      : (isDarkMode ? SoftPalette.red800 : SoftPalette.red100m)),
               borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: isPaid || due <= 0 ? SoftPalette.green400 : SoftPalette.red400),
+              border: Border.all(
+                color: isPaid || balanceDue <= 0
+                    ? SoftPalette.green400
+                    : (isPartial ? SoftPalette.orange400 : SoftPalette.red400),
+              ),
             ),
             child: Column(
               children: [
@@ -4946,24 +4985,28 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
-                      context.isUrdu ? 'قابل ادا رقم (NET AMOUNT DUE)' : 'NET PAYABLE AMOUNT DUE',
+                      context.isUrdu ? 'باقی واجب الادا رقم (WHAT REMAINS DUE)' : 'REMAINING BALANCE DUE',
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.bold,
-                        color: isPaid || due <= 0
+                        color: isPaid || balanceDue <= 0
                             ? (isDarkMode ? SoftPalette.green300 : SoftPalette.emerald600)
-                            : (isDarkMode ? SoftPalette.red350 : SoftPalette.red400),
+                            : (isPartial
+                                ? (isDarkMode ? SoftPalette.amber200 : SoftPalette.orange400)
+                                : (isDarkMode ? SoftPalette.red350 : SoftPalette.red400)),
                         fontFamily: context.isUrdu ? 'Noori' : null,
                       ),
                     ),
                     Text(
-                      context.isUrdu ? 'روپے ${due.toStringAsFixed(0)}' : 'Rs. ${due.toStringAsFixed(0)}',
+                      context.isUrdu ? 'روپے ${balanceDue.toStringAsFixed(0)}' : 'Rs. ${balanceDue.toStringAsFixed(0)}',
                       style: TextStyle(
                         fontSize: 20,
                         fontWeight: FontWeight.bold,
-                        color: isPaid || due <= 0
+                        color: isPaid || balanceDue <= 0
                             ? (isDarkMode ? SoftPalette.green300 : SoftPalette.emerald600)
-                            : (isDarkMode ? SoftPalette.red350 : SoftPalette.red400),
+                            : (isPartial
+                                ? (isDarkMode ? SoftPalette.amber200 : SoftPalette.orange400)
+                                : (isDarkMode ? SoftPalette.red350 : SoftPalette.red400)),
                       ),
                     ),
                   ],
@@ -4984,23 +5027,31 @@ Future<void> _showChangePasswordDialog(BuildContext context) async {
                     Container(
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                       decoration: BoxDecoration(
-                        color: isPaid || due <= 0
+                        color: isPaid || balanceDue <= 0
                             ? (isDarkMode ? SoftPalette.emerald600 : SoftPalette.emerald100)
-                            : (isDarkMode ? SoftPalette.red700 : SoftPalette.red150m),
+                            : (isPartial
+                                ? (isDarkMode ? SoftPalette.orange350.withValues(alpha: 0.2) : SoftPalette.yellow200)
+                                : (isDarkMode ? SoftPalette.red700 : SoftPalette.red150m)),
                         borderRadius: BorderRadius.circular(6),
                       ),
                       child: Text(
                         isPaid
-                            ? (context.isUrdu ? 'ادا شدہ (روپے ${amountPaid.toStringAsFixed(0)})' : 'PAID (Rs. ${amountPaid.toStringAsFixed(0)})')
-                            : (due <= 0
-                                ? (context.isUrdu ? 'معاف شدہ (روپے 0)' : 'WAIVED (Rs. 0)')
-                                : (context.isUrdu ? 'غیر ادا شدہ (بقایا روپے ${due.toStringAsFixed(0)})' : 'UNPAID (Pending Rs. ${due.toStringAsFixed(0)})')),
+                            ? (context.isUrdu ? 'مکمل ادا شدہ (روپے ${amountPaid.toStringAsFixed(0)})' : 'FULLY PAID (Rs. ${amountPaid.toStringAsFixed(0)})')
+                            : (isPartial
+                                ? (context.isUrdu
+                                    ? 'جزوی ادائیگی (ادا: روپے ${amountPaid.toStringAsFixed(0)} • باقی: روپے ${balanceDue.toStringAsFixed(0)})'
+                                    : 'PARTIAL (Paid: Rs. ${amountPaid.toStringAsFixed(0)} • Rem: Rs. ${balanceDue.toStringAsFixed(0)})')
+                                : (due <= 0
+                                    ? (context.isUrdu ? 'معاف شدہ (روپے 0)' : 'WAIVED (Rs. 0)')
+                                    : (context.isUrdu ? 'غیر ادا شدہ (بقایا روپے ${due.toStringAsFixed(0)})' : 'UNPAID (Pending Rs. ${due.toStringAsFixed(0)})'))),
                         style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
-                          color: isPaid || due <= 0
+                          color: isPaid || balanceDue <= 0
                               ? (isDarkMode ? SoftPalette.emerald300 : SoftPalette.emerald550)
-                              : (isDarkMode ? SoftPalette.red350 : SoftPalette.red550),
+                              : (isPartial
+                                  ? (isDarkMode ? SoftPalette.amber200 : SoftPalette.orange400)
+                                  : (isDarkMode ? SoftPalette.red350 : SoftPalette.red550)),
                           fontFamily: context.isUrdu ? 'Noori' : null,
                         ),
                       ),

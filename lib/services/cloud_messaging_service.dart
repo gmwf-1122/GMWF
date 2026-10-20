@@ -31,6 +31,7 @@ import '../pages/global_modular_dashboard.dart';
 import '../pages/notification_screen.dart';
 import '../pages/request.dart';
 import '../widgets/update_dialog_widget.dart';
+import 'cloud/lan_firestore_gate.dart';
 
 const String kAppTitle = 'Gulzar Madina Welfare Foundation';
 const String kAppLogoAsset = 'assets/logo/gmwf-1.png';
@@ -875,7 +876,7 @@ $xmlString
 
     // Also persist to branch 'notifications' subcollection for FCM push delivery when app is closed
     try {
-      await FirebaseFirestore.instance.collection('branches').doc(cleanB).collection('notifications').doc(notifId).set({
+      final notifDoc = <String, dynamic>{
         'id': notifId,
         'notificationId': notifId,
         'title': 'Supervisor Alert: $countStr',
@@ -902,7 +903,11 @@ $xmlString
           'requestType': requestType ?? '',
           'targetScreen': 'requests',
         },
-      }, SetOptions(merge: true));
+      };
+      // A dispensary desk on the LAN hands it to the LAN server, which uploads it.
+      if (!(LanFirestoreGate.isLanDesk && LanFirestoreGate.relayWrite('branches/$cleanB/notifications/$notifId', notifDoc))) {
+        await FirebaseFirestore.instance.collection('branches').doc(cleanB).collection('notifications').doc(notifId).set(notifDoc, SetOptions(merge: true));
+      }
     } catch (e) {
       debugPrint('[CloudMessagingService] Cloud supervisor notification write skipped/cached: $e');
     }

@@ -482,6 +482,8 @@ class _EmployeeDetailPageState extends State<EmployeeDetailPage> with SingleTick
               _DetailRow('Bank Name', bankName),
               _DetailRow('Account / IBAN', iban),
               _DetailRow('Education', emp['qualification']?.toString() ?? emp['education']?.toString() ?? 'N/A'),
+              _DetailRow('Weekly Rest Schedule', FinanceLocalStorage.getEmployeeWeeklyOffDisplay(emp)),
+              _DetailRow('Sunday Status', (emp['isSundayOff'] == false) ? 'Working Day (Not Off)' : 'Weekly Off (Excused)'),
             ],
           ),
           const SizedBox(height: 16),

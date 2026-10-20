@@ -23,6 +23,7 @@ import '../utils/photo_upload_helper.dart';
 import '../widgets/madrassa_status_menu.dart';
 import '../../../theme/role_theme_provider.dart';
 import '../dialogs/enrollment_dialog.dart';
+import '../dialogs/change_student_branch_dialog.dart';
 import '../madrassa_strings.dart';
 import 'student_detail_page.dart';
 import '../../../design/design_system.dart';
@@ -1195,6 +1196,16 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                   final matchesSearch = name.contains(query) || roll.contains(query);
                   if (!matchesSearch) return false;
 
+                  // Strict branch isolation: students must only appear in their enrolled branch
+                  final sBranch = (d['branchId'] ?? '').toString().toLowerCase().trim();
+                  if (_effectiveBranch != 'all' && _effectiveBranch != 'global' && sBranch.isNotEmpty) {
+                    final isKarachiFam = (sBranch.contains('karachi') || sBranch.contains('saddar') || sBranch.contains('haji')) &&
+                        (_effectiveBranch.contains('karachi') || _effectiveBranch.contains('saddar') || _effectiveBranch.contains('haji'));
+                    if (!isKarachiFam && sBranch != _effectiveBranch) {
+                      return false;
+                    }
+                  }
+
                   if (_statusFilter != 'all') {
                     final status = d['status'] ?? 'active';
                     if (status != _statusFilter) return false;
@@ -1404,7 +1415,7 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                                           ),
                                           const SizedBox(width: 8),
                                           SizedBox(
-                                            width: _isHQManager ? 72 : 40,
+                                            width: _isHQManager ? 104 : 40,
                                             child: Text(
                                               context.l.todayActions,
                                               textAlign: TextAlign.center,
@@ -1662,14 +1673,31 @@ class _StudentManagementViewState extends ConsumerState<StudentManagementView> {
                                               ),
                                               const SizedBox(width: 8),
 
-                                              // Actions (Delete button for HQ Manager only + Status menu)
+                                              // Actions (Transfer & Delete buttons for HQ Manager only + Status menu)
                                               SizedBox(
-                                                width: _isHQManager ? 72 : 40,
+                                                width: _isHQManager ? 104 : 40,
                                                 child: Row(
                                                   mainAxisSize: MainAxisSize.min,
                                                   mainAxisAlignment: MainAxisAlignment.end,
                                                   children: [
                                                     if (_isHQManager) ...[
+                                                      IconButton(
+                                                        icon: Icon(Icons.swap_horiz_rounded, size: 20, color: context.adapt(SoftPalette.indigo500)),
+                                                        tooltip: context.isUrdu ? 'طالب علم کی برانچ تبدیل کریں' : 'Change Branch (HQ Only)',
+                                                        padding: const EdgeInsets.all(4),
+                                                        constraints: const BoxConstraints(),
+                                                        onPressed: () => showChangeStudentBranchDialog(
+                                                          context,
+                                                          student: d,
+                                                          currentBranch: _effectiveBranch,
+                                                          username: widget.username,
+                                                          role: widget.role,
+                                                          onTransferred: () {
+                                                            ref.invalidate(madrassaStudentsProvider(_effectiveBranch));
+                                                          },
+                                                        ),
+                                                      ),
+                                                      const SizedBox(width: 2),
                                                       IconButton(
                                                         icon: Icon(Icons.delete_outline, size: 18, color: context.adapt(SoftPalette.red400)),
                                                         tooltip: context.isUrdu ? 'طالب علم ڈیلیٹ کریں (صرف HQ)' : 'Delete Student (HQ Only)',

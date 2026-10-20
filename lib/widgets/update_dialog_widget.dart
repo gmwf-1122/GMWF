@@ -44,27 +44,6 @@ class UpdateDialogWidget extends StatefulWidget {
         return;
       }
 
-      // Check version-specific snooze for non-mandatory updates
-      if (!manualCheck && !updateInfo.forceUpdate) {
-        try {
-          final box = Hive.isBoxOpen('app_settings')
-              ? Hive.box('app_settings')
-              : await Hive.openBox('app_settings');
-          final snoozedVersion = box.get('update_snoozed_version') as String?;
-          final snoozedUntilStr = box.get('update_snoozed_until') as String?;
-
-          if (snoozedUntilStr != null && snoozedVersion == updateInfo.latestVersion) {
-            final snoozedUntil = DateTime.tryParse(snoozedUntilStr);
-            if (snoozedUntil != null && DateTime.now().isBefore(snoozedUntil)) {
-              debugPrint('[UpdateDialogWidget] Update prompt for v${updateInfo.latestVersion} snoozed until $snoozedUntil');
-              return;
-            }
-          }
-        } catch (e) {
-          debugPrint('[UpdateDialogWidget] Error reading snooze setting: $e');
-        }
-      }
-
       if (isServerMode) {
         debugPrint('[UpdateDialogWidget] Headless server mode detected. Executing silent background auto-update...');
         await AutoUpdateService.performSilentHeadlessUpdate(updateInfo.downloadUrl);
@@ -76,7 +55,7 @@ class UpdateDialogWidget extends StatefulWidget {
       _isShowingDialog = true;
       await showDialog(
         context: context,
-        barrierDismissible: !updateInfo.forceUpdate,
+        barrierDismissible: false,
         barrierColor: SoftPalette.gray900.withValues(alpha: 0.65),
         builder: (ctx) => UpdateDialogWidget(updateInfo: updateInfo),
       );
@@ -128,20 +107,10 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
 
     if (mounted) {
       if (success) {
-        // Always reset _isDownloading so the dialog is not stuck in "Installing..." state.
-        // The APK installer runs as a separate Android activity; our job is done.
+        // Reset _isDownloading; keep dialog on screen since updates are mandatory.
         setState(() {
           _isDownloading = false;
         });
-
-        if (!widget.updateInfo.forceUpdate) {
-          // Auto close dialog after installer launches if non-mandatory
-          Future.delayed(const Duration(seconds: 3), () {
-            if (mounted) {
-              Navigator.of(context, rootNavigator: true).maybePop();
-            }
-          });
-        }
       } else {
         // Download or install failed — reset so the user can retry or dismiss
         setState(() {
@@ -179,7 +148,7 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
     final maxCardHeight = math.min(620.0, media.height * 0.86);
 
     return PopScope(
-      canPop: !widget.updateInfo.forceUpdate && !_isDownloading,
+      canPop: false,
       child: Dialog(
         backgroundColor: Colors.transparent,
         elevation: 0,
@@ -678,23 +647,6 @@ class _UpdateDialogWidgetState extends State<UpdateDialogWidget> {
       ),
       child: Row(
         children: [
-          if (!widget.updateInfo.forceUpdate && !_isDownloading) ...[
-            Expanded(
-              child: OutlinedButton(
-                onPressed: _snoozeUpdate,
-                style: OutlinedButton.styleFrom(
-                  padding: const EdgeInsets.symmetric(vertical: 13),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                  side: BorderSide(color: t.bgRule as Color, width: 1.2),
-                ),
-                child: Text(
-                  'Remind Later',
-                  style: TextStyle(color: t.textSecondary as Color, fontWeight: FontWeight.w600, fontSize: 13),
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-          ],
           Expanded(
             child: Container(
               decoration: BoxDecoration(

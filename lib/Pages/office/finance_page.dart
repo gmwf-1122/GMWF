@@ -930,8 +930,7 @@ class _FinancePageState extends State<FinancePage> {
           if (d1.toLowerCase() != d2.toLowerCase()) return false;
         }
         if (selCamp != 'All Camps') {
-          final empCamp = FinanceLocalStorage.getEmployeeCamp(emp);
-          if (empCamp.toLowerCase() != selCamp.toLowerCase()) return false;
+          if (!FinanceLocalStorage.isEmployeeInCamp(emp, selCamp)) return false;
         }
         return true;
       }).toList();
@@ -1079,7 +1078,7 @@ class _FinancePageState extends State<FinancePage> {
                           final name = emp['name']?.toString() ?? 'Staff';
                           final role = emp['role']?.toString() ?? '';
                           final dept = emp['department']?.toString() ?? '';
-                          final camp = FinanceLocalStorage.getEmployeeCamp(emp);
+                          final camp = FinanceLocalStorage.getEmployeeCampDisplay(emp);
                           final isChecked = selectedEmpIds.contains(id);
 
                           return CheckboxListTile(

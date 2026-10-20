@@ -450,7 +450,7 @@ class ZkTecoNetworkService {
     String deviceSn = '',
     required String source,
     bool enqueueForSync = true,
-    bool broadcastLan = true,
+    bool broadcastLan = false,
   }) async {
     final dedupKey = buildCanonicalDedupKey(pin, timestamp, deviceIp);
     if (isPunchDuplicate(dedupKey, pin: pin, deviceIp: deviceIp, timestamp: timestamp)) {
@@ -461,7 +461,26 @@ class ZkTecoNetworkService {
 
     final bool isFromCloud = (source == 'firestore_sync' || source == 'firestore_listener');
     final bool shouldEnqueue = enqueueForSync && !isFromCloud;
-    final bool shouldBroadcast = broadcastLan && !isFromCloud;
+    // Attendance punches must NOT be broadcasted over LAN; they upload directly to Firestore.
+    const bool shouldBroadcast = false;
+
+    // Each PC keeps only its role's boxes open (LocalStorageService.roleUsesBox). A punch from
+    // the cloud is recorded here only when this PC shows attendance; a device punch always is,
+    // and resolving its PIN needs the credential and employee lists (closed, it would be filed
+    // as unmapped).
+    if (isFromCloud &&
+        !LocalStorageService.roleUsesBox(LocalStorageService.attendanceBox) &&
+        !LocalStorageService.roleUsesBox(LocalStorageService.madrassaLogsBox) &&
+        !LocalStorageService.roleUsesBox(LocalStorageService.schoolLogsBox)) {
+      return;
+    }
+    for (final name in const [LocalStorageService.biometricCredentialsBox, LocalStorageService.employeesBox]) {
+      try {
+        await LocalStorageService.ensureBoxOpen(name);
+      } catch (e) {
+        debugPrint('[ZkTecoNetworkService] Could not open "$name" for punch $pin: $e');
+      }
+    }
 
     totalPunchesReceivedNotifier.value++;
 
@@ -689,12 +708,7 @@ class ZkTecoNetworkService {
       final key = '${credential.entityId}_$dateStr';
       final existing = box.get(key);
 
-      // Determine active shift / session for this punch (morning, evening, night)
-      final shiftInfo = CampSessionService.resolveShiftAndDateKey(punchTimestamp);
-      final sessionKey = shiftInfo.session.toLowerCase(); // 'morning', 'evening', 'night'
-      
       // Resolve effective branch accurately:
-      // CRITICAL: The physical device where the employee just punched (deviceBranch) takes top priority
       String effectiveBranch = '';
       if (deviceBranch.isNotEmpty && deviceBranch != 'all' && deviceBranch != 'main') {
         effectiveBranch = deviceBranch.toLowerCase().trim();
@@ -711,220 +725,129 @@ class ZkTecoNetworkService {
         effectiveBranch = 'karachi';
       }
 
-      String resolveBranchDisplayName(String bId) {
-        final clean = bId.toLowerCase().replaceAll('branch_', '').trim();
-        if (clean.contains('haji')) return 'Haji Camp';
-        if (clean.contains('saddar')) return 'Saddar';
-        final fromStorage = LocalStorageService.getBranchName(bId);
-        return fromStorage.isNotEmpty ? fromStorage : (bId[0].toUpperCase() + bId.substring(1));
-      }
+      final record = existing is Map ? Map<String, dynamic>.from(existing) : <String, dynamic>{};
 
-      final branchDisplayName = resolveBranchDisplayName(effectiveBranch);
-
-      if (existing != null) {
-        final existingMap = Map<String, dynamic>.from(existing as Map);
-
-        // RULE: If HQ Manager manually marked user as Absent/Leave and locked it, DO NOT ALLOW biometric override!
-        final isLocked = existingMap['isLockedByAdmin'] == true || 
-                         existingMap['isManagerLocked'] == true ||
-                         existingMap['manualOverride'] == true;
-        if (isLocked) {
-          debugPrint('[ZkTecoNetworkService] Biometric scan BLOCKED for ${credential.entityName}: Locked by HQ Manager');
+      // Debounce duplicate punch within 30 seconds
+      final lastPunchTimeStr = record['lastPunchTime']?.toString();
+      if (lastPunchTimeStr != null) {
+        final lastPunch = DateTime.tryParse(lastPunchTimeStr);
+        if (lastPunch != null && punchTimestamp.difference(lastPunch).inSeconds.abs() < 30) {
+          debugPrint('[ZkTecoNetworkService] Duplicate punch ignored (< 30s) for ${credential.entityName}');
           return;
         }
+      }
 
-        final lastPunchTimeStr = existingMap['lastPunchTime']?.toString();
-        if (lastPunchTimeStr != null) {
-          final lastPunchEventTime = DateTime.tryParse(lastPunchTimeStr);
-          if (lastPunchEventTime != null &&
-              punchTimestamp.difference(lastPunchEventTime).inMinutes.abs() < 5) {
-            debugPrint('[ZkTecoNetworkService] Duplicate punch ignored (< 5 mins) for ${credential.entityName}');
-            return;
-          }
-        }
+      final punches = (record['punches'] is List)
+          ? List<dynamic>.from(record['punches'] as List)
+          : <dynamic>[];
+      punches.add({
+        'time': timeStr,
+        'timestamp': punchTimestamp.toIso8601String(),
+        'source': '$source ($location)',
+        'deviceBranch': effectiveBranch,
+        'deviceSn': deviceSn,
+      });
 
-        // Retrieve or initialize shifts map
-        final Map<String, dynamic> shifts = existingMap['shifts'] is Map 
-            ? Map<String, dynamic>.from(existingMap['shifts'] as Map) 
-            : <String, dynamic>{};
+      record['id'] ??= _uuid.v4();
+      record['employeeId'] = credential.entityId;
+      record['employeeName'] = credential.entityName;
+      record['branchId'] = effectiveBranch;
+      record['date'] = dateStr;
+      record['dateKey'] = dateStr;
+      record['time'] = timeStr;
+      record['timestamp'] = punchTimestamp.toIso8601String();
+      record['lastPunchTime'] = punchTimestamp.toIso8601String();
+      record['punches'] = punches;
+      record['pin'] = credential.biometricPin;
+      record['biometricPin'] = credential.biometricPin;
+      record['source'] = '$source ($location)';
 
-        // Check if there is an unclosed shift at THIS physical facility/branch:
-        String? openShiftKeyAtThisBranch;
-        final cleanEff = effectiveBranch.replaceAll('branch_', '').trim();
-        for (final entry in shifts.entries) {
-          if (entry.value is Map) {
-            final m = entry.value as Map;
-            final bId = (m['branchId'] ?? '').toString().toLowerCase().replaceAll('branch_', '').trim();
-            final hasIn = m['checkInTime'] != null;
-            final hasOut = m['checkOutTime'] != null;
-            if (hasIn && !hasOut && (bId == cleanEff || bId.isEmpty || cleanEff.isEmpty)) {
-              openShiftKeyAtThisBranch = entry.key;
+      // Lookup employee profile to check for multi-shift/camp sessions
+      Map<String, dynamic>? emp;
+      if (Hive.isBoxOpen(LocalStorageService.employeesBox)) {
+        final raw = Hive.box(LocalStorageService.employeesBox).get(credential.entityId);
+        if (raw is Map) emp = Map<String, dynamic>.from(raw);
+      }
+
+      // Resolve multi-shift / camp session
+      final sessName = CampSessionService.getCurrentSession(punchTimestamp, effectiveBranch).toLowerCase();
+      final shifts = record['shifts'] is Map ? Map<String, dynamic>.from(record['shifts'] as Map) : <String, dynamic>{};
+
+      String targetShiftKey = sessName;
+      String? matchedCamp;
+      if (emp != null && emp['sessions'] is List) {
+        final sessList = emp['sessions'] as List;
+        for (final s in sessList) {
+          if (s is Map) {
+            final sCamp = (s['camp'] ?? s['location'] ?? s['branchName'] ?? '').toString().toLowerCase();
+            final sSess = (s['session'] ?? '').toString().toLowerCase();
+            final locMatch = sCamp.isNotEmpty && (location.toLowerCase().contains(sCamp) || effectiveBranch.toLowerCase().contains(sCamp));
+            if (locMatch || sSess == sessName) {
+              targetShiftKey = sSess.isNotEmpty ? sSess : sessName;
+              matchedCamp = s['camp']?.toString() ?? s['location']?.toString();
               break;
             }
           }
         }
+      }
 
-        if (openShiftKeyAtThisBranch != null) {
-          // Punch OUT: Close the unclosed shift at this facility/camp
-          final shiftEntry = Map<String, dynamic>.from(shifts[openShiftKeyAtThisBranch] as Map);
-          final inTsStr = shiftEntry['checkInTimestamp']?.toString();
-          final inTs = inTsStr != null ? DateTime.tryParse(inTsStr) : null;
-          if (inTs == null || punchTimestamp.isAfter(inTs)) {
-            shiftEntry['checkOutTime'] = timeStr;
-            shiftEntry['checkOutTimestamp'] = punchTimestamp.toIso8601String();
-            shiftEntry['status'] = 'present';
-            shiftEntry['departureTime'] = timeStr;
-            shifts[openShiftKeyAtThisBranch] = shiftEntry;
-          }
-        } else {
-          // Punch IN: Start a new shift/session at this facility/camp
-          String shiftKey = sessionKey;
-          if (shifts.containsKey(shiftKey)) {
-            final existingShift = shifts[shiftKey];
-            final existingBranch = existingShift is Map ? (existingShift['branchId'] ?? '').toString().toLowerCase().replaceAll('branch_', '').trim() : '';
-            if (existingBranch != cleanEff) {
-              shiftKey = '${sessionKey}_$cleanEff';
-            }
-          }
+      final curShift = shifts[targetShiftKey] is Map ? Map<String, dynamic>.from(shifts[targetShiftKey] as Map) : <String, dynamic>{};
+      curShift['session'] = targetShiftKey;
+      curShift['location'] = matchedCamp ?? (curShift['location'] ?? (location.isNotEmpty ? location : effectiveBranch));
+      curShift['branchId'] = effectiveBranch;
+      curShift['status'] = 'present';
 
-          final shiftEntry = {
-            'branchId': effectiveBranch,
-            'branchName': branchDisplayName,
-            'location': location,
-            'session': sessionKey,
-            'status': 'present',
-            'checkInTime': timeStr,
-            'arrivalTime': timeStr,
-            'checkInTimestamp': punchTimestamp.toIso8601String(),
-            'checkOutTime': null,
-            'departureTime': null,
-            'checkOutTimestamp': null,
-            'source': '$source ($location)',
-          };
-          shifts[shiftKey] = shiftEntry;
-        }
-
-        existingMap['shifts'] = shifts;
-
-        // Compute overall day bounds across all shifts
-        DateTime? earliestIn;
-        DateTime? latestOut;
-        String? earliestInStr;
-        String? latestOutStr;
-
-        for (final s in shifts.values) {
-          if (s is Map) {
-            final inTsStr = s['checkInTimestamp']?.toString();
-            if (inTsStr != null) {
-              final inTs = DateTime.tryParse(inTsStr);
-              if (inTs != null && (earliestIn == null || inTs.isBefore(earliestIn))) {
-                earliestIn = inTs;
-                earliestInStr = s['checkInTime']?.toString();
-              }
-            }
-            final outTsStr = s['checkOutTimestamp']?.toString();
-            if (outTsStr != null) {
-              final outTs = DateTime.tryParse(outTsStr);
-              if (outTs != null && (latestOut == null || outTs.isAfter(latestOut))) {
-                latestOut = outTs;
-                latestOutStr = s['checkOutTime']?.toString();
-              }
-            }
-          }
-        }
-
-        if (earliestInStr != null) {
-          existingMap['checkInTime'] = earliestInStr;
-          existingMap['arrivalTime'] = earliestInStr;
-          existingMap['checkInTimestamp'] = earliestIn?.toIso8601String();
-        }
-        if (latestOutStr != null) {
-          existingMap['checkOutTime'] = latestOutStr;
-          existingMap['departureTime'] = latestOutStr;
-          existingMap['checkOutTimestamp'] = latestOut?.toIso8601String();
-        }
-
-        existingMap['lastPunchTime'] = punchTimestamp.toIso8601String();
-        existingMap['status'] = 'present';
-        // BUGFIX: Never falsely mark as synced before Firestore acknowledges.
-        // Always set synced=false/pending so _enqueueMissingAttendance can backfill.
-        existingMap['synced'] = false;
-        existingMap['syncStatus'] = 'pending';
-        // [BUG-FIX] Write pin/biometricPin so fallback matcher in getAttendanceForDate() works
-        existingMap['pin'] = credential.biometricPin;
-        existingMap['biometricPin'] = credential.biometricPin;
-        await box.put(key, existingMap);
-
-        if (enqueueForSync) {
-          // Enqueue cloud sync
-          await LocalStorageService.enqueueSync({
-            'type': 'save_attendance_record',
-            'branchId': effectiveBranch,
-            'date': dateStr,
-            'employeeId': credential.entityId,
-            'entityId': 'att_${effectiveBranch}_${credential.entityId}_$dateStr',
-            'data': existingMap,
-          });
-        }
+      if (curShift['checkInTime'] == null) {
+        curShift['checkInTime'] = timeStr;
+        curShift['arrivalTime'] = timeStr;
+        curShift['checkInTimestamp'] = punchTimestamp.toIso8601String();
       } else {
-        // First scan of the day -> Check-In time for the respective shift
-        final shiftEntry = {
-          'branchId': effectiveBranch,
-          'branchName': branchDisplayName,
-          'location': location,
-          'session': sessionKey,
-          'status': 'present',
-          'checkInTime': timeStr,
-          'arrivalTime': timeStr,
-          'checkInTimestamp': punchTimestamp.toIso8601String(),
-          'checkOutTime': null,
-          'departureTime': null,
-          'checkOutTimestamp': null,
-          'source': '$source ($location)',
-        };
+        curShift['checkOutTime'] = timeStr;
+        curShift['departureTime'] = timeStr;
+        curShift['checkOutTimestamp'] = punchTimestamp.toIso8601String();
+      }
+      shifts[targetShiftKey] = curShift;
+      record['shifts'] = shifts;
 
-        final newRecord = {
-          'id': _uuid.v4(),
-          'employeeId': credential.entityId,
-          'employeeName': credential.entityName,
+      // Keep first punch as checkIn and latest punch as checkOut for direct availability
+      if (record['checkInTime'] == null) {
+        record['checkInTime'] = timeStr;
+        record['arrivalTime'] = timeStr;
+        record['checkInTimestamp'] = punchTimestamp.toIso8601String();
+      } else {
+        record['checkOutTime'] = timeStr;
+        record['departureTime'] = timeStr;
+        record['checkOutTimestamp'] = punchTimestamp.toIso8601String();
+      }
+      record['status'] = 'present';
+      record['synced'] = false;
+      record['syncStatus'] = 'pending';
+      record['pendingSync'] = true;
+
+      await box.put(key, record);
+
+      // Invalidate app_flags sync markers so new punch/checkout is enqueued and uploaded
+      if (Hive.isBoxOpen('app_flags')) {
+        final flags = Hive.box('app_flags');
+        await flags.delete('attendance_synced_$key');
+        await flags.delete('attendance_synced_${credential.entityId}_$dateStr');
+      }
+
+      if (enqueueForSync) {
+        await LocalStorageService.enqueueSync({
+          'type': 'save_attendance_record',
           'branchId': effectiveBranch,
           'date': dateStr,
-          'checkInTime': timeStr,
-          'arrivalTime': timeStr,
-          'checkInTimestamp': punchTimestamp.toIso8601String(),
-          'checkOutTime': null,
-          'departureTime': null,
-          'checkOutTimestamp': null,
-          'status': 'present',
-          'attendanceType': 'Full Day',
-          'shifts': {
-            sessionKey: shiftEntry,
-          },
-          'source': '$source ($location)',
-          'lastPunchTime': punchTimestamp.toIso8601String(),
-          // BUGFIX: Never falsely mark as synced before Firestore acknowledges.
-          // Always set synced=false/pending so _enqueueMissingAttendance can backfill.
-          'synced': false,
-          'syncStatus': 'pending',
-          // [BUG-FIX] Write pin/biometricPin so fallback matcher in getAttendanceForDate() works
-          'pin': credential.biometricPin,
-          'biometricPin': credential.biometricPin,
-        };
-        await box.put(key, newRecord);
-
-        if (enqueueForSync) {
-          // Enqueue cloud sync
-          await LocalStorageService.enqueueSync({
-            'type': 'save_attendance_record',
-            'branchId': effectiveBranch,
-            'date': dateStr,
-            'employeeId': credential.entityId,
-            'entityId': 'att_${effectiveBranch}_${credential.entityId}_$dateStr',
-            'data': newRecord,
-          });
-        }
+          'employeeId': credential.entityId,
+          'localKey': key,
+          'data': record,
+          'pendingSync': true,
+          'forceUpload': true,
+        });
+        unawaited(SyncService().triggerUpload(urgent: true));
       }
-      debugPrint('[ZkTecoNetworkService] Recorded Employee Attendance for ${credential.entityName} ($sessionKey shift)');
+
+      debugPrint('[ZkTecoNetworkService] Recorded attendance punch for ${credential.entityName} at $dateStr $timeStr (Direct Firestore Upload)');
     } catch (e) {
       debugPrint('[ZkTecoNetworkService] Error recording employee attendance: $e');
     }
@@ -1975,18 +1898,16 @@ class ZkTecoNetworkService {
         if (val is! Map) continue;
         final record = Map<String, dynamic>.from(val);
 
-        final employeeId = (record['employeeId'] ?? record['id'] ?? '').toString().trim();
-        final dateStr = (record['date'] ?? '').toString().trim();
+        final employeeId = (record['employeeId'] ?? record['id'] ?? (key.toString().contains('_') ? key.toString().split('_')[0] : '')).toString().trim();
+        final dateStr = (record['date'] ?? (key.toString().contains('_') ? key.toString().split('_')[1] : '')).toString().trim();
         final branchId = (record['branchId'] ?? '').toString().trim().toLowerCase();
         final effectiveBranch = (branchId.isNotEmpty && branchId != 'all' && branchId != 'main')
             ? branchId
             : 'karachi';
 
         if (employeeId.isEmpty || dateStr.isEmpty) continue;
-        if (record['synced'] == true && record['syncStatus'] == 'synced') continue;
-        // Copies received over LAN ('att_…' keys) belong to the PC that recorded the punch;
-        // queueing them here made every PC upload every punch.
-        if (record['receivedViaLan'] == true || key.toString().startsWith('att_')) continue;
+        final isAlreadySynced = (record['synced'] == true && record['syncStatus'] == 'synced') && record['lastSyncedAt'] != null;
+        if (isAlreadySynced) continue;
 
         try {
           await LocalStorageService.enqueueSync({
@@ -1996,6 +1917,8 @@ class ZkTecoNetworkService {
             'employeeId': employeeId,
             'localKey': key,
             'data': record,
+            'pendingSync': true,
+            'forceUpload': true,
           });
           syncedCount++;
         } catch (e) {
@@ -2003,8 +1926,8 @@ class ZkTecoNetworkService {
         }
       }
       if (syncedCount > 0) {
-        await SyncService().triggerUpload();
-        debugPrint('[ZkTecoNetworkService] Enqueued $syncedCount attendance records for unified cloud upload.');
+        await SyncService().triggerUpload(force: true);
+        debugPrint('[ZkTecoNetworkService] Enqueued $syncedCount historical/pending attendance records for direct Firestore upload.');
       }
     } catch (e) {
       debugPrint('[ZkTecoNetworkService] syncAllRecordedAttendanceToFirestore error: $e');
@@ -2080,8 +2003,8 @@ class ZkTecoNetworkService {
           final timeStr = parts[1].trim();
           final timestamp = DateTime.tryParse(timeStr) ?? DateTime.now();
 
-          // Cutoff: Only process records from the last 24h to avoid flooding queues with stale historical dumps
-          if (DateTime.now().difference(timestamp).inHours.abs() > 24) {
+          // Retention: Process records up to 90 days old so failed or offline historical punches are preserved
+          if (DateTime.now().difference(timestamp).inDays.abs() > 90) {
             continue;
           }
 
@@ -2098,7 +2021,7 @@ class ZkTecoNetworkService {
               deviceSn: deviceSn,
               source: 'zkteco_pull',
               broadcastLan: false,
-              enqueueForSync: false,
+              enqueueForSync: true,
             );
           }
         }
@@ -2130,8 +2053,8 @@ class ZkTecoNetworkService {
 
             final timestamp = _decodeZkTime(timeEncoded);
 
-            // Cutoff: Only process records from the last 24h to avoid flooding queues on memory dumps
-            if (DateTime.now().difference(timestamp).inHours.abs() > 24) {
+            // Retention: Process records up to 90 days old so failed or offline historical punches are preserved
+            if (DateTime.now().difference(timestamp).inDays.abs() > 90) {
               continue;
             }
 
@@ -2148,7 +2071,7 @@ class ZkTecoNetworkService {
                 deviceSn: deviceSn,
                 source: 'zkteco_pull',
                 broadcastLan: false,
-                enqueueForSync: false,
+                enqueueForSync: true,
               );
             }
           }
@@ -2176,8 +2099,8 @@ class ZkTecoNetworkService {
 
           final timestamp = _decodeZkTime(timeEncoded);
 
-          // Cutoff: Only process records from the last 24h to avoid flooding queues on memory dumps
-          if (DateTime.now().difference(timestamp).inHours.abs() > 24) {
+          // Retention: Process records up to 90 days old so failed or offline historical punches are preserved
+          if (DateTime.now().difference(timestamp).inDays.abs() > 90) {
             continue;
           }
 
@@ -2196,7 +2119,7 @@ class ZkTecoNetworkService {
               deviceSn: deviceSn,
               source: 'zkteco_pull',
               broadcastLan: false,
-              enqueueForSync: false,
+              enqueueForSync: true,
             );
           }
         } catch (e) {
@@ -2270,13 +2193,11 @@ class ZkTecoNetworkService {
   }
 
   /// Decodes ZKTeco encoded timestamp (seconds since 2000-01-01 00:00:00)
-  /// Keeps only the records of a downloaded attendance log that [_parseZkAttendanceData]
-  /// would act on (punches within 24 h), in the same text or 40-byte binary layout, so the
-  /// scan of the whole log can run off the UI thread (via `compute`).
+  /// Keeps records of a downloaded attendance log within the past 90 days.
   @visibleForTesting
   static Uint8List keepRecentZkRecords(Uint8List data) {
     if (data.isEmpty) return data;
-    bool recent(DateTime t) => DateTime.now().difference(t).inHours.abs() <= 24;
+    bool recent(DateTime t) => DateTime.now().difference(t).inDays.abs() <= 90;
 
     final textData = utf8.decode(data, allowMalformed: true);
     if (textData.contains('\t') || textData.contains('\n') || textData.contains(',')) {

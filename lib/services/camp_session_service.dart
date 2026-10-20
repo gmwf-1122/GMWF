@@ -9,6 +9,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
 import 'package:gmwf/services/finance_local_storage.dart';
+import 'package:gmwf/services/cloud/lan_firestore_gate.dart';
 
 class CampSessionService {
   static const String _activeCampKey = 'active_camp_id';
@@ -560,12 +561,7 @@ class CampSessionService {
                 dispensaryTag: entry['dispensaryTag']?.toString(),
                 serial: serial,
               );
-              FirebaseFirestore.instance
-                  .collection('branches').doc(branchId)
-                  .collection('serials').doc(campDocKey)
-                  .collection(queueType).doc(serial)
-                  .set({'session': activeShift, 'dateKey': activeDateKey, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true))
-                  .catchError((_) {});
+              LanFirestoreGate.writeDoc('branches/$branchId/serials/$campDocKey/$queueType/$serial', {'session': activeShift, 'dateKey': activeDateKey, 'updatedAt': FieldValue.serverTimestamp()});
             }
           }
         }
@@ -662,12 +658,7 @@ class CampSessionService {
                 dispensaryTag: entry['dispensaryTag']?.toString(),
                 serial: serial,
               );
-              FirebaseFirestore.instance
-                  .collection('branches').doc(branchId)
-                  .collection('serials').doc(todayDocKey)
-                  .collection(queueType).doc(serial)
-                  .delete()
-                  .catchError((_) {});
+              LanFirestoreGate.writeDoc('branches/$branchId/serials/$todayDocKey/$queueType/$serial', const {}, delete: true);
             }
 
             final origDocKey = getCampDateDocId(
@@ -677,17 +668,12 @@ class CampSessionService {
               dispensaryTag: entry['dispensaryTag']?.toString(),
               serial: serial,
             );
-            FirebaseFirestore.instance
-                .collection('branches').doc(branchId)
-                .collection('serials').doc(origDocKey)
-                .collection(queueType).doc(serial)
-                .set({
+            LanFirestoreGate.writeDoc('branches/$branchId/serials/$origDocKey/$queueType/$serial', {
                   ...entry,
                   'session': originalSession,
                   'dateKey': originalDateKey,
                   'updatedAt': FieldValue.serverTimestamp(),
-                }, SetOptions(merge: true))
-                .catchError((_) {});
+                });
           }
         }
       }
@@ -760,12 +746,7 @@ class CampSessionService {
             dispensaryTag: updatedEntry['dispensaryTag']?.toString(),
             serial: serial,
           );
-          FirebaseFirestore.instance
-              .collection('branches').doc(branchId)
-              .collection('serials').doc(campDocKey)
-              .collection(queueType).doc(serial)
-              .set({'session': cleanSession, 'updatedAt': FieldValue.serverTimestamp()}, SetOptions(merge: true))
-              .catchError((_) {});
+          LanFirestoreGate.writeDoc('branches/$branchId/serials/$campDocKey/$queueType/$serial', {'session': cleanSession, 'updatedAt': FieldValue.serverTimestamp()});
         } catch (_) {}
 
         return true;
@@ -1192,10 +1173,13 @@ class CampSessionService {
     return false;
   }
 
+  /// Shared formatter: resolveShiftAndDateKey runs for many tokens on every queue refresh.
+  static final DateFormat _ddMMyy = DateFormat('ddMMyy');
+
   /// Canonical single source of truth resolver for Shift and DateKey, factoring in branch-specific session windows.
   static ({String session, String dateKey}) resolveShiftAndDateKey([DateTime? time, String? branchId, String? department, String? facilityId]) {
     final dt = (time != null ? time.toLocal() : getAuthoritativeTime());
-    final formatter = DateFormat('ddMMyy');
+    final formatter = _ddMMyy;
     final currentMinutes = dt.hour * 60 + dt.minute;
 
     final allowed = getAllowedSessions(branchId, department: department, facilityId: facilityId);
@@ -1260,6 +1244,28 @@ class CampSessionService {
     return resolveShiftAndDateKey(time, branchId, null, facilityId).session;
   }
 
+  /// Suffix of a camp's `serials` date document. Karachi's configured camp ids ('haji_camp',
+  /// 'kapayya') map to the suffixes every reader and all older data use ('haji', 'saddar').
+  /// v1.6.2 wrote the raw id, so Haji Camp tokens went to `<date>_haji_camp`, a document no
+  /// dashboard read - see [getAllCampDateDocIds], which still reads it.
+  static String _campDocSuffix(String branchId, String campId) {
+    if (isKarachiFamily(branchId)) {
+      if (campId.contains('haji') || campId == 'hc') return 'haji';
+      if (campId.contains('sadd') || campId.contains('kap')) return 'saddar';
+    }
+    return campId;
+  }
+
+  /// Firestore branch ids holding a branch's data. Jalalpur Jattan was stored as
+  /// 'jalalpur_jattan' until 61acae2 renamed it to 'jalalpurjattan'; readers use both.
+  static List<String> firestoreBranchIds(String branchId) {
+    final b = branchId.toLowerCase().trim();
+    if (b.contains('jalal') || b.contains('jattan') || b == 'jlj' || b == 'jpj') {
+      return const ['jalalpurjattan', 'jalalpur_jattan'];
+    }
+    return [b];
+  }
+
   /// Returns the Firestore `serials` date document ID.
   /// For multi-camp branches like Karachi:
   /// - Saddar: '${dateKey}_saddar'
@@ -1286,18 +1292,19 @@ class CampSessionService {
       final name = (camp['name'] ?? '').toString().toLowerCase().trim();
       final cTag = (camp['dispensaryTag'] ?? camp['tag'] ?? '').toString().toUpperCase().trim();
       if (id.isEmpty) continue;
+      final docId = '${dateKey}_${_campDocSuffix(b, id)}';
 
       if (c == id || (c.isNotEmpty && (c.contains(id) || id.contains(c)))) {
-        return '${dateKey}_$id';
+        return docId;
       }
       if (cTag.isNotEmpty && (tag == cTag || ser.contains('-$cTag-') || ser.contains('-$cTag'))) {
-        return '${dateKey}_$id';
+        return docId;
       }
       if (id.length >= 3 && (ser.contains('-$id-') || ser.contains('-$id') || ser.contains(id.toUpperCase()))) {
-        return '${dateKey}_$id';
+        return docId;
       }
       if (name.isNotEmpty && c == name) {
-        return '${dateKey}_$id';
+        return docId;
       }
     }
 
@@ -1312,7 +1319,7 @@ class CampSessionService {
     // 3. Fallback: if branch has configured camps, pick first active camp
     if (camps.isNotEmpty) {
       final firstId = (camps.first['id'] ?? '').toString().toLowerCase().trim();
-      if (firstId.isNotEmpty) return '${dateKey}_$firstId';
+      if (firstId.isNotEmpty) return '${dateKey}_${_campDocSuffix(b, firstId)}';
     }
 
     return dateKey;
@@ -1328,14 +1335,22 @@ class CampSessionService {
     final b = branchId.toLowerCase().trim();
     if (!hasCampsForBranch(b)) return [dateKey];
 
-    final camps = getCampsForBranch(b, includeClosed: false);
+    // Closed camps too: getCampDateDocId writes to them, and past days hold their tokens.
+    final camps = getCampsForBranch(b, includeClosed: true);
     final sel = (selectedCamp ?? '').toLowerCase().trim();
+
+    // Every document a camp's tokens can be in: the canonical one and, where it differs, the
+    // raw camp id that v1.6.2 wrote to (e.g. '<date>_haji_camp').
+    List<String> idsFor(String id) => {
+          '${dateKey}_${_campDocSuffix(b, id)}',
+          '${dateKey}_$id',
+        }.toList();
 
     if (sel.isNotEmpty && sel != 'all') {
       for (final camp in camps) {
         final id = (camp['id'] ?? '').toString().toLowerCase().trim();
-        if (id == sel || id.contains(sel) || sel.contains(id)) {
-          return ['${dateKey}_$id', dateKey];
+        if (id.isNotEmpty && (id == sel || id.contains(sel) || sel.contains(id))) {
+          return [...idsFor(id), dateKey];
         }
       }
     }
@@ -1345,20 +1360,24 @@ class CampSessionService {
       if (sel == 'saddar' || sel == 'kapayya' || sel == 'kap') {
         return ['${dateKey}_saddar', dateKey];
       } else if (sel == 'haji_camp' || sel == 'haji' || sel == 'hc') {
-        return ['${dateKey}_haji', dateKey];
+        return ['${dateKey}_haji', '${dateKey}_haji_camp', dateKey];
       }
-      return ['${dateKey}_saddar', '${dateKey}_haji', dateKey];
+      final result = <String>{'${dateKey}_saddar', '${dateKey}_haji', '${dateKey}_haji_camp'};
+      for (final camp in camps) {
+        final id = (camp['id'] ?? '').toString().toLowerCase().trim();
+        if (id.isNotEmpty) result.addAll(idsFor(id));
+      }
+      return [...result, dateKey];
     }
 
     // Dynamic camps for any branch
     if (camps.isNotEmpty) {
-      final result = <String>[];
+      final result = <String>{};
       for (final camp in camps) {
         final id = (camp['id'] ?? '').toString().toLowerCase().trim();
-        if (id.isNotEmpty) result.add('${dateKey}_$id');
+        if (id.isNotEmpty) result.addAll(idsFor(id));
       }
-      result.add(dateKey);
-      return result;
+      return [...result, dateKey];
     }
 
     return [dateKey];
@@ -1639,6 +1658,27 @@ class CampSessionService {
       }
     }
     return null;
+  }
+
+  /// Strips branch prefix from serial for robust comparison across doctor, dispenser, and receptionist.
+  static String cleanSerial(String serial, [String? branchId]) {
+    var s = serial.trim();
+    if (branchId != null && branchId.trim().isNotEmpty) {
+      final b = branchId.trim().toLowerCase();
+      if (s.toLowerCase().startsWith('$b-')) {
+        s = s.substring(b.length + 1).trim();
+      }
+    }
+    return s;
+  }
+
+  /// Checks if two serial identifiers refer to the same token, agnostic of branch prefix or casing.
+  static bool isSameSerial(String? a, String? b, [String? branchId]) {
+    if (a == null || b == null) return false;
+    final cleanA = cleanSerial(a, branchId).toLowerCase();
+    final cleanB = cleanSerial(b, branchId).toLowerCase();
+    if (cleanA.isEmpty || cleanB.isEmpty) return false;
+    return cleanA == cleanB;
   }
 
   /// Safely extracts the 6-digit dateKey from any serial format

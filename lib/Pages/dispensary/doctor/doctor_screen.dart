@@ -221,12 +221,13 @@ class _DoctorScreenState extends State<DoctorScreen>
       }
     }
 
-    // 5. Fetch authoritative name from Firestore.
+    // 5. Fetch authoritative name from Firestore with timeout.
     try {
       final snap = await FirebaseFirestore.instance
           .collection('users')
           .doc(widget.doctorId)
-          .get();
+          .get()
+          .timeout(const Duration(seconds: 3));
       if (!snap.exists) return;
       final firestoreName = resolveUserDisplayName(snap.data());
       if (firestoreName.isNotEmpty && firestoreName != 'User' && firestoreName != 'Doctor') {
@@ -249,18 +250,21 @@ class _DoctorScreenState extends State<DoctorScreen>
     _reconnectSyncing = true;
     try {
       await RealtimeManager().forceFlushAndCatchUp();
-      unawaited(SyncService().triggerUpload().catchError((_) {}));
-      // Non-blocking download of today's tokens so Firestore network delay never freezes doctor UI
-      unawaited(
-        LocalStorageService.downloadTodayTokens(widget.branchId, null, true)
-            .timeout(const Duration(seconds: 3))
-            .then((_) {
-              if (mounted) setState(() {});
-            })
-            .catchError((e) {
-              debugPrint('[DoctorScreen] Reconnect cloud token pull notice: $e');
-            })
-      );
+      // If connected to LAN server, server is the single writer to Firestore.
+      // Dispensary client station should not trigger direct cloud upload or pull.
+      if (!RealtimeManager().isConnected) {
+        unawaited(SyncService().triggerUpload().catchError((_) {}));
+        unawaited(
+          LocalStorageService.downloadTodayTokens(widget.branchId, null, true)
+              .timeout(const Duration(seconds: 3))
+              .then((_) {
+                if (mounted) setState(() {});
+              })
+              .catchError((e) {
+                debugPrint('[DoctorScreen] Reconnect cloud token pull notice: $e');
+              })
+        );
+      }
       if (mounted) setState(() {});
       debugPrint('[DoctorScreen] ✅ Synced on reconnect');
     } catch (e) {
@@ -431,6 +435,13 @@ class _DoctorScreenState extends State<DoctorScreen>
     if (serial == null || serial != _selectedPatientData?['serial']) return;
     if (!mounted) return;
 
+    // Replays / catch-up pushes carry old snapshots; applying one would erase medicines
+    // the doctor added after that snapshot was taken.
+    if (data['_serverPush'] == true || data['_resent'] == true ||
+        data['isCatchUp'] == true || data['_isReplay'] == true) {
+      return;
+    }
+
     final incomingPrescriptions = (data['prescriptions'] as List<dynamic>?)
         ?.map((e) => Map<String, dynamic>.from(e as Map))
         .toList();
@@ -442,8 +453,9 @@ class _DoctorScreenState extends State<DoctorScreen>
 
     // Ignore echoes/replays that carry nothing new — recreating the panel for
     // them destroys any open medicine dialog and silently aborts the doctor's tap.
+    final doctorListLocked = _prescriptions.isNotEmpty;
     final unchanged =
-        (incomingPrescriptions == null || _sameJson(incomingPrescriptions, _prescriptions)) &&
+        (incomingPrescriptions == null || doctorListLocked || _sameJson(incomingPrescriptions, _prescriptions)) &&
         (incomingLabResults == null || _sameJson(incomingLabResults, _labResults)) &&
         (incomingComplaint == null || incomingComplaint == _complaintController.text) &&
         (incomingDiagnosis == null || incomingDiagnosis == _diagnosisController.text);
@@ -452,10 +464,11 @@ class _DoctorScreenState extends State<DoctorScreen>
     setState(() {
       if (incomingComplaint != null) _complaintController.text = incomingComplaint;
       if (incomingDiagnosis != null) _diagnosisController.text = incomingDiagnosis;
-      if (incomingPrescriptions != null) {
-        _prescriptions
-          ..clear()
-          ..addAll(incomingPrescriptions);
+      if (incomingPrescriptions != null && _prescriptions.isEmpty) {
+        // The doctor's open list is authoritative: remote events may only fill an EMPTY
+        // list (e.g. opening a patient already prescribed elsewhere), never edit or
+        // remove what the doctor has added.
+        _prescriptions.addAll(incomingPrescriptions);
       }
       if (incomingLabResults != null) {
         _labResults
@@ -548,8 +561,8 @@ class _DoctorScreenState extends State<DoctorScreen>
       // 1. Force-flush LAN WebSocket outbox & request catch-up from LAN server
       await RealtimeManager().forceFlushAndCatchUp();
 
-      // 2. If online, sync with cloud
-      if (_online) {
+      // 2. If online and NOT connected to LAN server, sync with cloud (server handles cloud sync when connected)
+      if (_online && !RealtimeManager().isConnected) {
         await SyncService().syncTodayOnly(widget.branchId);
         await SyncService().triggerUpload();
       }
@@ -719,40 +732,42 @@ class _DoctorScreenState extends State<DoctorScreen>
         debugPrint('[DoctorScreen] Skip LAN broadcast failed: $e');
       }
 
-      // 3. Enqueue to sync queue
-      try {
-        await LocalStorageService.enqueueSync({
-          'type': 'save_entry',
-          'branchId': widget.branchId,
-          'serial': serial,
-          'dateKey': dateKey,
-          'data': patient,
-        });
-        unawaited(SyncService().triggerUpload());
-      } catch (_) {}
+      // 3. Enqueue to sync queue & background Firestore sync (ONLY when offline / not connected to LAN server)
+      if (!RealtimeManager().isConnected) {
+        try {
+          await LocalStorageService.enqueueSync({
+            'type': 'save_entry',
+            'branchId': widget.branchId,
+            'serial': serial,
+            'dateKey': dateKey,
+            'data': patient,
+          });
+          unawaited(SyncService().triggerUpload());
+        } catch (_) {}
 
-      // 4. Background non-blocking Firestore sync (never freeze UI)
-      final queueType = resolveQueueType(patient['queueType']?.toString() ?? patient['status']?.toString());
-      final campDocKey = CampSessionService.getCampDateDocId(
-        branchId: widget.branchId,
-        dateKey: dateKey,
-        campId: patient['campId']?.toString() ?? patient['dispensaryId']?.toString(),
-        dispensaryTag: patient['dispensaryTag']?.toString(),
-        serial: serial,
-      );
-      unawaited(FirebaseFirestore.instance
-          .collection('branches').doc(widget.branchId)
-          .collection('serials').doc(campDocKey)
-          .collection(queueType)
-          .doc(serial)
-          .set({
-        'status': 'skipped',
-        'skippedAt': nowIso,
-        'skippedBy': _username ?? widget.doctorName,
-        'updatedAt': FieldValue.serverTimestamp(),
-      }, SetOptions(merge: true)).timeout(const Duration(seconds: 3)).catchError((e) {
-        debugPrint('[DoctorScreen] Skip Firestore deferred: $e');
-      }));
+        // Background non-blocking Firestore sync (never freeze UI)
+        final queueType = resolveQueueType(patient['queueType']?.toString() ?? patient['status']?.toString());
+        final campDocKey = CampSessionService.getCampDateDocId(
+          branchId: widget.branchId,
+          dateKey: dateKey,
+          campId: patient['campId']?.toString() ?? patient['dispensaryId']?.toString(),
+          dispensaryTag: patient['dispensaryTag']?.toString(),
+          serial: serial,
+        );
+        unawaited(FirebaseFirestore.instance
+            .collection('branches').doc(widget.branchId)
+            .collection('serials').doc(campDocKey)
+            .collection(queueType)
+            .doc(serial)
+            .set({
+          'status': 'skipped',
+          'skippedAt': nowIso,
+          'skippedBy': _username ?? widget.doctorName,
+          'updatedAt': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true)).timeout(const Duration(seconds: 3)).catchError((e) {
+          debugPrint('[DoctorScreen] Skip Firestore deferred: $e');
+        }));
+      }
 
       if (mounted) {
         AppToast.showSnackBar(context, 
@@ -826,6 +841,7 @@ class _DoctorScreenState extends State<DoctorScreen>
           if (name.isNotEmpty) {
             m['name'] = name;
             m['displayName'] = name;
+            m['_repeat'] = true; // the right panel matches it to today's stock
             parsedMeds.add(m);
           }
         } else if (item is String && item.trim().isNotEmpty) {
@@ -836,6 +852,7 @@ class _DoctorScreenState extends State<DoctorScreen>
             'dosage': '1',
             'timing': 'BD',
             'quantity': 1,
+            '_repeat': true,
           });
         }
       }
@@ -1802,9 +1819,9 @@ class _DoctorScreenState extends State<DoctorScreen>
     // [BUG-13] Unregister from ConnectionManager's listener list
     _removeReconnectListener?.call();
     CampSessionService.activeCampNotifier.removeListener(_onActiveCampChanged);
-    if (!widget.isEmbedded) {
-      ConnectionManager().stop();
-    }
+    // The LAN link is shared by every desk screen and only logout stops it. Stopping it here
+    // (e.g. when this screen was replaced or popped) left the PC disconnected, with Retry
+    // doing nothing, until the next login.
     _connectionSub?.cancel();
     _connSub?.cancel();
     _realtimeSub?.cancel();

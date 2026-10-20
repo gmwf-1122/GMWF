@@ -188,24 +188,67 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
     }
 
     try {
-      // downloadStudentsForGuardian already fetched into local Firestore cache and Hive.
-      // Reading with Source.cache eliminates duplicate network reads.
-      final snaps = await Future.wait(ids.map((id) => FirebaseFirestore.instance
-          .collection('branches')
-          .doc(effectiveBranch)
-          .collection('madrassa_students')
-          .doc(id)
-          .get(const GetOptions(source: Source.cache))));
-      return snaps;
-    } catch (e) {
-      debugPrint('[MadrassaGuardianScreen] Firestore cache fetch fallback: $e');
-      try {
-        return await Future.wait(ids.map((id) => FirebaseFirestore.instance
+      // Fetch each student doc, checking candidate branches if not found under effectiveBranch
+      final snaps = await Future.wait(ids.map((id) async {
+        DocumentSnapshot doc = await FirebaseFirestore.instance
             .collection('branches')
             .doc(effectiveBranch)
             .collection('madrassa_students')
             .doc(id)
-            .get()));
+            .get(const GetOptions(source: Source.cache));
+        if (!doc.exists) {
+          final candidateBranches = effectiveBranch == 'gujrat'
+              ? const ['karachi', 'saddar', 'jalalpurjattan']
+              : const ['gujrat', 'saddar', 'jalalpurjattan'];
+          for (final altBranch in candidateBranches) {
+            try {
+              final altDoc = await FirebaseFirestore.instance
+                  .collection('branches')
+                  .doc(altBranch)
+                  .collection('madrassa_students')
+                  .doc(id)
+                  .get(const GetOptions(source: Source.cache));
+              if (altDoc.exists) {
+                doc = altDoc;
+                break;
+              }
+            } catch (_) {}
+          }
+        }
+        return doc;
+      }));
+      return snaps;
+    } catch (e) {
+      debugPrint('[MadrassaGuardianScreen] Firestore cache fetch fallback: $e');
+      try {
+        return await Future.wait(ids.map((id) async {
+          DocumentSnapshot doc = await FirebaseFirestore.instance
+              .collection('branches')
+              .doc(effectiveBranch)
+              .collection('madrassa_students')
+              .doc(id)
+              .get();
+          if (!doc.exists) {
+            final candidateBranches = effectiveBranch == 'gujrat'
+                ? const ['karachi', 'saddar']
+                : const ['gujrat', 'saddar'];
+            for (final altBranch in candidateBranches) {
+              try {
+                final altDoc = await FirebaseFirestore.instance
+                    .collection('branches')
+                    .doc(altBranch)
+                    .collection('madrassa_students')
+                    .doc(id)
+                    .get();
+                if (altDoc.exists) {
+                  doc = altDoc;
+                  break;
+                }
+              } catch (_) {}
+            }
+          }
+          return doc;
+        }));
       } catch (_) {
         return [];
       }
@@ -714,11 +757,15 @@ class _MadrassaGuardianScreenState extends State<MadrassaGuardianScreen> {
               if (!selectedDoc.exists) return _EmptyState(onLogout: _logout);
               final studentData = selectedDoc.data() as Map<String, dynamic>;
 
+              final studentBranch = (studentData['branchId']?.toString().trim().isNotEmpty == true)
+                  ? studentData['branchId'].toString().trim()
+                  : (branchId.isNotEmpty ? branchId : 'gujrat');
+
               return RefreshIndicator(
                 onRefresh: _refreshData,
                 child: _showDetailed || allDocs.length == 1
                     ? ParentReportCard(
-                        branchId: branchId,
+                        branchId: studentBranch,
                         studentId: selectedDoc.id,
                         studentData: studentData,
                         allDocs: allDocs,

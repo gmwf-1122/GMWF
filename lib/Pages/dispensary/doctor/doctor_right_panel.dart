@@ -225,6 +225,9 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
         _showMedicinesForVitalsOnly = false;
       });
       _loadInventory();
+    } else if (_allInventory.isNotEmpty && widget.prescriptions.any((m) => m['_repeat'] == true)) {
+      // Repeated while the panel stayed in place (e.g. from the full history page).
+      _relinkRepeatedMeds();
     }
   }
 
@@ -576,8 +579,86 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       setState(() {
         _allInventory = combined;
         _reservedQuantities = reserved;
+        _relinkRepeatedMeds();
       });
       _activeDialogSetState?.call(() {});
+    }
+  }
+
+  /// Medicines copied from an earlier visit (Repeat / Apply) are marked '_repeat' by the
+  /// doctor screen. Their inventory ids point at the batch used back then, which may be used
+  /// up, deleted or from another camp, and records saved by older versions have no id at
+  /// all, so each one is matched to today's stock here; without that they all showed up as
+  /// custom medicines. Only a medicine with no match in this camp's stock stays custom.
+  void _relinkRepeatedMeds() {
+    if (_allInventory.isEmpty) return; // stock not loaded yet: tried again on the next load
+    final realStock = _allInventory.where((inv) => !(inv['id']?.toString() ?? '').startsWith('cat_')).toList();
+    if (realStock.isEmpty) return; // only the catalog fallback is loaded so far
+
+    String clean(Object? v) => MasterProformaService.cleanBrandToFormula((v ?? '').toString())
+        .toLowerCase()
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    String cleanDose(Object? v) => (v ?? '').toString().toLowerCase().replaceAll(RegExp(r'\s+'), '');
+
+    Map<String, dynamic>? single(Iterable<Map<String, dynamic>> found) => found.length == 1 ? found.first : null;
+
+    for (final med in widget.prescriptions) {
+      if (med['_repeat'] != true) continue;
+      med.remove('_repeat');
+
+      final oldId = (med['inventoryId'] ?? med['medicineId'])?.toString().trim() ?? '';
+      Map<String, dynamic>? match;
+
+      // 1. The batch it was given from, or another batch of the same medicine.
+      if (oldId.isNotEmpty) {
+        match = realStock.where((inv) =>
+            inv['id']?.toString() == oldId ||
+            ((inv['_batchIds'] as List?)?.any((b) => b.toString() == oldId) ?? false)).firstOrNull;
+      }
+
+      // 2. Same medicine by name/formula, form and strength; then by name and form, or
+      //    name alone, but only when that leaves exactly one medicine.
+      if (match == null) {
+        final names = {clean(med['name']), clean(med['formula'])}..remove('');
+        final type = (med['type'] ?? '').toString().toLowerCase().trim();
+        final dose = cleanDose(_getMedicineDose(med));
+        final byName = realStock.where((inv) => names.contains(clean(inv['name'])) || names.contains(clean(inv['formula']))).toList();
+        bool sameType(Map<String, dynamic> inv) => type.isEmpty || (inv['type'] ?? '').toString().toLowerCase().trim() == type;
+        bool sameDose(Map<String, dynamic> inv) => dose.isEmpty || cleanDose(_getMedicineDose(inv)) == dose;
+        match = single(byName.where((inv) => sameType(inv) && sameDose(inv))) ??
+            single(byName.where(sameType)) ??
+            single(byName.where(sameDose)) ??
+            single(byName);
+      }
+
+      if (match == null) {
+        // Not stocked in this camp: a custom medicine, never a link to a batch that is gone.
+        med.remove('inventoryId');
+        med.remove('medicineId');
+        continue;
+      }
+
+      final id = match['id']?.toString();
+      med['inventoryId'] = id;
+      med['medicineId'] = id;
+      med['name'] = match['name'] ?? med['name'];
+      med['displayName'] = med['name'];
+      if ((match['formula'] ?? '').toString().isNotEmpty) med['formula'] = match['formula'];
+      med['type'] = _getMedicineType(match);
+      final invDose = _getMedicineDose(match);
+      if (invDose.isNotEmpty) med['dose'] = invDose;
+
+      // Stock flags from the earlier visit no longer apply; set them from today's stock.
+      med.remove('isExternal');
+      med.remove('outOfStock');
+      med.remove('stockShortage');
+      final q = match['quantity'];
+      final stock = (q is num ? q.toInt() : int.tryParse(q?.toString() ?? '') ?? 0) - _getReservedCount(match);
+      if (stock <= 0) {
+        med['isExternal'] = true;
+        med['outOfStock'] = true;
+      }
     }
   }
 
@@ -4651,7 +4732,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
 
       final now         = DateTime.now();
       final nowIso      = now.toIso8601String();
-      final serialClean = widget.serialId.trim().toLowerCase();
+      final serialClean = CampSessionService.cleanSerial(widget.serialId, widget.branchId).trim().toLowerCase();
       String resolvedPatientName = (patientData['patientName'] ?? patientData['name'] ?? patientData['fullName'])?.toString().trim() ?? '';
       if (resolvedPatientName.isEmpty || resolvedPatientName.toLowerCase() == 'unknown' || resolvedPatientName.toLowerCase() == 'unknown patient') {
         final normB = widget.branchId.toLowerCase().trim();
@@ -4659,17 +4740,14 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
         try {
           if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
             final eBox = Hive.box(LocalStorageService.entriesBox);
-            for (final k in eBox.keys) {
-              final kStr = k.toString().toLowerCase();
-              if (kStr == '$normB-$normS' || kStr.endsWith('-$normS') || kStr == normS) {
-                final entry = eBox.get(k);
-                if (entry is Map) {
-                  final n = (entry['patientName'] ?? entry['name'] ?? entry['fullName'])?.toString().trim();
-                  if (n != null && n.isNotEmpty && n.toLowerCase() != 'unknown' && n.toLowerCase() != 'unknown patient') {
-                    resolvedPatientName = n;
-                    break;
-                  }
-                }
+            final directEntry = eBox.get('$normB-$normS') ??
+                eBox.get('$normB-${normS.toUpperCase()}') ??
+                eBox.get(normS) ??
+                eBox.get(normS.toUpperCase());
+            if (directEntry is Map) {
+              final n = (directEntry['patientName'] ?? directEntry['name'] ?? directEntry['fullName'])?.toString().trim();
+              if (n != null && n.isNotEmpty && n.toLowerCase() != 'unknown' && n.toLowerCase() != 'unknown patient') {
+                resolvedPatientName = n;
               }
             }
           }
@@ -4677,10 +4755,9 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       }
       if (resolvedPatientName.isEmpty) resolvedPatientName = 'Unknown Patient';
 
-      final parts       = serialClean.split('-');
-      final dateKey     = (parts.isNotEmpty && parts[0] == 'x')
-          ? (parts.length > 1 ? parts[1] : '')
-          : (parts.isNotEmpty ? parts[0] : '');
+      final dateKey = CampSessionService.getDateKeyFromSerial(serialClean).isNotEmpty
+          ? CampSessionService.getDateKeyFromSerial(serialClean)
+          : (patientData['dateKey']?.toString() ?? LocalStorageService.getTodayDateKey());
 
       final medicineList = widget.prescriptions.map((m) {
         return {
@@ -4788,36 +4865,28 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
         }
       }
 
-      // 2. Embed into Hive entriesBox (updating ALL matching serial keys)
+      // 2. Embed into Hive entriesBox (updating exact matching serial keys)
       final entriesBox = await LocalStorageService.ensureBoxOpen(LocalStorageService.entriesBox);
-      final rawSerial  = widget.serialId.trim().toLowerCase();
-      final targetBranch = widget.branchId.trim().toLowerCase();
+      final normBranch = widget.branchId.trim().toLowerCase();
+      final normSerialUpper = serialClean.toUpperCase();
+      final canonicalKey = '$normBranch-$normSerialUpper';
 
       final matchingKeys = <dynamic>[];
-      for (final k in entriesBox.keys) {
-        final kStr = k.toString().toLowerCase();
-        // A -COLLISION- twin carries the same serial but belongs to a different patient;
-        // matching it merged that patient into this one and deleted the other record.
-        if (kStr.contains('-collision-')) continue;
-        if (kStr == '$targetBranch-$rawSerial' ||
-            kStr.endsWith('-$rawSerial') ||
-            kStr == rawSerial) {
-          matchingKeys.add(k);
-        } else {
-          final val = entriesBox.get(k);
-          if (val is Map && (val['serial']?.toString().toLowerCase() == rawSerial)) {
-            matchingKeys.add(k);
-          }
+      final candidateVariants = <String>{
+        canonicalKey,
+        '$normBranch-$serialClean',
+        normSerialUpper,
+        serialClean,
+      };
+      for (final ck in candidateVariants) {
+        if (entriesBox.containsKey(ck)) {
+          matchingKeys.add(ck);
         }
       }
 
       if (matchingKeys.isEmpty) {
-        matchingKeys.add('${widget.branchId}-${widget.serialId.trim()}');
+        matchingKeys.add(canonicalKey);
       }
-
-      final normBranch = widget.branchId.trim().toLowerCase();
-      final normSerialUpper = serialClean.toUpperCase();
-      final canonicalKey = '$normBranch-$normSerialUpper';
 
       Map<String, dynamic>? updated;
       for (final k in matchingKeys) {
@@ -4948,25 +5017,38 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     required String nowIso,
   }) {
     try {
+      final chargeData = {
+        'serial':          serial,
+        'branchId':        branchId,
+        'dateKey':         dateKey,
+        'queueType':       queueType,
+        'patientCnic':     patientCnic,
+        'patientName':     patientName,
+        'amount':          amount,
+        'daysOfMedicine':  days,
+        'chargeType':      'extra_days',
+        'prescribedBy':    doctorName,
+        'createdAt':       nowIso,
+      };
+
+      // Always through the LAN outbox: it is kept until the server confirms it, so a charge
+      // made while the server was unreachable reaches it on reconnect. (It used to go to this
+      // PC's cloud queue only, which is cleared of dispensary items once the PC is back on
+      // the LAN, so the charge was lost.)
+      RealtimeManager().sendMessage(RealtimeEvents.payload(
+        type: 'save_dispensary_charge',
+        branchId: branchId,
+        data: chargeData,
+      ));
+      if (RealtimeManager().hasServerLink) return;
+
       LocalStorageService.enqueueSync({
         'type':      'save_dispensary_charge',
         'branchId':  branchId,
         'serial':    serial,
         'dateKey':   dateKey,
         'queueType': queueType,
-        'data': {
-          'serial':          serial,
-          'branchId':        branchId,
-          'dateKey':         dateKey,
-          'queueType':       queueType,
-          'patientCnic':     patientCnic,
-          'patientName':     patientName,
-          'amount':          amount,
-          'daysOfMedicine':  days,
-          'chargeType':      'extra_days',
-          'prescribedBy':    doctorName,
-          'createdAt':       nowIso,
-        },
+        'data': chargeData,
       });
       SyncService().triggerUpload();
     } catch (e) {
@@ -5046,6 +5128,10 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     String dateKey, String queueType, String serial, String patientCnic,
     Map<String, dynamic> fullData, Map<String, dynamic> medicalData,
   ) async {
+    if (RealtimeManager().isConnected) {
+      debugPrint('[DoctorPanel] LAN connected — skipping cloud enqueue for $serial');
+      return;
+    }
     try {
       await LocalStorageService.enqueueSync({
         'type': 'save_prescription',

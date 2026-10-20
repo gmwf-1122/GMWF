@@ -562,7 +562,7 @@ class _AddFoodLogSheetState extends State<_AddFoodLogSheet> {
       }
 
       // Trigger delta sync / server broadcast
-      SyncService().triggerUpload(force: true);
+      SyncService().triggerUpload(urgent: true);
 
       if (mounted) {
         Navigator.pop(context);

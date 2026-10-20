@@ -11,7 +11,9 @@ import '../../../services/image_upload_service.dart';
 import '../../../services/user_theme_service.dart';
 import '../../../services/local_storage_service.dart';
 import '../utils/madrassa_local_storage.dart';
+import '../student_fee_ledger.dart';
 import '../dialogs/enrollment_dialog.dart';
+import '../dialogs/change_student_branch_dialog.dart';
 import '../widgets/madrassa_status_menu.dart';
 import 'dart:async';
 import '../../../services/sync_service.dart';
@@ -57,6 +59,19 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
         r.contains('director') ||
         r.contains('supervisor') ||
         r.contains('global');
+  }
+
+  bool get _isHQManager {
+    final r = widget.role.toLowerCase().trim();
+    return r.contains('hqmanager') ||
+        r.contains('hq manager') ||
+        r.contains('hq_manager') ||
+        r == 'hq' ||
+        r.contains('admin') ||
+        r.contains('superadmin') ||
+        r.contains('director') ||
+        r.contains('chairman') ||
+        r.contains('ceo');
   }
 
   String get _effectiveBranch => MadrassaLocalStorage.normalizeBranch(widget.branchId);
@@ -386,6 +401,26 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                 role: widget.role,
               ),
               IconButton(
+                icon: Icon(Icons.receipt_long_rounded, color: context.adapt(SoftPalette.blue500)),
+                tooltip: 'Student Fee Ledger & Receipts',
+                onPressed: () {
+                  final feeVal = double.tryParse(_data['monthlyFee']?.toString() ?? '0') ?? 0.0;
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (_) => StudentFeeLedgerScreen(
+                        branchId: _effectiveBranch,
+                        studentId: studentId,
+                        studentName: name,
+                        fatherName: _data['fatherName']?.toString(),
+                        rollNumber: rollNumber,
+                        monthlyFee: feeVal,
+                      ),
+                    ),
+                  );
+                },
+              ),
+              IconButton(
                 icon: Icon(Icons.edit_note_rounded, color: context.adapt(SoftPalette.teal550)),
                 tooltip: 'Edit Student Details',
                 onPressed: () => showAddStudentDialog(
@@ -396,6 +431,21 @@ class _StudentDetailPageState extends State<StudentDetailPage> {
                   role: widget.role,
                 ),
               ),
+              if (_isHQManager)
+                IconButton(
+                  icon: Icon(Icons.swap_horiz_rounded, color: context.adapt(SoftPalette.indigo500)),
+                  tooltip: context.isUrdu ? 'طالب علم کی برانچ تبدیل کریں' : 'Change Student Branch',
+                  onPressed: () => showChangeStudentBranchDialog(
+                    context,
+                    student: _data,
+                    currentBranch: _effectiveBranch,
+                    username: widget.username,
+                    role: widget.role,
+                    onTransferred: () {
+                      Navigator.pop(context);
+                    },
+                  ),
+                ),
               const SizedBox(width: 8),
             ],
           ),

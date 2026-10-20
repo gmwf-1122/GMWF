@@ -7,6 +7,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:intl/intl.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import '../../services/local_storage_service.dart';
+import '../../services/cloud/cloud_db.dart';
 import '../../models/stock_item.dart';
 import 'widgets/cook_dialog.dart';
 
@@ -213,7 +214,7 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
                               .doc(_branchId)
                               .collection('dasterkhwaan_stock')
                               .doc(name);
-                          await ref.set({
+                          await CloudDb.instance.ref(ref).set({
                             'name': name,
                             'quantity': 0.0,
                             'unit': unit,
@@ -482,7 +483,7 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
         .collection('dasterkhwaan_stock')
         .doc(item.name);
 
-    await ref.update({
+    await CloudDb.instance.ref(ref).update({
       'quantity': newQty,
       'lastUpdated': FieldValue.serverTimestamp(),
     });
@@ -514,7 +515,7 @@ class _DasterkhwaanStockState extends State<DasterkhwaanStock> {
     final user = FirebaseAuth.instance.currentUser;
     final auditUser = user?.email ?? user?.displayName ?? 'Kitchen Auditor';
 
-    await FirebaseFirestore.instance
+    await CloudDb.instance
         .collection('branches')
         .doc(_branchId)
         .collection('dasterkhwaan_stock_logs')

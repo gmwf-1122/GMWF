@@ -1,5 +1,5 @@
 ; ══════════════════════════════════════════════════════════════
-; GMWF Installer — Premium Edition v1.6.2 (x64)
+; GMWF Installer — Premium Edition v1.6.3 (x64)
 ; ──────────────────────────────────────────────────────────────
 ; Features:
 ;   • Premium dark-themed modern UI with GMWF emerald/gold branding
@@ -15,8 +15,8 @@
 [Setup]
 AppId={{A1B2C3D4-9F23-4C11-8ABC-1234567890AB}
 AppName=GMWF
-AppVersion=1.6.2
-AppVerName=GMWF Management System v1.6.2
+AppVersion=1.6.3
+AppVerName=GMWF Management System v1.6.3
 AppPublisher=GMWF
 AppPublisherURL=https://gmwf.pk/
 AppSupportURL=https://gmwf.pk/
@@ -33,7 +33,7 @@ DefaultGroupName=GMWF
 
 ; Output
 OutputDir=installer
-OutputBaseFilename=GMWF-v1.6.2-x64
+OutputBaseFilename=GMWF-v1.6.3-x64
 SetupIconFile=Installer\gmwf.ico
 
 ; Compression
@@ -73,7 +73,7 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Messages]
 SetupWindowTitle=GMWF Management System — Setup Wizard
 WelcomeLabel1=Welcome to GMWF
-WelcomeLabel2=This setup wizard will guide you through the installation of GMWF Management System v1.6.2 on your computer.%n%nGMWF is a comprehensive welfare management platform for dispensaries, donations, attendance, madrassa, and branch operations.%n%nClick Next to continue, or Cancel to exit.
+WelcomeLabel2=This setup wizard will guide you through the installation of GMWF Management System v1.6.3 on your computer.%n%nGMWF is a comprehensive welfare management platform for dispensaries, donations, attendance, madrassa, and branch operations.%n%nClick Next to continue, or Cancel to exit.
 ReadyLabel1=Ready to Install
 ReadyLabel2a=The installer is ready to begin. Review your settings below, then click Install to proceed.
 FinishedHeadingLabel=Installation Complete
@@ -149,6 +149,47 @@ Filename: "{cmd}"; \
   Tasks: serverautostart; \
   Flags: runhidden waituntilterminated
 
+; ── Permanent Inbound & Outbound Windows Firewall Rules ──────
+Filename: "{cmd}"; \
+    Parameters: "/c netsh advfirewall firewall delete rule name=""GMWF Application (Inbound)"" & netsh advfirewall firewall add rule name=""GMWF Application (Inbound)"" dir=in action=allow program=""{app}\gmwf.exe"" enable=yes profile=any"; \
+    StatusMsg: "Configuring Windows Defender Firewall (Inbound: gmwf.exe)..."; \
+    Flags: runhidden waituntilterminated
+
+Filename: "{cmd}"; \
+    Parameters: "/c netsh advfirewall firewall delete rule name=""GMWF Application (Outbound)"" & netsh advfirewall firewall add rule name=""GMWF Application (Outbound)"" dir=out action=allow program=""{app}\gmwf.exe"" enable=yes profile=any"; \
+    StatusMsg: "Configuring Windows Defender Firewall (Outbound: gmwf.exe)..."; \
+    Flags: runhidden waituntilterminated
+
+Filename: "{cmd}"; \
+    Parameters: "/c netsh advfirewall firewall delete rule name=""GMWF Python Service (Inbound)"" & netsh advfirewall firewall add rule name=""GMWF Python Service (Inbound)"" dir=in action=allow program=""{app}\python\python.exe"" enable=yes profile=any"; \
+    StatusMsg: "Configuring Windows Defender Firewall (Inbound: Python Service)..."; \
+    Flags: runhidden waituntilterminated
+
+Filename: "{cmd}"; \
+    Parameters: "/c netsh advfirewall firewall delete rule name=""GMWF Python Service (Outbound)"" & netsh advfirewall firewall add rule name=""GMWF Python Service (Outbound)"" dir=out action=allow program=""{app}\python\python.exe"" enable=yes profile=any"; \
+    StatusMsg: "Configuring Windows Defender Firewall (Outbound: Python Service)..."; \
+    Flags: runhidden waituntilterminated
+
+Filename: "{cmd}"; \
+    Parameters: "/c netsh advfirewall firewall delete rule name=""GMWF LAN Sync and ADMS (TCP-In)"" & netsh advfirewall firewall add rule name=""GMWF LAN Sync and ADMS (TCP-In)"" dir=in action=allow protocol=TCP localport=53281,8088,8080,8081 enable=yes profile=any"; \
+    StatusMsg: "Configuring Windows Defender Firewall (TCP Inbound: Ports 53281, 8088, 8080, 8081)..."; \
+    Flags: runhidden waituntilterminated
+
+Filename: "{cmd}"; \
+    Parameters: "/c netsh advfirewall firewall delete rule name=""GMWF LAN Sync and ADMS (TCP-Out)"" & netsh advfirewall firewall add rule name=""GMWF LAN Sync and ADMS (TCP-Out)"" dir=out action=allow protocol=TCP localport=53281,8088,8080,8081 enable=yes profile=any"; \
+    StatusMsg: "Configuring Windows Defender Firewall (TCP Outbound: Ports 53281, 8088, 8080, 8081)..."; \
+    Flags: runhidden waituntilterminated
+
+Filename: "{cmd}"; \
+    Parameters: "/c netsh advfirewall firewall delete rule name=""GMWF UDP Discovery and Biometrics (UDP-In)"" & netsh advfirewall firewall add rule name=""GMWF UDP Discovery and Biometrics (UDP-In)"" dir=in action=allow protocol=UDP localport=45454,53280,4370 enable=yes profile=any"; \
+    StatusMsg: "Configuring Windows Defender Firewall (UDP Inbound: Discovery & Biometrics)..."; \
+    Flags: runhidden waituntilterminated
+
+Filename: "{cmd}"; \
+    Parameters: "/c netsh advfirewall firewall delete rule name=""GMWF UDP Discovery and Biometrics (UDP-Out)"" & netsh advfirewall firewall add rule name=""GMWF UDP Discovery and Biometrics (UDP-Out)"" dir=out action=allow protocol=UDP localport=45454,53280,4370 enable=yes profile=any"; \
+    StatusMsg: "Configuring Windows Defender Firewall (UDP Outbound: Discovery & Biometrics)..."; \
+    Flags: runhidden waituntilterminated
+
 ; 4. Auto-launch app after install (runs with admin privileges configured by installer)
 Filename: "{app}\gmwf.exe"; \
     Flags: nowait runascurrentuser
@@ -160,9 +201,14 @@ Filename: "{cmd}"; \
     RunOnceId: "KillGMWF"
 
 Filename: "{cmd}"; \
-  Parameters: "/c schtasks /Delete /TN ""GMWF Server"" /F"; \
-  Flags: runhidden waituntilterminated; \
-  RunOnceId: "RemoveGMWFServerTask"
+    Parameters: "/c schtasks /Delete /TN ""GMWF Server"" /F"; \
+    Flags: runhidden waituntilterminated; \
+    RunOnceId: "RemoveGMWFServerTask"
+
+Filename: "{cmd}"; \
+    Parameters: "/c netsh advfirewall firewall delete rule name=""GMWF Application (Inbound)"" & netsh advfirewall firewall delete rule name=""GMWF Application (Outbound)"" & netsh advfirewall firewall delete rule name=""GMWF Python Service (Inbound)"" & netsh advfirewall firewall delete rule name=""GMWF Python Service (Outbound)"" & netsh advfirewall firewall delete rule name=""GMWF LAN Sync and ADMS (TCP-In)"" & netsh advfirewall firewall delete rule name=""GMWF LAN Sync and ADMS (TCP-Out)"" & netsh advfirewall firewall delete rule name=""GMWF UDP Discovery and Biometrics (UDP-In)"" & netsh advfirewall firewall delete rule name=""GMWF UDP Discovery and Biometrics (UDP-Out)"""; \
+    Flags: runhidden waituntilterminated; \
+    RunOnceId: "RemoveGMWFFirewallRules"
 
 [UninstallDelete]
 Type: filesandordirs; Name: "{app}\logs"
@@ -287,7 +333,7 @@ begin
     S := S + MemoTasksInfo + NewLine + NewLine;
 
   S := S + 'COMPONENTS' + NewLine;
-  S := S + Space + 'GMWF Management System v1.6.2' + NewLine;
+  S := S + Space + 'GMWF Management System v1.6.3' + NewLine;
   S := S + Space + 'Python 3.12 Embedded Runtime' + NewLine;
   S := S + Space + 'Background Sync Scripts' + NewLine;
   S := S + Space + 'Visual C++ Runtime' + NewLine;
@@ -459,7 +505,7 @@ begin
   GVersionLabel.Parent := WizardForm;
   GVersionLabel.Left := ScaleX(16);
   GVersionLabel.Top := GBrandLabel.Top + GBrandLabel.Height + ScaleY(1);
-  GVersionLabel.Caption := 'v1.6.2  |  x64 Admin  |  By Ans';
+  GVersionLabel.Caption := 'v1.6.3  |  x64 Admin  |  By Ans';
   GVersionLabel.Font.Name := 'Segoe UI';
   GVersionLabel.Font.Size := 7;
   GVersionLabel.Font.Style := [];

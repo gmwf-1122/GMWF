@@ -1,7 +1,11 @@
 import 'package:flutter/foundation.dart';
 import 'package:hive/hive.dart';
+import 'package:intl/intl.dart';
 import 'camp_session_service.dart';
 import 'local_storage_service.dart';
+import '../realtime/lan_server.dart';
+import '../realtime/lan_host_manager.dart';
+import '../realtime/realtime_manager.dart';
 
 class QueueHealingReport {
   final int totalInspected;
@@ -108,14 +112,34 @@ class QueueSelfHealingService {
     return report;
   }
 
+  /// True for a token date key in `ddMMyy` form (e.g. `171026`) with a real day and month.
+  static bool isDdMMyyKey(String? key) {
+    if (key == null || !RegExp(r'^\d{6}$').hasMatch(key)) return false;
+    final d = int.parse(key.substring(0, 2));
+    final m = int.parse(key.substring(2, 4));
+    return d >= 1 && d <= 31 && m >= 1 && m <= 12;
+  }
+
+  /// True for an ISO `yyyy-MM-dd` date key.
+  static bool isIsoDateKey(String? key) =>
+      key != null && RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(key);
+
   /// On-the-fly self-healing for an individual queued item before uploading.
   /// Returns true if modifications were made to repair the action payload.
   static bool healAction(Map<String, dynamic> action, {String? fallbackBranch}) {
     bool modified = false;
 
-    final rawType = (action['type'] ?? action['event_type'] ?? '').toString().trim();
+    var rawType = (action['type'] ?? action['event_type'] ?? '').toString().trim();
     if (rawType.isEmpty) {
       action['type'] = 'unknown';
+      modified = true;
+    }
+    // Older LAN servers queued kitchen serves under the raw LAN event name, which has no
+    // upload handler (it landed in sync_records). The payload is already the
+    // serve_dasterkhwan_token shape, and the kitchen PC did not upload these itself.
+    if (rawType == 'save_kitchen_serve_log') {
+      rawType = 'serve_dasterkhwan_token';
+      action['type'] = rawType;
       modified = true;
     }
 
@@ -193,8 +217,33 @@ class QueueSelfHealingService {
     }
 
     // ── 3. DATE KEY HEALING ───────────────────────────────────────────────────
-    final rawDate = (action['dateKey'] ?? action['date'] ?? data['dateKey'] ?? data['date'])?.toString().trim();
-    if (rawDate == null || rawDate.isEmpty || rawDate.length < 10) {
+    // Token serial docs live under serials/{ddMMyy}, so a 6-digit key is valid and must be
+    // kept as it is. Only a missing/empty key is filled in.
+    final rawDate = (action['dateKey'] ?? action['datePart'] ?? action['date'] ??
+            data['dateKey'] ?? data['date'])
+        ?.toString()
+        .trim();
+    final isSerialAction = rawType == 'save_entry' ||
+        rawType == 'save_prescription' ||
+        rawType == 'update_serial_status' ||
+        rawType == 'save_dispensary_charge';
+    final hasDate = rawDate != null && rawDate.isNotEmpty && rawDate != 'null';
+    if (isSerialAction) {
+      final serial = (action['serial'] ?? data['serial'] ?? '').toString();
+      final serialDk = CampSessionService.getDateKeyFromSerial(serial);
+      final serialDkValid = isDdMMyyKey(serialDk);
+      // An ISO key on a serial action is the damage an older build of this healer did
+      // (it rewrote every ddMMyy key to today's ISO date); the serial says the real date.
+      final needsHeal = !hasDate || (isIsoDateKey(rawDate) && serialDkValid);
+      if (needsHeal) {
+        final healed = serialDkValid ? serialDk : DateFormat('ddMMyy').format(DateTime.now());
+        if (healed != rawDate) {
+          action['dateKey'] = healed;
+          data['dateKey'] = healed;
+          modified = true;
+        }
+      }
+    } else if (!hasDate) {
       final nowStr = DateTime.now().toIso8601String().substring(0, 10);
       action['dateKey'] = nowStr;
       data['dateKey'] = nowStr;
@@ -257,6 +306,9 @@ class QueueSelfHealingService {
       final syncBox = Hive.box(LocalStorageService.syncBox);
 
       final dlKeys = dlBox.keys.toList();
+      final todayKey = LocalStorageService.getTodayDateKey();
+      final bool isClientOnLan = !LanServer.isRunning && !LanHostManager.isHostRunning && RealtimeManager().hasServerLink;
+
       for (final key in dlKeys) {
         final raw = dlBox.get(key);
         if (raw == null || raw is! Map) {
@@ -265,6 +317,20 @@ class QueueSelfHealingService {
         }
 
         final action = Map<String, dynamic>.from(raw);
+        final type = (action['type'] ?? action['event_type'] ?? '').toString().trim();
+        final isDispensary = LocalStorageService.isDispensaryActionType(type);
+
+        // Daily data rule & LAN Gateway rule:
+        // 1. If dispensary action and dateKey != todayKey, do NOT revive! Delete it permanently.
+        // 2. If dispensary action and client connected to LAN server, delete it (server handles it).
+        final itemDateKey = (action['dateKey'] ?? (action['data'] is Map ? action['data']['dateKey'] : null) ?? '').toString().trim();
+        final rawSerial = (action['serial'] ?? (action['data'] is Map ? action['data']['serial'] : null))?.toString().trim() ?? '';
+        final serialDateKey = rawSerial.isNotEmpty ? CampSessionService.getDateKeyFromSerial(rawSerial) : '';
+
+        if (isDispensary && isClientOnLan) {
+          await dlBox.delete(key);
+          continue;
+        }
         // Clean out dead-letter failure tags and reset attempt counter
         action.remove('deadLetteredAt');
         action.remove('deadLetterReason');

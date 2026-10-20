@@ -16,6 +16,9 @@ class MasterProformaService {
   /// Default Master Seed Catalog using generic medicine formulas ONLY.
   static final List<Map<String, dynamic>> _defaultProformaList = [
     {
+      'barcode': '001',
+      'rollNo': '001',
+      'itemCode': 'MED-PARA-400',
       'code': 'MED-PARA-400',
       'name': 'Paracetamol (Panadol)',
       'formula': 'Paracetamol (Panadol)',
@@ -25,6 +28,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '002',
+      'rollNo': '002',
+      'itemCode': 'MED-PARA-500',
       'code': 'MED-PARA-500',
       'name': 'Paracetamol (Panadol)',
       'formula': 'Paracetamol (Panadol)',
@@ -34,6 +40,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '003',
+      'rollNo': '003',
+      'itemCode': 'MED-PARA-CAF',
       'code': 'MED-PARA-CAF',
       'name': 'Paracetamol + Caffeine (Panadol Extra)',
       'formula': 'Paracetamol + Caffeine (Panadol Extra)',
@@ -43,6 +52,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '004',
+      'rollNo': '004',
+      'itemCode': 'MED-ORPH-PARA-TAB',
       'code': 'MED-ORPH-PARA-TAB',
       'name': 'Orphenadrine Citrate + Paracetamol (Nubrul Forte)',
       'formula': 'Orphenadrine Citrate + Paracetamol (Nubrul Forte)',
@@ -52,6 +64,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '005',
+      'rollNo': '005',
+      'itemCode': 'MED-ANT-TRI-TAB',
       'code': 'MED-ANT-TRI-TAB',
       'name': 'Antacid (Trisil)',
       'formula': 'Antacid (Trisil)',
@@ -61,6 +76,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '006',
+      'rollNo': '006',
+      'itemCode': 'MED-MEF-SYR',
       'code': 'MED-MEF-SYR',
       'name': 'Mefenamic Acid (Ponstan)',
       'formula': 'Mefenamic Acid (Ponstan)',
@@ -70,6 +88,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '007',
+      'rollNo': '007',
+      'itemCode': 'MED-CAP-25-TAB',
       'code': 'MED-CAP-25-TAB',
       'name': 'Captopril (Capoten)',
       'formula': 'Captopril (Capoten)',
@@ -79,6 +100,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '008',
+      'rollNo': '008',
+      'itemCode': 'MED-PARA-CPM-DXM-TAB',
       'code': 'MED-PARA-CPM-DXM-TAB',
       'name': 'Paracetamol + Chlorpheniramine + Dextromethorphan (Panadol CF / T-Day)',
       'formula': 'Paracetamol + Chlorpheniramine + Dextromethorphan (Panadol CF / T-Day)',
@@ -88,6 +112,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '009',
+      'rollNo': '009',
+      'itemCode': 'MED-PARA-CPM-DXM-SYR',
       'code': 'MED-PARA-CPM-DXM-SYR',
       'name': 'Paracetamol + Chlorpheniramine + Dextromethorphan (Corex-D / T-Day)',
       'formula': 'Paracetamol + Chlorpheniramine + Dextromethorphan (Corex-D / T-Day)',
@@ -97,6 +124,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '010',
+      'rollNo': '010',
+      'itemCode': 'MED-PSE-CPM-DXM-SYR',
       'code': 'MED-PSE-CPM-DXM-SYR',
       'name': 'Pseudoephedrine + CPM + Dextromethorphan (Coldrex)',
       'formula': 'Pseudoephedrine + CPM + Dextromethorphan (Coldrex)',
@@ -106,6 +136,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '011',
+      'rollNo': '011',
+      'itemCode': 'MED-PSE-CPM-DXM-TAB',
       'code': 'MED-PSE-CPM-DXM-TAB',
       'name': 'Pseudoephedrine + CPM + Dextromethorphan (Coldrex)',
       'formula': 'Pseudoephedrine + CPM + Dextromethorphan (Coldrex)',
@@ -115,6 +148,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '012',
+      'rollNo': '012',
+      'itemCode': 'MED-PARA-SYR',
       'code': 'MED-PARA-SYR',
       'name': 'Paracetamol (Panadol)',
       'formula': 'Paracetamol (Panadol)',
@@ -124,6 +160,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '013',
+      'rollNo': '013',
+      'itemCode': 'MED-PARA-INJ-100',
       'code': 'MED-PARA-INJ-100',
       'name': 'Paracetamol (Panadol)',
       'formula': 'Paracetamol (Panadol)',
@@ -133,6 +172,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '014',
+      'rollNo': '014',
+      'itemCode': 'MED-AMX-250',
       'code': 'MED-AMX-250',
       'name': 'Amoxicillin (Amoxil)',
       'formula': 'Amoxicillin (Amoxil)',
@@ -142,6 +184,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '015',
+      'rollNo': '015',
+      'itemCode': 'MED-AMX-500',
       'code': 'MED-AMX-500',
       'name': 'Amoxicillin (Amoxil)',
       'formula': 'Amoxicillin (Amoxil)',
@@ -151,6 +196,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '016',
+      'rollNo': '016',
+      'itemCode': 'MED-AMX-SYR',
       'code': 'MED-AMX-SYR',
       'name': 'Amoxicillin (Amoxil)',
       'formula': 'Amoxicillin (Amoxil)',
@@ -160,6 +208,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '017',
+      'rollNo': '017',
+      'itemCode': 'MED-CEF-400',
       'code': 'MED-CEF-400',
       'name': 'Cefixime (Cefspan)',
       'formula': 'Cefixime (Cefspan)',
@@ -169,6 +220,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '018',
+      'rollNo': '018',
+      'itemCode': 'MED-CEF-SYR',
       'code': 'MED-CEF-SYR',
       'name': 'Cefixime (Cefspan)',
       'formula': 'Cefixime (Cefspan)',
@@ -178,6 +232,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '019',
+      'rollNo': '019',
+      'itemCode': 'MED-FLG-400',
       'code': 'MED-FLG-400',
       'name': 'Metronidazole (Flagyl)',
       'formula': 'Metronidazole (Flagyl)',
@@ -187,6 +244,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '020',
+      'rollNo': '020',
+      'itemCode': 'MED-FLG-SYR',
       'code': 'MED-FLG-SYR',
       'name': 'Metronidazole (Flagyl)',
       'formula': 'Metronidazole (Flagyl)',
@@ -196,6 +256,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '021',
+      'rollNo': '021',
+      'itemCode': 'MED-OMP-20',
       'code': 'MED-OMP-20',
       'name': 'Omeprazole (Risek)',
       'formula': 'Omeprazole (Risek)',
@@ -205,6 +268,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '022',
+      'rollNo': '022',
+      'itemCode': 'MED-OMP-40',
       'code': 'MED-OMP-40',
       'name': 'Omeprazole (Risek)',
       'formula': 'Omeprazole (Risek)',
@@ -214,6 +280,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '023',
+      'rollNo': '023',
+      'itemCode': 'MED-OMP-IV',
       'code': 'MED-OMP-IV',
       'name': 'Omeprazole (Risek)',
       'formula': 'Omeprazole (Risek)',
@@ -223,6 +292,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '024',
+      'rollNo': '024',
+      'itemCode': 'MED-AUG-625',
       'code': 'MED-AUG-625',
       'name': 'Co-Amoxiclav (Augmentin)',
       'formula': 'Co-Amoxiclav (Augmentin)',
@@ -232,6 +304,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '025',
+      'rollNo': '025',
+      'itemCode': 'MED-AUG-1G',
       'code': 'MED-AUG-1G',
       'name': 'Co-Amoxiclav (Augmentin)',
       'formula': 'Co-Amoxiclav (Augmentin)',
@@ -241,6 +316,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '026',
+      'rollNo': '026',
+      'itemCode': 'MED-AUG-SYR',
       'code': 'MED-AUG-SYR',
       'name': 'Co-Amoxiclav (Augmentin)',
       'formula': 'Co-Amoxiclav (Augmentin)',
@@ -250,6 +328,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '027',
+      'rollNo': '027',
+      'itemCode': 'MED-IBU-200',
       'code': 'MED-IBU-200',
       'name': 'Ibuprofen (Brufen)',
       'formula': 'Ibuprofen (Brufen)',
@@ -259,6 +340,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '028',
+      'rollNo': '028',
+      'itemCode': 'MED-IBU-400',
       'code': 'MED-IBU-400',
       'name': 'Ibuprofen (Brufen)',
       'formula': 'Ibuprofen (Brufen)',
@@ -268,6 +352,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '029',
+      'rollNo': '029',
+      'itemCode': 'MED-DMH-50',
       'code': 'MED-DMH-50',
       'name': 'Dimenhydrinate (Gravinate)',
       'formula': 'Dimenhydrinate (Gravinate)',
@@ -277,6 +364,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '030',
+      'rollNo': '030',
+      'itemCode': 'MED-DMH-SYR',
       'code': 'MED-DMH-SYR',
       'name': 'Dimenhydrinate (Gravinate)',
       'formula': 'Dimenhydrinate (Gravinate)',
@@ -286,6 +376,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '031',
+      'rollNo': '031',
+      'itemCode': 'MED-DMH-INJ',
       'code': 'MED-DMH-INJ',
       'name': 'Dimenhydrinate (Gravinate)',
       'formula': 'Dimenhydrinate (Gravinate)',
@@ -295,6 +388,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '032',
+      'rollNo': '032',
+      'itemCode': 'MED-DEX-INJ',
       'code': 'MED-DEX-INJ',
       'name': 'Dexamethasone',
       'formula': 'Dexamethasone',
@@ -304,6 +400,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '033',
+      'rollNo': '033',
+      'itemCode': 'MED-OND-INJ',
       'code': 'MED-OND-INJ',
       'name': 'Ondansetron',
       'formula': 'Ondansetron',
@@ -313,6 +412,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '034',
+      'rollNo': '034',
+      'itemCode': 'MED-CEF-1G',
       'code': 'MED-CEF-1G',
       'name': 'Ceftriaxone',
       'formula': 'Ceftriaxone',
@@ -322,6 +424,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '035',
+      'rollNo': '035',
+      'itemCode': 'MED-CEF-500M',
       'code': 'MED-CEF-500M',
       'name': 'Ceftriaxone',
       'formula': 'Ceftriaxone',
@@ -331,6 +436,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '036',
+      'rollNo': '036',
+      'itemCode': 'MED-NS-1000',
       'code': 'MED-NS-1000',
       'name': 'Normal Saline (N/S)',
       'formula': 'Normal Saline (N/S)',
@@ -340,6 +448,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '037',
+      'rollNo': '037',
+      'itemCode': 'MED-DS-1000',
       'code': 'MED-DS-1000',
       'name': 'DexoseSaline (D/S)',
       'formula': 'DexoseSaline (D/S)',
@@ -349,6 +460,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '038',
+      'rollNo': '038',
+      'itemCode': 'MED-RL-1000',
       'code': 'MED-RL-1000',
       'name': 'Ringer Lactate (R/L)',
       'formula': 'Ringer Lactate (R/L)',
@@ -358,6 +472,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '039',
+      'rollNo': '039',
+      'itemCode': 'EQUIP-DRIP-SET',
       'code': 'EQUIP-DRIP-SET',
       'name': 'IV Administration Set',
       'formula': 'IV Administration Set',
@@ -367,6 +484,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '040',
+      'rollNo': '040',
+      'itemCode': 'EQUIP-SYR-3CC',
       'code': 'EQUIP-SYR-3CC',
       'name': 'Disposable Syringe 3cc',
       'formula': 'Syringe',
@@ -376,6 +496,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '041',
+      'rollNo': '041',
+      'itemCode': 'EQUIP-SYR-5CC',
       'code': 'EQUIP-SYR-5CC',
       'name': 'Disposable Syringe 5cc',
       'formula': 'Syringe',
@@ -385,6 +508,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '042',
+      'rollNo': '042',
+      'itemCode': 'EQUIP-SYR-10CC',
       'code': 'EQUIP-SYR-10CC',
       'name': 'Disposable Syringe 10cc',
       'formula': 'Syringe',
@@ -394,6 +520,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '043',
+      'rollNo': '043',
+      'itemCode': 'EQUIP-CAN-18IN',
       'code': 'EQUIP-CAN-18IN',
       'name': 'IV Cannula 18"',
       'formula': 'IV Cannula',
@@ -403,6 +532,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '044',
+      'rollNo': '044',
+      'itemCode': 'EQUIP-CAN-20IN',
       'code': 'EQUIP-CAN-20IN',
       'name': 'IV Cannula 20"',
       'formula': 'IV Cannula',
@@ -412,6 +544,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '045',
+      'rollNo': '045',
+      'itemCode': 'EQUIP-CAN-22IN',
       'code': 'EQUIP-CAN-22IN',
       'name': 'IV Cannula 22"',
       'formula': 'IV Cannula',
@@ -421,6 +556,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '046',
+      'rollNo': '046',
+      'itemCode': 'EQUIP-CAN-24IN',
       'code': 'EQUIP-CAN-24IN',
       'name': 'IV Cannula 24"',
       'formula': 'IV Cannula',
@@ -430,6 +568,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '047',
+      'rollNo': '047',
+      'itemCode': 'EQUIP-NEB-MSK',
       'code': 'EQUIP-NEB-MSK',
       'name': 'Aerosol / Nebulizer Mask',
       'formula': 'Aerosol Mask',
@@ -439,6 +580,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '048',
+      'rollNo': '048',
+      'itemCode': 'MED-ATR-NEB',
       'code': 'MED-ATR-NEB',
       'name': 'Ipratropium Bromide',
       'formula': 'Ipratropium Bromide',
@@ -448,6 +592,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '049',
+      'rollNo': '049',
+      'itemCode': 'MED-VNT-NEB',
       'code': 'MED-VNT-NEB',
       'name': 'Salbutamol Solution',
       'formula': 'Salbutamol',
@@ -457,6 +604,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '050',
+      'rollNo': '050',
+      'itemCode': 'MED-SRB-Z',
       'code': 'MED-SRB-Z',
       'name': 'Multivitamin + Zinc (Surbex-Z)',
       'formula': 'Multivitamin + Zinc (Surbex-Z)',
@@ -466,6 +616,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '051',
+      'rollNo': '051',
+      'itemCode': 'MED-VTD3-1000',
       'code': 'MED-VTD3-1000',
       'name': 'Vitamin D3',
       'formula': 'Vitamin D3',
@@ -475,6 +628,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '052',
+      'rollNo': '052',
+      'itemCode': 'MED-MVIT-TAB',
       'code': 'MED-MVIT-TAB',
       'name': 'Multivitamin',
       'formula': 'Multivitamin',
@@ -484,6 +640,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '053',
+      'rollNo': '053',
+      'itemCode': 'MED-MEF-250',
       'code': 'MED-MEF-250',
       'name': 'Mefenamic Acid (Ponstan)',
       'formula': 'Mefenamic Acid (Ponstan)',
@@ -493,6 +652,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '054',
+      'rollNo': '054',
+      'itemCode': 'MED-MEF-500',
       'code': 'MED-MEF-500',
       'name': 'Mefenamic Acid (Ponstan)',
       'formula': 'Mefenamic Acid (Ponstan)',
@@ -502,6 +664,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '055',
+      'rollNo': '055',
+      'itemCode': 'MED-ENT-TAB',
       'code': 'MED-ENT-TAB',
       'name': 'Metronidazole (flagyl) + Diloxanide',
       'formula': 'Metronidazole (flagyl) + Diloxanide',
@@ -511,6 +676,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '056',
+      'rollNo': '056',
+      'itemCode': 'MED-DRT-40',
       'code': 'MED-DRT-40',
       'name': 'Drotaverine (No-Spa)',
       'formula': 'Drotaverine (No-Spa)',
@@ -520,6 +688,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '057',
+      'rollNo': '057',
+      'itemCode': 'MED-HYO-10',
       'code': 'MED-HYO-10',
       'name': 'Hyoscine Butylbromide (Buscopan)',
       'formula': 'Hyoscine Butylbromide (Buscopan)',
@@ -529,6 +700,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '058',
+      'rollNo': '058',
+      'itemCode': 'MED-HYO-INJ',
       'code': 'MED-HYO-INJ',
       'name': 'Hyoscine Butylbromide (Buscopan)',
       'formula': 'Hyoscine Butylbromide (Buscopan)',
@@ -538,6 +712,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '059',
+      'rollNo': '059',
+      'itemCode': 'MED-PHE-INJ',
       'code': 'MED-PHE-INJ',
       'name': 'Pheniramine Maleate (Avil)',
       'formula': 'Pheniramine Maleate (Avil)',
@@ -547,6 +724,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '060',
+      'rollNo': '060',
+      'itemCode': 'MED-ASP-300',
       'code': 'MED-ASP-300',
       'name': 'Aspirin (Disprin)',
       'formula': 'Aspirin (Disprin)',
@@ -556,6 +736,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '061',
+      'rollNo': '061',
+      'itemCode': 'MED-ASP-75',
       'code': 'MED-ASP-75',
       'name': 'Aspirin',
       'formula': 'Aspirin',
@@ -565,6 +748,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '062',
+      'rollNo': '062',
+      'itemCode': 'MED-PYO-OINT',
       'code': 'MED-PYO-OINT',
       'name': 'Povidone Iodine 10%',
       'formula': 'Povidone Iodine 10%',
@@ -574,6 +760,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '063',
+      'rollNo': '063',
+      'itemCode': 'EQUIP-NDL-24IN',
       'code': 'EQUIP-NDL-24IN',
       'name': 'Needle 24"',
       'formula': 'Needle',
@@ -583,6 +772,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '064',
+      'rollNo': '064',
+      'itemCode': 'EQUIP-NDL-21IN',
       'code': 'EQUIP-NDL-21IN',
       'name': 'Disposable Needle 21"',
       'formula': 'Needle',
@@ -592,6 +784,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '065',
+      'rollNo': '065',
+      'itemCode': 'EQUIP-NDL-22IN',
       'code': 'EQUIP-NDL-22IN',
       'name': 'Disposable Needle 22"',
       'formula': 'Needle',
@@ -601,6 +796,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '066',
+      'rollNo': '066',
+      'itemCode': 'EQUIP-NDL-23IN',
       'code': 'EQUIP-NDL-23IN',
       'name': 'Disposable Needle 23"',
       'formula': 'Needle',
@@ -610,6 +808,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '067',
+      'rollNo': '067',
+      'itemCode': 'EQUIP-NDL-25IN',
       'code': 'EQUIP-NDL-25IN',
       'name': 'Disposable Needle 25"',
       'formula': 'Needle',
@@ -619,6 +820,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '068',
+      'rollNo': '068',
+      'itemCode': 'EQUIP-NDL-INS',
       'code': 'EQUIP-NDL-INS',
       'name': 'Insulin Needle 30"',
       'formula': 'Needle',
@@ -628,6 +832,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '069',
+      'rollNo': '069',
+      'itemCode': 'EQUIP-NDL-DNT',
       'code': 'EQUIP-NDL-DNT',
       'name': 'Dental Needle 27"',
       'formula': 'Needle',
@@ -637,6 +844,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '070',
+      'rollNo': '070',
+      'itemCode': 'MED-DIC-INJ',
       'code': 'MED-DIC-INJ',
       'name': 'Diclofenac Sodium',
       'formula': 'Diclofenac Sodium',
@@ -646,6 +856,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '071',
+      'rollNo': '071',
+      'itemCode': 'MED-DIC-50',
       'code': 'MED-DIC-50',
       'name': 'Diclofenac Sodium',
       'formula': 'Diclofenac Sodium',
@@ -655,6 +868,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '072',
+      'rollNo': '072',
+      'itemCode': 'MED-TRM-INJ',
       'code': 'MED-TRM-INJ',
       'name': 'Tramadol Hydrochloride',
       'formula': 'Tramadol',
@@ -664,6 +880,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '073',
+      'rollNo': '073',
+      'itemCode': 'MED-HYD-INJ',
       'code': 'MED-HYD-INJ',
       'name': 'Hydrocortisone Sodium Succinate',
       'formula': 'Hydrocortisone',
@@ -673,6 +892,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '074',
+      'rollNo': '074',
+      'itemCode': 'MED-MTC-INJ',
       'code': 'MED-MTC-INJ',
       'name': 'Metoclopramide',
       'formula': 'Metoclopramide',
@@ -682,6 +904,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '075',
+      'rollNo': '075',
+      'itemCode': 'MED-CIP-DRP',
       'code': 'MED-CIP-DRP',
       'name': 'Ciprofloxacin',
       'formula': 'Ciprofloxacin',
@@ -690,8 +915,11 @@ class MasterProformaService {
       'defaultPrice': 140.00,
       'isProformaMaster': true,
     },
-    // ── Brufen Syrup ───────────────────────────────────────────────
+    // â”€â”€ Brufen Syrup â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
+      'barcode': '076',
+      'rollNo': '076',
+      'itemCode': 'MED-BRF-SYR',
       'code': 'MED-BRF-SYR',
       'name': 'Ibuprofen',
       'formula': 'Ibuprofen',
@@ -700,8 +928,11 @@ class MasterProformaService {
       'defaultPrice': 120.00,
       'isProformaMaster': true,
     },
-    // ── Metoclopramide (Tablet, Injection, Syrup) ───────────────
+    // â”€â”€ Metoclopramide (Tablet, Injection, Syrup) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
+      'barcode': '077',
+      'rollNo': '077',
+      'itemCode': 'MED-METCL-TAB',
       'code': 'MED-METCL-TAB',
       'name': 'Metoclopramide (Metoclone)',
       'formula': 'Metoclopramide (Metoclone)',
@@ -711,6 +942,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '078',
+      'rollNo': '078',
+      'itemCode': 'MED-METCL-INJ',
       'code': 'MED-METCL-INJ',
       'name': 'Metoclopramide (Metoclone)',
       'formula': 'Metoclopramide (Metoclone)',
@@ -720,6 +954,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '079',
+      'rollNo': '079',
+      'itemCode': 'MED-METCL-SYR',
       'code': 'MED-METCL-SYR',
       'name': 'Metoclopramide (Metoclone)',
       'formula': 'Metoclopramide (Metoclone)',
@@ -728,8 +965,11 @@ class MasterProformaService {
       'defaultPrice': 70.00,
       'isProformaMaster': true,
     },
-    // ── Additional Requested Proforma Items ──────────────────────────────
+    // â”€â”€ Additional Requested Proforma Items â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
     {
+      'barcode': '080',
+      'rollNo': '080',
+      'itemCode': 'MED-CPM-4',
       'code': 'MED-CPM-4',
       'name': 'Chloropheniramine Maleate (CPM)',
       'formula': 'Chloropheniramine Maleate (CPM)',
@@ -739,6 +979,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '081',
+      'rollNo': '081',
+      'itemCode': 'MED-CPM-SYP',
       'code': 'MED-CPM-SYP',
       'name': 'Chloropheniramine Maleate (CPM)',
       'formula': 'Chloropheniramine Maleate (CPM)',
@@ -748,6 +991,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '082',
+      'rollNo': '082',
+      'itemCode': 'MED-FLG-INJ',
       'code': 'MED-FLG-INJ',
       'name': 'Metronidazole (Flagyl)',
       'formula': 'Metronidazole (Flagyl)',
@@ -757,6 +1003,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '083',
+      'rollNo': '083',
+      'itemCode': 'MED-FLG-400',
       'code': 'MED-FLG-400',
       'name': 'Metronidazole (Flagyl)',
       'formula': 'Metronidazole (Flagyl)',
@@ -766,6 +1015,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '084',
+      'rollNo': '084',
+      'itemCode': 'MED-FLG-SYR',
       'code': 'MED-FLG-SYR',
       'name': 'Metronidazole (Flagyl)',
       'formula': 'Metronidazole (Flagyl)',
@@ -775,6 +1027,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '085',
+      'rollNo': '085',
+      'itemCode': 'MED-MET-DIL-TAB',
       'code': 'MED-MET-DIL-TAB',
       'name': 'Metronidazole + Diloxanide (Entamezole DS)',
       'formula': 'Metronidazole + Diloxanide (Entamezole DS)',
@@ -784,6 +1039,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '086',
+      'rollNo': '086',
+      'itemCode': 'MED-MET-DIL-SYR',
       'code': 'MED-MET-DIL-SYR',
       'name': 'Metronidazole + Diloxanide (Entamezole DS)',
       'formula': 'Metronidazole + Diloxanide (Entamezole DS)',
@@ -793,6 +1051,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '087',
+      'rollNo': '087',
+      'itemCode': 'MED-VBC-TAB',
       'code': 'MED-VBC-TAB',
       'name': 'Vitamin B-complex (BC)',
       'formula': 'Vitamin B-complex (BC)',
@@ -802,6 +1063,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '088',
+      'rollNo': '088',
+      'itemCode': 'MED-VBC-SYR',
       'code': 'MED-VBC-SYR',
       'name': 'Vitamin B-complex (BC)',
       'formula': 'Vitamin B-complex (BC)',
@@ -811,6 +1075,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '089',
+      'rollNo': '089',
+      'itemCode': 'MED-FOL-TAB',
       'code': 'MED-FOL-TAB',
       'name': 'Folic Acid',
       'formula': 'Folic Acid',
@@ -820,6 +1087,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '090',
+      'rollNo': '090',
+      'itemCode': 'MED-SDM-TAB',
       'code': 'MED-SDM-TAB',
       'name': 'Sodamint',
       'formula': 'Sodamint',
@@ -829,6 +1099,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '091',
+      'rollNo': '091',
+      'itemCode': 'MED-DEX-TAB',
       'code': 'MED-DEX-TAB',
       'name': 'Dexamethasone',
       'formula': 'Dexamethasone',
@@ -838,6 +1111,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '092',
+      'rollNo': '092',
+      'itemCode': 'MED-DRT-INJ',
       'code': 'MED-DRT-INJ',
       'name': 'Drotaverine (No-Spa)',
       'formula': 'Drotaverine (No-Spa)',
@@ -847,6 +1123,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '093',
+      'rollNo': '093',
+      'itemCode': 'MED-VTC-TAB',
       'code': 'MED-VTC-TAB',
       'name': 'Vitamin C',
       'formula': 'Vitamin C',
@@ -856,6 +1135,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '094',
+      'rollNo': '094',
+      'itemCode': 'MED-CAL-TAB',
       'code': 'MED-CAL-TAB',
       'name': 'Calcium',
       'formula': 'Calcium',
@@ -865,6 +1147,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '095',
+      'rollNo': '095',
+      'itemCode': 'MED-PCP-5',
       'code': 'MED-PCP-5',
       'name': 'Prochlorperazine (Stemetil)',
       'formula': 'Prochlorperazine (Stemetil)',
@@ -874,6 +1159,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '096',
+      'rollNo': '096',
+      'itemCode': 'MED-NIM-100',
       'code': 'MED-NIM-100',
       'name': 'Nimesulide',
       'formula': 'Nimesulide',
@@ -883,6 +1171,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '097',
+      'rollNo': '097',
+      'itemCode': 'MED-SRP-20',
       'code': 'MED-SRP-20',
       'name': 'Serratiopeptidase (Danzen DS)',
       'formula': 'Serratiopeptidase (Danzen DS)',
@@ -892,6 +1183,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '098',
+      'rollNo': '098',
+      'itemCode': 'MED-DOX-100',
       'code': 'MED-DOX-100',
       'name': 'Doxycycline',
       'formula': 'Doxycycline',
@@ -901,6 +1195,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '099',
+      'rollNo': '099',
+      'itemCode': 'MED-OTC-250',
       'code': 'MED-OTC-250',
       'name': 'Oxytetracycline',
       'formula': 'Oxytetracycline',
@@ -910,6 +1207,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '100',
+      'rollNo': '100',
+      'itemCode': 'MED-IND-25',
       'code': 'MED-IND-25',
       'name': 'Indomethacin',
       'formula': 'Indomethacin',
@@ -919,6 +1219,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '101',
+      'rollNo': '101',
+      'itemCode': 'MED-ANT-SYR',
       'code': 'MED-ANT-SYR',
       'name': 'Antacid (Trisil)',
       'formula': 'Antacid (Trisil)',
@@ -928,6 +1231,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '102',
+      'rollNo': '102',
+      'itemCode': 'MED-AMC-SYR',
       'code': 'MED-AMC-SYR',
       'name': 'Amonium Chloride (Cough Syrup)',
       'formula': 'Amonium Chloride (Cough Syrup)',
@@ -937,6 +1243,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '103',
+      'rollNo': '103',
+      'itemCode': 'MED-CRM-SYR',
       'code': 'MED-CRM-SYR',
       'name': 'Carminative Mixture (Colic Syrup)',
       'formula': 'Carminative Mixture (Colic Syrup)',
@@ -946,6 +1255,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '104',
+      'rollNo': '104',
+      'itemCode': 'MED-LIN-INJ',
       'code': 'MED-LIN-INJ',
       'name': 'Lincomycin (Lincocin)',
       'formula': 'Lincomycin (Lincocin)',
@@ -955,6 +1267,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '105',
+      'rollNo': '105',
+      'itemCode': 'MED-BCM-INJ',
       'code': 'MED-BCM-INJ',
       'name': 'B-Complex (Neurobion)',
       'formula': 'B-Complex (Neurobion)',
@@ -964,6 +1279,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '106',
+      'rollNo': '106',
+      'itemCode': 'MED-B12-INJ',
       'code': 'MED-B12-INJ',
       'name': 'B-12 (Cynocobalmin)',
       'formula': 'B-12 (Cynocobalmin)',
@@ -973,6 +1291,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '107',
+      'rollNo': '107',
+      'itemCode': 'EQUIP-BTP-STD',
       'code': 'EQUIP-BTP-STD',
       'name': 'Bandage Tape Plaster',
       'formula': 'Bandage Tape Plaster',
@@ -982,6 +1303,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '108',
+      'rollNo': '108',
+      'itemCode': 'EQUIP-BND-STD',
       'code': 'EQUIP-BND-STD',
       'name': 'Bandages',
       'formula': 'Bandages',
@@ -991,6 +1315,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '109',
+      'rollNo': '109',
+      'itemCode': 'EQUIP-COT-ROL',
       'code': 'EQUIP-COT-ROL',
       'name': 'Cotton Roll',
       'formula': 'Cotton Roll',
@@ -1000,6 +1327,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '110',
+      'rollNo': '110',
+      'itemCode': 'EQUIP-SNP-STD',
       'code': 'EQUIP-SNP-STD',
       'name': 'Adhesive First Aid Bandage (Sunny Plast)',
       'formula': 'Adhesive First Aid Bandage (Sunny Plast)',
@@ -1009,6 +1339,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '111',
+      'rollNo': '111',
+      'itemCode': 'EQUIP-PYD-SOL',
       'code': 'EQUIP-PYD-SOL',
       'name': 'Povidone Iodine Solution (Pyodine)',
       'formula': 'Povidone Iodine Solution (Pyodine)',
@@ -1018,6 +1351,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '112',
+      'rollNo': '112',
+      'itemCode': 'EQUIP-ALC-SWB',
       'code': 'EQUIP-ALC-SWB',
       'name': 'Alcohol Swab',
       'formula': 'Alcohol Swab',
@@ -1027,6 +1363,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '113',
+      'rollNo': '113',
+      'itemCode': 'EQUIP-NDL-24',
       'code': 'EQUIP-NDL-24',
       'name': 'Needle 24"',
       'formula': 'Needle',
@@ -1036,6 +1375,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '114',
+      'rollNo': '114',
+      'itemCode': 'MED-NS-100',
       'code': 'MED-NS-100',
       'name': 'Normal Saline (N/S)',
       'formula': 'Normal Saline (N/S)',
@@ -1045,6 +1387,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '115',
+      'rollNo': '115',
+      'itemCode': 'MED-NS-500',
       'code': 'MED-NS-500',
       'name': 'Normal Saline (N/S)',
       'formula': 'Normal Saline (N/S)',
@@ -1054,6 +1399,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '116',
+      'rollNo': '116',
+      'itemCode': 'MED-DS-500',
       'code': 'MED-DS-500',
       'name': 'DexoseSaline (D/S)',
       'formula': 'DexoseSaline (D/S)',
@@ -1063,6 +1411,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '117',
+      'rollNo': '117',
+      'itemCode': 'MED-MEF-1000',
       'code': 'MED-MEF-1000',
       'name': 'Mefenamic Acid',
       'formula': 'Mefenamic Acid',
@@ -1072,6 +1423,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '118',
+      'rollNo': '118',
+      'itemCode': 'MED-CIP-250-TAB',
       'code': 'MED-CIP-250-TAB',
       'name': 'Ciprofloxacin (Novidat)',
       'formula': 'Ciprofloxacin (Novidat)',
@@ -1081,6 +1435,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '119',
+      'rollNo': '119',
+      'itemCode': 'MED-CIP-500-TAB',
       'code': 'MED-CIP-500-TAB',
       'name': 'Ciprofloxacin (Novidat)',
       'formula': 'Ciprofloxacin (Novidat)',
@@ -1090,6 +1447,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '120',
+      'rollNo': '120',
+      'itemCode': 'MED-CIP-250',
       'code': 'MED-CIP-250',
       'name': 'Ciprofloxacin (Novidat)',
       'formula': 'Ciprofloxacin (Novidat)',
@@ -1099,6 +1459,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '121',
+      'rollNo': '121',
+      'itemCode': 'MED-CIP-500',
       'code': 'MED-CIP-500',
       'name': 'Ciprofloxacin (Novidat)',
       'formula': 'Ciprofloxacin (Novidat)',
@@ -1108,6 +1471,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '122',
+      'rollNo': '122',
+      'itemCode': 'MED-CIP-IV',
       'code': 'MED-CIP-IV',
       'name': 'Ciprofloxacin (Novidat)',
       'formula': 'Ciprofloxacin (Novidat)',
@@ -1117,6 +1483,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '123',
+      'rollNo': '123',
+      'itemCode': 'MED-OMP-40',
       'code': 'MED-OMP-40',
       'name': 'Omeprazole',
       'formula': 'Omeprazole',
@@ -1126,6 +1495,9 @@ class MasterProformaService {
       'isProformaMaster': true,
     },
     {
+      'barcode': '124',
+      'rollNo': '124',
+      'itemCode': 'MED-RL-500',
       'code': 'MED-RL-500',
       'name': 'Ringer Lactate (R/L)',
       'formula': 'Ringer Lactate (R/L)',
@@ -1256,16 +1628,47 @@ class MasterProformaService {
               }
             }
 
-            // Auto-align code/barcode with medicine type (e.g. fix -INJ on Tablet)
-            final rawCode = (map['code'] ?? map['barcode'] ?? '').toString().trim();
+            // Auto-align code with medicine type (e.g. fix -INJ on Tablet)
+            final currentCode = (map['itemCode'] ?? map['code'] ?? '').toString().trim();
             final curType = (map['type'] ?? '').toString().trim();
-            final adjustedCode = adjustBarcodeForType(rawCode, curType);
-            if (adjustedCode != rawCode && adjustedCode.isNotEmpty) {
+            final adjustedCode = adjustBarcodeForType(currentCode, curType);
+            if (adjustedCode != currentCode && adjustedCode.isNotEmpty) {
               map['code'] = adjustedCode;
-              map['barcode'] = adjustedCode;
+              map['itemCode'] = adjustedCode;
               if (box.containsKey(key)) {
                 box.put(key, LocalStorageService.sanitize(map));
               }
+            }
+
+            // Ensure itemCode is set to alphanumeric code
+            final resolvedCode = (map['itemCode'] ?? map['code'] ?? adjustedCode).toString().trim();
+            final rawBarcode = (map['barcode'] ?? '').toString().trim();
+            final rawRoll = (map['rollNo'] ?? '').toString().trim();
+
+            map['itemCode'] = (map['itemCode'] != null && map['itemCode'].toString().isNotEmpty)
+                ? map['itemCode'].toString().trim()
+                : resolvedCode;
+
+            // If barcode is an old alphanumeric string like MED-... or EQUIP-..., move it to itemCode
+            if (rawBarcode.startsWith('MED-') || rawBarcode.startsWith('EQUIP-')) {
+              map['itemCode'] = rawBarcode;
+              map['code'] = rawBarcode;
+            }
+
+            // Assign 3-digit numeric barcode from _defaultProformaList match
+            final defMatch = _defaultProformaList.firstWhere(
+              (d) => d['code'] == resolvedCode || d['itemCode'] == resolvedCode || (d['name'] == map['name'] && d['type'] == map['type'] && d['dose'] == map['dose']),
+              orElse: () => {},
+            );
+            if (defMatch.isNotEmpty && defMatch['barcode'] != null) {
+              map['barcode'] = defMatch['barcode'];
+              map['rollNo'] = defMatch['barcode'];
+            } else if (rawRoll.isNotEmpty && int.tryParse(rawRoll) != null) {
+              map['barcode'] = rawRoll.padLeft(3, '0');
+              map['rollNo'] = rawRoll.padLeft(3, '0');
+            } else if (int.tryParse(rawBarcode) != null) {
+              map['barcode'] = rawBarcode.padLeft(3, '0');
+              map['rollNo'] = rawBarcode.padLeft(3, '0');
             }
 
             result.add(map);
@@ -1281,6 +1684,25 @@ class MasterProformaService {
           if (code != null && !existingCodes.contains(code)) {
             result.add(Map<String, dynamic>.from(defItem));
             box.put('proforma:$code', defItem);
+          }
+        }
+
+        // Backfill numeric barcodes for any custom items that still don't have one
+        int maxBarcode = 0;
+        for (final item in result) {
+          final b = int.tryParse((item['barcode'] ?? item['rollNo'] ?? '').toString().trim());
+          if (b != null && b > maxBarcode) maxBarcode = b;
+        }
+        for (final item in result) {
+          if (int.tryParse((item['barcode'] ?? '').toString().trim()) == null) {
+            maxBarcode++;
+            final newBarcode = maxBarcode.toString().padLeft(3, '0');
+            item['barcode'] = newBarcode;
+            item['rollNo'] = newBarcode;
+            final k = 'proforma:${item['code']}';
+            if (box.containsKey(k)) {
+              box.put(k, LocalStorageService.sanitize(item));
+            }
           }
         }
 
@@ -1318,19 +1740,45 @@ class MasterProformaService {
     return null;
   }
 
-  /// Helper to check if a barcode/code already exists in Proforma catalog
+  /// Helper to check if a barcode/code or roll number already exists in Proforma catalog
   static Map<String, dynamic>? findExactBarcodeMatch(String code) {
     final cleanCode = code.trim().toLowerCase();
     if (cleanCode.isEmpty) return null;
 
     final all = getAllProformaItems();
+    final queryInt = int.tryParse(cleanCode);
+
     for (final item in all) {
-      final itemCode = (item['code'] as String? ?? item['barcode'] as String? ?? '').trim().toLowerCase();
-      if (itemCode.isNotEmpty && itemCode == cleanCode) {
+      final itemBarcode = (item['barcode'] as String? ?? item['code'] as String? ?? '').trim().toLowerCase();
+      final itemRoll = (item['rollNo'] as String? ?? '').trim().toLowerCase();
+
+      if (itemBarcode == cleanCode || itemRoll == cleanCode) {
         return item;
+      }
+
+      // Roll number numeric matching with leading-zero tolerance (e.g. '1' matches '001')
+      if (queryInt != null) {
+        final rollInt = int.tryParse(itemRoll);
+        if (rollInt != null && rollInt == queryInt) {
+          return item;
+        }
       }
     }
     return null;
+  }
+
+  /// Returns the next sequential roll number padded to at least 3 digits (e.g. '001', '002', ..., '125')
+  static String getNextRollNumber() {
+    int maxNum = 0;
+    final all = getAllProformaItems();
+    for (final item in all) {
+      final rollStr = (item['rollNo'] ?? '').toString().trim();
+      final numVal = int.tryParse(rollStr);
+      if (numVal != null && numVal > maxNum) {
+        maxNum = numVal;
+      }
+    }
+    return (maxNum + 1).toString().padLeft(3, '0');
   }
 
   /// Helper to check if a Name + Dose + Type exact match exists in Proforma catalog

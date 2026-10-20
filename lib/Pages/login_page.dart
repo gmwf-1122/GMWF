@@ -1751,8 +1751,14 @@ class _LoginPageState extends State<LoginPage> {
       ));
       final validDocs = results.whereType<Map<String, dynamic>>().toList();
       if (validDocs.isNotEmpty) {
-        final isAnyDel = validDocs.any((d) => d['isDeleted'] == true || (d['status'] ?? '').toString().toLowerCase().trim() == 'deleted');
-        if (isAnyDel) {
+        // Prioritize active profiles: filter out stale tombstones if active documents exist
+        final activeDocs = validDocs.where((d) =>
+            d['isDeleted'] != true &&
+            (d['status'] ?? '').toString().toLowerCase().trim() != 'deleted' &&
+            (d['accountStatus'] ?? '').toString().toLowerCase().trim() != 'deleted'
+        ).toList();
+
+        if (activeDocs.isEmpty) {
           debugPrint('[LoginPage] Deleted user profile detected for $uid ($inputUsername)');
           return {
             'uid': uid,
@@ -1763,7 +1769,7 @@ class _LoginPageState extends State<LoginPage> {
           };
         }
 
-        final merged = _mergeCloudUserDocs(validDocs, defaultUsername: inputUsername);
+        final merged = _mergeCloudUserDocs(activeDocs, defaultUsername: inputUsername);
         merged['uid'] = uid;
         merged['email'] = user.email ?? merged['email'];
         final role = (merged['role'] ?? '').toString();

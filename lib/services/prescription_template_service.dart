@@ -7,6 +7,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:font_awesome_flutter/font_awesome_flutter.dart';
 import 'package:gmwf/realtime/realtime_manager.dart';
 import 'package:gmwf/realtime/realtime_events.dart';
+import 'package:gmwf/services/cloud/lan_firestore_gate.dart';
 
 class PrescriptionTemplateService {
   static const String boxName = 'doctor_prescription_templates';
@@ -29,7 +30,8 @@ class PrescriptionTemplateService {
     final targetDoctor = (doctorId ?? '').trim().toLowerCase();
 
     // 1. Fetch from Firestore if doctorId is provided to sync across devices
-    if (syncCloud && targetDoctor.isNotEmpty) {
+    // A doctor desk on the LAN gets template changes over the LAN; it never reads the cloud.
+    if (syncCloud && targetDoctor.isNotEmpty && !LanFirestoreGate.isLanDesk) {
       try {
         final box = await _getBox();
         final effectiveBranch = branchId.isNotEmpty ? branchId : 'karachi';
@@ -177,7 +179,9 @@ class PrescriptionTemplateService {
       // only complete once the server acknowledges, so awaiting them left the "Save Template"
       // dialog stuck whenever the connection was slow or the write stream was stalled.
       final cloudCopy = Map<String, dynamic>.from(template);
-      unawaited(() async {
+      // On a desk connected to the LAN server, the LAN broadcast below is the upload: the
+      // server stores the change in the cloud.
+      if (!LanFirestoreGate.isLanDesk) unawaited(() async {
         try {
           await FirebaseFirestore.instance
               .collection('branches')
@@ -223,7 +227,9 @@ class PrescriptionTemplateService {
       final effectiveBranch = branchId.isNotEmpty ? branchId : 'karachi';
       final effectiveDoctorId = (doctorId ?? '').trim();
 
-      unawaited(() async {
+      // On a desk connected to the LAN server, the LAN broadcast below is the upload: the
+      // server stores the change in the cloud.
+      if (!LanFirestoreGate.isLanDesk) unawaited(() async {
         try {
           await FirebaseFirestore.instance
               .collection('branches')

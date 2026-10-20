@@ -26,9 +26,11 @@ void main() {
 
   tearDownAll(() async {
     await Hive.close();
-    if (await tempDir.exists()) {
-      await tempDir.delete(recursive: true);
-    }
+    try {
+      if (await tempDir.exists()) {
+        await tempDir.delete(recursive: true);
+      }
+    } catch (_) {}
   });
 
   test('Employee working 2 shifts in same branch records distinct morning and evening shifts', () async {

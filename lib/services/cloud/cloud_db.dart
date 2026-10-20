@@ -13,6 +13,7 @@ import 'package:hive_flutter/hive_flutter.dart';
 
 import '../quota_service.dart';
 import 'sync_log.dart';
+import 'lan_firestore_gate.dart';
 
 /// Upload transport for the sync queues (SyncService and the LAN server's ServerSyncManager).
 ///
@@ -101,6 +102,15 @@ class CloudDb {
         plugin: 'cloud_firestore',
         code: 'resource-exhausted',
         message: 'Daily write quota used up — waiting for the reset',
+      );
+    }
+    // A dispensary desk on the LAN never writes to Firestore itself: the LAN server uploads.
+    // 'unavailable' is treated like being offline, so queued items wait rather than fail.
+    if (LanFirestoreGate.active || LanFirestoreGate.isLanDesk) {
+      throw FirebaseException(
+        plugin: 'cloud_firestore',
+        code: 'unavailable',
+        message: 'LAN desk: the LAN server uploads this',
       );
     }
 

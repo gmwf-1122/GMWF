@@ -15,21 +15,17 @@ def main():
 
     clean_ver = new_version.lstrip('v')
     
-    # 1. Update pubspec.yaml
+    # 1. Update pubspec.yaml (Keep exact clean version)
     pubspec_path = os.path.join(os.getcwd(), 'pubspec.yaml')
     if os.path.exists(pubspec_path):
         with open(pubspec_path, 'r', encoding='utf-8') as f:
             content = f.read()
         
-        match = re.search(r'version:\s*([\d.]+)(?:\+(\d+))?', content)
-        if match:
-            old_build = int(match.group(2)) if match.group(2) else 1
-            new_build = old_build + 1
-            new_ver_str = f"version: {clean_ver}+{new_build}"
-            content = re.sub(r'version:\s*[\d.]+(?:\+\d+)?', new_ver_str, content)
-            with open(pubspec_path, 'w', encoding='utf-8') as f:
-                f.write(content)
-            log(f"Updated pubspec.yaml to {new_ver_str}")
+        new_ver_str = f"version: {clean_ver}"
+        content = re.sub(r'version:\s*[\d.]+(?:\+\d+)?', new_ver_str, content)
+        with open(pubspec_path, 'w', encoding='utf-8') as f:
+            f.write(content)
+        log(f"Updated pubspec.yaml to {new_ver_str}")
 
     # 2. Update AutoUpdateService
     auto_update_path = os.path.join(os.getcwd(), 'lib', 'services', 'auto_update_service.dart')
@@ -37,10 +33,10 @@ def main():
         with open(auto_update_path, 'r', encoding='utf-8') as f:
             content = f.read()
         content = re.sub(r"static const String currentVersion = '[^']+';", f"static const String currentVersion = '{clean_ver}';", content)
-        content = re.sub(r"static const String minSupportedVersion = '[^']+';", f"static const String minSupportedVersion = '{clean_ver}';", content)
+        content = re.sub(r"static const String fallbackVersion = '[^']+';", f"static const String fallbackVersion = '{clean_ver}';", content)
         with open(auto_update_path, 'w', encoding='utf-8') as f:
             f.write(content)
-        log(f"Updated auto_update_service.dart currentVersion to '{clean_ver}'")
+        log(f"Updated auto_update_service.dart version to '{clean_ver}'")
 
     # 3. Update GMWFSetup.iss & GMWFSetup_x86.iss
     for iss_name, arch in [('GMWFSetup.iss', 'x64'), ('GMWFSetup_x86.iss', 'x86')]:
@@ -49,6 +45,7 @@ def main():
             with open(iss_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             content = re.sub(r'AppVersion=[\d.]+', f'AppVersion={clean_ver}', content)
+            content = re.sub(r'AppVerName=GMWF Management System v[\d.]+', f'AppVerName=GMWF Management System v{clean_ver}', content)
             content = re.sub(r'OutputBaseFilename=GMWF-v[\d.]+-(' + arch + ')', f'OutputBaseFilename=GMWF-v{clean_ver}-\\1', content)
             with open(iss_path, 'w', encoding='utf-8') as f:
                 f.write(content)
@@ -75,21 +72,27 @@ def main():
         log("Windows build failed!")
         sys.exit(1)
 
-    # 7. Build Inno Setup Installer if ISCC is installed
+    # 7. Build Inno Setup Installers (x64 and x86) if ISCC is installed
     iscc_path = r"C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
     if os.path.exists(iscc_path):
-        log("Compiling Inno Setup Installer...")
-        subprocess.run([iscc_path, iss_path])
+        for iss_file in ['GMWFSetup.iss', 'GMWFSetup_x86.iss']:
+            iss_full_path = os.path.join(os.getcwd(), iss_file)
+            if os.path.exists(iss_full_path):
+                log(f"Compiling Inno Setup Installer: {iss_file}...")
+                subprocess.run([iscc_path, iss_full_path])
 
     # 8. Upload code to GitHub
-    log("Committing and pushing source code to GitHub...")
+    log("Committing source code to Git...")
     subprocess.run(["git", "add", "."], shell=True)
     subprocess.run(["git", "commit", "-m", f"Release v{clean_ver}: update builds and code sync"], shell=True)
-    push_res = subprocess.run(["git", "push", "origin", "main"], shell=True)
-    if push_res.returncode == 0:
-        log("Code successfully uploaded to GitHub (origin/main)!")
-    else:
-        log("Warning: git push returned non-zero code. Verify credentials if required.")
+    # Detect current git branch
+    try:
+        branch_out = subprocess.check_output(["git", "rev-parse", "--abbrev-ref", "HEAD"], shell=True).decode().strip()
+        if branch_out:
+            log(f"Pushing to origin/{branch_out}...")
+            subprocess.run(["git", "push", "origin", branch_out], shell=True)
+    except Exception as e:
+        log(f"Git push notice: {e}")
 
     log(f"RELEASE v{clean_ver} BUILD SUCCESSFUL!")
     print(f"""

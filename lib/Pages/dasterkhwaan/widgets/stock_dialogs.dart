@@ -12,6 +12,7 @@ import 'package:gmwf/design/tokens/comfort_colors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../models/stock_item.dart';
 import '../../../widgets/app_feedback.dart';
+import '../../../services/cloud/cloud_db.dart';
 import 'cook_dialog.dart' show
     kPrimary, kAccent, kSuccess, kWarning, kInfo, kPurple,
     kSurface, kCardBg, kTextDark, kTextMid, kTextLight,
@@ -198,9 +199,10 @@ void showAddStockDialog(
                           .doc(branchId)
                           .collection('dasterkhwaan_stock')
                           .doc(name);
-                      final snap = await ref.get();
+                      final snap = await ref.get().timeout(const Duration(seconds: 8),
+                          onTimeout: () => ref.get(const GetOptions(source: Source.cache)));
                       if (isEdit) {
-                        await ref.update({
+                        await CloudDb.instance.ref(ref).update({
                           'quantity':    qty,
                           'unit':        unit,
                           'lastUpdated': FieldValue.serverTimestamp(),
@@ -213,7 +215,7 @@ void showAddStockDialog(
                         );
                         return;
                       } else {
-                        await ref.set({
+                        await CloudDb.instance.ref(ref).set({
                           'name':        name,
                           'quantity':    qty,
                           'unit':        unit,

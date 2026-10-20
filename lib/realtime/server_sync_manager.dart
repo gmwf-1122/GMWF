@@ -37,6 +37,7 @@
 //       _downloadTodayDispensary() — fetches today's dispensary records
 
 import 'package:gmwf/utils/ui_stall_monitor.dart';
+import 'package:gmwf/services/network_health_service.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -418,7 +419,14 @@ class ServerSyncManager {
               );
       final forceAll = msg['forceAll'] == true || msg['force'] == true || type == 'request_full_lan_sync';
       if (socketId != null && info != null) {
-        _downloadTodayTokens().then((_) {
+        // The catch-up is served from this server's local cache. The cloud refresh is only a
+        // bonus: with no internet it used to hold the push back for the SDK's whole offline
+        // timeout, so a PC that reconnected got its missed tokens/prescriptions very late.
+        // Never wait more than 3 s for it.
+        _downloadTodayTokens()
+            .timeout(const Duration(seconds: 3), onTimeout: () {})
+            .catchError((_) {})
+            .whenComplete(() {
           if (_running) _pushCatchUpToSocket(socketId, info, forceAll: forceAll);
         });
       }
@@ -713,35 +721,35 @@ class ServerSyncManager {
     final branchId = _field(data, full, 'branchId') ?? _branchId!;
     final serial   = (data['serial'] ?? data['id'])?.toString().trim();
     if (serial == null || serial.isEmpty) return;
+    final cleanSerial = CampSessionService.cleanSerial(serial, branchId);
     final prescWithBranch = {
       ...data,
       'branchId': branchId,
-      'serial':   serial,
+      'serial':   cleanSerial,
       ...?user?.toAuditMap(),
     };
 
     LocalStorageService.saveLocalPrescription(prescWithBranch);
-    LocalStorageService.saveLocalPrescription({...prescWithBranch, 'serial': serial});
 
     final normBranch = branchId.toLowerCase().trim();
-    final normSerial = serial.toUpperCase();
+    final normSerial = cleanSerial.toUpperCase();
     final canonicalKey = '$normBranch-$normSerial';
     final box      = Hive.box(LocalStorageService.entriesBox);
 
     Map<String, dynamic>? existing;
-    final direct = box.get(canonicalKey) ?? box.get('$branchId-$serial') ?? box.get(serial);
-    if (direct is Map) {
-      existing = Map<String, dynamic>.from(direct);
-    } else {
-      for (final k in box.keys) {
-        final kStr = k.toString().toUpperCase();
-        if (kStr == normSerial || kStr.endsWith('-$normSerial')) {
-          final val = box.get(k);
-          if (val is Map) {
-            existing = Map<String, dynamic>.from(val);
-            break;
-          }
-        }
+    final candidateKeys = <String>{
+      canonicalKey,
+      '$normBranch-$cleanSerial',
+      normSerial,
+      cleanSerial,
+      if (serial != cleanSerial) serial,
+      if (serial != cleanSerial) '$normBranch-${serial.toUpperCase()}',
+    };
+    for (final ck in candidateKeys) {
+      final direct = box.get(ck);
+      if (direct is Map) {
+        existing = Map<String, dynamic>.from(direct);
+        break;
       }
     }
 
@@ -762,14 +770,13 @@ class ServerSyncManager {
         });
       }
       box.put(canonicalKey, upd);
-      if (box.containsKey('$branchId-$serial') && canonicalKey != '$branchId-$serial') {
-        box.delete('$branchId-$serial');
-      }
-      if (box.containsKey(serial)) {
-        box.delete(serial);
+      for (final ck in candidateKeys) {
+        if (ck != canonicalKey && box.containsKey(ck)) {
+          box.delete(ck);
+        }
       }
     } else {
-      _pendingPrescriptions[serial] = data;
+      _pendingPrescriptions[cleanSerial] = data;
     }
 
     final cnic = _cleanCnic(
@@ -918,6 +925,16 @@ class ServerSyncManager {
       ...?user?.toAuditMap(),
     };
     final box = Hive.box(_editRequestsBox);
+    final existing = box.get(requestId);
+    if (existing is Map) {
+      final existingStatus = (existing['status'] ?? '').toString().toLowerCase().trim();
+      final incomingStatus = (request['status'] ?? 'pending').toString().toLowerCase().trim();
+      if ((existingStatus == 'approved' || existingStatus == 'rejected') && incomingStatus == 'pending') {
+        request['status'] = existingStatus;
+        if (existing['reviewedAt'] != null) request['reviewedAt'] = existing['reviewedAt'];
+        if (existing['reviewedBy'] != null) request['reviewedBy'] = existing['reviewedBy'];
+      }
+    }
     box.put(requestId, LocalStorageService.sanitize(request));
     _enqueue({
       'type': 'workflow_request',
@@ -964,8 +981,8 @@ class ServerSyncManager {
       final timeStr = (data['timestamp'] ?? data['deviceTimestamp'] ?? '').toString().trim();
       if (timeStr.isNotEmpty) {
         final parsedTime = DateTime.tryParse(timeStr);
-        if (parsedTime != null && DateTime.now().difference(parsedTime).inHours.abs() > 24) {
-          // Stale log (> 24h): skip queueing to avoid historical memory dump flooding
+        if (parsedTime != null && DateTime.now().difference(parsedTime).inDays.abs() > 90) {
+          // Stale log (> 90 days): skip queueing
           return;
         }
       }
@@ -2022,12 +2039,22 @@ class ServerSyncManager {
         break;
 
       case 'save_attendance':
+      case 'save_attendance_record':
+      case 'save_employee_attendance':
+      case 'save_biometric_log':
         final docId = op['docId']?.toString() ?? 'att_${DateTime.now().microsecondsSinceEpoch}';
-        final today = _todayKey();
+        final employeeId = (cleanData['employeeId'] ?? cleanData['empId'] ?? cleanData['userId'] ?? cleanData['pin'] ?? docId).toString();
+        final dateKey = (cleanData['date'] ?? cleanData['dateKey'] ?? op['date'] ?? _todayKey()).toString();
+
         await _db
             .collection('branches').doc(branchId)
-            .collection('attendance').doc(today)
-            .collection('records').doc(docId)
+            .collection('employee_attendance').doc(dateKey)
+            .set({'date': dateKey, 'branchId': branchId, 'lastUpdated': FieldValue.serverTimestamp()}, SetOptions(merge: true));
+
+        await _db
+            .collection('branches').doc(branchId)
+            .collection('employee_attendance').doc(dateKey)
+            .collection('records').doc(employeeId)
             .set(cleanData, SetOptions(merge: true));
         break;
 
@@ -2319,6 +2346,12 @@ class ServerSyncManager {
     if (!force && _lastTokenDownloadTime != null &&
         DateTime.now().difference(_lastTokenDownloadTime!) < const Duration(minutes: 5)) {
       debugPrint('[SSM] _downloadTodayTokens skipped (throttled by 5m cooldown)');
+      return;
+    }
+    // Offline: nothing to download, and the cloud calls would only hang. LAN routing keeps
+    // working from the local cache.
+    if (!NetworkHealthService().isStableOnline) {
+      debugPrint('[SSM] _downloadTodayTokens skipped (no stable internet; LAN cache is used)');
       return;
     }
     _lastTokenDownloadTime = DateTime.now();

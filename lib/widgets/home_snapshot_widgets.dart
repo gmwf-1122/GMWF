@@ -3475,16 +3475,17 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
     }
     final branchIds = cleanBranchIds.toList();
     
-    // 2. Fetch today-vs-yesterday per branch
-    final Map<String, TodayVsYesterday> statsMap = await fetchTodayVsYesterdayPerBranch(branchIds);
+    // 2. Fetch today-vs-yesterday per branch. This PC is on no clinic's LAN, so the figures
+    // are combined with cached cloud counts (the local-only view is buildLocalSnapshotDashboardData).
+    final Map<String, TodayVsYesterday> statsMap = await fetchTodayVsYesterdayPerBranch(branchIds, allowRemoteFallback: true);
     final weeklyPatients = await fetchWeeklyPatientCounts(branchIds);
-    
+
     // 3. Build branch/camp rows for table
     final List<HomeBranchRow> branchRows = [];
     final List<BranchStats> todayStatsList = [];
     final List<BranchStats> yesterdayStatsList = [];
-    
-    final karachiCamps = await fetchKarachiCampBreakdown();
+
+    final karachiCamps = await fetchKarachiCampBreakdown(null, true);
 
     statsMap.forEach((bId, value) {
       if (bId == 'karachi') {

@@ -119,7 +119,7 @@ class PayrollCalculatorService {
           'empName': employeeName,
           'empRole': emp['role']?.toString() ?? 'Employee',
           'empDepartment': emp['department']?.toString() ?? 'Other',
-          'empCamp': emp['camp'] ?? FinanceLocalStorage.getEmployeeCamp(emp),
+          'empCamp': FinanceLocalStorage.getEmployeeCampDisplay(emp).isNotEmpty ? FinanceLocalStorage.getEmployeeCampDisplay(emp) : (emp['camp']?.toString() ?? ''),
           'empBranchId': emp['branchId']?.toString() ?? branchId,
           'empIsActive': emp['isActive'] ?? true,
         });
