@@ -5022,6 +5022,36 @@ class ServerSyncManager {
             _serialLocks[lockKey] = nextLock;
             await nextLock;
             debugPrint('[SSM] ✅ Entry saved locally: $msgBranch-$serial');
+
+            // ── DIRECT CLOUD SYNC & ENQUEUE ON SERVER ──
+            try {
+              final canonicalBranch = msgBranch.toLowerCase().trim();
+              final upperSerial = serial.toUpperCase().trim();
+              final dateKey = (data['dateKey'] ?? LocalStorageService.getTodayDateKey()).toString();
+              final queueType = _resolveQueueType(data['queueType']?.toString());
+              final campId = (data['campId'] ?? data['dispensaryId'] ?? data['dispensaryTag'] ?? '').toString().toLowerCase().trim();
+              final targetKey = 'sync_serial_${canonicalBranch}_$upperSerial';
+
+              if (Hive.isBoxOpen(LocalStorageService.syncBox)) {
+                final sBox = Hive.box(LocalStorageService.syncBox);
+                await sBox.put(targetKey, {
+                  'type': 'save_entry',
+                  'entityId': '$canonicalBranch-$upperSerial',
+                  'branchId': canonicalBranch,
+                  'dateKey': dateKey,
+                  'queueType': queueType,
+                  'serial': upperSerial,
+                  'campId': campId,
+                  'data': data,
+                  'createdAt': DateTime.now().toIso8601String(),
+                  'attempts': 0,
+                  'status': 'pending',
+                });
+              }
+              _scheduleSyncDebounced();
+            } catch (e) {
+              debugPrint('[SSM] Direct sync enqueue error for entry: $e');
+            }
           }
           break;
 
@@ -5085,6 +5115,36 @@ class ServerSyncManager {
               }
             } catch (_) {}
             debugPrint('[SSM] ✅ Prescription saved locally: $serial');
+
+            // ── DIRECT CLOUD SYNC & ENQUEUE ON SERVER ──
+            try {
+              final canonicalBranch = msgBranch.toLowerCase().trim();
+              final upperSerial = serial.toUpperCase().trim();
+              final dateKey = (data['dateKey'] ?? LocalStorageService.getTodayDateKey()).toString();
+              final queueType = _resolveQueueType(data['queueType']?.toString());
+              final campId = (data['campId'] ?? data['dispensaryId'] ?? data['dispensaryTag'] ?? '').toString().toLowerCase().trim();
+              final targetKey = 'sync_presc_${canonicalBranch}_$upperSerial';
+
+              if (Hive.isBoxOpen(LocalStorageService.syncBox)) {
+                final sBox = Hive.box(LocalStorageService.syncBox);
+                await sBox.put(targetKey, {
+                  'type': 'save_prescription',
+                  'entityId': '$canonicalBranch-$upperSerial',
+                  'branchId': canonicalBranch,
+                  'dateKey': dateKey,
+                  'queueType': queueType,
+                  'serial': upperSerial,
+                  'campId': campId,
+                  'data': data,
+                  'createdAt': DateTime.now().toIso8601String(),
+                  'attempts': 0,
+                  'status': 'pending',
+                });
+              }
+              _scheduleSyncDebounced();
+            } catch (e) {
+              debugPrint('[SSM] Direct sync enqueue error for prescription: $e');
+            }
           }
           break;
 
@@ -5162,6 +5222,40 @@ class ServerSyncManager {
                 await LocalStorageService.updateDispenseStatus(normBranch, normSerialUpper, 'dispensed');
               }
             } catch (_) {}
+
+            // ── DIRECT CLOUD SYNC & ENQUEUE ON SERVER ──
+            try {
+              final canonicalBranch = msgBranch.toLowerCase().trim();
+              final upperSerial = normSerialUpper;
+              final dateKey = (data['dateKey'] ?? LocalStorageService.getTodayDateKey()).toString();
+              final queueType = _resolveQueueType(data['queueType']?.toString());
+              final campId = (data['campId'] ?? data['dispensaryId'] ?? data['dispensaryTag'] ?? '').toString().toLowerCase().trim();
+              final targetKey = 'sync_dispense_${canonicalBranch}_$upperSerial';
+
+              if (Hive.isBoxOpen(LocalStorageService.syncBox)) {
+                final sBox = Hive.box(LocalStorageService.syncBox);
+                await sBox.put(targetKey, {
+                  'type': 'update_serial_status',
+                  'entityId': '$canonicalBranch-$upperSerial',
+                  'branchId': canonicalBranch,
+                  'dateKey': dateKey,
+                  'queueType': queueType,
+                  'serial': upperSerial,
+                  'campId': campId,
+                  'data': {
+                    ...data,
+                    'dispenseStatus': 'dispensed',
+                    'status': 'completed',
+                  },
+                  'createdAt': DateTime.now().toIso8601String(),
+                  'attempts': 0,
+                  'status': 'pending',
+                });
+              }
+              _scheduleSyncDebounced();
+            } catch (e) {
+              debugPrint('[SSM] Direct sync enqueue error for dispense: $e');
+            }
           }
           break;
 
@@ -5171,6 +5265,27 @@ class ServerSyncManager {
                 {...data, 'branchId': msgBranch},
                 isFromSync: true);
             debugPrint('[SSM] ✅ Patient saved locally');
+
+            // ── DIRECT CLOUD SYNC & ENQUEUE ON SERVER ──
+            final pid = (data['patientId'] ?? data['id'] ?? '').toString().trim();
+            if (pid.isNotEmpty) {
+              final canonicalBranch = msgBranch.toLowerCase().trim();
+              final targetKey = 'sync_patient_${canonicalBranch}_$pid';
+              if (Hive.isBoxOpen(LocalStorageService.syncBox)) {
+                final sBox = Hive.box(LocalStorageService.syncBox);
+                await sBox.put(targetKey, {
+                  'type': 'save_patient',
+                  'entityId': pid,
+                  'branchId': canonicalBranch,
+                  'patientId': pid,
+                  'data': {...data, 'branchId': canonicalBranch},
+                  'createdAt': DateTime.now().toIso8601String(),
+                  'attempts': 0,
+                  'status': 'pending',
+                });
+              }
+              _scheduleSyncDebounced();
+            }
           } catch (_) {}
           break;
 
@@ -7063,6 +7178,15 @@ class ServerSyncManager {
         await setDoc(entryRef, cleanData);
         debugPrint('✅ save_entry → serials/$campDocKey/$qt/$docId');
 
+        // Direct write to dispensary collection for cloud console & legacy paths
+        try {
+          final dispRef = db
+              .collection('branches').doc(effectiveBranchId)
+              .collection('dispensary').doc(dk)
+              .collection(dk).doc(s);
+          await setDoc(dispRef, cleanData);
+        } catch (_) {}
+
         // Update local entry so pendingSync is cleared and marked synced on the server
         Future<void> applyEntrySync() async {
           try {
@@ -7156,6 +7280,32 @@ class ServerSyncManager {
             .collection(effectiveQueueType).doc(s);
         await setDoc(prescRef, updateMap);
         debugPrint('✅ save_prescription → serials/$campDocKey/$effectiveQueueType/$s');
+
+        // Direct write to prescriptions collections & dispensary daily collection
+        final cnic = (cleanData['patientCnic'] ?? cleanData['cnic'] ?? '').toString().trim();
+        if (cnic.isNotEmpty) {
+          try {
+            final pRef1 = db
+                .collection('branches').doc(effectiveBranchId)
+                .collection('prescriptions').doc(cnic)
+                .collection('prescriptions').doc(s);
+            await setDoc(pRef1, Map<String, dynamic>.from(cleanData)..addAll(updateMap));
+          } catch (_) {}
+          try {
+            final pRef2 = db
+                .collection('branches').doc(effectiveBranchId)
+                .collection('patients').doc(cnic)
+                .collection('prescriptions').doc(s);
+            await setDoc(pRef2, Map<String, dynamic>.from(cleanData)..addAll(updateMap));
+          } catch (_) {}
+        }
+        try {
+          final dispRef = db
+              .collection('branches').doc(effectiveBranchId)
+              .collection('dispensary').doc(effectiveDateKey)
+              .collection(effectiveDateKey).doc(s);
+          await setDoc(dispRef, Map<String, dynamic>.from(cleanData)..addAll(updateMap));
+        } catch (_) {}
 
         // Update local entry so prescription status is synced on the server
         Future<void> applyPrescriptionSync() async {
@@ -7264,6 +7414,15 @@ class ServerSyncManager {
             .collection(qt).doc(s);
         await setDoc(statusRef, statusPatch);
         debugPrint('✅ update_serial_status → serials/$campDocKey/$qt/$s');
+
+        // Direct write status patch to dispensary daily collection
+        try {
+          final dispRef = db
+              .collection('branches').doc(effectiveBranchId)
+              .collection('dispensary').doc(dk)
+              .collection(dk).doc(s);
+          await setDoc(dispRef, Map<String, dynamic>.from(cleanData)..addAll(statusPatch));
+        } catch (_) {}
 
         // Update local entry so dispenseStatus is synced on the server
         Future<void> applyDispenseSync() async {
