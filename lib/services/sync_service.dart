@@ -4964,6 +4964,9 @@ class SyncService {
   String resolveQueueType(String? raw, {String? branchId}) {
     if (raw == null) return 'zakat';
     final r = raw.toLowerCase().trim();
+    if (r == '20' || r == 'pkr 20' || r == 'pkr20' || r == 'twenty') {
+      return 'zakat';
+    }
     if (r.contains('non') || r.contains('general')) {
       if (branchId != null) {
         final b = branchId.toLowerCase().trim();

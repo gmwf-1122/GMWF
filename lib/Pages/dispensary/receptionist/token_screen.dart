@@ -1676,10 +1676,10 @@ class TokenScreenState extends State<TokenScreen> with WidgetsBindingObserver {
                           _radioGroup(
                             'Status',
                             _isKarachi
-                                ? ['Zakat', 'GMWF']
+                                ? ['PKR 20', 'GMWF']
                                 : ['Zakat', 'Non-Zakat', 'GMWF'],
-                            selectedStatus,
-                            (v) => setStateDialog(() => selectedStatus = v),
+                            (_isKarachi && (selectedStatus == 'Zakat' || selectedStatus == '20')) ? 'PKR 20' : selectedStatus,
+                            (v) => setStateDialog(() => selectedStatus = (v == 'PKR 20') ? 'Zakat' : v),
                           ),
                           const SizedBox(height: 14),
                           _radioGroup('Gender', ['Male', 'Female', 'Other'],

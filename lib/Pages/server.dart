@@ -4546,6 +4546,7 @@ class ServerSyncManager {
     if (raw == null) return 'zakat';
     final s = raw.toString().toLowerCase().trim();
     if (s.isEmpty) return 'zakat';
+    if (s == '20' || s == 'pkr 20' || s == 'pkr20' || s == 'twenty') return 'zakat';
     if (s == 'non-zakat' || s == 'non zakat' || s == 'nonzakat' ||
         s == 'non_zakat' || s.startsWith('non')) {
       return 'non-zakat';

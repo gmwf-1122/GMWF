@@ -686,6 +686,7 @@ class CampSessionService {
 
   static String _resolveQueueType(String? raw) {
     final s = (raw ?? '').toLowerCase().trim();
+    if (s == '20' || s == 'pkr 20' || s == 'pkr20' || s == 'twenty') return 'zakat';
     if (s.contains('non')) return 'non-zakat';
     if (s.contains('gmwf')) return 'gmwf';
     return 'zakat';

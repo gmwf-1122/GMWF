@@ -9233,7 +9233,12 @@ class LocalStorageService {
             .collection('serials')
             .doc(docDateKey);
 
-        for (final type in ['zakat', 'non-zakat', 'gmwf']) {
+        final isKarachi = branchId.contains('karachi') || branchId.contains('haji') || branchId.contains('saddar') || branchId.contains('kapaya');
+        final typesToDownload = isKarachi
+            ? ['zakat', '20', 'non-zakat', 'gmwf']
+            : ['zakat', 'non-zakat', 'gmwf'];
+
+        for (final type in typesToDownload) {
           try {
             final snap = await serialsRef.collection(type).get().timeout(const Duration(seconds: 4));
           for (final doc in snap.docs) {
@@ -9245,8 +9250,7 @@ class LocalStorageService {
             d['serial']    = upperId;
             d['dateKey']   = today;
             d['branchId']  = branchId;
-            final isKarachi = branchId.contains('karachi') || branchId.contains('haji') || branchId.contains('saddar') || branchId.contains('kapaya');
-            d['queueType'] = (isKarachi && (type == 'non-zakat' || type.contains('non'))) ? 'zakat' : type;
+            d['queueType'] = (type == '20' || (isKarachi && (type == 'non-zakat' || type.contains('non')))) ? 'zakat' : type;
             if (upperId.contains('-SADD-') || upperId.contains('-KAP-') || upperId.contains('-KAPAYYA-')) {
               d['dispensaryId'] = 'saddar';
               d['campId']       = 'saddar';
