@@ -5152,17 +5152,18 @@ class ServerSyncManager {
           final serial = data['serial']?.toString().trim();
           final entryUid = (data['entryUid'] ?? message['entryUid'])?.toString().trim();
           if (serial != null && serial.isNotEmpty) {
+            final normBranch = msgBranch.toLowerCase().trim();
+            var cleanSerial = serial.trim();
+            if (cleanSerial.toLowerCase().startsWith('$normBranch-')) {
+              cleanSerial = cleanSerial.substring(normBranch.length + 1).trim();
+            }
+            final normSerial = cleanSerial.toLowerCase();
+            final normSerialUpper = cleanSerial.toUpperCase();
+            final canonicalKey = '$normBranch-$normSerialUpper';
+
             try {
               if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
                 final eBox = Hive.box(LocalStorageService.entriesBox);
-                final normBranch = msgBranch.toLowerCase().trim();
-                var cleanSerial = serial.trim();
-                if (cleanSerial.toLowerCase().startsWith('$normBranch-')) {
-                  cleanSerial = cleanSerial.substring(normBranch.length + 1).trim();
-                }
-                final normSerial = cleanSerial.toLowerCase();
-                final normSerialUpper = cleanSerial.toUpperCase();
-                final canonicalKey = '$normBranch-$normSerialUpper';
 
                 dynamic targetKey = canonicalKey;
                 dynamic existing;
