@@ -424,15 +424,6 @@ class DonationsLocalStorage {
     await box.flush();
     debugPrint('[DonationsLS] Saved → $key');
 
-    debugPrint('[DonationsLS] Enqueuing sync...');
-    await LocalStorageService.enqueueSync({
-      'type':     'save_donation',
-      'branchId': branchIdNorm,
-      'localId':  localId,
-      'hiveKey':  key,
-      'data':     sanitized,
-    });
-
     // Broadcast over LAN so server and peer stations receive the donation receipt immediately
     try {
       if (RealtimeManager().isConnected) {
@@ -447,12 +438,62 @@ class DonationsLocalStorage {
       debugPrint('[DonationsLS] Realtime LAN broadcast error: $e');
     }
 
-    // Immediately trigger cloud upload
-    try {
-      SyncService().triggerUpload(urgent: true);
-    } catch (_) {}
+    // ── HYBRID WRITE: Direct Cloud Write if online, with syncBox fallback ─────
+    bool directWriteSuccess = false;
+    final stableId = recordMap['firestoreId'] as String;
+    if (LocalStorageService.isValidBranchId(branchIdNorm)) {
+      try {
+        final nowUtc = DateTime.now().toUtc().toIso8601String();
+        final fsData = Map<String, dynamic>.from(sanitized)
+          ..remove('hiveKey')
+          ..remove('syncStatus')
+          ..['updatedAt'] = nowUtc
+          ..['lastUpdatedAt'] = nowUtc
+          ..['branchId'] = branchIdNorm;
 
-    debugPrint('[DonationsLS] Sync enqueued. Queue size: ${Hive.box(LocalStorageService.syncBox).length}');
+        final batch = FirebaseFirestore.instance.batch();
+        // Dual write: subcollection AND top-level collection (ensures remote visibility anywhere in Firestore)
+        final subDoc = FirebaseFirestore.instance
+            .collection('branches')
+            .doc(branchIdNorm)
+            .collection('donations')
+            .doc(stableId);
+        final topDoc = FirebaseFirestore.instance
+            .collection('donations')
+            .doc(stableId);
+        batch.set(subDoc, fsData, SetOptions(merge: true));
+        batch.set(topDoc, fsData, SetOptions(merge: true));
+
+        await batch.commit().timeout(const Duration(seconds: 6));
+        directWriteSuccess = true;
+
+        await markDonationSynced(key, stableId);
+        sanitized['syncStatus'] = 'synced';
+        sanitized['synced'] = true;
+        sanitized['firestoreId'] = stableId;
+        debugPrint('[DonationsLS] ✅ Direct Firestore write succeeded for donation $stableId');
+      } catch (e) {
+        debugPrint('[DonationsLS] Direct Firestore write failed/offline ($e) -> Falling back to Sync queue');
+      }
+    }
+
+    if (!directWriteSuccess) {
+      debugPrint('[DonationsLS] Enqueuing sync fallback...');
+      await LocalStorageService.enqueueSync({
+        'type':     'save_donation',
+        'branchId': branchIdNorm,
+        'localId':  localId,
+        'hiveKey':  key,
+        'data':     sanitized,
+      });
+
+      // Immediately trigger cloud upload
+      try {
+        SyncService().triggerUpload(urgent: true);
+      } catch (_) {}
+
+      debugPrint('[DonationsLS] Sync enqueued. Queue size: ${Hive.box(LocalStorageService.syncBox).length}');
+    }
 
     // ── ENQUEUE AUDIT LOG ───────────────────────────────────────────────────
     await enqueueAuditLog(
@@ -1052,7 +1093,27 @@ class DonationsLocalStorage {
             query = query.startAfterDocument(lastDoc);
           }
 
-          final snap = await query.get();
+          QuerySnapshot<Map<String, dynamic>> snap;
+          try {
+            snap = await query.get().timeout(const Duration(seconds: 10));
+          } catch (e) {
+            if (lastSyncedTs != null) {
+              debugPrint('[DonationsLS] Delta query with updatedAt failed ($e), falling back to date cutoff query');
+              query = FirebaseFirestore.instance
+                  .collection('branches')
+                  .doc(bId)
+                  .collection('donations')
+                  .where('date', isGreaterThanOrEqualTo: cutoffStr)
+                  .orderBy('date', descending: false)
+                  .limit(500);
+              if (lastDoc != null) {
+                query = query.startAfterDocument(lastDoc);
+              }
+              snap = await query.get().timeout(const Duration(seconds: 10));
+            } else {
+              rethrow;
+            }
+          }
           docs.addAll(snap.docs);
 
           if (snap.docs.length < 500) {

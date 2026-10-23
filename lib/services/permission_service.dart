@@ -186,6 +186,13 @@ class PermissionService {
     
     'kitchen': {
       AppPermission.viewKitchenOrders,
+      AppPermission.generateFoodTokens,
+      AppPermission.manageKitchen,
+    },
+    'dasterkhwaan kitchen': {
+      AppPermission.viewKitchenOrders,
+      AppPermission.generateFoodTokens,
+      AppPermission.manageKitchen,
     },
     
     'donations': {

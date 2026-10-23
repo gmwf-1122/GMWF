@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../services/donations_local_storage.dart';
+import '../../services/local_storage_service.dart';
 import '../../models/donation_models.dart';
 import 'donations_shared.dart';
 import 'package:flutter/foundation.dart'; // for kIsWeb
@@ -16,7 +17,10 @@ import 'package:hive_flutter/hive_flutter.dart';
 class DonationFetchConfig {
   final String branchId; // 'all' → collectionGroup, otherwise branch sub-collection
   final int pageSize;
-  const DonationFetchConfig({required this.branchId, this.pageSize = 50});
+  DonationFetchConfig({required String branchId, this.pageSize = 50})
+      : branchId = (branchId.toLowerCase().trim() == 'all' || branchId.trim().isEmpty)
+            ? 'all'
+            : LocalStorageService.sanitizeBranchId(branchId);
 
   @override
   bool operator ==(Object other) =>
@@ -84,14 +88,17 @@ class DonationPaginationNotifier
   // ── Private helpers ────────────────────────────────────────────────────────
 
   Query<Map<String, dynamic>> _baseQuery() {
-    if (branchId == 'all' || branchId.isEmpty) {
+    final cleanBranch = (branchId == 'all' || branchId.isEmpty)
+        ? 'all'
+        : LocalStorageService.sanitizeBranchId(branchId);
+    if (cleanBranch == 'all' || cleanBranch.isEmpty) {
       return FirebaseFirestore.instance
           .collectionGroup('donations')
           .orderBy('date', descending: true);
     }
     return FirebaseFirestore.instance
         .collection('branches')
-        .doc(branchId)
+        .doc(cleanBranch)
         .collection('donations')
         .orderBy('date', descending: true);
   }
@@ -161,10 +168,13 @@ class DonationPaginationNotifier
 
       final newDocs = snapshot.docs.map((doc) {
         final data = Map<String, dynamic>.from(doc.data());
+        final cleanBranch = (branchId == 'all' || branchId.isEmpty)
+            ? 'all'
+            : LocalStorageService.sanitizeBranchId(branchId);
         // Ensure branchId is populated for collectionGroup queries
         if ((data['branchId'] == null || data['branchId'].toString().isEmpty) &&
-            branchId != 'all') {
-          data['branchId'] = branchId;
+            cleanBranch != 'all') {
+          data['branchId'] = cleanBranch;
         } else if (data['branchId'] == null || data['branchId'].toString().isEmpty) {
           data['branchId'] = doc.reference.parent.parent?.id ?? '';
         }

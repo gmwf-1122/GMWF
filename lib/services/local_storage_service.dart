@@ -2909,13 +2909,37 @@ class LocalStorageService {
     await Hive.box(donationsBox).flush();
     debugPrint('[LS] Donation saved locally → $key');
 
-    await enqueueSync({
-      'type':     'save_donation',
-      'branchId': branchIdNorm,
-      'localId':  localId,
-      'hiveKey':  key,
-      'data':     sanitized,
-    });
+    bool directSuccess = false;
+    if (isValidBranchId(branchIdNorm)) {
+      try {
+        final nowUtc = DateTime.now().toUtc().toIso8601String();
+        final fsData = Map<String, dynamic>.from(sanitized)
+          ..remove('hiveKey')
+          ..remove('syncStatus')
+          ..['updatedAt'] = nowUtc
+          ..['lastUpdatedAt'] = nowUtc
+          ..['branchId'] = branchIdNorm;
+
+        final batch = FirebaseFirestore.instance.batch();
+        batch.set(FirebaseFirestore.instance.collection('branches').doc(branchIdNorm).collection('donations').doc(localId), fsData, SetOptions(merge: true));
+        batch.set(FirebaseFirestore.instance.collection('donations').doc(localId), fsData, SetOptions(merge: true));
+        await batch.commit().timeout(const Duration(seconds: 5));
+        directSuccess = true;
+        await markDonationSynced(key, localId);
+      } catch (e) {
+        debugPrint('[LS] Direct write donation failed ($e), falling back to sync');
+      }
+    }
+
+    if (!directSuccess) {
+      await enqueueSync({
+        'type':     'save_donation',
+        'branchId': branchIdNorm,
+        'localId':  localId,
+        'hiveKey':  key,
+        'data':     sanitized,
+      });
+    }
 
     return key;
   }

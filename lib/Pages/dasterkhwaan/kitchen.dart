@@ -5,6 +5,7 @@
 //   • widgets/cook_dialog.dart   — food logging (cook / received / saved)
 //   • widgets/stock_dialogs.dart — inventory add / adjust
 
+import 'dart:async';
 import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:gmwf/design/tokens/comfort_colors.dart';
 import '../../widgets/lazy_indexed_stack.dart';
@@ -14,6 +15,7 @@ import 'package:gmwf/design/components/app_toast.dart';
 import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../models/stock_item.dart';
 import 'widgets/cook_dialog.dart';
@@ -26,10 +28,10 @@ import '../../services/camp_session_service.dart';
 import '../../realtime/realtime_manager.dart';
 import '../../realtime/realtime_events.dart';
 import '../../services/sync_service.dart';
+import '../../services/pre_login_security_service.dart';
 import '../../services/cloud/cloud_db.dart';
 import '../settings_page.dart';
 import 'food_log_screen.dart';
-
 export 'widgets/cook_dialog.dart'
     show
         kPrimary,
@@ -44,6 +46,110 @@ export 'widgets/cook_dialog.dart'
         kTextDark,
         kTextMid,
         kTextLight;
+
+// ─────────────────────────── Design Tokens ──────────────────────────────────
+
+abstract class _DS {
+  static const Color bg       = SoftPalette.gray100;
+  static const Color surface  = SoftPalette.gray50;
+  static const Color surface2 = SoftPalette.gray100;
+  static const Color border   = SoftPalette.teal150t;
+  static const Color border2  = SoftPalette.teal200m;
+
+  static Color getBg(bool isDark) => isDark ? SoftPalette.slate900 : SoftPalette.gray100;
+  static Color getSurface(bool isDark) => isDark ? SoftPalette.slate800 : SoftPalette.gray50;
+  static Color getSurface2(bool isDark) => isDark ? SoftPalette.slate750 : SoftPalette.gray100;
+  static Color getBorder(bool isDark) => isDark ? SoftPalette.slate700 : SoftPalette.teal150t;
+  static Color getBorder2(bool isDark) => isDark ? SoftPalette.slate600 : SoftPalette.teal200m;
+  static Color getInk(bool isDark) => isDark ? SoftPalette.gray50 : SoftPalette.gray900;
+  static Color getInk2(bool isDark) => isDark ? SoftPalette.slate200 : SoftPalette.teal750m;
+  static Color getInk3(bool isDark) => isDark ? SoftPalette.slate350 : SoftPalette.teal500m;
+
+  static const Color sage     = SoftPalette.teal750m;
+  static const Color mint     = SoftPalette.teal350;
+  static const Color mintBg   = SoftPalette.teal50;
+
+  static const Color amber    = SoftPalette.orange400;
+  static const Color amberBg  = SoftPalette.yellow50m;
+  static const Color green    = SoftPalette.emerald500;
+  static const Color greenBg  = SoftPalette.emerald100m;
+  static const Color red      = SoftPalette.red500;
+  static const Color redBg    = SoftPalette.red100m;
+  static const Color purple   = SoftPalette.violet550;
+  static const Color purpleBg = SoftPalette.violet100;
+
+  static const Color ink      = SoftPalette.gray900;
+  static const Color ink2     = SoftPalette.teal750m;
+  static const Color ink3     = SoftPalette.teal500m;
+
+  static const double r12 = 12;
+  static const double r14 = 14;
+  static const double r16 = 16;
+  static const double r22 = 22;
+}
+
+abstract class _TS {
+  static TextStyle displayLg(Color c) => GoogleFonts.dmSerifDisplay(
+      fontSize: 28, color: c, height: 1.1);
+
+  static TextStyle displayMd(Color c) => GoogleFonts.dmSerifDisplay(
+      fontSize: 22, color: c, height: 1.2);
+
+  static TextStyle label({Color c = _DS.ink3, double size = 10}) =>
+      GoogleFonts.dmSans(
+          fontSize: size, fontWeight: FontWeight.w600,
+          letterSpacing: 1.2, color: c);
+
+  static TextStyle body({Color? c, double size = 14, FontWeight w = FontWeight.w400}) =>
+      GoogleFonts.dmSans(fontSize: size, fontWeight: w, color: c ?? _DS.ink);
+
+  static TextStyle num({Color? c, double size = 22}) =>
+      GoogleFonts.dmSans(fontSize: size, fontWeight: FontWeight.w600, color: c ?? _DS.ink, height: 1.0);
+}
+
+final Map<String, ({String title, String shortTitle, String urdu, IconData icon, Color color, Color bg, List<Color> gradient})> _kitchenSessionMeta = {
+  'breakfast': (
+    title: 'Breakfast (ناشتہ)',
+    shortTitle: 'Breakfast',
+    urdu: 'ناشتہ کا دسترخوان',
+    icon: Icons.wb_sunny_rounded,
+    color: SoftPalette.orange400,
+    bg: SoftPalette.yellow50m,
+    gradient: const [SoftPalette.orange500, SoftPalette.orange400],
+  ),
+  'lunch': (
+    title: 'Lunch (دوپہر)',
+    shortTitle: 'Lunch',
+    urdu: 'دوپہر کا دسترخوان',
+    icon: Icons.sunny,
+    color: SoftPalette.teal500,
+    bg: SoftPalette.teal50,
+    gradient: const [SoftPalette.teal550, SoftPalette.teal500],
+  ),
+  'dinner': (
+    title: 'Dinner (رات)',
+    shortTitle: 'Dinner',
+    urdu: 'رات کا دسترخوان',
+    icon: Icons.nightlight_round,
+    color: SoftPalette.indigo550,
+    bg: SoftPalette.slate100,
+    gradient: const [SoftPalette.indigo700, SoftPalette.indigo550],
+  ),
+};
+
+String _kitchenNormalizeSession(String? raw) {
+  final s = (raw ?? 'lunch').toLowerCase().trim();
+  if (s == 'breakfast' || s == 'morning') return 'breakfast';
+  if (s == 'dinner' || s == 'evening' || s == 'night') return 'dinner';
+  return 'lunch';
+}
+
+String _kitchenSessionUrdu(String session) {
+  final s = _kitchenNormalizeSession(session);
+  if (s == 'breakfast') return 'ناشتہ کا دسترخوان';
+  if (s == 'dinner') return 'رات کا دسترخوان';
+  return 'دوپہر کا دسترخوان';
+}
 
 class DasterkhwaanKitchen extends StatefulWidget {
   static const String routeName = '/dasterkhwaan-kitchen';
@@ -66,7 +172,7 @@ class DasterkhwaanKitchen extends StatefulWidget {
 }
 
 class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
-    with SingleTickerProviderStateMixin {
+    with TickerProviderStateMixin {
   late int _currentNav;
   String _username = 'Kitchen Staff';
   String? _branchId;
@@ -80,6 +186,25 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
   bool _stockLoaded = false;
 
   late AnimationController _animCtrl;
+  late AnimationController _pulseCtrl;
+  late Animation<double> _pulseAnim;
+
+  final _qtyCtrl = TextEditingController(text: '1');
+  final double _pricePerToken = 10.0;
+  late String _selectedSession;
+  bool _isGenerating = false;
+  bool _isReversing = false;
+
+  Map<String, dynamic> _stats = {
+    'total': 0,
+    'served': 0,
+    'breakfastTotal': 0,
+    'breakfastServed': 0,
+    'lunchTotal': 0,
+    'lunchServed': 0,
+    'dinnerTotal': 0,
+    'dinnerServed': 0,
+  };
 
   // ── Default stock seeds ──────────────────────────────────────────────────
   static const List<Map<String, String>> _defaultStockItems = [
@@ -151,10 +276,18 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
   @override
   void initState() {
     super.initState();
-    _currentNav = widget.initialTab == 3 ? 2 : widget.initialTab;
+    _currentNav = widget.initialTab.clamp(0, 2);
     _animCtrl = AnimationController(
         vsync: this, duration: const Duration(milliseconds: 400))
       ..forward();
+    _pulseCtrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1400),
+    )..repeat(reverse: true);
+    _pulseAnim = Tween<double>(begin: 1.0, end: 1.025).animate(
+      CurvedAnimation(parent: _pulseCtrl, curve: Curves.easeInOut),
+    );
+    _selectedSession = CampSessionService.resolveDasterkhwaanSession(null, widget.branchId);
     _role = widget.role;
 
     if (widget.branchId != null && widget.branchId!.isNotEmpty && widget.branchId != 'all') {
@@ -162,6 +295,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
       _username = widget.username ?? 'Kitchen Staff';
       SyncService().start(_branchId!);
       _loadAllStockItems().then((_) => _applyPreviousDaySaved());
+      _recalculateLocalStats();
     } else {
       _loadUserAndBranch();
     }
@@ -170,6 +304,8 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
   @override
   void dispose() {
     _animCtrl.dispose();
+    _pulseCtrl.dispose();
+    _qtyCtrl.dispose();
     super.dispose();
   }
 
@@ -195,6 +331,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
             });
             await _loadAllStockItems();
             await _applyPreviousDaySaved();
+            _recalculateLocalStats();
             return;
           }
         }
@@ -207,6 +344,8 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
           });
           await _loadAllStockItems();
           await _applyPreviousDaySaved();
+          _recalculateLocalStats();
+          unawaited(LocalStorageService.downloadDasterkhwaanTokens(cb));
           return;
         }
       }
@@ -234,6 +373,8 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
           }
           await _loadAllStockItems();
           await _applyPreviousDaySaved();
+          _recalculateLocalStats();
+          unawaited(LocalStorageService.downloadDasterkhwaanTokens(b));
           return;
         }
       }
@@ -264,6 +405,8 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
           }
           await _loadAllStockItems();
           await _applyPreviousDaySaved();
+          _recalculateLocalStats();
+          unawaited(LocalStorageService.downloadDasterkhwaanTokens(branch.id));
           return;
         }
       }
@@ -427,12 +570,565 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
   CollectionReference<Map<String, dynamic>> _cookingCol(String date) =>
       _dayDoc(date).collection('cooking_sessions');
 
-  Future<void> _serveToken(String tokenId, int tokenNumber, {String session = 'evening'}) async {
+  void _showSnack(String msg, {bool isError = false}) {
+    if (!mounted) return;
+    AppToast.showSnackBar(
+      context,
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: isError ? SoftPalette.red500 : SoftPalette.emerald500,
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.all(16),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+
+  Future<void> _recalculateLocalStats() async {
+    if (_branchId == null) return;
+    int localTotal = 0;
+    int localServed = 0;
+    int localBreakfast = 0;
+    int localBreakfastServed = 0;
+    int localLunch = 0;
+    int localLunchServed = 0;
+    int localDinner = 0;
+    int localDinnerServed = 0;
+
+    try {
+      if (Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)) {
+        final box = Hive.box(LocalStorageService.dasterkhwaanTokensBox);
+        final seenNumbers = <int>{};
+        for (final raw in box.values) {
+          if (raw is Map) {
+            final t = Map<String, dynamic>.from(raw);
+            if (t['dateKey'] == today && t['branchId'] == _branchId) {
+              final n = (t['number'] as num?)?.toInt() ?? 0;
+              if (n > 0 && !seenNumbers.add(n)) continue;
+              localTotal++;
+              final isServed = t['served'] == true;
+              if (isServed) localServed++;
+              final s = _kitchenNormalizeSession(t['session'] as String?);
+              if (s == 'breakfast') {
+                localBreakfast++;
+                if (isServed) localBreakfastServed++;
+              } else if (s == 'dinner') {
+                localDinner++;
+                if (isServed) localDinnerServed++;
+              } else {
+                localLunch++;
+                if (isServed) localLunchServed++;
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('[Kitchen] Local stats recalculate error: $e');
+    }
+
+    final updated = {
+      'total': localTotal,
+      'served': localServed,
+      'breakfastTotal': localBreakfast,
+      'breakfastServed': localBreakfastServed,
+      'lunchTotal': localLunch,
+      'lunchServed': localLunchServed,
+      'dinnerTotal': localDinner,
+      'dinnerServed': localDinnerServed,
+    };
+
+    if (mounted) {
+      setState(() => _stats = updated);
+    } else {
+      _stats = updated;
+    }
+  }
+
+  Future<void> _generateTokens() async {
+    if (_isGenerating) return;
+    _isGenerating = true;
+    try {
+      final quantity = int.tryParse(_qtyCtrl.text.trim()) ?? 0;
+      if (quantity <= 0) {
+        _showSnack('Enter a valid quantity', isError: true);
+        return;
+      }
+      _branchId = LocalStorageService.sanitizeBranchId(_branchId);
+      if (_branchId == null || !LocalStorageService.isValidBranchId(_branchId)) {
+        _showSnack('Branch not found!', isError: true);
+        return;
+      }
+      HapticFeedback.mediumImpact();
+
+      // 1. Calculate next sequential start number
+      int startNum = 1;
+      try {
+        final box = await LocalStorageService.openBoxSafe(LocalStorageService.dasterkhwaanTokensBox);
+        int maxNum = 0;
+        for (final raw in box.values) {
+          if (raw is Map) {
+            final t = Map<String, dynamic>.from(raw);
+            if (t['dateKey'] == today && t['branchId'] == _branchId) {
+              final n = (t['number'] as num?)?.toInt() ?? 0;
+              if (n > maxNum) maxNum = n;
+            }
+          }
+        }
+        startNum = maxNum + 1;
+      } catch (_) {}
+
+      final nowIso = DateTime.now().toIso8601String();
+      final tokensList = <Map<String, dynamic>>[];
+      final originDevice = await PreLoginSecurityService.getDeviceId();
+
+      for (int i = 0; i < quantity; i++) {
+        final num = startNum + i;
+        final tid = 'dst_${_branchId}_${today}_$num';
+        tokensList.add({
+          'id': tid,
+          'localId': tid,
+          'number': num,
+          'time': nowIso,
+          'served': false,
+          'session': _selectedSession,
+          'branchId': _branchId,
+          'dateKey': today,
+          'issuedBy': _username,
+          'pricePerToken': _pricePerToken,
+          'syncStatus': 'pending',
+          'originDevice': originDevice,
+        });
+      }
+
+      // ── STEP 1: Save Locally First (Hive) ──────────────────────────────
+      try {
+        final box = await LocalStorageService.openBoxSafe(LocalStorageService.dasterkhwaanTokensBox);
+        for (final t in tokensList) {
+          await box.put(t['id'], t);
+        }
+      } catch (e) {
+        debugPrint('[Kitchen] Local token write error: $e');
+      }
+
+      final firstNum = tokensList.isNotEmpty ? tokensList.first['number'] : 1;
+      final lastNum = tokensList.isNotEmpty ? tokensList.last['number'] : quantity;
+      final batchId = 'dst_batch_${_branchId}_${today}_${firstNum}_${lastNum}_${DateTime.now().millisecondsSinceEpoch}';
+
+      // ── STEP 2: Send to LAN Server (if connected) ──────────────────────
+      final isLanConnected = RealtimeManager().isConnected;
+      if (isLanConnected) {
+        try {
+          RealtimeManager().sendMessage(
+            RealtimeEvents.payload(
+              type: RealtimeEvents.saveOfficeBoyToken,
+              data: {
+                'branchId': _branchId,
+                'dateKey': today,
+                'session': _selectedSession,
+                'quantity': quantity,
+                'tokens': tokensList,
+                'issuedBy': _username,
+                'pricePerToken': _pricePerToken,
+                'timestamp': nowIso,
+                'batchId': batchId,
+              },
+            ),
+          );
+        } catch (e) {
+          debugPrint('[Kitchen] Realtime LAN broadcast error: $e');
+        }
+      }
+
+      // ── STEP 3: Hybrid Write (Direct Firestore write if online, Sync queue fallback if offline) ───
+      bool directWriteSucceeded = false;
+      try {
+        if (_branchId != null && _branchId!.isNotEmpty && LocalStorageService.isValidBranchId(_branchId)) {
+          final batch = FirebaseFirestore.instance.batch();
+          for (final t in tokensList) {
+            final tid = t['id'].toString();
+            final fsToken = {
+              'number': t['number'] ?? 1,
+              'session': t['session'] ?? _selectedSession,
+              'time': t['time'] != null
+                  ? Timestamp.fromDate(DateTime.tryParse(t['time'].toString()) ?? DateTime.now())
+                  : FieldValue.serverTimestamp(),
+              'issuedBy': t['issuedBy'] ?? _username,
+              'localId': tid,
+              'branchId': _branchId,
+              'dateKey': today,
+              'pricePerToken': _pricePerToken,
+              'syncStatus': 'synced',
+              'synced': true,
+            };
+            batch.set(_tokensCol(today).doc(tid), fsToken, SetOptions(merge: true));
+          }
+
+          final dayUpdate = <String, dynamic>{
+            'totalTokens': FieldValue.increment(quantity),
+            'session_${_selectedSession}_total': FieldValue.increment(quantity),
+            'appliedBatches': FieldValue.arrayUnion([batchId]),
+            'lastUpdated': FieldValue.serverTimestamp(),
+            'date': today,
+            'dateKey': today,
+            'branchId': _branchId,
+          };
+          batch.set(_dayDoc(today), dayUpdate, SetOptions(merge: true));
+          await batch.commit().timeout(const Duration(seconds: 6));
+          directWriteSucceeded = true;
+
+          // Update local Hive tokens to synced status immediately
+          try {
+            final box = await LocalStorageService.openBoxSafe(LocalStorageService.dasterkhwaanTokensBox);
+            for (final t in tokensList) {
+              final tid = t['id'].toString();
+              final loc = box.get(tid);
+              if (loc is Map) {
+                await box.put(tid, Map<String, dynamic>.from(loc)
+                  ..['syncStatus'] = 'synced'
+                  ..['synced'] = true);
+              }
+            }
+          } catch (_) {}
+          debugPrint('[Kitchen] ✅ Direct Firestore write succeeded for batch $batchId');
+        }
+      } catch (e) {
+        debugPrint('[Kitchen] Direct Firestore write failed/offline ($e) -> Falling back to Sync queue');
+      }
+
+      if (!directWriteSucceeded) {
+        try {
+          if (_branchId != null && _branchId!.isNotEmpty) {
+            SyncService().start(_branchId!);
+          }
+          await LocalStorageService.enqueueSync({
+            'type': 'save_dasterkhwan_tokens',
+            'entityId': batchId,
+            'batchId': batchId,
+            'branchId': _branchId,
+            'dateKey': today,
+            'data': {
+              'branchId': _branchId,
+              'dateKey': today,
+              'session': _selectedSession,
+              'quantity': quantity,
+              'tokens': tokensList,
+              'issuedBy': _username,
+              'pricePerToken': _pricePerToken,
+              'batchId': batchId,
+            },
+          });
+          SyncService().triggerUpload(urgent: true);
+        } catch (e) {
+          debugPrint('[Kitchen] Sync enqueue error: $e');
+        }
+      }
+
+      if (!mounted) return;
+      _recalculateLocalStats();
+      String sessionDisplayName = 'Meal';
+      if (_selectedSession == 'breakfast') {
+        sessionDisplayName = 'Breakfast (ناشتہ)';
+      } else if (_selectedSession == 'lunch') {
+        sessionDisplayName = 'Lunch (دوپہر)';
+      } else if (_selectedSession == 'dinner') {
+        sessionDisplayName = 'Dinner (رات)';
+      }
+      _showSnack('$quantity $sessionDisplayName Token${quantity > 1 ? 's' : ''} Issued · PKR ${(quantity * _pricePerToken).toStringAsFixed(0)}');
+      _qtyCtrl.text = '1';
+      setState(() {});
+    } finally {
+      _isGenerating = false;
+    }
+  }
+
+  Future<void> _showReverseTokensDialog() async {
+    if (_isReversing) return;
+    _isReversing = true;
+    try {
+      if (_branchId == null) {
+        _showSnack('Branch not found!', isError: true);
+        return;
+      }
+
+      final List<Map<String, dynamic>> localUnserved = [];
+      try {
+        final box = await LocalStorageService.openBoxSafe(LocalStorageService.dasterkhwaanTokensBox);
+        for (final raw in box.values) {
+          if (raw is Map) {
+            final t = Map<String, dynamic>.from(raw);
+            if (t['dateKey'] == today && t['branchId'] == _branchId && t['served'] != true) {
+              localUnserved.add(t);
+            }
+          }
+        }
+      } catch (_) {}
+
+      try {
+        final daySnap = await _tokensCol(today).get().timeout(const Duration(seconds: 2));
+        for (final d in daySnap.docs) {
+          final data = d.data();
+          if (data['served'] == true) continue;
+          final docId = data['localId'] ?? d.id;
+          if (!localUnserved.any((x) => x['id'] == docId || x['localId'] == docId)) {
+            localUnserved.add({
+              'id': docId,
+              'localId': docId,
+              'number': data['number'] ?? 0,
+              'session': data['session'] ?? 'lunch',
+              'served': false,
+              'branchId': _branchId,
+              'dateKey': today,
+            });
+          }
+        }
+      } catch (_) {}
+
+      localUnserved.sort((a, b) {
+        final numA = (a['number'] as num?)?.toInt() ?? 0;
+        final numB = (b['number'] as num?)?.toInt() ?? 0;
+        return numB.compareTo(numA);
+      });
+
+      if (localUnserved.isEmpty) {
+        _showSnack('No unserved tokens available to reverse today.', isError: true);
+        return;
+      }
+
+      final reverseQtyCtrl = TextEditingController(text: '1');
+      final confirmQty = await showDialog<int>(
+        context: context,
+        builder: (ctx) => StatefulBuilder(
+          builder: (dialogCtx, setS) {
+            final isDark = Theme.of(dialogCtx).brightness == Brightness.dark;
+            final qty = int.tryParse(reverseQtyCtrl.text) ?? 0;
+            return AlertDialog(
+              backgroundColor: _DS.getSurface(isDark),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(_DS.r22)),
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: isDark ? _DS.red.withValues(alpha: 0.18) : _DS.redBg,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.undo_rounded, color: _DS.red, size: 22),
+                  ),
+                  const SizedBox(width: 12),
+                  Text('Reverse Food Tokens',
+                      style: GoogleFonts.dmSerifDisplay(
+                          fontSize: 20, color: _DS.getInk(isDark))),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Unintentionally issued tokens can be voided. ${localUnserved.length} unserved token(s) available today.',
+                    style: GoogleFonts.dmSans(
+                        fontSize: 13, color: _DS.getInk3(isDark)),
+                  ),
+                  const SizedBox(height: 16),
+                  Text('TOKENS TO REVERSE',
+                      style: _TS.label(c: _DS.getInk3(isDark))),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [1, 2, 3, 5, 10].map((q) {
+                      final sel = reverseQtyCtrl.text == q.toString();
+                      return GestureDetector(
+                        onTap: () => setS(() => reverseQtyCtrl.text = q.toString()),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: sel ? _DS.red : _DS.getSurface2(isDark),
+                            borderRadius: BorderRadius.circular(_DS.r12),
+                          ),
+                          child: Text('$q',
+                              style: GoogleFonts.dmSans(
+                                  color: sel
+                                      ? SoftPalette.gray50
+                                      : _DS.getInk(isDark),
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 13)),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: reverseQtyCtrl,
+                    keyboardType: TextInputType.number,
+                    inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                    onChanged: (_) => setS(() {}),
+                    style: GoogleFonts.dmSans(
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                        color: _DS.getInk(isDark)),
+                    decoration: InputDecoration(
+                      hintText: 'Custom quantity…',
+                      hintStyle: GoogleFonts.dmSans(
+                          fontSize: 13, color: _DS.getInk3(isDark)),
+                      suffixText:
+                          '= PKR ${(qty * _pricePerToken).toStringAsFixed(0)}',
+                      suffixStyle: GoogleFonts.dmSans(
+                          color: _DS.red,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 12),
+                      filled: true,
+                      fillColor: _DS.getSurface2(isDark),
+                      border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(_DS.r14),
+                          borderSide: BorderSide.none),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx),
+                  child: Text('Cancel',
+                      style: GoogleFonts.dmSans(
+                          color: _DS.getInk3(isDark),
+                          fontWeight: FontWeight.w600)),
+                ),
+                ElevatedButton.icon(
+                  onPressed: (qty <= 0 || qty > localUnserved.length)
+                      ? null
+                      : () => Navigator.pop(ctx, qty),
+                  icon: const Icon(Icons.history_toggle_off_rounded, size: 18),
+                  label: Text('Reverse $qty Token${qty != 1 ? "s" : ""}'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _DS.red,
+                    foregroundColor: SoftPalette.gray50,
+                    shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(_DS.r14)),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
+                  ),
+                ),
+              ],
+            );
+          },
+        ),
+      );
+
+      if (confirmQty == null || confirmQty <= 0) return;
+
+      final tokensToVoid = localUnserved.take(confirmQty).toList();
+      final voidIds = tokensToVoid
+          .map((t) => t['id']?.toString() ?? t['localId']?.toString() ?? '')
+          .where((id) => id.isNotEmpty)
+          .toList();
+      final Map<String, int> sessionCounts = {};
+
+      for (final t in tokensToVoid) {
+        final s = _kitchenNormalizeSession(t['session'] as String?);
+        sessionCounts[s] = (sessionCounts[s] ?? 0) + 1;
+      }
+
+      // ── STEP 1: Delete from Local Hive First ─────────────────────────
+      try {
+        final box = await LocalStorageService.openBoxSafe(LocalStorageService.dasterkhwaanTokensBox);
+        for (final tid in voidIds) {
+          await box.delete(tid);
+        }
+      } catch (_) {}
+
+      final revBatchId = 'dst_rev_${_branchId}_${today}_${voidIds.join('_')}';
+
+      // ── STEP 2: Send over LAN (if connected) ────────────────────────
+      final isLanConnected = RealtimeManager().isConnected;
+      if (isLanConnected) {
+        try {
+          RealtimeManager().sendMessage(
+            RealtimeEvents.payload(
+              type: RealtimeEvents.saveOfficeBoyToken,
+              data: {
+                'action': 'reverse',
+                'branchId': _branchId,
+                'dateKey': today,
+                'quantity': confirmQty,
+                'tokenIds': voidIds,
+                'sessionCounts': sessionCounts,
+                'timestamp': DateTime.now().toIso8601String(),
+                'batchId': revBatchId,
+              },
+            ),
+          );
+        } catch (_) {}
+      }
+
+      // ── STEP 3: Hybrid Void Write ───
+      bool directVoidSucceeded = false;
+      try {
+        if (_branchId != null && _branchId!.isNotEmpty && LocalStorageService.isValidBranchId(_branchId)) {
+          final batch = FirebaseFirestore.instance.batch();
+          for (final tid in voidIds) {
+            batch.delete(_tokensCol(today).doc(tid));
+          }
+
+          final dayUpdate = <String, dynamic>{
+            'totalTokens': FieldValue.increment(-confirmQty),
+            'reversedBatchIds': FieldValue.arrayUnion([revBatchId]),
+            'lastUpdated': FieldValue.serverTimestamp(),
+          };
+          sessionCounts.forEach((s, count) {
+            if (count > 0) {
+              dayUpdate['session_${s}_total'] = FieldValue.increment(-count);
+            }
+          });
+          batch.set(_dayDoc(today), dayUpdate, SetOptions(merge: true));
+          await batch.commit().timeout(const Duration(seconds: 6));
+          directVoidSucceeded = true;
+          debugPrint('[Kitchen] ✅ Direct Firestore reversal write succeeded for $revBatchId');
+        }
+      } catch (e) {
+        debugPrint('[Kitchen] Direct Firestore reversal failed/offline ($e) -> Falling back to Sync queue');
+      }
+
+      if (!directVoidSucceeded) {
+        try {
+          await LocalStorageService.enqueueSync({
+            'type': 'reverse_dasterkhwan_tokens',
+            'entityId': revBatchId,
+            'batchId': revBatchId,
+            'branchId': _branchId,
+            'dateKey': today,
+            'data': {
+              'branchId': _branchId,
+              'dateKey': today,
+              'quantity': confirmQty,
+              'tokenIds': voidIds,
+              'sessionCounts': sessionCounts,
+              'batchId': revBatchId,
+            },
+          });
+          SyncService().triggerUpload(urgent: true);
+        } catch (e) {
+          debugPrint('[Kitchen] Sync reverse enqueue error: $e');
+        }
+      }
+
+      if (!mounted) return;
+      _recalculateLocalStats();
+      _showSnack('$confirmQty Token${confirmQty != 1 ? "s" : ""} Voided & Reversed');
+      setState(() {});
+    } finally {
+      _isReversing = false;
+    }
+  }
+
+  Future<void> _serveToken(String tokenId, int tokenNumber, {String session = 'lunch'}) async {
+    final cleanSession = _kitchenNormalizeSession(session);
     HapticFeedback.mediumImpact();
 
     // 1. Update local Hive box immediately (zero UI lag, works offline)
     try {
-      final box = await LocalStorageService.openBoxSafe('dasterkhwaan_tokens');
+      final box = await LocalStorageService.openBoxSafe(LocalStorageService.dasterkhwaanTokensBox);
       final localItem = box.get(tokenId);
       if (localItem is Map) {
         final updated = Map<String, dynamic>.from(localItem);
@@ -444,31 +1140,56 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
       debugPrint('[Kitchen] Local serve token write error: $e');
     }
 
-    // 2. Queue the cloud upload on this PC. A serve adds to the day's servedTokens, so
-    // exactly one PC may upload it: the one that served it. The LAN server only updates
-    // its local copy (it used to file the LAN event under sync_records, so serves made
-    // while on the LAN never reached the cloud). No direct Firestore write either: the
-    // queued item already increments the counters, and both together counted it twice.
+    _recalculateLocalStats();
+
+    // 2. Direct Cloud Write if online, fallback to sync queue if offline
+    bool directServeSucceeded = false;
     try {
-      final ts = DateTime.now().toIso8601String();
-      await LocalStorageService.enqueueSync({
-        'type': 'serve_dasterkhwan_token',
-        'entityId': 'serve_$tokenId',
-        'branchId': _branchId,
-        'dateKey': today,
-        'data': {
+      if (_branchId != null && _branchId!.isNotEmpty && LocalStorageService.isValidBranchId(_branchId)) {
+        final batch = FirebaseFirestore.instance.batch();
+        batch.set(_tokensCol(today).doc(tokenId), {
+          'served': true,
+          'servedTime': FieldValue.serverTimestamp(),
+          'servedBy': _username,
+        }, SetOptions(merge: true));
+
+        batch.set(_dayDoc(today), {
+          'servedTokens': FieldValue.increment(1),
+          'session_${cleanSession}_served': FieldValue.increment(1),
+          'servedTokenIds': FieldValue.arrayUnion([tokenId]),
+          'lastUpdated': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+
+        await batch.commit().timeout(const Duration(seconds: 5));
+        directServeSucceeded = true;
+        debugPrint('[Kitchen] ✅ Direct Firestore serve write succeeded for token $tokenId');
+      }
+    } catch (e) {
+      debugPrint('[Kitchen] Direct serve write failed/offline ($e) -> Falling back to sync queue');
+    }
+
+    if (!directServeSucceeded) {
+      try {
+        final ts = DateTime.now().toIso8601String();
+        await LocalStorageService.enqueueSync({
+          'type': 'serve_dasterkhwan_token',
+          'entityId': 'serve_$tokenId',
           'branchId': _branchId,
           'dateKey': today,
-          'tokenId': tokenId,
-          'tokenNumber': tokenNumber,
-          'session': session,
-          'servedBy': _username,
-          'timestamp': ts,
-        },
-      });
-      SyncService().triggerUpload();
-    } catch (e) {
-      debugPrint('[Kitchen] Serve enqueue error: $e');
+          'data': {
+            'branchId': _branchId,
+            'dateKey': today,
+            'tokenId': tokenId,
+            'tokenNumber': tokenNumber,
+            'session': cleanSession,
+            'servedBy': _username,
+            'timestamp': ts,
+          },
+        });
+        SyncService().triggerUpload();
+      } catch (e) {
+        debugPrint('[Kitchen] Serve enqueue error: $e');
+      }
     }
 
     // 3. Tell the LAN so other PCs show the token as served.
@@ -483,7 +1204,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
               'dateKey': today,
               'tokenId': tokenId,
               'tokenNumber': tokenNumber,
-              'session': session,
+              'session': cleanSession,
               'servedBy': _username,
               'timestamp': DateTime.now().toIso8601String(),
             },
@@ -497,7 +1218,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
     if (mounted) {
       AppToast.showSnackBar(context, SnackBar(
         content: Text('Token #$tokenNumber served ✓'),
-        backgroundColor: kSuccess,
+        backgroundColor: SoftPalette.emerald500,
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.all(16),
         shape: RoundedRectangleBorder(
@@ -626,65 +1347,77 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
       );
     }
 
-    final isKitchenUser = _role?.toLowerCase() == 'kitchen' || _role?.toLowerCase() == 'dasterkhwaan kitchen';
-
     return Scaffold(
       backgroundColor: context.adapt(kSurface),
-      body: isKitchenUser
-          ? _TokensTab(
-              branchId:   _branchId!,
-              today:      today,
-              tokensCol:  _tokensCol(today),
-              serveToken: _serveToken,
-              username:   _username,
-              onLogout:   _logout,
-              onSettings: _openSettings,
-            )
-          : LazyIndexedStack(
-              index: _currentNav,
-              children: [
-                _TokensTab(
-                  branchId:   _branchId!,
-                  today:      today,
-                  tokensCol:  _tokensCol(today),
-                  serveToken: _serveToken,
-                  username:   _username,
-                  onLogout:   _logout,
-                  onSettings: _openSettings,
-                ),
-                _HistoryTab(
-                  branchId:   _branchId!,
-                  dateFmt:    _dateFmt,
-                  displayFmt: _displayFmt,
-                  username:   _username,
-                  onLogout:   _logout,
-                  onSettings: _openSettings,
-                ),
-              ],
-            ),
-      bottomNavigationBar: isKitchenUser ? null : _buildBottomNav(),
+      body: LazyIndexedStack(
+        index: _currentNav,
+        children: [
+          _KitchenIssueTokenTab(
+            userName: _username,
+            branchId: _branchId,
+            today: today,
+            displayFormat: _displayFmt,
+            quantityController: _qtyCtrl,
+            pricePerToken: _pricePerToken,
+            selectedSession: _selectedSession,
+            onSessionChanged: (s) => setState(() => _selectedSession = s),
+            onGenerate: _generateTokens,
+            onReverse: _showReverseTokensDialog,
+            pulseAnim: _pulseAnim,
+            todayStats: _stats,
+            onLogout: _logout,
+            onSettings: _openSettings,
+            showLogout: !GlobalModuleWrapper.isWrapped(context),
+            onSelectQty: (q) => setState(() => _qtyCtrl.text = q.toString()),
+            onGoToServeQueue: () => setState(() => _currentNav = 1),
+          ),
+          _KitchenServeQueueTab(
+            branchId: _branchId!,
+            today: today,
+            tokensCol: _tokensCol(today),
+            serveToken: _serveToken,
+            username: _username,
+            onLogout: _logout,
+            onSettings: _openSettings,
+            onGoToIssueToken: () => setState(() => _currentNav = 0),
+          ),
+          _HistoryTab(
+            branchId: _branchId!,
+            dateFmt: _dateFmt,
+            displayFmt: _displayFmt,
+            username: _username,
+            onLogout: _logout,
+            onSettings: _openSettings,
+          ),
+        ],
+      ),
+      bottomNavigationBar: _buildBottomNav(),
     );
   }
 
   Widget _buildBottomNav() {
-    const items = [
-      _NavItem(Icons.confirmation_number_rounded, 'Tokens',    kSuccess),
-      _NavItem(Icons.history_rounded,              'History',   kPurple),
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final items = [
+      _NavItem(Icons.confirmation_number_rounded, 'Issue Token', SoftPalette.teal500),
+      _NavItem(Icons.restaurant_rounded,          'Serve Queue', SoftPalette.emerald500),
+      _NavItem(Icons.history_rounded,             'History',     SoftPalette.violet550),
     ];
     return Container(
       decoration: BoxDecoration(
-        color: context.adapt(kCardBg),
+        color: _DS.getSurface(isDark),
+        border: Border(top: BorderSide(color: _DS.getBorder(isDark), width: 1)),
         boxShadow: [
           BoxShadow(
-              color: SoftPalette.gray900.withValues(alpha: 0.08),
-              blurRadius: 20,
-              offset: const Offset(0, -4))
+            color: SoftPalette.gray900.withValues(alpha: isDark ? 0.3 : 0.06),
+            blurRadius: 16,
+            offset: const Offset(0, -4),
+          )
         ],
       ),
       child: SafeArea(
         top: false,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: List.generate(items.length, (idx) {
@@ -697,27 +1430,32 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
                 },
                 child: AnimatedContainer(
                   duration: const Duration(milliseconds: 200),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 14, vertical: 10),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                   decoration: BoxDecoration(
                     color: selected
-                        ? item.color.withValues(alpha: 0.12)
+                        ? item.color.withValues(alpha: isDark ? 0.22 : 0.12)
                         : Colors.transparent,
-                    borderRadius: BorderRadius.circular(16),
+                    borderRadius: BorderRadius.circular(14),
                   ),
-                  child: Column(mainAxisSize: MainAxisSize.min, children: [
-                    Icon(item.icon,
-                        color: selected ? item.color : context.adapt(kTextLight),
-                        size: 24),
-                    const SizedBox(height: 4),
-                    Text(item.label,
-                        style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: selected
-                                ? FontWeight.w800
-                                : FontWeight.w600,
-                            color: selected ? item.color : context.adapt(kTextLight))),
-                  ]),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(item.icon,
+                          color: selected ? item.color : _DS.getInk3(isDark),
+                          size: 22),
+                      if (selected) ...[
+                        const SizedBox(width: 8),
+                        Text(
+                          item.label,
+                          style: GoogleFonts.dmSans(
+                            fontSize: 12.5,
+                            fontWeight: FontWeight.w800,
+                            color: item.color,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
                 ),
               );
             }),
@@ -735,18 +1473,1380 @@ class _NavItem {
   const _NavItem(this.icon, this.label, this.color);
 }
 
+class _SectionLabel extends StatelessWidget {
+  final String text;
+  final bool isDark;
+
+  const _SectionLabel(this.text, {this.isDark = false});
+
+  @override
+  Widget build(BuildContext context) => Text(
+        text.toUpperCase(),
+        style: GoogleFonts.dmSans(
+          fontSize: 10.5,
+          fontWeight: FontWeight.w800,
+          letterSpacing: 1.2,
+          color: isDark ? SoftPalette.slate350 : _DS.ink3,
+        ),
+      );
+}
+
+// ─── Reverse Button ──────────────────────────────────────────────────────────
+
+class _ReverseButton extends StatelessWidget {
+  final double pricePerToken;
+  final VoidCallback onPressed;
+  final bool isDark;
+
+  const _ReverseButton({
+    required this.pricePerToken,
+    required this.onPressed,
+    this.isDark = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      height: 50,
+      decoration: BoxDecoration(
+        color: isDark ? _DS.red.withValues(alpha: 0.15) : _DS.redBg,
+        borderRadius: BorderRadius.circular(_DS.r22),
+        border: Border.all(color: _DS.red.withValues(alpha: isDark ? 0.35 : 0.25), width: 1),
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(_DS.r22),
+          onTap: onPressed,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 20),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.undo_rounded, size: 17, color: isDark ? SoftPalette.red350 : _DS.red),
+                const SizedBox(width: 8),
+                Text(
+                  'Reverse / Void Issued Tokens',
+                  style: GoogleFonts.dmSans(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: isDark ? SoftPalette.red350 : _DS.red,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ═══════════════════════════════════════════════════════════════════════════
-// TOKENS TAB
+// KITCHEN ISSUE TOKEN TAB
 // ═══════════════════════════════════════════════════════════════════════════
 
-class _TokensTab extends StatefulWidget {
+class _KitchenIssueTokenTab extends StatefulWidget {
+  final String userName;
+  final String? branchId;
+  final String today;
+  final DateFormat displayFormat;
+  final TextEditingController quantityController;
+  final double pricePerToken;
+  final String selectedSession;
+  final ValueChanged<String> onSessionChanged;
+  final VoidCallback onGenerate;
+  final VoidCallback onReverse;
+  final Animation<double> pulseAnim;
+  final Map<String, dynamic> todayStats;
+  final VoidCallback onLogout;
+  final VoidCallback onSettings;
+  final bool showLogout;
+  final Function(int) onSelectQty;
+  final VoidCallback onGoToServeQueue;
+
+  const _KitchenIssueTokenTab({
+    required this.userName,
+    this.branchId,
+    required this.today,
+    required this.displayFormat,
+    required this.quantityController,
+    required this.pricePerToken,
+    required this.selectedSession,
+    required this.onSessionChanged,
+    required this.onGenerate,
+    required this.onReverse,
+    required this.pulseAnim,
+    required this.todayStats,
+    required this.onLogout,
+    required this.onSettings,
+    required this.showLogout,
+    required this.onSelectQty,
+    required this.onGoToServeQueue,
+  });
+
+  @override
+  State<_KitchenIssueTokenTab> createState() => _KitchenIssueTokenTabState();
+}
+
+class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
+  String _feedFilter = 'all';
+  late Future<Box> _tokensBoxFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _tokensBoxFuture = LocalStorageService.openBoxSafe(LocalStorageService.dasterkhwaanTokensBox);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final qty = int.tryParse(widget.quantityController.text) ?? 1;
+    final currentKey = _kitchenNormalizeSession(widget.selectedSession);
+    final meta = _kitchenSessionMeta[currentKey] ?? _kitchenSessionMeta['dinner']!;
+    final sessionColor = meta.color;
+
+    final total = widget.todayStats['total'] as int? ?? 0;
+    final nextStart = total + 1;
+
+    return Column(
+      children: [
+        // ── Top Header with Session Switcher & Analytics ──
+        _buildHeader(context),
+
+        // ── Scrollable Body ──
+        Expanded(
+          child: SingleChildScrollView(
+            physics: const BouncingScrollPhysics(),
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 36),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // 1. Tactile Meal Voucher Preview
+                _buildVoucherPreview(
+                  nextStart: nextStart,
+                  qty: qty,
+                  sessionKey: currentKey,
+                  meta: meta,
+                ),
+                const SizedBox(height: 20),
+
+                // 2. Quantity Selection
+                _buildQuantitySection(context, qty),
+                const SizedBox(height: 22),
+
+                // 3. Grand Issue Button
+                ScaleTransition(
+                  scale: widget.pulseAnim,
+                  child: Container(
+                    width: double.infinity,
+                    height: 62,
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: meta.gradient,
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(_DS.r22),
+                      boxShadow: [
+                        BoxShadow(
+                          color: sessionColor.withValues(alpha: 0.35),
+                          blurRadius: 18,
+                          offset: const Offset(0, 6),
+                        ),
+                      ],
+                    ),
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(_DS.r22),
+                        onTap: widget.onGenerate,
+                        splashColor: SoftPalette.gray50.withValues(alpha: 0.15),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 20),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Container(
+                                width: 34,
+                                height: 34,
+                                decoration: BoxDecoration(
+                                  color: SoftPalette.gray50.withValues(alpha: 0.18),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: Icon(
+                                  meta.icon,
+                                  size: 18,
+                                  color: SoftPalette.gray50,
+                                ),
+                              ),
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Issue $qty ${meta.shortTitle} Token${qty > 1 ? "s" : ""}',
+                                      style: GoogleFonts.dmSans(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w700,
+                                        color: SoftPalette.gray50,
+                                        letterSpacing: -0.2,
+                                      ),
+                                    ),
+                                    Text(
+                                      'PKR ${(qty * widget.pricePerToken).toStringAsFixed(0)} · ${_kitchenSessionUrdu(widget.selectedSession)}',
+                                      style: GoogleFonts.dmSans(
+                                        fontSize: 11,
+                                        color: SoftPalette.gray50.withValues(alpha: 0.85),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const Icon(Icons.arrow_forward_rounded, color: SoftPalette.gray50, size: 20),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // 4. Reverse Tokens Button
+                _ReverseButton(
+                  pricePerToken: widget.pricePerToken,
+                  onPressed: widget.onReverse,
+                  isDark: isDark,
+                ),
+                const SizedBox(height: 14),
+
+                // 5. Serve Queue Shortcut Banner
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: _DS.getSurface(isDark),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: _DS.mint.withValues(alpha: 0.35)),
+                  ),
+                  child: InkWell(
+                    onTap: widget.onGoToServeQueue,
+                    borderRadius: BorderRadius.circular(12),
+                    child: Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: _DS.mint.withValues(alpha: isDark ? 0.2 : 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Icon(Icons.restaurant_rounded, color: _DS.mint, size: 20),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Ready to distribute food?',
+                                style: GoogleFonts.dmSans(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w700,
+                                  color: _DS.getInk(isDark),
+                                ),
+                              ),
+                              Text(
+                                'Open Serve Queue to mark meals as served',
+                                style: GoogleFonts.dmSans(
+                                  fontSize: 11,
+                                  color: _DS.getInk3(isDark),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const Icon(Icons.arrow_forward_ios_rounded, color: _DS.mint, size: 14),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // 6. Live Feed of Today's Tokens
+                _buildLiveTokensFeed(context),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Header Component ───────────────────────────────────────────────────────
+  Widget _buildHeader(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final conf = CampSessionService.getDasterkhwaanSessionConfig(widget.branchId);
+    final availableSessions = ['breakfast', 'lunch', 'dinner']
+        .where((s) => conf.containsKey(s) && (conf[s] is Map && (conf[s] as Map)['enabled'] == true))
+        .toList();
+
+    final sessionsToRender = availableSessions.isNotEmpty
+        ? availableSessions
+        : ['breakfast', 'lunch', 'dinner'];
+
+    final total = widget.todayStats['total'] as int? ?? 0;
+    final served = widget.todayStats['served'] as int? ?? 0;
+
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: isDark
+              ? const [SoftPalette.teal800m, SoftPalette.teal750m, SoftPalette.teal800]
+              : const [SoftPalette.teal800, SoftPalette.teal700m, SoftPalette.teal750m],
+        ),
+      ),
+      child: Stack(
+        children: [
+          Positioned(
+            top: -30,
+            right: -20,
+            child: Container(
+              width: 140,
+              height: 140,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: _DS.mint.withValues(alpha: 0.08),
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Top Row: Logo, User, Title & Price Tag
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: [
+                    if (Navigator.canPop(context)) ...[
+                      IconButton(
+                        icon: const Icon(Icons.arrow_back_rounded, color: SoftPalette.gray50, size: 20),
+                        onPressed: () => Navigator.maybePop(context),
+                      ),
+                      const SizedBox(width: 4),
+                    ],
+                    Container(
+                      padding: const EdgeInsets.all(3),
+                      decoration: BoxDecoration(
+                        color: SoftPalette.gray50.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(7),
+                        child: Image.asset(
+                          'assets/logo/gmwf-1.webp',
+                          width: 38,
+                          height: 38,
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, _, _) => const Icon(
+                            Icons.restaurant_rounded,
+                            color: SoftPalette.gray50A70,
+                            size: 24,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    _UserAvatar(userName: widget.userName, onTap: widget.onSettings),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Flexible(
+                                child: Text(
+                                  'Food Tokens',
+                                  style: GoogleFonts.dmSerifDisplay(
+                                    color: SoftPalette.gray50,
+                                    fontSize: 21,
+                                    letterSpacing: -0.3,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: _DS.mint.withValues(alpha: 0.18),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: const Text(
+                                  'طعام لنگر',
+                                  style: TextStyle(
+                                    color: _DS.mint,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Meal Distribution · ${widget.displayFormat.format(DateTime.now())}',
+                            style: GoogleFonts.dmSans(
+                              color: SoftPalette.gray50.withValues(alpha: 0.65),
+                              fontSize: 11,
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: SoftPalette.gray50.withValues(alpha: 0.14),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.18)),
+                      ),
+                      child: Text(
+                        'PKR ${widget.pricePerToken.toInt()} / token',
+                        style: GoogleFonts.dmSans(
+                          color: SoftPalette.cyan200,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 11.5,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    _settingsBtn(widget.onSettings),
+                  ],
+                ),
+                const SizedBox(height: 14),
+
+                // Dynamic Meal Sessions Segmented Switcher
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: SoftPalette.gray900.withValues(alpha: 0.25),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.1)),
+                  ),
+                  child: Row(
+                    children: sessionsToRender.map((sKey) {
+                      final meta = _kitchenSessionMeta[sKey] ?? _kitchenSessionMeta['dinner']!;
+
+                      return Expanded(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 2),
+                          child: _buildSessionTab(
+                            id: sKey,
+                            title: meta.shortTitle,
+                            timingSubtitle: meta.urdu.replaceAll(' کا دسترخوان', ''),
+                            icon: meta.icon,
+                            activeGradient: meta.gradient,
+                            activeShadow: meta.color,
+                          ),
+                        ),
+                      );
+                    }).toList(),
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                // Multi-Session Analytics Strip
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: SoftPalette.gray50.withValues(alpha: 0.07),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: SoftPalette.gray50.withValues(alpha: 0.12),
+                      width: 0.8,
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        children: [
+                          for (int idx = 0; idx < sessionsToRender.length; idx++) ...[
+                            if (idx > 0)
+                              Container(
+                                width: 1,
+                                height: 36,
+                                color: SoftPalette.gray50.withValues(alpha: 0.15),
+                              ),
+                            Expanded(
+                              child: Builder(
+                                builder: (_) {
+                                  final sKey = sessionsToRender[idx];
+                                  final sTotal = widget.todayStats['${sKey}Total'] ?? 0;
+                                  final sServed = widget.todayStats['${sKey}Served'] ?? 0;
+                                  final meta = _kitchenSessionMeta[sKey] ?? _kitchenSessionMeta['dinner']!;
+                                  return _buildSessionStatColumn(
+                                    title: meta.shortTitle,
+                                    total: sTotal,
+                                    served: sServed,
+                                    accentColor: meta.color,
+                                  );
+                                },
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      Divider(color: SoftPalette.gray50.withValues(alpha: 0.1), height: 1),
+                      const SizedBox(height: 8),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.receipt_long_rounded,
+                                  size: 13, color: SoftPalette.cyan200),
+                              const SizedBox(width: 5),
+                              Text(
+                                'Combined: $total Issued · ${total - served} Pending',
+                                style: GoogleFonts.dmSans(
+                                  fontSize: 11,
+                                  color: SoftPalette.gray50.withValues(alpha: 0.75),
+                                  fontWeight: FontWeight.w500,
+                                ),
+                              ),
+                            ],
+                          ),
+                          Text(
+                            'PKR ${(total * widget.pricePerToken).toStringAsFixed(0)}',
+                            style: GoogleFonts.dmSans(
+                              fontSize: 12,
+                              color: SoftPalette.emerald150,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSessionTab({
+    required String id,
+    required String title,
+    String? timingSubtitle,
+    required IconData icon,
+    required List<Color> activeGradient,
+    required Color activeShadow,
+  }) {
+    final active = _kitchenNormalizeSession(widget.selectedSession) == id.toLowerCase();
+    return GestureDetector(
+      onTap: () {
+        HapticFeedback.selectionClick();
+        widget.onSessionChanged(id);
+      },
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeInOut,
+        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
+        decoration: BoxDecoration(
+          gradient: active ? LinearGradient(colors: activeGradient) : null,
+          color: active ? null : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          boxShadow: active
+              ? [
+                  BoxShadow(
+                    color: activeShadow.withValues(alpha: 0.4),
+                    blurRadius: 10,
+                    offset: const Offset(0, 3),
+                  ),
+                ]
+              : null,
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  icon,
+                  size: 14,
+                  color: active ? SoftPalette.gray50 : SoftPalette.gray50.withValues(alpha: 0.6),
+                ),
+                const SizedBox(width: 5),
+                Flexible(
+                  child: Text(
+                    title,
+                    style: GoogleFonts.dmSans(
+                      fontSize: 11.5,
+                      fontWeight: active ? FontWeight.w700 : FontWeight.w500,
+                      color: active ? SoftPalette.gray50 : SoftPalette.gray50.withValues(alpha: 0.7),
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            if (timingSubtitle != null && timingSubtitle.isNotEmpty) ...[
+              const SizedBox(height: 2),
+              Text(
+                timingSubtitle,
+                style: GoogleFonts.dmSans(
+                  fontSize: 9.5,
+                  fontWeight: active ? FontWeight.w600 : FontWeight.normal,
+                  color: active ? SoftPalette.gray50.withValues(alpha: 0.9) : SoftPalette.gray50.withValues(alpha: 0.45),
+                ),
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSessionStatColumn({
+    required String title,
+    required int total,
+    required int served,
+    required Color accentColor,
+  }) {
+    final pending = total - served;
+    return Column(
+      children: [
+        Text(
+          title,
+          style: GoogleFonts.dmSans(
+            fontSize: 11,
+            fontWeight: FontWeight.w600,
+            color: accentColor,
+          ),
+          overflow: TextOverflow.ellipsis,
+        ),
+        const SizedBox(height: 3),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(
+              '$total',
+              style: GoogleFonts.dmSans(
+                fontSize: 15,
+                fontWeight: FontWeight.w800,
+                color: SoftPalette.gray50,
+              ),
+            ),
+            const SizedBox(width: 3),
+            Text(
+              'issued',
+              style: GoogleFonts.dmSans(
+                fontSize: 9.5,
+                color: SoftPalette.gray50.withValues(alpha: 0.4),
+              ),
+            ),
+            const SizedBox(width: 6),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              decoration: BoxDecoration(
+                color: SoftPalette.amber200.withValues(alpha: 0.2),
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                '$pending wait',
+                style: GoogleFonts.dmSans(
+                  fontSize: 8.5,
+                  fontWeight: FontWeight.w700,
+                  color: SoftPalette.yellow200,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // ── Tactile Meal Voucher Preview ──────────────────────────────────────────
+  Widget _buildVoucherPreview({
+    required int nextStart,
+    required int qty,
+    required String sessionKey,
+    required ({String title, String shortTitle, String urdu, IconData icon, Color color, Color bg, List<Color> gradient}) meta,
+  }) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final endNum = nextStart + qty - 1;
+    final rangeText = qty == 1 ? 'Token #$nextStart' : 'Tokens #$nextStart → #$endNum';
+    final totalPKR = (qty * widget.pricePerToken).toStringAsFixed(0);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: _DS.getSurface(isDark),
+        borderRadius: BorderRadius.circular(16),
+        boxShadow: [
+          BoxShadow(
+            color: meta.color.withValues(alpha: isDark ? 0.12 : 0.05),
+            blurRadius: 14,
+            offset: const Offset(0, 3),
+          ),
+        ],
+        border: Border.all(color: _DS.getBorder(isDark), width: 1),
+      ),
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(5),
+                      decoration: BoxDecoration(
+                        color: isDark ? meta.color.withValues(alpha: 0.18) : meta.bg,
+                        borderRadius: BorderRadius.circular(7),
+                      ),
+                      child: Icon(meta.icon, size: 14, color: meta.color),
+                    ),
+                    const SizedBox(width: 8),
+                    Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'DASTERKHWAAN MEAL VOUCHER',
+                          style: GoogleFonts.dmSans(
+                            fontSize: 8.5,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: 0.6,
+                            color: _DS.getInk3(isDark),
+                          ),
+                        ),
+                        Text(
+                          '${meta.shortTitle} Session · ${_kitchenSessionUrdu(sessionKey)}',
+                          style: GoogleFonts.dmSans(
+                            fontSize: 11,
+                            fontWeight: FontWeight.w700,
+                            color: _DS.getInk(isDark),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: isDark ? meta.color.withValues(alpha: 0.15) : meta.bg,
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: meta.color.withValues(alpha: 0.25)),
+                  ),
+                  child: Text(
+                    meta.shortTitle.toUpperCase(),
+                    style: GoogleFonts.dmSans(
+                      fontSize: 9,
+                      fontWeight: FontWeight.w800,
+                      color: meta.color,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+
+          Divider(color: _DS.getBorder(isDark), height: 1, thickness: 0.8),
+
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 8, 14, 10),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'NEXT IN QUEUE',
+                      style: GoogleFonts.dmSans(
+                        fontSize: 8.5,
+                        fontWeight: FontWeight.w700,
+                        color: _DS.getInk3(isDark),
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      rangeText,
+                      style: GoogleFonts.dmSans(
+                        fontSize: 17,
+                        fontWeight: FontWeight.w900,
+                        color: _DS.getInk(isDark),
+                        letterSpacing: -0.3,
+                      ),
+                    ),
+                  ],
+                ),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  decoration: BoxDecoration(
+                    color: isDark ? _DS.mint.withValues(alpha: 0.15) : _DS.mintBg,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: _DS.mint.withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        '$qty Meal${qty > 1 ? "s" : ""} · ',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 11.5,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? _DS.mint : _DS.sage,
+                        ),
+                      ),
+                      Text(
+                        'PKR $totalPKR',
+                        style: GoogleFonts.dmSans(
+                          fontSize: 12.5,
+                          fontWeight: FontWeight.w800,
+                          color: isDark ? _DS.mint : _DS.sage,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Quantity Section ───────────────────────────────────────────────────────
+  Widget _buildQuantitySection(BuildContext context, int currentQty) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            _SectionLabel('Token Quantity', isDark: isDark),
+            Text(
+              '= PKR ${(currentQty * widget.pricePerToken).toStringAsFixed(0)}',
+              style: GoogleFonts.dmSans(
+                fontSize: 14,
+                fontWeight: FontWeight.w700,
+                color: _DS.mint,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          decoration: BoxDecoration(
+            color: _DS.getSurface(isDark),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _DS.getBorder(isDark)),
+            boxShadow: [
+              BoxShadow(
+                color: SoftPalette.gray900.withValues(alpha: isDark ? 0.2 : 0.02),
+                blurRadius: 8,
+                offset: const Offset(0, 2),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              GestureDetector(
+                onTap: () {
+                  if (currentQty > 1) {
+                    HapticFeedback.selectionClick();
+                    widget.onSelectQty(currentQty - 1);
+                  }
+                },
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: currentQty > 1 ? _DS.getSurface2(isDark) : _DS.getSurface2(isDark).withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.remove_rounded,
+                    color: currentQty > 1 ? _DS.getInk2(isDark) : _DS.getInk3(isDark).withValues(alpha: 0.4),
+                    size: 22,
+                  ),
+                ),
+              ),
+              Column(
+                children: [
+                  Text(
+                    '$currentQty',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 28,
+                      fontWeight: FontWeight.w900,
+                      color: _DS.getInk(isDark),
+                      letterSpacing: -1,
+                    ),
+                  ),
+                  Text(
+                    '${currentQty == 1 ? "1 Meal" : "$currentQty Meals"} · PKR ${(currentQty * widget.pricePerToken).toStringAsFixed(0)}',
+                    style: GoogleFonts.dmSans(
+                      fontSize: 11,
+                      fontWeight: FontWeight.w600,
+                      color: _DS.mint,
+                    ),
+                  ),
+                ],
+              ),
+              GestureDetector(
+                onTap: () {
+                  HapticFeedback.selectionClick();
+                  widget.onSelectQty(currentQty + 1);
+                },
+                child: Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: _DS.mint.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: const Icon(
+                    Icons.add_rounded,
+                    color: _DS.mint,
+                    size: 22,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          physics: const BouncingScrollPhysics(),
+          child: Row(
+            children: [1, 2, 3, 5, 10, 20, 50].map((preset) {
+              final selected = currentQty == preset;
+              return Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: GestureDetector(
+                  onTap: () {
+                    HapticFeedback.selectionClick();
+                    widget.onSelectQty(preset);
+                  },
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 180),
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? (isDark ? _DS.mint : _DS.sage)
+                          : _DS.getSurface(isDark),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: selected
+                            ? (isDark ? _DS.mint : _DS.sage)
+                            : _DS.getBorder(isDark),
+                        width: selected ? 1.5 : 1,
+                      ),
+                      boxShadow: selected
+                          ? [
+                              BoxShadow(
+                                color: (isDark ? _DS.mint : _DS.sage).withValues(alpha: 0.25),
+                                blurRadius: 6,
+                                offset: const Offset(0, 2),
+                              )
+                            ]
+                          : null,
+                    ),
+                    child: Text(
+                      '$preset',
+                      style: GoogleFonts.dmSans(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
+                        color: selected ? (isDark ? SoftPalette.slate900 : SoftPalette.gray50) : _DS.getInk(isDark),
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+        ),
+        const SizedBox(height: 12),
+
+        Container(
+          decoration: BoxDecoration(
+            color: _DS.getSurface(isDark),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: _DS.getBorder(isDark)),
+          ),
+          child: TextField(
+            controller: widget.quantityController,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+            onChanged: (_) => setState(() {}),
+            style: GoogleFonts.dmSans(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: _DS.getInk(isDark),
+            ),
+            decoration: InputDecoration(
+              prefixIcon: Icon(Icons.dialpad_rounded, color: _DS.getInk3(isDark), size: 20),
+              suffixText: '= PKR ${(currentQty * widget.pricePerToken).toStringAsFixed(0)}',
+              suffixStyle: GoogleFonts.dmSans(
+                color: _DS.mint,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
+              ),
+              hintText: 'Enter custom token quantity…',
+              hintStyle: GoogleFonts.dmSans(fontSize: 13, color: _DS.getInk3(isDark)),
+              filled: true,
+              fillColor: _DS.getSurface(isDark),
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(16),
+                borderSide: BorderSide.none,
+              ),
+              contentPadding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Live Recent Tokens Feed ────────────────────────────────────────────────
+  Widget _buildLiveTokensFeed(BuildContext context) {
+    if (widget.branchId == null) return const SizedBox.shrink();
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    final conf = CampSessionService.getDasterkhwaanSessionConfig(widget.branchId);
+    final availableSessions = ['breakfast', 'lunch', 'dinner']
+        .where((s) => conf.containsKey(s) && (conf[s] is Map && (conf[s] as Map)['enabled'] == true))
+        .toList();
+
+    final sessionsToRender = availableSessions.isNotEmpty
+        ? availableSessions
+        : ['breakfast', 'lunch', 'dinner'];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _SectionLabel("Today's Issued Tokens", isDark: isDark),
+                const SizedBox(height: 2),
+                Text(
+                  'Live feed of meal tickets for today',
+                  style: GoogleFonts.dmSans(fontSize: 11, color: _DS.getInk3(isDark)),
+                ),
+              ],
+            ),
+            SingleChildScrollView(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              child: Row(
+                children: [
+                  _filterChip('all', 'All', isDark),
+                  ...sessionsToRender.map((sKey) {
+                    final meta = _kitchenSessionMeta[sKey] ?? _kitchenSessionMeta['dinner']!;
+                    return Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: _filterChip(sKey, meta.shortTitle, isDark),
+                    );
+                  }),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+
+        FutureBuilder<Box>(
+          future: Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)
+              ? Future.value(Hive.box(LocalStorageService.dasterkhwaanTokensBox))
+              : _tokensBoxFuture,
+          builder: (context, boxSnap) {
+            if (!boxSnap.hasData) {
+              return const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Center(
+                  child: SizedBox(
+                    width: 24,
+                    height: 24,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                ),
+              );
+            }
+            final box = boxSnap.data!;
+            return ValueListenableBuilder(
+              valueListenable: box.listenable(),
+              builder: (ctx, Box box, _) {
+                final List<Map<String, dynamic>> tokenList = [];
+                final Set<int> seenTokenNumbers = {};
+                for (final raw in box.values) {
+                  if (raw is Map) {
+                    final t = Map<String, dynamic>.from(raw);
+                    if (t['dateKey'] == widget.today && t['branchId'] == widget.branchId) {
+                      final tokenNum = (t['number'] as num?)?.toInt() ?? 0;
+                      if (tokenNum > 0 && !seenTokenNumbers.add(tokenNum)) continue;
+                      final rawSession = _kitchenNormalizeSession(t['session'] as String?);
+                      DateTime? tTime;
+                      if (t['time'] is String) {
+                        tTime = DateTime.tryParse(t['time']);
+                      } else if (t['timestamp'] is String) {
+                        tTime = DateTime.tryParse(t['timestamp']);
+                      }
+                      tokenList.add({
+                        'id': t['id'] ?? t['localId'] ?? '',
+                        'number': (t['number'] as num?)?.toInt() ?? 0,
+                        'served': t['served'] == true,
+                        'session': rawSession,
+                        'time': tTime,
+                      });
+                    }
+                  }
+                }
+
+                var filtered = tokenList;
+                if (_feedFilter != 'all') {
+                  filtered = filtered.where((t) => t['session'] == _feedFilter).toList();
+                }
+
+                filtered.sort((a, b) => (b['number'] as int).compareTo(a['number'] as int));
+
+                if (filtered.isEmpty) {
+                  return Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 32, horizontal: 20),
+                    decoration: BoxDecoration(
+                      color: _DS.getSurface(isDark),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: _DS.getBorder(isDark)),
+                    ),
+                    child: Column(
+                      children: [
+                        Icon(Icons.confirmation_number_outlined,
+                            size: 40, color: _DS.getInk3(isDark).withValues(alpha: 0.3)),
+                        const SizedBox(height: 8),
+                        Text(
+                          'No tokens issued today yet',
+                          style: GoogleFonts.dmSans(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                            color: _DS.getInk(isDark),
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Select session and quantity above to issue tickets',
+                          style: GoogleFonts.dmSans(
+                            fontSize: 11,
+                            color: _DS.getInk3(isDark),
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
+                final displayList = filtered.take(20).toList();
+
+                return ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: displayList.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 8),
+                  itemBuilder: (_, idx) {
+                    final item = displayList[idx];
+                    final number = item['number'] as int;
+                    final served = item['served'] as bool;
+                    final session = item['session'] as String;
+                    final time = item['time'] as DateTime?;
+                    final meta = _kitchenSessionMeta[session] ?? _kitchenSessionMeta['dinner']!;
+
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: _DS.getSurface(isDark),
+                        borderRadius: BorderRadius.circular(14),
+                        border: Border.all(color: _DS.getBorder(isDark)),
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 44,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: isDark ? meta.color.withValues(alpha: 0.18) : meta.bg,
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: meta.color.withValues(alpha: 0.3),
+                              ),
+                            ),
+                            child: Center(
+                              child: Text(
+                                '#$number',
+                                style: GoogleFonts.dmSans(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w800,
+                                  color: meta.color,
+                                ),
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Icon(
+                                      meta.icon,
+                                      size: 13,
+                                      color: meta.color,
+                                    ),
+                                    const SizedBox(width: 5),
+                                    Expanded(
+                                      child: Text(
+                                        '${meta.shortTitle} Session',
+                                        style: GoogleFonts.dmSans(
+                                          fontSize: 12.5,
+                                          fontWeight: FontWeight.w700,
+                                          color: _DS.getInk(isDark),
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  '${time != null ? DateFormat('hh:mm a').format(time) : 'Today'} · ${_kitchenSessionUrdu(session)}',
+                                  style: GoogleFonts.dmSans(
+                                    fontSize: 10.5,
+                                    color: _DS.getInk3(isDark),
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
+                          ),
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                            decoration: BoxDecoration(
+                              color: served
+                                  ? (isDark ? _DS.green.withValues(alpha: 0.2) : _DS.greenBg)
+                                  : (isDark ? _DS.amber.withValues(alpha: 0.2) : _DS.amberBg),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(
+                                color: served ? _DS.green.withValues(alpha: 0.3) : _DS.amber.withValues(alpha: 0.3),
+                              ),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  served ? Icons.check_circle_rounded : Icons.hourglass_top_rounded,
+                                  size: 12,
+                                  color: served ? _DS.green : _DS.amber,
+                                ),
+                                const SizedBox(width: 4),
+                                Text(
+                                  served ? 'Served' : 'Waiting',
+                                  style: GoogleFonts.dmSans(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: served ? _DS.green : _DS.amber,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                );
+              },
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  Widget _filterChip(String filterKey, String label, bool isDark) {
+    final sel = _feedFilter == filterKey;
+    return GestureDetector(
+      onTap: () => setState(() => _feedFilter = filterKey),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: BoxDecoration(
+          color: sel ? (isDark ? _DS.mint : _DS.sage) : _DS.getSurface2(isDark),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Text(
+          label,
+          style: GoogleFonts.dmSans(
+            fontSize: 10,
+            fontWeight: FontWeight.w700,
+            color: sel ? (isDark ? SoftPalette.slate900 : SoftPalette.gray50) : _DS.getInk3(isDark),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COOKING TAB
+// ═══════════════════════════════════════════════════════════════════════════
+
+class _KitchenServeQueueTab extends StatefulWidget {
   final String branchId, today, username;
   final CollectionReference<Map<String, dynamic>> tokensCol;
   final Function(String, int, {String session}) serveToken;
   final VoidCallback onLogout;
   final VoidCallback onSettings;
+  final VoidCallback onGoToIssueToken;
 
-  const _TokensTab({
+  const _KitchenServeQueueTab({
     required this.branchId,
     required this.today,
     required this.tokensCol,
@@ -754,21 +2854,30 @@ class _TokensTab extends StatefulWidget {
     required this.username,
     required this.onLogout,
     required this.onSettings,
+    required this.onGoToIssueToken,
   });
 
   @override
-  State<_TokensTab> createState() => _TokensTabState();
+  State<_KitchenServeQueueTab> createState() => _KitchenServeQueueTabState();
 }
 
-class _TokensTabState extends State<_TokensTab> {
+class _KitchenServeQueueTabState extends State<_KitchenServeQueueTab> {
   String _selectedSessionFilter = 'all';
+  final TextEditingController _searchCtrl = TextEditingController();
+  String _searchQuery = '';
 
   @override
   void initState() {
     super.initState();
     final active = CampSessionService.resolveDasterkhwaanSession(null, widget.branchId);
-    _selectedSessionFilter = active;
+    _selectedSessionFilter = _kitchenNormalizeSession(active);
     _ensureBox();
+  }
+
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
   }
 
   Future<void> _ensureBox() async {
@@ -780,127 +2889,248 @@ class _TokensTabState extends State<_TokensTab> {
 
   @override
   Widget build(BuildContext context) {
-    return Column(children: [
-      if (!GlobalModuleWrapper.isWrapped(context))
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Column(
+      children: [
+        // ── Grand Kitchen Header with Live Analytics & Shortcut ──
         _buildHeader(context),
-      Expanded(
-        child: !Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)
-            ? const Center(
-                child: CircularProgressIndicator(
-                    color: kSuccess, strokeWidth: 2))
-            : ValueListenableBuilder<Box>(
-                valueListenable: Hive.box(LocalStorageService.dasterkhwaanTokensBox).listenable(),
-                builder: (_, box, __) {
-                  final allItems = <Map<String, dynamic>>[];
-                  for (final entry in box.toMap().entries) {
-                    if (entry.value is Map) {
-                      final m = Map<String, dynamic>.from(entry.value as Map);
-                      m['id'] ??= entry.key.toString();
-                      allItems.add(m);
-                    }
-                  }
 
-                  final unserved = allItems
-                      .where((d) => d['served'] != true)
-                      .toList();
-
-                  final evePending = unserved
-                      .where((d) =>
-                          ((d['session'] ?? 'evening').toString().toLowerCase()) == 'evening')
-                      .length;
-                  final nightPending = unserved
-                      .where((d) =>
-                          (d['session']?.toString().toLowerCase()) == 'night')
-                      .length;
-
-                  final pending = unserved.where((d) {
-                    if (_selectedSessionFilter == 'all') return true;
-                    final s = ((d['session'] ?? 'evening').toString().toLowerCase());
-                    return s == _selectedSessionFilter;
-                  }).toList()
-                    ..sort((a, b) {
-                      final aNum = (a['number'] as num?)?.toInt() ?? 0;
-                      final bNum = (b['number'] as num?)?.toInt() ?? 0;
-                      return aNum.compareTo(bNum);
-                    });
-
-                  return Column(
-                    children: [
-                      // ── Session Filter Chips ──────────────────────────────────────
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                        color: context.adapt(SoftPalette.gray50),
-                        child: Row(
-                          children: [
-                            _sessionFilterChip('all', 'All (${unserved.length})', null),
-                            const SizedBox(width: 8),
-                            _sessionFilterChip('evening', '🌅 Evening ($evePending)', SoftPalette.orange400),
-                            const SizedBox(width: 8),
-                            _sessionFilterChip('night', '🌙 Night ($nightPending)', SoftPalette.indigo550),
-                          ],
-                        ),
-                      ),
-                      Divider(height: 1, thickness: 1, color: context.adapt(SoftPalette.slate150)),
-
-                      // ── Token List ────────────────────────────────────────────────
-                      Expanded(
-                        child: pending.isEmpty
-                            ? Center(
-                                child: Column(
-                                    mainAxisAlignment: MainAxisAlignment.center,
-                                    children: [
-                                  Icon(Icons.check_circle_outline,
-                                      size: 80, color: kSuccess.withValues(alpha: 0.25)),
-                                  const SizedBox(height: 16),
-                                  Text(_selectedSessionFilter == 'all'
-                                      ? 'All tokens served!'
-                                      : 'No pending ${_selectedSessionFilter == 'night' ? 'Night (رات)' : 'Evening (شام)'} tokens',
-                                      style: TextStyle(
-                                          fontSize: 17,
-                                          fontWeight: FontWeight.w700,
-                                          color: context.adapt(kTextLight))),
-                                  const SizedBox(height: 6),
-                                  Text('Tokens will appear when issued by Office Boy',
-                                      style: TextStyle(fontSize: 13, color: context.adapt(kTextLight))),
-                                ]))
-                            : ListView.builder(
-                                padding: const EdgeInsets.fromLTRB(16, 14, 16, 100),
-                                itemCount: pending.length,
-                                itemBuilder: (_, i) {
-                                  final e       = pending[i];
-                                  final rawTime = e['time'] ?? e['timestamp'] ?? e['createdAt'];
-                                  final DateTime time;
-                                  if (rawTime is Timestamp) {
-                                    time = rawTime.toDate();
-                                  } else if (rawTime is String) {
-                                    time = DateTime.tryParse(rawTime) ?? DateTime.now();
-                                  } else if (rawTime is DateTime) {
-                                    time = rawTime;
-                                  } else {
-                                    time = DateTime.now();
-                                  }
-                                  final number  = (e['number'] as num?)?.toInt() ?? (i + 1);
-                                  final session = e['session'] as String? ?? 'evening';
-                                  final tokenId = e['id']?.toString() ?? '';
-                                  return _TokenCard(
-                                      number: number,
-                                      time: time,
-                                      session: session,
-                                      onServe: () => widget.serveToken(tokenId, number, session: session));
-                                },
-                              ),
-                      ),
-                    ],
-                  );
-                },
+        // ── Controls Strip: Search & Session Filter Chips ──
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: _DS.getSurface(isDark),
+            border: Border(bottom: BorderSide(color: _DS.getBorder(isDark), width: 1)),
+          ),
+          child: Column(
+            children: [
+              // Search Field
+              Container(
+                height: 42,
+                decoration: BoxDecoration(
+                  color: _DS.getSurface2(isDark),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: _DS.getBorder(isDark)),
+                ),
+                child: TextField(
+                  controller: _searchCtrl,
+                  keyboardType: TextInputType.number,
+                  onChanged: (val) => setState(() => _searchQuery = val.trim()),
+                  style: GoogleFonts.dmSans(
+                    fontSize: 13.5,
+                    fontWeight: FontWeight.w600,
+                    color: _DS.getInk(isDark),
+                  ),
+                  decoration: InputDecoration(
+                    prefixIcon: Icon(Icons.search_rounded, size: 18, color: _DS.getInk3(isDark)),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.clear_rounded, size: 16),
+                            onPressed: () {
+                              _searchCtrl.clear();
+                              setState(() => _searchQuery = '');
+                            },
+                          )
+                        : null,
+                    hintText: 'Search token number (e.g. 15)...',
+                    hintStyle: GoogleFonts.dmSans(fontSize: 12.5, color: _DS.getInk3(isDark)),
+                    border: InputBorder.none,
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
+                  ),
+                ),
               ),
-      ),
-    ]);
+              const SizedBox(height: 10),
+
+              // ValueListenable for dynamic counts inside filter chips
+              if (Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox))
+                ValueListenableBuilder<Box>(
+                  valueListenable: Hive.box(LocalStorageService.dasterkhwaanTokensBox).listenable(),
+                  builder: (_, box, __) {
+                    int unservedCount = 0;
+                    int bfCount = 0;
+                    int lunchCount = 0;
+                    int dinCount = 0;
+
+                    for (final entry in box.toMap().entries) {
+                      if (entry.value is Map) {
+                        final m = Map<String, dynamic>.from(entry.value as Map);
+                        final dateMatches = m['dateKey'] == widget.today || m['date'] == widget.today;
+                        final branchMatches = m['branchId'] == null || m['branchId'] == widget.branchId;
+                        if (dateMatches && branchMatches && m['served'] != true) {
+                          unservedCount++;
+                          final s = _kitchenNormalizeSession(m['session'] as String?);
+                          if (s == 'breakfast') bfCount++;
+                          else if (s == 'dinner') dinCount++;
+                          else lunchCount++;
+                        }
+                      }
+                    }
+
+                    return Row(
+                      children: [
+                        _sessionFilterChip('all', 'All ($unservedCount)', null),
+                        const SizedBox(width: 6),
+                        _sessionFilterChip('breakfast', '🌅 Breakfast ($bfCount)', SoftPalette.orange400),
+                        const SizedBox(width: 6),
+                        _sessionFilterChip('lunch', '☀️ Lunch ($lunchCount)', SoftPalette.teal500),
+                        const SizedBox(width: 6),
+                        _sessionFilterChip('dinner', '🌙 Dinner ($dinCount)', SoftPalette.indigo550),
+                      ],
+                    );
+                  },
+                ),
+            ],
+          ),
+        ),
+
+        // ── Token Queue Body ──
+        Expanded(
+          child: !Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)
+              ? const Center(
+                  child: CircularProgressIndicator(
+                    color: SoftPalette.emerald500,
+                    strokeWidth: 2,
+                  ),
+                )
+              : ValueListenableBuilder<Box>(
+                  valueListenable: Hive.box(LocalStorageService.dasterkhwaanTokensBox).listenable(),
+                  builder: (_, box, __) {
+                    final allItems = <Map<String, dynamic>>[];
+                    for (final entry in box.toMap().entries) {
+                      if (entry.value is Map) {
+                        final m = Map<String, dynamic>.from(entry.value as Map);
+                        m['id'] ??= entry.key.toString();
+                        final dateMatches = m['dateKey'] == widget.today || m['date'] == widget.today;
+                        final branchMatches = m['branchId'] == null || m['branchId'] == widget.branchId;
+                        if (dateMatches && branchMatches) {
+                          allItems.add(m);
+                        }
+                      }
+                    }
+
+                    final unserved = allItems.where((d) => d['served'] != true).toList();
+
+                    final pending = unserved.where((d) {
+                      final s = _kitchenNormalizeSession(d['session'] as String?);
+                      if (_selectedSessionFilter != 'all' && s != _selectedSessionFilter) {
+                        return false;
+                      }
+                      if (_searchQuery.isNotEmpty) {
+                        final q = _searchQuery.replaceAll('#', '').trim();
+                        final numStr = (d['number']?.toString() ?? '');
+                        if (!numStr.contains(q)) return false;
+                      }
+                      return true;
+                    }).toList()
+                      ..sort((a, b) {
+                        final aNum = (a['number'] as num?)?.toInt() ?? 0;
+                        final bNum = (b['number'] as num?)?.toInt() ?? 0;
+                        return aNum.compareTo(bNum);
+                      });
+
+                    if (pending.isEmpty) {
+                      return Center(
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 32),
+                          child: Column(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Container(
+                                width: 80,
+                                height: 80,
+                                decoration: BoxDecoration(
+                                  color: SoftPalette.emerald500.withValues(alpha: isDark ? 0.15 : 0.1),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.check_circle_outline_rounded,
+                                  size: 48,
+                                  color: SoftPalette.emerald500,
+                                ),
+                              ),
+                              const SizedBox(height: 18),
+                              Text(
+                                _selectedSessionFilter == 'all'
+                                    ? 'All Tokens Served!'
+                                    : 'No pending ${_kitchenSessionMeta[_selectedSessionFilter]?.shortTitle ?? _selectedSessionFilter} tokens',
+                                style: GoogleFonts.dmSans(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                  color: _DS.getInk(isDark),
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                'New tokens will appear instantly when generated.\nOr tap below to issue meal tokens.',
+                                textAlign: TextAlign.center,
+                                style: GoogleFonts.dmSans(
+                                  fontSize: 12.5,
+                                  color: _DS.getInk3(isDark),
+                                  height: 1.4,
+                                ),
+                              ),
+                              const SizedBox(height: 20),
+                              ElevatedButton.icon(
+                                onPressed: widget.onGoToIssueToken,
+                                icon: const Icon(Icons.add_circle_outline_rounded, size: 18),
+                                label: const Text('Issue Food Tokens'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: SoftPalette.teal500,
+                                  foregroundColor: SoftPalette.gray50,
+                                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                                  elevation: 0,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    }
+
+                    return ListView.builder(
+                      physics: const BouncingScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(16, 14, 16, 100),
+                      itemCount: pending.length,
+                      itemBuilder: (_, i) {
+                        final e = pending[i];
+                        final rawTime = e['time'] ?? e['timestamp'] ?? e['createdAt'];
+                        final DateTime time;
+                        if (rawTime is Timestamp) {
+                          time = rawTime.toDate();
+                        } else if (rawTime is String) {
+                          time = DateTime.tryParse(rawTime) ?? DateTime.now();
+                        } else if (rawTime is DateTime) {
+                          time = rawTime;
+                        } else {
+                          time = DateTime.now();
+                        }
+                        final number  = (e['number'] as num?)?.toInt() ?? (i + 1);
+                        final session = _kitchenNormalizeSession(e['session'] as String?);
+                        final tokenId = e['id']?.toString() ?? e['localId']?.toString() ?? '';
+                        final issuedBy = e['issuedBy'] as String?;
+
+                        return _TokenCard(
+                          number: number,
+                          time: time,
+                          session: session,
+                          issuedBy: issuedBy,
+                          onServe: () => widget.serveToken(tokenId, number, session: session),
+                        );
+                      },
+                    );
+                  },
+                ),
+        ),
+      ],
+    );
   }
 
   Widget _sessionFilterChip(String id, String label, Color? activeColor) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final isSelected = _selectedSessionFilter == id;
-    final color = activeColor ?? kSuccess;
+    final color = activeColor ?? SoftPalette.teal500;
     return Expanded(
       child: InkWell(
         onTap: () => setState(() => _selectedSessionFilter = id),
@@ -909,21 +3139,23 @@ class _TokensTabState extends State<_TokensTab> {
           duration: const Duration(milliseconds: 150),
           padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
-            color: isSelected ? color.withValues(alpha: 0.12) : context.adapt(SoftPalette.slate100),
+            color: isSelected ? color.withValues(alpha: isDark ? 0.22 : 0.12) : _DS.getSurface2(isDark),
             borderRadius: BorderRadius.circular(10),
             border: Border.all(
-              color: isSelected ? color : context.adapt(SoftPalette.slate200),
+              color: isSelected ? color : _DS.getBorder(isDark),
               width: isSelected ? 1.5 : 1,
             ),
           ),
           child: Center(
             child: Text(
               label,
-              style: TextStyle(
-                fontSize: 12,
+              style: GoogleFonts.dmSans(
+                fontSize: 11,
                 fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
-                color: isSelected ? color : context.adapt(SoftPalette.slate600),
+                color: isSelected ? color : _DS.getInk3(isDark),
               ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
             ),
           ),
         ),
@@ -932,10 +3164,14 @@ class _TokensTabState extends State<_TokensTab> {
   }
 
   Widget _buildHeader(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
     return Container(
-      decoration: const BoxDecoration(
+      decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [SoftPalette.green400, kSuccess],
+          colors: isDark
+              ? const [SoftPalette.teal800m, SoftPalette.teal750m, SoftPalette.teal800]
+              : const [SoftPalette.teal800, SoftPalette.teal700m, SoftPalette.teal750m],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
@@ -943,7 +3179,7 @@ class _TokensTabState extends State<_TokensTab> {
       child: SafeArea(
         bottom: false,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -958,25 +3194,25 @@ class _TokensTabState extends State<_TokensTab> {
                             icon: const Icon(Icons.arrow_back_rounded, color: SoftPalette.gray50, size: 20),
                             onPressed: () => Navigator.maybePop(context),
                           ),
-                          const SizedBox(width: 8),
+                          const SizedBox(width: 4),
                         ],
                         Container(
-                          padding: const EdgeInsets.all(4),
+                          padding: const EdgeInsets.all(3),
                           decoration: BoxDecoration(
                             color: SoftPalette.gray50.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(12),
+                            borderRadius: BorderRadius.circular(10),
                           ),
                           child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
+                            borderRadius: BorderRadius.circular(7),
                             child: Image.asset(
                               'assets/logo/gmwf-1.webp',
-                              width: 44,
-                              height: 44,
+                              width: 38,
+                              height: 38,
                               fit: BoxFit.contain,
                               errorBuilder: (_, _, _) => const Icon(
                                 Icons.restaurant_rounded,
                                 color: SoftPalette.gray50A70,
-                                size: 28,
+                                size: 24,
                               ),
                             ),
                           ),
@@ -989,22 +3225,42 @@ class _TokensTabState extends State<_TokensTab> {
                             crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Text(
-                                'Active Tokens',
-                                style: TextStyle(
-                                  color: SoftPalette.gray50,
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w900,
-                                  letterSpacing: -0.5,
-                                ),
-                                overflow: TextOverflow.ellipsis,
+                              Row(
+                                children: [
+                                  Text(
+                                    'Kitchen Serve Queue',
+                                    style: GoogleFonts.dmSerifDisplay(
+                                      color: SoftPalette.gray50,
+                                      fontSize: 19,
+                                      letterSpacing: -0.3,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                    decoration: BoxDecoration(
+                                      color: _DS.mint.withValues(alpha: 0.2),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: const Text(
+                                      'طعام لنگر',
+                                      style: TextStyle(
+                                        color: _DS.mint,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
+                              const SizedBox(height: 2),
                               Text(
-                                widget.username,
-                                style: const TextStyle(
-                                  color: SoftPalette.gray50A70,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
+                                '${widget.username} · Serving Meals',
+                                style: GoogleFonts.dmSans(
+                                  color: SoftPalette.gray50.withValues(alpha: 0.65),
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w500,
                                 ),
                                 overflow: TextOverflow.ellipsis,
                               ),
@@ -1015,16 +3271,35 @@ class _TokensTabState extends State<_TokensTab> {
                     ),
                   ),
                   const SizedBox(width: 8),
+
+                  ElevatedButton.icon(
+                    onPressed: widget.onGoToIssueToken,
+                    icon: const Icon(Icons.add_rounded, size: 16),
+                    label: const Text('Issue Token'),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: SoftPalette.gray50.withValues(alpha: 0.2),
+                      foregroundColor: SoftPalette.gray50,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(10),
+                        side: BorderSide(color: SoftPalette.gray50.withValues(alpha: 0.3)),
+                      ),
+                      textStyle: GoogleFonts.dmSans(fontSize: 11.5, fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+
                   if (LocalStorageService.canKitchenLogFoodDetails(widget.branchId)) ...[
                     IconButton(
                       tooltip: 'Food Details & Logs',
                       icon: Container(
-                        padding: const EdgeInsets.all(8),
+                        padding: const EdgeInsets.all(7),
                         decoration: BoxDecoration(
                           color: SoftPalette.gray50.withValues(alpha: 0.2),
                           borderRadius: BorderRadius.circular(10),
                         ),
-                        child: const Icon(Icons.restaurant_menu_rounded, color: SoftPalette.gray50, size: 20),
+                        child: const Icon(Icons.restaurant_menu_rounded, color: SoftPalette.gray50, size: 18),
                       ),
                       onPressed: () {
                         Navigator.push(
@@ -1043,853 +3318,345 @@ class _TokensTabState extends State<_TokensTab> {
                   _settingsBtn(widget.onSettings),
                 ],
               ),
-              const SizedBox(height: 16),
-            ValueListenableBuilder(
-              valueListenable: (Hive.isBoxOpen('dasterkhwaan_tokens')
-                      ? Hive.box('dasterkhwaan_tokens')
-                      : Hive.box(LocalStorageService.usersBox))
-                  .listenable(),
-              builder: (_, Box box, __) {
-                final allTokensBox = Hive.isBoxOpen('dasterkhwaan_tokens') ? Hive.box('dasterkhwaan_tokens') : null;
-                final all = (allTokensBox?.values ?? [])
-                    .whereType<Map>()
-                    .map((m) => Map<String, dynamic>.from(m))
-                    .where((m) => (m['dateKey'] == widget.today || m['date'] == widget.today) &&
-                                  (m['branchId'] == null || m['branchId'] == widget.branchId))
-                    .toList();
-                final pending = all.where((d) => d['served'] == false).length;
-                final served  = all.length - pending;
-                final evePending = all
-                    .where((d) =>
-                        d['served'] == false &&
-                        (d['session'] ?? 'evening') == 'evening')
-                    .length;
-                final nightPending = all
-                    .where((d) =>
-                        d['served'] == false &&
-                        d['session'] == 'night')
-                    .length;
+              const SizedBox(height: 14),
 
-                return Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: SoftPalette.gray50.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(16),
-                    border: Border.all(
-                        color: SoftPalette.gray50.withValues(alpha: 0.2)),
-                  ),
-                  child: Row(
+              // Live Realtime Stat Strip
+              ValueListenableBuilder(
+                valueListenable: (Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)
+                        ? Hive.box(LocalStorageService.dasterkhwaanTokensBox)
+                        : Hive.box(LocalStorageService.usersBox))
+                    .listenable(),
+                builder: (_, Box box, __) {
+                  final allTokensBox = Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)
+                      ? Hive.box(LocalStorageService.dasterkhwaanTokensBox)
+                      : null;
+                  final all = (allTokensBox?.values ?? [])
+                      .whereType<Map>()
+                      .map((m) => Map<String, dynamic>.from(m))
+                      .where((m) =>
+                          (m['dateKey'] == widget.today || m['date'] == widget.today) &&
+                          (m['branchId'] == null || m['branchId'] == widget.branchId))
+                      .toList();
+                  final pending = all.where((d) => d['served'] != true).length;
+                  final served  = all.length - pending;
+
+                  final bfPending = all
+                      .where((d) => d['served'] != true && _kitchenNormalizeSession(d['session'] as String?) == 'breakfast')
+                      .length;
+                  final lunchPending = all
+                      .where((d) => d['served'] != true && _kitchenNormalizeSession(d['session'] as String?) == 'lunch')
+                      .length;
+                  final dinPending = all
+                      .where((d) => d['served'] != true && _kitchenNormalizeSession(d['session'] as String?) == 'dinner')
+                      .length;
+
+                  return Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: SoftPalette.gray50.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: SoftPalette.gray50.withValues(alpha: 0.18)),
+                    ),
+                    child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceAround,
                       children: [
-                    _statBadge(
-                      Icons.hourglass_top_rounded,
-                      'Pending (🌅$evePending · 🌙$nightPending)',
-                      '$pending',
-                      SoftPalette.yellow200,
+                        _statBadge(
+                          Icons.hourglass_top_rounded,
+                          'Waiting (🌅$bfPending · ☀️$lunchPending · 🌙$dinPending)',
+                          '$pending',
+                          SoftPalette.yellow200,
+                        ),
+                        Container(
+                          width: 1,
+                          height: 38,
+                          color: SoftPalette.gray50.withValues(alpha: 0.2),
+                        ),
+                        _statBadge(
+                          Icons.check_circle_rounded,
+                          'Served Meals',
+                          '$served',
+                          SoftPalette.emerald200,
+                        ),
+                        Container(
+                          width: 1,
+                          height: 38,
+                          color: SoftPalette.gray50.withValues(alpha: 0.2),
+                        ),
+                        _statBadge(
+                          Icons.confirmation_number_rounded,
+                          'Total Issued',
+                          '${all.length}',
+                          SoftPalette.gray50,
+                        ),
+                      ],
                     ),
-                    Container(
-                        width: 1,
-                        height: 40,
-                        color: SoftPalette.gray50.withValues(alpha: 0.2)),
-                    _statBadge(Icons.check_circle_rounded, 'Served',
-                        '$served', SoftPalette.emerald200),
-                    Container(
-                        width: 1,
-                        height: 40,
-                        color: SoftPalette.gray50.withValues(alpha: 0.2)),
-                    _statBadge(Icons.confirmation_number_rounded, 'Total',
-                        '${all.length}', SoftPalette.gray50),
-                  ]),
-                );
-              },
-            ),
-          ]),
+                  );
+                },
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  Widget _statBadge(
-          IconData icon, String label, String value, Color color) =>
-      Column(children: [
-        Icon(icon, color: color, size: 18),
-        const SizedBox(height: 5),
-        Text(value,
-            style: const TextStyle(
-                color: SoftPalette.gray50,
-                fontSize: 22,
-                fontWeight: FontWeight.w900)),
-        Text(label,
+  Widget _statBadge(IconData icon, String label, String value, Color color) =>
+      Column(
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, color: color, size: 14),
+              const SizedBox(width: 4),
+              Text(
+                value,
+                style: const TextStyle(
+                  color: SoftPalette.gray50,
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 3),
+          Text(
+            label,
             style: TextStyle(
-                color: SoftPalette.gray50.withValues(alpha: 0.7),
-                fontSize: 11,
-                fontWeight: FontWeight.w600)),
-      ]);
+              color: SoftPalette.gray50.withValues(alpha: 0.75),
+              fontSize: 10.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      );
 }
+
+// ── Token Serve Card ─────────────────────────────────────────────────────────
 
 class _TokenCard extends StatelessWidget {
   final int number;
   final DateTime time;
   final String session;
+  final String? issuedBy;
   final VoidCallback onServe;
+
   const _TokenCard({
     required this.number,
     required this.time,
-    this.session = 'evening',
+    this.session = 'lunch',
+    this.issuedBy,
     required this.onServe,
   });
 
   @override
   Widget build(BuildContext context) {
-    final isNight = session == 'night';
-    final sessionColor = isNight ? SoftPalette.indigo550 : SoftPalette.orange400;
-    final sessionBg = context.adapt(isNight ? SoftPalette.slate100 : SoftPalette.yellow50m);
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final meta = _kitchenSessionMeta[_kitchenNormalizeSession(session)] ?? _kitchenSessionMeta['lunch']!;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 12),
       decoration: BoxDecoration(
-        color: context.adapt(SoftPalette.gray50),
-        borderRadius: BorderRadius.circular(20),
+        color: _DS.getSurface(isDark),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: _DS.getBorder(isDark),
+          width: 1,
+        ),
         boxShadow: [
           BoxShadow(
-              color: (isNight ? SoftPalette.indigo550 : kSuccess).withValues(alpha: 0.1),
-              blurRadius: 16,
-              offset: const Offset(0, 4))
+            color: isDark ? Colors.black.withValues(alpha: 0.3) : SoftPalette.teal900.withValues(alpha: 0.04),
+            blurRadius: 10,
+            offset: const Offset(0, 3),
+          ),
         ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Row(children: [
-          Container(
-            width: 58,
-            height: 58,
-            decoration: BoxDecoration(
-              gradient: isNight
-                  ? const LinearGradient(
-                      colors: [SoftPalette.indigo700, SoftPalette.indigo550],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight)
-                  : const LinearGradient(
-                      colors: [SoftPalette.green400, kSuccess],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight),
-              borderRadius: BorderRadius.circular(16),
-            ),
-            child: Center(
-                child: Text('#$number',
-                    style: const TextStyle(
-                        color: SoftPalette.gray50,
-                        fontSize: 18,
-                        fontWeight: FontWeight.w900))),
-          ),
-          const SizedBox(width: 16),
-          Expanded(
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-            Row(
-              children: [
-                Text('Token Ready',
-                    style: TextStyle(
-                        fontSize: 15,
-                        fontWeight: FontWeight.w800,
-                        color: context.adapt(kTextDark))),
-                const SizedBox(width: 6),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                  decoration: BoxDecoration(
-                    color: sessionBg,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: sessionColor.withValues(alpha: 0.3)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        isNight ? Icons.nightlight_round : Icons.wb_sunny_rounded,
-                        size: 10,
-                        color: sessionColor,
-                      ),
-                      const SizedBox(width: 3),
-                      Text(
-                        isNight ? 'Night (رات)' : 'Evening (شام)',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w700,
-                          color: sessionColor,
-                        ),
-                      ),
-                    ],
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(16),
+        child: IntrinsicHeight(
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              // Token Number Badge with Session Gradient
+              Container(
+                width: 78,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: meta.gradient,
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
                   ),
                 ),
-              ],
-            ),
-            const SizedBox(height: 4),
-            Row(children: [
-              Icon(Icons.access_time_rounded,
-                  size: 13, color: context.adapt(kTextLight)),
-              const SizedBox(width: 4),
-              Text(DateFormat('hh:mm a').format(time),
-                  style: TextStyle(
-                      fontSize: 12,
-                      color: context.adapt(kTextLight),
-                      fontWeight: FontWeight.w600)),
-            ]),
-          ])),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: isNight ? SoftPalette.indigo550 : kSuccess,
-              foregroundColor: SoftPalette.gray50,
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 22, vertical: 14),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14)),
-              elevation: 0,
-            ),
-            onPressed: onServe,
-            child: const Text('Serve',
-                style: TextStyle(
-                    fontSize: 14, fontWeight: FontWeight.w800)),
-          ),
-        ]),
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// COOKING TAB
-// ═══════════════════════════════════════════════════════════════════════════
-
-class _CookingTab extends StatelessWidget {
-  final String branchId, today, username;
-  final CollectionReference<Map<String, dynamic>> cookingCol;
-  final VoidCallback onAdd;
-  final Function(Map<String, dynamic>, String) onEdit;
-  final Function(String, Map<String, dynamic>) onDelete;
-  final VoidCallback onLogout;
-
-  const _CookingTab({
-    required this.branchId,
-    required this.today,
-    required this.username,
-    required this.cookingCol,
-    required this.onAdd,
-    required this.onEdit,
-    required this.onDelete,
-    required this.onLogout,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(children: [
-      if (!GlobalModuleWrapper.isWrapped(context))
-        Container(
-          decoration: const BoxDecoration(
-            gradient: LinearGradient(
-                colors: [SoftPalette.orange400, kWarning],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight),
-          ),
-          child: SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
-              child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                Row(mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                  Row(children: [
-                    if (Navigator.canPop(context)) ...[
-                      IconButton(
-                        icon: const Icon(Icons.arrow_back_rounded, color: SoftPalette.gray50, size: 20),
-                        onPressed: () => Navigator.maybePop(context),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                    Container(
-                      padding: const EdgeInsets.all(4),
-                      decoration: BoxDecoration(
-                        color: SoftPalette.gray50.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(8),
-                        child: Image.asset(
-                          'assets/logo/gmwf-1.webp',
-                          width: 54,
-                          height: 54,
-                          fit: BoxFit.contain,
-                          errorBuilder: (_, _, _) => const Icon(
-                            Icons.restaurant_rounded,
-                            color: SoftPalette.gray50A70,
-                            size: 28,
-                          ),
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Column(crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                      const Text('Food Log',
-                          style: TextStyle(
-                              color: SoftPalette.gray50,
-                              fontSize: 24,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: -0.5)),
-                      Text(username,
-                          style: const TextStyle(
-                              color: SoftPalette.gray50,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w700)),
-                    ]),
-                  ]),
-                ]),
-                const SizedBox(height: 14),
-                ValueListenableBuilder<Box>(
-                  valueListenable: Hive.isBoxOpen(LocalStorageService.dasterkhwaanCookingBox)
-                      ? Hive.box(LocalStorageService.dasterkhwaanCookingBox).listenable()
-                      : Hive.box(LocalStorageService.dasterkhwaanTokensBox).listenable(),
-                  builder: (_, snap, __) {
-                    final cookBox = Hive.isBoxOpen(LocalStorageService.dasterkhwaanCookingBox)
-                        ? Hive.box(LocalStorageService.dasterkhwaanCookingBox)
-                        : null;
-                    final tokenBox = Hive.isBoxOpen(LocalStorageService.dasterkhwaanTokensBox)
-                        ? Hive.box(LocalStorageService.dasterkhwaanTokensBox)
-                        : null;
-
-                    double totalUsed = 0, totalSaved = 0, totalWasted = 0;
-                    if (cookBox != null) {
-                      for (final entry in cookBox.toMap().entries) {
-                        if (entry.value is Map) {
-                          final data = Map<String, dynamic>.from(entry.value as Map);
-                          totalUsed   += (data['usedKg']   as num? ?? 0).toDouble();
-                          totalSaved  += (data['savedKg']  as num? ?? 0).toDouble();
-                          totalWasted += (data['wastedKg'] as num? ?? 0).toDouble();
-                        }
-                      }
-                    }
-
-                    int totalServedTokens = 0;
-                    if (tokenBox != null) {
-                      for (final entry in tokenBox.toMap().entries) {
-                        if (entry.value is Map) {
-                          final data = Map<String, dynamic>.from(entry.value as Map);
-                          if (data['served'] == true) {
-                            totalServedTokens++;
-                          }
-                        }
-                      }
-                    }
-
-                    return Container(
-                      padding: const EdgeInsets.symmetric(
-                          vertical: 14, horizontal: 8),
-                      decoration: BoxDecoration(
-                        color: SoftPalette.gray50.withValues(alpha: 0.15),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                            color: SoftPalette.gray50.withValues(alpha: 0.2)),
-                      ),
-                      child: Row(
-                          mainAxisAlignment:
-                              MainAxisAlignment.spaceAround,
-                          children: [
-                        _cookStat('Used',
-                            '${totalUsed.toStringAsFixed(1)} kg',
-                            Icons.whatshot_rounded),
-                        _vDiv(),
-                        _cookStat('Served',
-                            '$totalServedTokens tokens',
-                            Icons.confirmation_number_rounded),
-                        _vDiv(),
-                        _cookStat('Saved',
-                            '${totalSaved.toStringAsFixed(1)} kg',
-                            Icons.save_rounded),
-                        _vDiv(),
-                        _cookStat('Wasted',
-                            '${totalWasted.toStringAsFixed(1)} kg',
-                            Icons.delete_outline_rounded),
-                      ]),
-                    );
-                  },
-                ),
-              ]),
-            ),
-          ),
-        ),
-      Expanded(
-        child: ValueListenableBuilder<Box>(
-          valueListenable: Hive.isBoxOpen(LocalStorageService.dasterkhwaanCookingBox)
-              ? Hive.box(LocalStorageService.dasterkhwaanCookingBox).listenable()
-              : Hive.box(LocalStorageService.dasterkhwaanTokensBox).listenable(),
-          builder: (_, __, ___) {
-            final cookBox = Hive.isBoxOpen(LocalStorageService.dasterkhwaanCookingBox)
-                ? Hive.box(LocalStorageService.dasterkhwaanCookingBox)
-                : null;
-            final docs = <Map<String, dynamic>>[];
-            if (cookBox != null) {
-              for (final entry in cookBox.toMap().entries) {
-                if (entry.value is Map) {
-                  final data = Map<String, dynamic>.from(entry.value as Map);
-                  data['id'] ??= entry.key.toString();
-                  docs.add(data);
-                }
-              }
-            }
-            if (docs.isEmpty) {
-              return Center(
-                  child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      children: [
-                Icon(Icons.soup_kitchen_rounded,
-                    size: 80, color: kWarning.withValues(alpha: 0.25)),
-                const SizedBox(height: 16),
-                Text('No food logged yet',
-                    style: TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        color: context.adapt(kTextLight))),
-                const SizedBox(height: 8),
-                Text('Tap + to log cooked or received food',
-                    style: TextStyle(fontSize: 13, color: context.adapt(kTextLight))),
-              ]));
-            }
-            return ListView.builder(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 120),
-              itemCount: docs.length,
-              itemBuilder: (_, i) {
-                final data = docs[i];
-                final rawTime = data['createdAt'] ?? data['time'];
-                final DateTime time;
-                if (rawTime is Timestamp) {
-                  time = rawTime.toDate();
-                } else if (rawTime is String) {
-                  time = DateTime.tryParse(rawTime) ?? DateTime.now();
-                } else if (rawTime is DateTime) {
-                  time = rawTime;
-                } else {
-                  time = DateTime.now();
-                }
-                final id = data['id']?.toString() ?? '';
-                return _CookingCard(
-                  data:     data,
-                  time:     time,
-                  onEdit:   () => onEdit(data, id),
-                  onDelete: () => _confirmDelete(context, id, data),
-                );
-              },
-            );
-          },
-        ),
-      ),
-    ]);
-  }
-
-  void _confirmDelete(
-      BuildContext context, String docId, Map<String, dynamic> data) {
-    final isReceived  = data['isReceivedFood'] as bool? ?? false;
-    final isSavedFood = data['isSavedFood']    as bool? ?? false;
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Row(children: [
-          Icon(Icons.warning_rounded, color: kAccent),
-          SizedBox(width: 8),
-          Text('Delete Entry?',
-              style: TextStyle(
-                  fontWeight: FontWeight.w800, fontSize: 16)),
-        ]),
-        content: Text(
-          isSavedFood
-              ? 'Delete this saved food entry?'
-              : isReceived
-                  ? 'Delete "${data['dish']}"?'
-                  : 'Delete "${data['dish']}"? Ingredients will be restored to stock.',
-          style: const TextStyle(fontSize: 14),
-        ),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(context),
-              child: const Text('Cancel')),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-                backgroundColor: kAccent,
-                foregroundColor: SoftPalette.gray50,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12))),
-            onPressed: () {
-              Navigator.pop(context);
-              onDelete(docId, data);
-            },
-            child: const Text('Delete',
-                style: TextStyle(fontWeight: FontWeight.w700)),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _cookStat(String label, String value, IconData icon) =>
-      Column(mainAxisSize: MainAxisSize.min, children: [
-        Icon(icon, color: SoftPalette.gray50, size: 16),
-        const SizedBox(height: 5),
-        Text(value,
-            style: const TextStyle(
-                color: SoftPalette.gray50,
-                fontSize: 12,
-                fontWeight: FontWeight.w900)),
-        Text(label,
-            style: TextStyle(
-                color: SoftPalette.gray50.withValues(alpha: 0.7),
-                fontSize: 10,
-                fontWeight: FontWeight.w600)),
-      ]);
-
-  Widget _vDiv() =>
-      Container(width: 1, height: 36, color: SoftPalette.gray50.withValues(alpha: 0.2));
-}
-
-// ── Cooking card ─────────────────────────────────────────────────────────────
-
-class _CookingCard extends StatelessWidget {
-  final Map<String, dynamic> data;
-  final DateTime time;
-  final VoidCallback onEdit, onDelete;
-
-  const _CookingCard(
-      {required this.data,
-      required this.time,
-      required this.onEdit,
-      required this.onDelete});
-
-  String _fmt(num? v) {
-    final d = (v ?? 0).toDouble();
-    return d == d.roundToDouble()
-        ? d.toInt().toString()
-        : d.toStringAsFixed(1);
-  }
-
-  bool get _isReceived  => data['isReceivedFood'] as bool? ?? false;
-  bool get _isSavedFood => data['isSavedFood']    as bool? ?? false;
-
-  bool get _quantitiesMissing =>
-      (data['usedKg']   as num? ?? 0) == 0 &&
-      (data['savedKg']  as num? ?? 0) == 0 &&
-      (data['wastedKg'] as num? ?? 0) == 0;
-
-  Color get _typeColor {
-    if (_isSavedFood) return kTeal;
-    if (_isReceived)  return kPurple;
-    return kWarning;
-  }
-
-  IconData get _typeIcon {
-    if (_isSavedFood) return Icons.recycling_rounded;
-    if (_isReceived)  return Icons.delivery_dining_rounded;
-    return Icons.soup_kitchen_rounded;
-  }
-
-  String get _typeLabel {
-    if (_isSavedFood) return 'Saved Food';
-    if (_isReceived)  return 'Received';
-    return 'Cooked';
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final ingredients = List<Map<String, dynamic>>.from(
-        (data['ingredients'] as List<dynamic>? ?? [])
-            .map((e) => Map<String, dynamic>.from(e as Map)));
-    final source = data['source'] as String? ?? '';
-    // For saved food, strip the "Saved: " prefix for display
-    final displayDish = _isSavedFood
-        ? (data['dish'] as String? ?? '—').replaceFirst('Saved: ', '')
-        : (data['dish'] as String? ?? '—');
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      decoration: BoxDecoration(
-        color: context.adapt(SoftPalette.gray50),
-        borderRadius: BorderRadius.circular(20),
-        border: _quantitiesMissing
-            ? Border.all(color: _typeColor.withValues(alpha: 0.5), width: 1.5)
-            : null,
-        boxShadow: [
-          BoxShadow(
-              color: _typeColor.withValues(alpha: 0.08),
-              blurRadius: 16,
-              offset: const Offset(0, 4))
-        ],
-      ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-
-        // Header
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 16, 12, 12),
-          child: Row(children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                  color: _typeColor.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(12)),
-              child: Icon(_typeIcon, color: _typeColor, size: 22),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 14),
                 child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-              Row(children: [
-                Expanded(
-                  child: Text(displayDish,
-                      style: TextStyle(
-                          fontSize: 15,
-                          fontWeight: FontWeight.w800,
-                          color: context.adapt(kTextDark))),
-                ),
-                Container(
-                  margin: const EdgeInsets.only(left: 6),
-                  padding: const EdgeInsets.symmetric(
-                      horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: _typeColor.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(7),
-                  ),
-                  child: Text(
-                    _typeLabel,
-                    style: TextStyle(
-                        fontSize: 10,
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Text(
+                      'TOKEN',
+                      style: GoogleFonts.dmSans(
+                        fontSize: 9.5,
                         fontWeight: FontWeight.w800,
-                        color: _typeColor),
-                  ),
-                ),
-              ]),
-              const SizedBox(height: 2),
-              Row(children: [
-                Text(DateFormat('hh:mm a · dd MMM').format(time),
-                    style: TextStyle(
-                        fontSize: 11, color: context.adapt(kTextLight))),
-                if (_quantitiesMissing) ...[
-                  const SizedBox(width: 8),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 7, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: _typeColor.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(6),
+                        letterSpacing: 1.2,
+                        color: Colors.white.withValues(alpha: 0.85),
+                      ),
                     ),
-                    child: Text('Tap Edit to add quantities',
-                        style: TextStyle(
-                            fontSize: 10,
-                            fontWeight: FontWeight.w700,
-                            color: _typeColor)),
-                  ),
-                ],
-              ]),
-            ])),
-            IconButton(
-              icon: const Icon(Icons.edit_rounded,
-                  size: 18, color: kInfo),
-              onPressed: onEdit,
-            ),
-            IconButton(
-              icon: const Icon(Icons.delete_rounded,
-                  size: 18, color: kAccent),
-              onPressed: onDelete,
-            ),
-          ]),
-        ),
-
-        // Source row (received / saved food)
-        if (source.isNotEmpty && source != 'Carry-over')
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Row(children: [
-              Icon(Icons.store_rounded, size: 13, color: _typeColor),
-              const SizedBox(width: 5),
-              Text(source,
-                  style: TextStyle(
-                      fontSize: 12,
-                      color: _typeColor,
-                      fontWeight: FontWeight.w600)),
-            ]),
-          ),
-
-        // Saved food carry-over label
-        if (_isSavedFood)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Row(children: [
-              const Icon(Icons.recycling_rounded, size: 13, color: kTeal),
-              const SizedBox(width: 5),
-              const Text('Carry-over from previous day',
-                  style: TextStyle(
-                      fontSize: 12,
-                      color: kTeal,
-                      fontWeight: FontWeight.w600)),
-            ]),
-          ),
-
-        // Quantity stats
-        if (!_quantitiesMissing)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Row(children: [
-              _statChip('${_fmt(data['usedKg'] as num?)} kg',
-                  'Used', _typeColor),
-              const SizedBox(width: 8),
-              _statChip('${_fmt(data['savedKg'] as num?)} kg',
-                  'Saved', kInfo),
-              const SizedBox(width: 8),
-              _statChip('${_fmt(data['wastedKg'] as num?)} kg',
-                  'Wasted', kAccent),
-            ]),
-          ),
-
-        // Served info
-        if (!_quantitiesMissing)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: kSuccess.withValues(alpha: 0.07),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: kSuccess.withValues(alpha: 0.2)),
+                    const SizedBox(height: 2),
+                    FittedBox(
+                      fit: BoxFit.scaleDown,
+                      child: Text(
+                        '#$number',
+                        style: GoogleFonts.dmSerifDisplay(
+                          fontSize: 24,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          height: 1.0,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              child: const Row(children: [
-                Icon(Icons.confirmation_number_rounded,
-                    color: kSuccess, size: 14),
-                SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    'Served count comes from the Tokens tab automatically',
-                    style: TextStyle(
-                        fontSize: 11,
-                        color: kSuccess,
-                        fontWeight: FontWeight.w600),
+
+              // Token Details
+              Expanded(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      // Session pill + Urdu tag
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                            decoration: BoxDecoration(
+                              color: meta.color.withValues(alpha: isDark ? 0.2 : 0.1),
+                              borderRadius: BorderRadius.circular(6),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(meta.icon, size: 11, color: meta.color),
+                                const SizedBox(width: 4),
+                                Text(
+                                  meta.shortTitle,
+                                  style: GoogleFonts.dmSans(
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w700,
+                                    color: meta.color,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Expanded(
+                            child: Text(
+                              meta.urdu,
+                              style: TextStyle(
+                                fontFamily: 'Jameel Noori Nastaleeq',
+                                fontSize: 13,
+                                color: _DS.getInk3(isDark),
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 6),
+                      // Timestamp & Issued By
+                      Row(
+                        children: [
+                          Icon(Icons.schedule_rounded, size: 12, color: _DS.getInk3(isDark)),
+                          const SizedBox(width: 4),
+                          Text(
+                            DateFormat('hh:mm a').format(time),
+                            style: GoogleFonts.dmSans(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: _DS.getInk2(isDark),
+                            ),
+                          ),
+                          if (issuedBy != null && issuedBy!.isNotEmpty) ...[
+                            Text(' · ', style: TextStyle(color: _DS.getInk3(isDark))),
+                            Icon(Icons.person_outline_rounded, size: 12, color: _DS.getInk3(isDark)),
+                            const SizedBox(width: 3),
+                            Flexible(
+                              child: Text(
+                                issuedBy!,
+                                style: GoogleFonts.dmSans(
+                                  fontSize: 11,
+                                  color: _DS.getInk3(isDark),
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
                   ),
                 ),
-              ]),
-            ),
-          ),
-
-        // Saved carry-over reminder
-        if (!_quantitiesMissing &&
-            (data['savedKg'] as num? ?? 0) > 0 &&
-            !_isSavedFood)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 10, vertical: 6),
-              decoration: BoxDecoration(
-                color: kInfo.withValues(alpha: 0.07),
-                borderRadius: BorderRadius.circular(8),
-                border: Border.all(color: kInfo.withValues(alpha: 0.2)),
               ),
-              child: Row(children: [
-                const Icon(Icons.schedule_rounded,
-                    color: kInfo, size: 14),
-                const SizedBox(width: 6),
-                Expanded(
-                  child: Text(
-                    '${_fmt(data['savedKg'] as num?)} kg saved → carries over to tomorrow\'s inventory',
-                    style: const TextStyle(
-                        fontSize: 11,
-                        color: kInfo,
-                        fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ]),
-            ),
-          ),
 
-        // Ingredients (cooked only)
-        if (!_isReceived && !_isSavedFood && ingredients.isNotEmpty) ...[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
-            child: Text('INGREDIENTS USED',
-                style: TextStyle(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    color: context.adapt(kTextLight),
-                    letterSpacing: 1.0)),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
-            child: Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: ingredients
-                  .map((ing) => Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 5),
+              // Grand Tactile Serve Button
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                child: Center(
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: () {
+                        HapticFeedback.mediumImpact();
+                        onServe();
+                      },
+                      borderRadius: BorderRadius.circular(12),
+                      child: Ink(
                         decoration: BoxDecoration(
-                            color: context.adapt(kSurface),
-                            borderRadius: BorderRadius.circular(8)),
-                        child: Text(
-                            '${ing['name']}: ${_fmt(ing['qty'] as num?)} ${ing['unit']}',
-                            style: TextStyle(
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
-                                color: context.adapt(kTextMid))),
-                      ))
-                  .toList(),
-            ),
+                          gradient: const LinearGradient(
+                            colors: [SoftPalette.teal700, SoftPalette.teal550],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(12),
+                          boxShadow: [
+                            BoxShadow(
+                              color: SoftPalette.teal600.withValues(alpha: 0.35),
+                              blurRadius: 8,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(Icons.check_circle_rounded, color: Colors.white, size: 16),
+                            const SizedBox(width: 6),
+                            Text(
+                              'Serve',
+                              style: GoogleFonts.dmSans(
+                                fontSize: 13,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                                letterSpacing: 0.3,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
-        ],
-
-        // Notes
-        if ((data['notes'] as String? ?? '').isNotEmpty)
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
-            child: Container(
-              width: double.infinity,
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                  color: context.adapt(kSurface),
-                  borderRadius: BorderRadius.circular(10)),
-              child: Text(data['notes'] as String,
-                  style:
-                      TextStyle(fontSize: 12, color: context.adapt(SoftPalette.slate550))),
-            ),
-          ),
-
-        const SizedBox(height: 14),
-      ]),
+        ),
+      ),
     );
   }
-
-  Widget _statChip(String value, String label, Color color) =>
-      Expanded(
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-          decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(10)),
-          child: Column(children: [
-            Text(value,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    fontSize: 11,
-                    fontWeight: FontWeight.w800,
-                    color: color)),
-            const SizedBox(height: 2),
-            Text(label,
-                textAlign: TextAlign.center,
-                style: TextStyle(
-                    fontSize: 9,
-                    fontWeight: FontWeight.w600,
-                    color: color.withValues(alpha: 0.7))),
-          ]),
-        ),
-      );
 }
 
 

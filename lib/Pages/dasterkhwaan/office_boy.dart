@@ -613,34 +613,89 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
         }
       }
 
-      // ── STEP 3: Enqueue for Cloud Sync (Offline-first idempotent sync) ─────
+      // ── STEP 3: Hybrid Write (Direct Firestore write if online, Sync queue fallback if offline) ───
+      bool directWriteSucceeded = false;
       try {
-        if (_branchId != null && _branchId!.isNotEmpty) {
-          SyncService().start(_branchId!);
+        if (_branchId != null && _branchId!.isNotEmpty && LocalStorageService.isValidBranchId(_branchId)) {
+          final batch = FirebaseFirestore.instance.batch();
+          for (final t in tokensList) {
+            final tid = t['id'].toString();
+            final fsToken = {
+              'number': t['number'] ?? 1,
+              'session': t['session'] ?? _selectedSession,
+              'time': t['time'] != null
+                  ? Timestamp.fromDate(DateTime.tryParse(t['time'].toString()) ?? DateTime.now())
+                  : FieldValue.serverTimestamp(),
+              'issuedBy': t['issuedBy'] ?? _effectiveUserName,
+              'localId': tid,
+              'branchId': _branchId,
+              'dateKey': today,
+              'pricePerToken': _pricePerToken,
+              'syncStatus': 'synced',
+              'synced': true,
+            };
+            batch.set(_tokensCol.doc(tid), fsToken, SetOptions(merge: true));
+          }
+
+          final dayUpdate = <String, dynamic>{
+            'totalTokens': FieldValue.increment(quantity),
+            'session_${_selectedSession}_total': FieldValue.increment(quantity),
+            'appliedBatches': FieldValue.arrayUnion([batchId]),
+            'lastUpdated': FieldValue.serverTimestamp(),
+            'date': today,
+            'dateKey': today,
+            'branchId': _branchId,
+          };
+          batch.set(_dayDoc, dayUpdate, SetOptions(merge: true));
+          await batch.commit().timeout(const Duration(seconds: 6));
+          directWriteSucceeded = true;
+
+          // Update local Hive tokens to synced status immediately
+          try {
+            final tokenBox = await _getTokensBox();
+            for (final t in tokensList) {
+              final tid = t['id'].toString();
+              final loc = tokenBox.get(tid);
+              if (loc is Map) {
+                await tokenBox.put(tid, Map<String, dynamic>.from(loc)
+                  ..['syncStatus'] = 'synced'
+                  ..['synced'] = true);
+              }
+            }
+          } catch (_) {}
+          debugPrint('[OfficeBoy] ✅ Direct Firestore write succeeded for batch $batchId');
         }
-        await LocalStorageService.enqueueSync({
-          'type': 'save_dasterkhwan_tokens',
-          'entityId': batchId,
-          'batchId': batchId,
-          'branchId': _branchId,
-          'dateKey': today,
-          'data': {
+      } catch (e) {
+        debugPrint('[OfficeBoy] Direct Firestore write failed/offline ($e) -> Falling back to Sync queue');
+      }
+
+      // If direct write didn't succeed (offline, network error, or timeout), enqueue in syncBox
+      if (!directWriteSucceeded) {
+        try {
+          if (_branchId != null && _branchId!.isNotEmpty) {
+            SyncService().start(_branchId!);
+          }
+          await LocalStorageService.enqueueSync({
+            'type': 'save_dasterkhwan_tokens',
+            'entityId': batchId,
+            'batchId': batchId,
             'branchId': _branchId,
             'dateKey': today,
-            'session': _selectedSession,
-            'quantity': quantity,
-            'tokens': tokensList,
-            'issuedBy': _effectiveUserName,
-            'pricePerToken': _pricePerToken,
-            'batchId': batchId,
-          },
-        });
-
-        // No direct Firestore write here: the queued save_dasterkhwan_tokens item already
-        // increments totalTokens/session totals, so a second write counted every token twice.
-        SyncService().triggerUpload(urgent: true);
-      } catch (e) {
-        debugPrint('[OfficeBoy] Sync enqueue error: $e');
+            'data': {
+              'branchId': _branchId,
+              'dateKey': today,
+              'session': _selectedSession,
+              'quantity': quantity,
+              'tokens': tokensList,
+              'issuedBy': _effectiveUserName,
+              'pricePerToken': _pricePerToken,
+              'batchId': batchId,
+            },
+          });
+          SyncService().triggerUpload(urgent: true);
+        } catch (e) {
+          debugPrint('[OfficeBoy] Sync enqueue error: $e');
+        }
       }
 
       if (!mounted) return;
@@ -854,25 +909,54 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
         } catch (_) {}
       }
 
-      // ── STEP 3: Enqueue for Cloud Sync (Offline-first idempotent sync) ─────
+      // ── STEP 3: Hybrid Void Write (Direct Firestore delete if online, Sync queue fallback if offline) ───
+      bool directVoidSucceeded = false;
       try {
-        await LocalStorageService.enqueueSync({
-          'type': 'reverse_dasterkhwan_tokens',
-          'entityId': revBatchId,
-          'batchId': revBatchId,
-          'branchId': _branchId,
-          'dateKey': today,
-          'data': {
+        if (_branchId != null && _branchId!.isNotEmpty && LocalStorageService.isValidBranchId(_branchId)) {
+          final batch = FirebaseFirestore.instance.batch();
+          for (final tid in voidIds) {
+            batch.delete(_tokensCol.doc(tid));
+          }
+
+          final dayUpdate = <String, dynamic>{
+            'totalTokens': FieldValue.increment(-confirmQty),
+            'reversedBatchIds': FieldValue.arrayUnion([revBatchId]),
+            'lastUpdated': FieldValue.serverTimestamp(),
+          };
+          sessionCounts.forEach((s, count) {
+            if (count > 0) {
+              dayUpdate['session_${s}_total'] = FieldValue.increment(-count);
+            }
+          });
+          batch.set(_dayDoc, dayUpdate, SetOptions(merge: true));
+          await batch.commit().timeout(const Duration(seconds: 6));
+          directVoidSucceeded = true;
+          debugPrint('[OfficeBoy] ✅ Direct Firestore reversal write succeeded for $revBatchId');
+        }
+      } catch (e) {
+        debugPrint('[OfficeBoy] Direct Firestore reversal failed/offline ($e) -> Falling back to Sync queue');
+      }
+
+      if (!directVoidSucceeded) {
+        try {
+          await LocalStorageService.enqueueSync({
+            'type': 'reverse_dasterkhwan_tokens',
+            'entityId': revBatchId,
+            'batchId': revBatchId,
             'branchId': _branchId,
             'dateKey': today,
-            'quantity': confirmQty,
-            'tokenIds': voidIds,
-            'sessionCounts': sessionCounts,
-            'batchId': revBatchId,
-          },
-        });
-        SyncService().triggerUpload(urgent: true);
-      } catch (_) {}
+            'data': {
+              'branchId': _branchId,
+              'dateKey': today,
+              'quantity': confirmQty,
+              'tokenIds': voidIds,
+              'sessionCounts': sessionCounts,
+              'batchId': revBatchId,
+            },
+          });
+          SyncService().triggerUpload(urgent: true);
+        } catch (_) {}
+      }
 
       if (!mounted) return;
       _recalculateLocalStats();
@@ -3651,6 +3735,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
         userRole.contains('manager') ||
         userRole.contains('supervisor') ||
         userRole.contains('principal');
+    final cleanBranch = LocalStorageService.sanitizeBranchId(widget.branchId);
     final dateKey = widget.dateFmt.format(_selectedDate);
     final monthKey = '${_selectedDate.year}-${_selectedDate.month.toString().padLeft(2, '0')}';
     final myUsername = widget.username.toLowerCase().trim();
@@ -3670,8 +3755,8 @@ class _HistoryScreenState extends State<_HistoryScreen> {
         if (raw is Map) {
           final t = Map<String, dynamic>.from(raw);
           final tDate = t['dateKey']?.toString() ?? '';
-          final tBranch = t['branchId']?.toString() ?? '';
-          final matchesBranch = tBranch.isEmpty || tBranch == widget.branchId;
+          final tBranch = LocalStorageService.sanitizeBranchId(t['branchId']?.toString());
+          final matchesBranch = tBranch.isEmpty || tBranch == cleanBranch;
           final matchesDate = _isMonthView ? tDate.startsWith(monthKey) : tDate == dateKey;
 
           if (matchesBranch && matchesDate) {
@@ -3798,7 +3883,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
     try {
       if (!_isMonthView) {
         final tokensSnap = await FirebaseFirestore.instance
-            .collection('branches').doc(widget.branchId)
+            .collection('branches').doc(cleanBranch)
             .collection('dasterkhwaan').doc(dateKey)
             .collection('tokens')
             .get()
@@ -3862,9 +3947,9 @@ class _HistoryScreenState extends State<_HistoryScreen> {
         try {
           final donationsSnap = await FirebaseFirestore.instance
               .collection('branches')
-              .doc(widget.branchId)
+              .doc(cleanBranch)
               .collection('donations')
-              .where('branchId', isEqualTo: widget.branchId)
+              .where('branchId', isEqualTo: cleanBranch)
               .where('date', isEqualTo: dateKey)
               .get()
               .timeout(const Duration(seconds: 3));
@@ -3913,9 +3998,9 @@ class _HistoryScreenState extends State<_HistoryScreen> {
         try {
           final donationsSnap = await FirebaseFirestore.instance
               .collection('branches')
-              .doc(widget.branchId)
+              .doc(cleanBranch)
               .collection('donations')
-              .where('branchId', isEqualTo: widget.branchId)
+              .where('branchId', isEqualTo: cleanBranch)
               .get()
               .timeout(const Duration(seconds: 3));
 

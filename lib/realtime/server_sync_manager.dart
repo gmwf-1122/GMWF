@@ -1715,6 +1715,15 @@ class ServerSyncManager {
             .collection(queueType).doc(upperSerial)
             .set(cleanData, SetOptions(merge: true));
 
+        // Direct write to dispensary collection
+        try {
+          await _db
+              .collection('branches').doc(branchId)
+              .collection('dispensary').doc(dateKey)
+              .collection(dateKey).doc(upperSerial)
+              .set(cleanData, SetOptions(merge: true));
+        } catch (_) {}
+
         if (serial != upperSerial) {
           try {
             await _db
@@ -1775,14 +1784,29 @@ class ServerSyncManager {
             .collection(queueType).doc(upperSerial)
             .set(updateMap, SetOptions(merge: true));
 
-        // Delete any legacy standalone prescription doc if present
-        try {
-          final cnic = (op['cnic'] ?? _cleanCnic(cleanData['patientCnic']?.toString() ?? '')).toString();
-          if (cnic.isNotEmpty) {
+        // Direct write to prescriptions collections
+        final cnic = (op['cnic'] ?? _cleanCnic(cleanData['patientCnic']?.toString() ?? '')).toString();
+        if (cnic.isNotEmpty) {
+          try {
             await _db.collection('branches').doc(branchId)
                 .collection('prescriptions').doc(cnic)
-                .collection('prescriptions').doc(serial).delete();
-          }
+                .collection('prescriptions').doc(upperSerial)
+                .set(Map<String, dynamic>.from(cleanData)..addAll(updateMap), SetOptions(merge: true));
+          } catch (_) {}
+          try {
+            await _db.collection('branches').doc(branchId)
+                .collection('patients').doc(cnic)
+                .collection('prescriptions').doc(upperSerial)
+                .set(Map<String, dynamic>.from(cleanData)..addAll(updateMap), SetOptions(merge: true));
+          } catch (_) {}
+        }
+
+        // Direct write to dispensary daily records
+        try {
+          await _db.collection('branches').doc(branchId)
+              .collection('dispensary').doc(dateKey)
+              .collection(dateKey).doc(upperSerial)
+              .set(Map<String, dynamic>.from(cleanData)..addAll(updateMap), SetOptions(merge: true));
         } catch (_) {}
 
         _handlePrescriptionRestriction(cleanData, op);
@@ -1818,6 +1842,14 @@ class ServerSyncManager {
             .collection('serials').doc(campDocKey)
             .collection(queueType).doc(upperSerial)
             .set(cleanData, SetOptions(merge: true));
+
+        // Direct write to dispensary collection
+        try {
+          await _db.collection('branches').doc(branchId)
+              .collection('dispensary').doc(dateKey)
+              .collection(dateKey).doc(upperSerial)
+              .set(cleanData, SetOptions(merge: true));
+        } catch (_) {}
         break;
 
       case 'save_dispensary_record':
@@ -1858,11 +1890,12 @@ class ServerSyncManager {
             .collection(queueType).doc(upperSerial)
             .set(statusPatch, SetOptions(merge: true));
 
-        // Delete any legacy standalone dispensary doc if present
+        // Direct write to dispensary collection
         try {
           await _db.collection('branches').doc(branchId)
               .collection('dispensary').doc(dateKey)
-              .collection(dateKey).doc(serial).delete();
+              .collection(dateKey).doc(upperSerial)
+              .set(Map<String, dynamic>.from(cleanData)..addAll(statusPatch), SetOptions(merge: true));
         } catch (_) {}
         break;
 

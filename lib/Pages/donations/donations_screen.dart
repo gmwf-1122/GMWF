@@ -313,7 +313,7 @@ class _DonationsScreenState extends ConsumerState<DonationsScreen> with TickerPr
     if (_viewingBranchId == 'all' || _viewingBranchId.isEmpty) return 'all';
     return FirebaseFirestore.instance
         .collection('branches')
-        .doc(_viewingBranchId)
+        .doc(LocalStorageService.sanitizeBranchId(_viewingBranchId))
         .collection('donations');
   }
 

@@ -487,6 +487,13 @@ class SyncService {
       case 'add_inventory_stock':
         return 5;
       case 'save_donation':
+      case 'save_donation_box':
+      case 'save_dasterkhwan_tokens':
+      case 'save_food_token':
+      case 'save_dasterkhwan_entry':
+      case 'serve_dasterkhwan_token':
+      case 'reverse_dasterkhwan_tokens':
+      case 'save_dasterkhwan_food_log':
         return 6;
       case 'save_attendance_record':
       case 'save_attendance':
@@ -2714,6 +2721,9 @@ class SyncService {
                 fsData.remove('status');
               }
               await _db.collection('branches').doc(branchId).collection('serials').doc(campDocKey).collection(queueType).doc(upperSerial).set(fsData, SetOptions(merge: true));
+              try {
+                await _db.collection('branches').doc(branchId).collection('dispensary').doc(dateKey).collection(dateKey).doc(upperSerial).set(fsData, SetOptions(merge: true));
+              } catch (_) {}
               if (serial != upperSerial) {
                 try {
                   await _db.collection('branches').doc(branchId).collection('serials').doc(campDocKey).collection(queueType).doc(serial.toLowerCase()).delete();
@@ -2782,6 +2792,21 @@ class SyncService {
             }
 
             await _db.collection('branches').doc(branchId).collection('serials').doc(campDocKey).collection(queueType).doc(serial).set(updateMap, SetOptions(merge: true));
+
+            // Direct write to prescriptions and dispensary paths
+            final cnic = (data['patientCnic'] ?? data['cnic'] ?? '').toString();
+            if (cnic.isNotEmpty) {
+              try {
+                await _db.collection('branches').doc(branchId).collection('prescriptions').doc(cnic).collection('prescriptions').doc(serial).set(Map<String, dynamic>.from(data)..addAll(updateMap), SetOptions(merge: true));
+              } catch (_) {}
+              try {
+                await _db.collection('branches').doc(branchId).collection('patients').doc(cnic).collection('prescriptions').doc(serial).set(Map<String, dynamic>.from(data)..addAll(updateMap), SetOptions(merge: true));
+              } catch (_) {}
+            }
+            try {
+              await _db.collection('branches').doc(branchId).collection('dispensary').doc(dateKey).collection(dateKey).doc(serial).set(updateMap, SetOptions(merge: true));
+            } catch (_) {}
+
             if (rawSerial != serial) {
               try {
                 await _db.collection('branches').doc(branchId).collection('serials').doc(campDocKey).collection(queueType).doc(rawSerial.toLowerCase()).delete();
@@ -2835,11 +2860,38 @@ class SyncService {
               serial: serial,
             );
             await _db.collection('branches').doc(branchId).collection('serials').doc(campDocKey).collection(queueType).doc(serial).set(data, SetOptions(merge: true));
+            try {
+              await _db.collection('branches').doc(branchId).collection('dispensary').doc(dateKey).collection(dateKey).doc(serial).set(data, SetOptions(merge: true));
+            } catch (_) {}
           }
           else if (type == 'save_dispensary_record') {
-            // [DEDUP] Dispensary collection write deprecated. All dispense data is
-            // stored in the serial document via update_serial_status.
-            debugPrint('[SyncService] save_dispensary_record skipped (redundant write removed)');
+            final serial = action['serial'] as String?;
+            final data   = Map<String, dynamic>.from(action['data'] ?? {});
+            if (serial != null && serial.isNotEmpty) {
+              final upperSerial = serial.trim().toUpperCase();
+              final dateKey = (action['dateKey'] ?? data['dateKey'] ?? LocalStorageService.getTodayDateKey()).toString();
+              final campDocKey = CampSessionService.getCampDateDocId(
+                branchId: branchId,
+                dateKey: dateKey,
+                campId: data['campId']?.toString() ?? data['dispensaryId']?.toString(),
+                dispensaryTag: data['dispensaryTag']?.toString(),
+                serial: upperSerial,
+              );
+              final queueType = resolveQueueType(action['queueType']?.toString() ?? data['queueType']?.toString(), branchId: branchId);
+              final statusPatch = {
+                'dispenseStatus': data['dispenseStatus'] ?? 'dispensed',
+                'status': 'completed',
+                if (data['dispensedAt'] != null) 'dispensedAt': data['dispensedAt'],
+                if (data['dispensedBy'] != null) 'dispensedBy': data['dispensedBy'],
+                if (data['completedAt'] != null) 'completedAt': data['completedAt'],
+              };
+              try {
+                await _db.collection('branches').doc(branchId).collection('serials').doc(campDocKey).collection(queueType).doc(upperSerial).set(statusPatch, SetOptions(merge: true));
+              } catch (_) {}
+              try {
+                await _db.collection('branches').doc(branchId).collection('dispensary').doc(dateKey).collection(dateKey).doc(upperSerial).set(Map<String, dynamic>.from(data)..addAll(statusPatch), SetOptions(merge: true));
+              } catch (_) {}
+            }
           }
           else if (type == 'save_dispensary_charge') {
             final data    = Map<String, dynamic>.from(action['data'] ?? {});
@@ -3994,12 +4046,27 @@ class SyncService {
             final tokensList = List<dynamic>.from(data['tokens'] as List? ?? []);
             final qty = (data['quantity'] as num?)?.toInt() ?? tokensList.length;
             final session = data['session']?.toString() ?? 'lunch';
+            final batchId = (action['batchId'] ?? action['entityId'] ?? data['batchId'])?.toString();
 
             final dayDocRef = _db
                 .collection('branches')
                 .doc(bId)
                 .collection('dasterkhwaan')
                 .doc(dateKey);
+
+            // Check if this batch was already applied by direct write to avoid double counting!
+            bool alreadyApplied = false;
+            if (batchId != null && batchId.isNotEmpty) {
+              try {
+                final daySnap = await dayDocRef.get().timeout(const Duration(seconds: 4));
+                if (daySnap.exists) {
+                  final applied = (daySnap.data()?['appliedBatches'] as List?)?.map((e) => e.toString()).toSet() ?? {};
+                  if (applied.contains(batchId)) {
+                    alreadyApplied = true;
+                  }
+                }
+              } catch (_) {}
+            }
 
             final tokensColRef = dayDocRef.collection('tokens');
 
@@ -4027,8 +4094,9 @@ class SyncService {
             }
 
             final dayUpdate = <String, dynamic>{
-              'totalTokens': FieldValue.increment(qty),
-              'session_${session}_total': FieldValue.increment(qty),
+              if (!alreadyApplied) 'totalTokens': FieldValue.increment(qty),
+              if (!alreadyApplied) 'session_${session}_total': FieldValue.increment(qty),
+              if (batchId != null) 'appliedBatches': FieldValue.arrayUnion([batchId]),
               'lastUpdated': FieldValue.serverTimestamp(),
               'date': dateKey,
               'dateKey': dateKey,
@@ -4061,12 +4129,26 @@ class SyncService {
             final tokenIds = List<String>.from((data['tokenIds'] as List? ?? []).map((e) => e.toString()));
             final qty = (data['quantity'] as num?)?.toInt() ?? tokenIds.length;
             final sessionCounts = Map<String, dynamic>.from(data['sessionCounts'] ?? {});
+            final revBatchId = (action['batchId'] ?? action['entityId'] ?? data['batchId'])?.toString();
 
             final dayDocRef = _db
                 .collection('branches')
                 .doc(bId)
                 .collection('dasterkhwaan')
                 .doc(dateKey);
+
+            bool alreadyReversed = false;
+            if (revBatchId != null && revBatchId.isNotEmpty) {
+              try {
+                final daySnap = await dayDocRef.get().timeout(const Duration(seconds: 4));
+                if (daySnap.exists) {
+                  final reversed = (daySnap.data()?['reversedBatchIds'] as List?)?.map((e) => e.toString()).toSet() ?? {};
+                  if (reversed.contains(revBatchId)) {
+                    alreadyReversed = true;
+                  }
+                }
+              } catch (_) {}
+            }
 
             final tokensColRef = dayDocRef.collection('tokens');
             final batch = _db.batch();
@@ -4076,15 +4158,18 @@ class SyncService {
             }
 
             final dayUpdate = <String, dynamic>{
-              'totalTokens': FieldValue.increment(-qty),
+              if (!alreadyReversed) 'totalTokens': FieldValue.increment(-qty),
+              if (revBatchId != null) 'reversedBatchIds': FieldValue.arrayUnion([revBatchId]),
               'lastUpdated': FieldValue.serverTimestamp(),
             };
-            sessionCounts.forEach((s, count) {
-              final cnt = (count as num?)?.toInt() ?? 0;
-              if (cnt > 0) {
-                dayUpdate['session_${s}_total'] = FieldValue.increment(-cnt);
-              }
-            });
+            if (!alreadyReversed) {
+              sessionCounts.forEach((s, count) {
+                final cnt = (count as num?)?.toInt() ?? 0;
+                if (cnt > 0) {
+                  dayUpdate['session_${s}_total'] = FieldValue.increment(-cnt);
+                }
+              });
+            }
 
             batch.set(dayDocRef, dayUpdate, SetOptions(merge: true));
             await batch.commit();
@@ -4103,6 +4188,17 @@ class SyncService {
                   .collection('dasterkhwaan')
                   .doc(dateKey);
 
+              bool alreadyServed = false;
+              try {
+                final daySnap = await dayDocRef.get().timeout(const Duration(seconds: 4));
+                if (daySnap.exists) {
+                  final servedIds = (daySnap.data()?['servedTokenIds'] as List?)?.map((e) => e.toString()).toSet() ?? {};
+                  if (servedIds.contains(tokenId)) {
+                    alreadyServed = true;
+                  }
+                }
+              } catch (_) {}
+
               final tokensColRef = dayDocRef.collection('tokens');
 
               final batch = _db.batch();
@@ -4112,8 +4208,9 @@ class SyncService {
               }, SetOptions(merge: true));
 
               batch.set(dayDocRef, {
-                'servedTokens': FieldValue.increment(1),
-                'session_${session}_served': FieldValue.increment(1),
+                if (!alreadyServed) 'servedTokens': FieldValue.increment(1),
+                if (!alreadyServed) 'session_${session}_served': FieldValue.increment(1),
+                'servedTokenIds': FieldValue.arrayUnion([tokenId]),
                 'lastUpdated': FieldValue.serverTimestamp(),
               }, SetOptions(merge: true));
 
