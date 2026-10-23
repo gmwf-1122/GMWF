@@ -7187,6 +7187,47 @@ class ServerSyncManager {
           await setDoc(dispRef, cleanData);
         } catch (_) {}
 
+        // Direct write embedded prescription to patient timeline so historical data is easily found
+        final pCnic = (cleanData['patientCnic'] ?? cleanData['cnic'] ?? '').toString().trim();
+        if (pCnic.isNotEmpty && (cleanData['prescription'] != null || cleanData['medicines'] != null || cleanData['doctorName'] != null)) {
+          try {
+            final pRef1 = db
+                .collection('branches').doc(effectiveBranchId)
+                .collection('prescriptions').doc(pCnic)
+                .collection('prescriptions').doc(s);
+            await setDoc(pRef1, cleanData);
+          } catch (_) {}
+          try {
+            final pRef2 = db
+                .collection('branches').doc(effectiveBranchId)
+                .collection('patients').doc(pCnic)
+                .collection('prescriptions').doc(s);
+            await setDoc(pRef2, cleanData);
+          } catch (_) {}
+        }
+
+        // Direct write patient profile so historical patient details are queryable
+        final pid = (cleanData['patientId'] ?? cleanData['id'] ?? '').toString().trim();
+        if (pid.isNotEmpty && !pid.startsWith('unknown_')) {
+          try {
+            final patData = {
+              'id': pid,
+              'patientId': pid,
+              'name': cleanData['patientName'] ?? cleanData['name'],
+              'cnic': cleanData['patientCnic'] ?? cleanData['cnic'],
+              if (cleanData['phone'] != null) 'phone': cleanData['phone'],
+              if (cleanData['gender'] != null) 'gender': cleanData['gender'],
+              if (cleanData['age'] != null) 'age': cleanData['age'],
+              'branchId': effectiveBranchId,
+              'lastVisitedAt': cleanData['createdAt'] ?? DateTime.now().toIso8601String(),
+            };
+            final patRef = db
+                .collection('branches').doc(effectiveBranchId)
+                .collection('patients').doc(pid);
+            await setDoc(patRef, patData);
+          } catch (_) {}
+        }
+
         // Update local entry so pendingSync is cleared and marked synced on the server
         Future<void> applyEntrySync() async {
           try {

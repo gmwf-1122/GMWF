@@ -2724,6 +2724,37 @@ class SyncService {
               try {
                 await _db.collection('branches').doc(branchId).collection('dispensary').doc(dateKey).collection(dateKey).doc(upperSerial).set(fsData, SetOptions(merge: true));
               } catch (_) {}
+
+              // Direct write embedded prescription to patient timeline so historical data is easily found
+              final pCnic = (fsData['patientCnic'] ?? fsData['cnic'] ?? '').toString().trim();
+              if (pCnic.isNotEmpty && (fsData['prescription'] != null || fsData['medicines'] != null || fsData['doctorName'] != null)) {
+                try {
+                  await _db.collection('branches').doc(branchId).collection('prescriptions').doc(pCnic).collection('prescriptions').doc(upperSerial).set(fsData, SetOptions(merge: true));
+                } catch (_) {}
+                try {
+                  await _db.collection('branches').doc(branchId).collection('patients').doc(pCnic).collection('prescriptions').doc(upperSerial).set(fsData, SetOptions(merge: true));
+                } catch (_) {}
+              }
+
+              // Direct write patient profile
+              final pid = (fsData['patientId'] ?? fsData['id'] ?? '').toString().trim();
+              if (pid.isNotEmpty && !pid.startsWith('unknown_')) {
+                try {
+                  final patData = {
+                    'id': pid,
+                    'patientId': pid,
+                    'name': fsData['patientName'] ?? fsData['name'],
+                    'cnic': fsData['patientCnic'] ?? fsData['cnic'],
+                    if (fsData['phone'] != null) 'phone': fsData['phone'],
+                    if (fsData['gender'] != null) 'gender': fsData['gender'],
+                    if (fsData['age'] != null) 'age': fsData['age'],
+                    'branchId': branchId,
+                    'lastVisitedAt': fsData['createdAt'] ?? DateTime.now().toIso8601String(),
+                  };
+                  await _db.collection('branches').doc(branchId).collection('patients').doc(pid).set(patData, SetOptions(merge: true));
+                } catch (_) {}
+              }
+
               if (serial != upperSerial) {
                 try {
                   await _db.collection('branches').doc(branchId).collection('serials').doc(campDocKey).collection(queueType).doc(serial.toLowerCase()).delete();
