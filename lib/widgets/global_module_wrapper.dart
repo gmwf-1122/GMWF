@@ -457,20 +457,41 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
   }
 
   AppBar _buildAppBar(RoleThemeData t, bool isMobile) {
-    final bgColor = _isGlobal ? SoftPalette.slate900 : t.bgCard;
-    final dividerColor =
-        _isGlobal ? SoftPalette.slate750 : t.bgRule;
     final screenWidth = MediaQuery.of(context).size.width;
     final isCompact = isMobile || screenWidth < 800;
 
     return AppBar(
-      backgroundColor: bgColor,
+      backgroundColor: Colors.transparent,
       elevation: 0,
       surfaceTintColor: Colors.transparent,
-      leading: AppBackButton(
-        color: _isGlobal ? SoftPalette.gray50 : t.textPrimary,
-        bgColor: _isGlobal ? SoftPalette.slate800 : t.accent.withValues(alpha: 0.08),
-        onPressed: () => Navigator.pop(context),
+      flexibleSpace: Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.centerLeft,
+            end: Alignment.centerRight,
+            colors: [
+              Color(0xFF042F2E), // deep teal 950
+              Color(0xFF064E3B), // deep emerald 900
+              Color(0xFF022C22), // rich islamic emerald
+            ],
+          ),
+        ),
+      ),
+      leading: Center(
+        child: InkWell(
+          onTap: () => Navigator.pop(context),
+          borderRadius: BorderRadius.circular(20),
+          child: Container(
+            width: 32,
+            height: 32,
+            decoration: BoxDecoration(
+              color: Colors.white.withValues(alpha: 0.14),
+              shape: BoxShape.circle,
+              border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
+            ),
+            child: const Icon(Icons.arrow_back_ios_new_rounded, size: 13, color: Colors.white),
+          ),
+        ),
       ),
       leadingWidth: 50,
       titleSpacing: 4,
@@ -479,20 +500,21 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
           Container(
             padding: const EdgeInsets.all(4),
             decoration: BoxDecoration(
-              color: t.accent.withValues(alpha: 0.12),
+              color: Colors.white.withValues(alpha: 0.14),
               borderRadius: BorderRadius.circular(8),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.2)),
             ),
             child: ClipRRect(
               borderRadius: BorderRadius.circular(6),
               child: Image.asset(
                 'assets/logo/gmwf-1.webp',
-                width: 20,
-                height: 20,
+                width: 22,
+                height: 22,
                 fit: BoxFit.contain,
               ),
             ),
           ),
-          const SizedBox(width: 8),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -501,10 +523,10 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
                 Text(
                   widget.module.title,
                   style: TextStyle(
-                    color: _isGlobal ? SoftPalette.slate150 : t.textPrimary,
+                    color: Colors.white,
                     fontWeight: FontWeight.w800,
                     fontSize: isCompact ? 14 : 16,
-                    letterSpacing: -0.3,
+                    letterSpacing: -0.2,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -514,23 +536,14 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Container(
-                          width: 5,
-                          height: 5,
-                          decoration: BoxDecoration(
-                            color: t.accent,
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        const SizedBox(width: 4),
                         Flexible(
                           child: Text(
                             _selectedBranchName!,
                             overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: t.accent,
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.w700,
+                            style: const TextStyle(
+                              color: Color(0xFF86EFAC), // soft mint green
+                              fontSize: 11,
+                              fontWeight: FontWeight.w500,
                             ),
                           ),
                         ),
@@ -545,22 +558,20 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
       actions: [
         Padding(
           padding: const EdgeInsets.only(right: 6),
-          child: SyncStatusIndicator(isDark: _isGlobal),
+          child: SyncStatusIndicator(isDark: true),
         ),
         // Version pill (hide on very narrow screens < 420px to save space)
         if (screenWidth >= 420)
           Container(
-            margin: const EdgeInsets.only(right: 4),
-            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-            decoration: BoxDecoration(
-              color: t.accent.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(4),
+            margin: const EdgeInsets.only(right: 8),
+            child: Text(
+              'v${AutoUpdateService.currentVersion}',
+              style: const TextStyle(
+                color: Color(0xFF86EFAC),
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+              ),
             ),
-            child: Text('v${AutoUpdateService.currentVersion}',
-                style: TextStyle(
-                    color: t.accent,
-                    fontSize: 9,
-                    fontWeight: FontWeight.bold)),
           ),
         // Branch-scoped roles or finance module see only a read-only branch label, no selector.
         if (widget.module.isBranchDependent && (_isBranchScoped || widget.module.id == 'finance'))
@@ -576,17 +587,17 @@ class _GlobalModuleWrapperState extends State<GlobalModuleWrapper>
       ],
       bottom: PreferredSize(
         preferredSize: const Size.fromHeight(1),
-        child: Divider(height: 1, color: dividerColor),
+        child: Container(
+          height: 1,
+          color: Colors.white.withValues(alpha: 0.12),
+        ),
       ),
     );
   }
 }
 
 // ── Locked branch label (branch-scoped roles) ─────────────────────────────────
-/// A read-only pill displayed in the AppBar for branch managers / supervisors.
-/// It shows the branch name but is NOT interactive — there is no way to tap
-/// or switch to another branch.
-
+/// A read-only pill displayed in the AppBar matching the executive design pattern.
 class _LockedBranchLabel extends StatelessWidget {
   final String branchName;
   final RoleThemeData t;
@@ -598,26 +609,29 @@ class _LockedBranchLabel extends StatelessWidget {
     if (branchName.isEmpty) return const SizedBox.shrink();
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-      constraints: const BoxConstraints(maxWidth: 150),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      constraints: const BoxConstraints(maxWidth: 240),
       decoration: BoxDecoration(
-        color: t.accent.withValues(alpha: 0.08),
+        color: Colors.black.withValues(alpha: 0.25),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: t.accent.withValues(alpha: 0.25)),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.22)),
       ),
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Icon(Icons.lock_outline_rounded, color: t.accent, size: 12),
-        const SizedBox(width: 5),
+        const Icon(Icons.domain_rounded, color: Colors.white, size: 14),
+        const SizedBox(width: 6),
         Flexible(
           child: Text(
             branchName,
             overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-                color: t.accent,
-                fontSize: 11.5,
-                fontWeight: FontWeight.w700),
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 11.5,
+              fontWeight: FontWeight.w600,
+            ),
           ),
         ),
+        const SizedBox(width: 4),
+        const Icon(Icons.keyboard_arrow_down_rounded, color: Colors.white70, size: 16),
       ]),
     );
   }

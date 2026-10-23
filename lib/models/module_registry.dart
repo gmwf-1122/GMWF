@@ -555,7 +555,7 @@ class ModuleRegistry {
     // ── DASTERKHWAAN MODULES ──
     AppModule(
       id: 'office_boy',
-      title: 'Food Tokens',
+      title: 'Issue Food Tokens',
       description: 'Dasterkhwaan food token issuing and meal management',
       icon: Icons.confirmation_number_rounded,
       requiredPermission: AppPermission.generateFoodTokens,
@@ -870,7 +870,7 @@ class ModuleRegistry {
         'pending_requests': 'Requests',
         'finance': 'Finance',
         'inventory_ledger': 'Medicine Ledger',
-        'office_boy': 'Office',
+        'office_boy': 'Issue Food Tokens',
         'kitchen': 'Kitchen',
         'dasterkhwaan_inventory': 'Dasterkhwaan Stock',
         'donations': 'Donations',

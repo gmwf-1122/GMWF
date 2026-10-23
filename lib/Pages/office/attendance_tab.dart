@@ -366,17 +366,33 @@ class _AttendanceTabState extends State<AttendanceTab> {
                       ? (FinanceLocalStorage.mergeAttendanceRecordMaps(baseRec, _draftRecords[empId]) ?? _draftRecords[empId]!)
                       : Map<String, dynamic>.from(baseRec);
 
-                  // Ensure presence is recognized if ANY punch times exist
+                  // Ensure presence is recognized if real punch times exist and status isn't manually set non-present
+                  final curStatus = (record['status']?.toString() ?? '').toLowerCase();
+                  final bool explicitNonPresent = curStatus == 'absent' ||
+                      curStatus == 'leave' ||
+                      curStatus == 'holiday' ||
+                      curStatus == 'off';
+
                   final checkIn = record['checkInTime']?.toString() ?? record['arrivalTime']?.toString();
                   final checkOut = record['checkOutTime']?.toString() ?? record['departureTime']?.toString();
                   final lastPunch = record['lastPunchTime']?.toString();
                   final shifts = record['shifts'] is Map ? (record['shifts'] as Map) : null;
+                  final bool hasRealShiftPunch = shifts != null && shifts.values.any((s) {
+                    if (s is Map) {
+                      final inT = s['checkInTime']?.toString() ?? s['inTime']?.toString();
+                      final outT = s['checkOutTime']?.toString() ?? s['outTime']?.toString();
+                      return (inT != null && inT.isNotEmpty && inT != '--:--') ||
+                             (outT != null && outT.isNotEmpty && outT != '--:--');
+                    }
+                    return false;
+                  });
+
                   final hasPunch = (checkIn != null && checkIn.isNotEmpty && checkIn != '--:--') ||
                       (checkOut != null && checkOut.isNotEmpty && checkOut != '--:--') ||
                       (lastPunch != null && lastPunch.isNotEmpty) ||
-                      (shifts != null && shifts.isNotEmpty);
+                      hasRealShiftPunch;
 
-                  if (hasPunch) {
+                  if (hasPunch && !explicitNonPresent && curStatus != 'late') {
                     record['status'] = 'present';
                     record['leaveType'] = null;
                   }
@@ -2217,18 +2233,28 @@ class _AttendanceTabState extends State<AttendanceTab> {
       onSelected: (newStatus) async {
         setState(() {
           record['status'] = newStatus;
+          record['manualOverride'] = true;
           if (newStatus == 'present' && (record['checkInTime'] == null || record['checkInTime'].toString().isEmpty)) {
             record['checkInTime'] = '08:30 AM';
             record['arrivalTime'] = '08:30 AM';
+            record['leaveType'] = null;
+          }
+          if (newStatus == 'late' && (record['checkInTime'] == null || record['checkInTime'].toString().isEmpty)) {
+            record['checkInTime'] = '09:15 AM';
+            record['arrivalTime'] = '09:15 AM';
+            record['leaveType'] = null;
           }
           if (newStatus != 'present' && newStatus != 'late') {
             record['checkInTime'] = null;
             record['checkOutTime'] = null;
             record['arrivalTime'] = null;
             record['departureTime'] = null;
+            record['lastPunchTime'] = null;
           }
           if (newStatus == 'leave') {
-            record['leaveType'] = record['leaveType'] ?? 'sick';
+            record['leaveType'] = record['leaveType'] ?? 'Sick';
+          } else {
+            record['leaveType'] = null;
           }
           if (newStatus == 'half_day') {
             record['halfDayType'] = record['halfDayType'] ?? 'unpaid';
@@ -2242,6 +2268,8 @@ class _AttendanceTabState extends State<AttendanceTab> {
         _buildPopupMenuItem('leave', 'On Approved Leave', Icons.event_busy_rounded, SoftPalette.blue550, SoftPalette.blue500.withValues(alpha: 0.12)),
         _buildPopupMenuItem('half_day', 'Half Day', Icons.timelapse_rounded, SoftPalette.teal500, SoftPalette.teal350.withValues(alpha: 0.12)),
         _buildPopupMenuItem('absent', 'Mark Absent', Icons.cancel_outlined, SoftPalette.red500, SoftPalette.red400.withValues(alpha: 0.12)),
+        _buildPopupMenuItem('holiday', 'Holiday (Day Off)', Icons.festival_outlined, SoftPalette.violet400, SoftPalette.violet400.withValues(alpha: 0.12)),
+        _buildPopupMenuItem('off', 'Weekly Off Day', Icons.beach_access_outlined, SoftPalette.slate400, SoftPalette.slate300.withValues(alpha: 0.12)),
       ],
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),

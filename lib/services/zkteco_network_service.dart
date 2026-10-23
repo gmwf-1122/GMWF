@@ -2912,6 +2912,83 @@ class ZkTecoNetworkService {
     return null;
   }
 
+  /// Generates suggested unused biometric PINs based on department/role pattern.
+  /// - Madrassa: 3001+
+  /// - School: 5001+
+  /// - Dispensary / Health: 2001+
+  /// - Kitchen / Food: 1001+
+  /// - Office / General: 101+
+  static List<String> getSuggestedPinsForDepartment(String? department, {int count = 3, String? excludeEntityId}) {
+    final d = (department ?? '').toLowerCase();
+    int startPin = 101;
+    if (d.contains('madrassa') || d.contains('islamic') || d.contains('quran') || d.contains('hifz')) {
+      startPin = 3001;
+    } else if (d.contains('school') || d.contains('education') || d.contains('teacher')) {
+      startPin = 5001;
+    } else if (d.contains('dispensary') || d.contains('health') || d.contains('medical') || d.contains('clinic')) {
+      startPin = 2001;
+    } else if (d.contains('kitchen') || d.contains('dasterkhwaan') || d.contains('food')) {
+      startPin = 1001;
+    }
+
+    final Set<String> takenPins = {};
+    if (Hive.isBoxOpen(LocalStorageService.biometricCredentialsBox)) {
+      final box = Hive.box(LocalStorageService.biometricCredentialsBox);
+      for (final v in box.values) {
+        if (v is Map) {
+          final credEntityId = (v['entityId'] ?? '').toString().trim();
+          if (excludeEntityId != null && credEntityId == excludeEntityId.trim()) continue;
+          final p = (v['biometricPin'] ?? v['pin'])?.toString().trim();
+          if (p != null && p.isNotEmpty) takenPins.add(p);
+        }
+      }
+    }
+    if (Hive.isBoxOpen(LocalStorageService.employeesBox)) {
+      final box = Hive.box(LocalStorageService.employeesBox);
+      for (final v in box.values) {
+        if (v is Map) {
+          final eId = (v['localId'] ?? v['id'])?.toString().trim();
+          if (excludeEntityId != null && eId == excludeEntityId.trim()) continue;
+          final p = (v['biometricPin'] ?? v['pin'])?.toString().trim();
+          if (p != null && p.isNotEmpty) takenPins.add(p);
+        }
+      }
+    }
+    if (Hive.isBoxOpen(LocalStorageService.madrassaStudentsBox)) {
+      final box = Hive.box(LocalStorageService.madrassaStudentsBox);
+      for (final v in box.values) {
+        if (v is Map) {
+          final sId = v['id']?.toString().trim();
+          if (excludeEntityId != null && sId == excludeEntityId.trim()) continue;
+          final p = (v['biometricPin'] ?? v['pin'])?.toString().trim();
+          if (p != null && p.isNotEmpty) takenPins.add(p);
+        }
+      }
+    }
+    if (Hive.isBoxOpen(LocalStorageService.schoolStudentsBox)) {
+      final box = Hive.box(LocalStorageService.schoolStudentsBox);
+      for (final v in box.values) {
+        if (v is Map) {
+          final sId = v['id']?.toString().trim();
+          if (excludeEntityId != null && sId == excludeEntityId.trim()) continue;
+          final p = (v['biometricPin'] ?? v['pin'])?.toString().trim();
+          if (p != null && p.isNotEmpty) takenPins.add(p);
+        }
+      }
+    }
+
+    final suggestions = <String>[];
+    int candidate = startPin;
+    while (suggestions.length < count && candidate < 99999) {
+      final pinStr = candidate.toString();
+      if (!takenPins.contains(pinStr)) {
+        suggestions.add(pinStr);
+      }
+      candidate++;
+    }
+    return suggestions;
+  }
+
   /// Assigns or updates a numeric PIN for a specific user (Employee/Student).
   static Future<String> assignPinToEntity({
     required String entityId,

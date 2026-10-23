@@ -271,6 +271,7 @@ void openEmployeeFormSheet(
   int currentStep = 0;
   bool isSaving = false;
   bool showIdDocs = existingIdFrontUrl != null || existingIdBackUrl != null;
+  bool allowPinOverwrite = false;
 
   showDialog(
     context: context,
@@ -962,30 +963,194 @@ void openEmployeeFormSheet(
 
                   const SizedBox(height: 8),
 
-                  // Biometric Scanner PIN
-                  buildResponsiveFieldRow(
-                    isNarrow: isNarrow,
-                    children: [
-                      Expanded(
-                        child: buildFormField(
-                          controller: biometricPinController,
-                          label: 'Biometric Scanner PIN (Optional)',
-                          icon: Icons.fingerprint_rounded,
-                          theme: t,
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                        ),
-                      ),
-                      Expanded(
-                        child: Padding(
-                          padding: EdgeInsets.only(top: 4, left: 6),
-                          child: Text(
-                            'Numeric PIN for physical ZKTeco fingerprint/face attendance hardware (e.g. 159).',
-                            style: TextStyle(color: context.adapt(SoftPalette.slate550), fontSize: 11),
+                  // Biometric Scanner PIN, Department Pattern Suggestions & Collision Detection
+                  Builder(
+                    builder: (bCtx) {
+                      final enteredPin = biometricPinController.text.trim();
+                      final takenCred = enteredPin.isNotEmpty
+                          ? ZkTecoNetworkService.getCredentialByPin(enteredPin)
+                          : null;
+                      final isCollision = takenCred != null && takenCred.entityId != employeeId;
+                      final suggestedPins = ZkTecoNetworkService.getSuggestedPinsForDepartment(
+                        department,
+                        count: 4,
+                        excludeEntityId: employeeId,
+                      );
+
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          buildResponsiveFieldRow(
+                            isNarrow: isNarrow,
+                            children: [
+                              Expanded(
+                                child: buildFormField(
+                                  controller: biometricPinController,
+                                  label: 'Biometric Scanner PIN (Optional)',
+                                  icon: Icons.fingerprint_rounded,
+                                  theme: t,
+                                  keyboardType: TextInputType.number,
+                                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                                  onChanged: (_) => setState(() {
+                                    allowPinOverwrite = false;
+                                  }),
+                                ),
+                              ),
+                              Expanded(
+                                child: Padding(
+                                  padding: const EdgeInsets.only(top: 4, left: 6),
+                                  child: Text(
+                                    'Hardware PIN for physical ZKTeco machine. Follows $department numbering convention.',
+                                    style: TextStyle(color: context.adapt(SoftPalette.slate550), fontSize: 11),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
-                        ),
-                      ),
-                    ],
+
+                          // Suggested PIN Chips
+                          if (suggestedPins.isNotEmpty) ...[
+                            const SizedBox(height: 4),
+                            Row(
+                              crossAxisAlignment: CrossAxisAlignment.center,
+                              children: [
+                                Icon(Icons.auto_awesome_rounded, size: 12, color: const Color(0xFF045D48)),
+                                const SizedBox(width: 4),
+                                Text(
+                                  'Suggested for $department: ',
+                                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: context.adapt(SoftPalette.slate600)),
+                                ),
+                                const SizedBox(width: 4),
+                                Expanded(
+                                  child: Wrap(
+                                    spacing: 6,
+                                    runSpacing: 4,
+                                    children: suggestedPins.map((pin) {
+                                      final isCur = enteredPin == pin;
+                                      return InkWell(
+                                        borderRadius: BorderRadius.circular(14),
+                                        onTap: () {
+                                          biometricPinController.text = pin;
+                                          allowPinOverwrite = false;
+                                          setState(() {});
+                                        },
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                                          decoration: BoxDecoration(
+                                            color: isCur ? const Color(0xFF042F2E) : const Color(0xFFDCFCE7),
+                                            borderRadius: BorderRadius.circular(14),
+                                            border: Border.all(color: isCur ? const Color(0xFF042F2E) : const Color(0xFFBBF7D0)),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(Icons.pin, size: 11, color: isCur ? Colors.white : const Color(0xFF15803D)),
+                                              const SizedBox(width: 3),
+                                              Text(
+                                                pin,
+                                                style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: isCur ? Colors.white : const Color(0xFF15803D)),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    }).toList(),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+
+                          // Collision Warning Banner
+                          if (isCollision) ...[
+                            const SizedBox(height: 8),
+                            Container(
+                              padding: const EdgeInsets.all(10),
+                              decoration: BoxDecoration(
+                                color: allowPinOverwrite ? const Color(0xFFF0FDF4) : const Color(0xFFFEF3C7),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: allowPinOverwrite ? const Color(0xFF86EFAC) : const Color(0xFFFCD34D)),
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Icon(
+                                        allowPinOverwrite ? Icons.check_circle_rounded : Icons.warning_amber_rounded,
+                                        color: allowPinOverwrite ? const Color(0xFF15803D) : const Color(0xFFB45309),
+                                        size: 18,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(
+                                              allowPinOverwrite
+                                                  ? 'PIN Overwrite Confirmed'
+                                                  : 'PIN $enteredPin is already taken!',
+                                              style: TextStyle(
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.bold,
+                                                color: allowPinOverwrite ? const Color(0xFF15803D) : const Color(0xFF92400E),
+                                              ),
+                                            ),
+                                            const SizedBox(height: 2),
+                                            Text(
+                                              allowPinOverwrite
+                                                  ? 'This PIN will be reassigned from ${takenCred.entityName} upon saving.'
+                                                  : 'Currently assigned to ${takenCred.entityName} (${takenCred.entityType.replaceAll('_', ' ')}). Should we overwrite this or use a new one?',
+                                              style: TextStyle(
+                                                fontSize: 11,
+                                                color: allowPinOverwrite ? const Color(0xFF166534) : const Color(0xFF78350F),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  if (!allowPinOverwrite) ...[
+                                    const SizedBox(height: 8),
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.end,
+                                      children: [
+                                        if (suggestedPins.isNotEmpty)
+                                          TextButton(
+                                            style: TextButton.styleFrom(
+                                              foregroundColor: const Color(0xFF045D48),
+                                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                            ),
+                                            onPressed: () {
+                                              biometricPinController.text = suggestedPins.first;
+                                              allowPinOverwrite = false;
+                                              setState(() {});
+                                            },
+                                            child: Text('Use Suggested (${suggestedPins.first})', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                          ),
+                                        const SizedBox(width: 6),
+                                        ElevatedButton(
+                                          style: ElevatedButton.styleFrom(
+                                            backgroundColor: const Color(0xFFB45309),
+                                            foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                            elevation: 0,
+                                          ),
+                                          onPressed: () => setState(() => allowPinOverwrite = true),
+                                          child: const Text('Overwrite PIN', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          ],
+                        ],
+                      );
+                    },
                   ),
                 ],
               );
@@ -1984,7 +2149,97 @@ void openEmployeeFormSheet(
                   idBackPath = selectedIdBackFile!.path;
                 }
 
-                final enteredPin = biometricPinController.text.trim();
+                String enteredPin = biometricPinController.text.trim();
+
+                // ── Biometric PIN Collision & Overwrite Confirmation ──
+                if (enteredPin.isNotEmpty && !allowPinOverwrite) {
+                  final takenCred = ZkTecoNetworkService.getCredentialByPin(enteredPin);
+                  if (takenCred != null && takenCred.entityId != employeeId) {
+                    final suggested = ZkTecoNetworkService.getSuggestedPinsForDepartment(
+                      department,
+                      count: 3,
+                      excludeEntityId: employeeId,
+                    );
+                    final chosen = await showDialog<String>(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (dialogCtx) => AlertDialog(
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        title: const Row(
+                          children: [
+                            Icon(Icons.warning_amber_rounded, color: Color(0xFFB45309), size: 26),
+                            SizedBox(width: 8),
+                            Text('PIN Already Taken', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                        content: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'PIN $enteredPin is currently assigned to ${takenCred.entityName} (${takenCred.entityType.replaceAll('_', ' ')}).\n\nShould we overwrite this PIN or assign a new recommended PIN?',
+                              style: const TextStyle(fontSize: 13),
+                            ),
+                            if (suggested.isNotEmpty) ...[
+                              const SizedBox(height: 12),
+                              Text(
+                                'Recommended for $department:',
+                                style: const TextStyle(fontSize: 11.5, fontWeight: FontWeight.w600, color: Color(0xFF042F2E)),
+                              ),
+                              const SizedBox(height: 6),
+                              Wrap(
+                                spacing: 8,
+                                children: suggested.map((s) => ActionChip(
+                                  avatar: const Icon(Icons.pin, size: 14, color: Color(0xFF15803D)),
+                                  label: Text(s, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: Color(0xFF15803D))),
+                                  backgroundColor: const Color(0xFFDCFCE7),
+                                  onPressed: () => Navigator.pop(dialogCtx, 'use_$s'),
+                                )).toList(),
+                              ),
+                            ],
+                          ],
+                        ),
+                        actions: [
+                          TextButton(
+                            onPressed: () => Navigator.pop(dialogCtx, 'cancel'),
+                            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+                          ),
+                          OutlinedButton(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: const Color(0xFFB45309),
+                              side: const BorderSide(color: Color(0xFFB45309)),
+                            ),
+                            onPressed: () => Navigator.pop(dialogCtx, 'overwrite'),
+                            child: const Text('Overwrite PIN'),
+                          ),
+                          if (suggested.isNotEmpty)
+                            ElevatedButton(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF045D48),
+                                foregroundColor: Colors.white,
+                              ),
+                              onPressed: () => Navigator.pop(dialogCtx, 'use_${suggested.first}'),
+                              child: Text('Use Suggested (${suggested.first})'),
+                            ),
+                        ],
+                      ),
+                    );
+
+                    if (chosen == null || chosen == 'cancel') {
+                      setState(() => isSaving = false);
+                      return;
+                    } else if (chosen == 'overwrite') {
+                      allowPinOverwrite = true;
+                    } else if (chosen.startsWith('use_')) {
+                      final newPin = chosen.replaceFirst('use_', '');
+                      biometricPinController.text = newPin;
+                      enteredPin = newPin;
+                      allowPinOverwrite = false;
+                      setState(() {});
+                    }
+                  }
+                }
+
                 final enteredCnic = cnicController.text.trim();
 
                 final scheduleOverride = (winterShiftController.text.trim().isNotEmpty || summerShiftController.text.trim().isNotEmpty)

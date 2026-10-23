@@ -9,8 +9,8 @@ import '../../services/finance_local_storage.dart';
 import '../../services/local_storage_service.dart';
 import '../../services/camp_session_service.dart';
 import '../../services/zkteco_network_service.dart';
-import '../settings/biometric_device_manager_page.dart';
 import 'bulk_attendance_dialog.dart';
+import 'holiday_manager_dialog.dart';
 import 'employee_detail_page.dart';
 import 'offboard_dialog.dart';
 import 'finance_report_helper.dart';
@@ -447,11 +447,17 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                   mergedDbRec = FinanceLocalStorage.mergeAttendanceRecordMaps(mergedDbRec, m);
                 }
 
-                final isHoliday = FinanceLocalStorage.isHoliday(
+                final empRole = (emp['role'] ?? emp['designation'] ?? '').toString();
+                final holInfo = FinanceLocalStorage.getHolidayForDate(
                   branchId: widget.branchId,
-                  department: empDept,
                   dateStr: dateStr,
+                  employeeId: empId,
+                  department: empDept,
+                  role: empRole,
                 );
+                final bool isHoliday = holInfo != null && holInfo['isHoliday'] == true;
+                final bool isOnDuty = holInfo != null && holInfo['isOnDuty'] == true;
+                final String? holName = holInfo != null ? holInfo['name']?.toString() : null;
 
                 final Map<String, dynamic> defaultRec = {
                   'employeeId': empId,
@@ -462,26 +468,21 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                   'arrivalTime': null,
                   'checkOutTime': null,
                   'departureTime': null,
-                  'note': isHoliday ? 'Public Holiday' : null,
+                  'note': isHoliday ? (holName ?? 'Public Holiday') : (isOnDuty ? 'Holiday Duty' : null),
                   'overtimeDuration': null,
                 };
 
                 final baseRec = mergedDbRec ?? defaultRec;
                 final record = _draftRecords.containsKey(empId)
-                    ? (FinanceLocalStorage.mergeAttendanceRecordMaps(baseRec, _draftRecords[empId]) ?? _draftRecords[empId]!)
+                    ? Map<String, dynamic>.from(_draftRecords[empId]!)
                     : Map<String, dynamic>.from(baseRec);
 
-                // Detect presence if punch times exist
-                final inTime = record['checkInTime']?.toString() ?? record['arrivalTime']?.toString();
-                final outTime = record['checkOutTime']?.toString() ?? record['departureTime']?.toString();
-                final lastPunch = record['lastPunchTime']?.toString();
-                final shifts = record['shifts'] is Map ? (record['shifts'] as Map) : null;
-                final hasPunch = (inTime != null && inTime.isNotEmpty && inTime != '--:--') ||
-                    (outTime != null && outTime.isNotEmpty && outTime != '--:--') ||
-                    (lastPunch != null && lastPunch.isNotEmpty) ||
-                    (shifts != null && shifts.isNotEmpty);
+                // Detect presence if real punch times exist and status isn't explicitly marked non-present
+                final hasRealPunch = FinanceLocalStorage.hasAnyPunch(record);
+                final curStatus = (record['status'] ?? '').toString().toLowerCase().trim();
+                final bool isExplicitNonPresent = curStatus == 'absent' || curStatus == 'leave' || curStatus == 'holiday' || curStatus == 'off';
 
-                if (hasPunch && record['status'] != 'late') {
+                if (!isExplicitNonPresent && hasRealPunch && curStatus != 'late') {
                   record['status'] = 'present';
                 }
 
@@ -626,6 +627,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                         holiday: holidayCount,
                         isSunday: isSunday,
                       ),
+                    _buildHolidayBanner(widget.date),
                     _buildCrossBranchBanner(dateStr),
                     _buildUnmappedPunchesBanner(),
                     Expanded(
@@ -644,103 +646,96 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
   // ── Header Toolbar ────────────────────────────────────────────────────────
   Widget _buildHeaderToolbar(int totalStaffCount, int offboardedCount) {
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
       decoration: BoxDecoration(
         color: context.adapt(ExecTokens.cardSurface),
         border: Border(bottom: BorderSide(color: context.adapt(ExecTokens.borderMuted))),
       ),
       child: LayoutBuilder(builder: (ctx, constraints) {
-        final isWide = constraints.maxWidth >= 900;
+        final isWide = constraints.maxWidth >= 950;
 
-        final searchAndCalendarToggle = Row(
+        final searchAndCategoryToggle = Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            // Category Segmented Pill (Active vs Offboarded)
-            Container(
-              decoration: BoxDecoration(
-                color: context.adapt(ExecTokens.canvasBg),
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: context.adapt(ExecTokens.borderMuted)),
-              ),
-              padding: const EdgeInsets.all(2),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  InkWell(
-                    borderRadius: BorderRadius.circular(4),
-                    onTap: () => setState(() => _isViewingOffboarded = false),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: !_isViewingOffboarded ? context.adapt(ExecTokens.cardSurface) : Colors.transparent,
-                        borderRadius: BorderRadius.circular(4),
-                        boxShadow: !_isViewingOffboarded ? [BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.05), blurRadius: 2)] : null,
-                      ),
-                      child: Text(
-                        'Active Staff ($totalStaffCount)',
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight: !_isViewingOffboarded ? FontWeight.bold : FontWeight.normal,
-                          color: !_isViewingOffboarded ? ExecTokens.primaryCTA : context.adapt(ExecTokens.textSecondary),
-                        ),
+            // Active Staff Pill
+            InkWell(
+              borderRadius: BorderRadius.circular(20),
+              onTap: () => setState(() => _isViewingOffboarded = false),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                decoration: BoxDecoration(
+                  color: !_isViewingOffboarded ? const Color(0xFF042F2E) : Colors.transparent,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: !_isViewingOffboarded ? const Color(0xFF042F2E) : context.adapt(ExecTokens.borderMuted),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.people_alt_outlined,
+                      size: 14,
+                      color: !_isViewingOffboarded ? Colors.white : context.adapt(ExecTokens.textSecondary),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Active Staff ($totalStaffCount)',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: !_isViewingOffboarded ? FontWeight.bold : FontWeight.w500,
+                        color: !_isViewingOffboarded ? Colors.white : context.adapt(ExecTokens.textSecondary),
                       ),
                     ),
-                  ),
-                  InkWell(
-                    borderRadius: BorderRadius.circular(4),
-                    onTap: () => setState(() => _isViewingOffboarded = true),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: _isViewingOffboarded ? context.adapt(ExecTokens.cardSurface) : Colors.transparent,
-                        borderRadius: BorderRadius.circular(4),
-                        boxShadow: _isViewingOffboarded ? [BoxShadow(color: SoftPalette.gray900.withValues(alpha: 0.05), blurRadius: 2)] : null,
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            'Offboarded',
-                            style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: _isViewingOffboarded ? FontWeight.bold : FontWeight.normal,
-                              color: _isViewingOffboarded ? ExecTokens.absentDot : context.adapt(ExecTokens.textSecondary),
-                            ),
-                          ),
-                          if (offboardedCount > 0) ...[
-                            const SizedBox(width: 4),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                              decoration: BoxDecoration(
-                                color: _isViewingOffboarded ? context.adapt(ExecTokens.absentBg) : context.adapt(ExecTokens.borderMuted),
-                                borderRadius: BorderRadius.circular(10),
-                              ),
-                              child: Text(
-                                '$offboardedCount',
-                                style: TextStyle(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                  color: _isViewingOffboarded ? ExecTokens.absentDot : context.adapt(ExecTokens.textMuted),
-                                ),
-                              ),
-                            ),
-                          ],
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
             const SizedBox(width: 8),
 
-            // Search Input
+            // Offboarded Pill
+            InkWell(
+              borderRadius: BorderRadius.circular(20),
+              onTap: () => setState(() => _isViewingOffboarded = true),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                decoration: BoxDecoration(
+                  color: _isViewingOffboarded ? const Color(0xFF042F2E) : Colors.transparent,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: _isViewingOffboarded ? const Color(0xFF042F2E) : context.adapt(ExecTokens.borderMuted),
+                  ),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.person_off_outlined,
+                      size: 14,
+                      color: _isViewingOffboarded ? Colors.white : context.adapt(ExecTokens.textSecondary),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Offboarded ($offboardedCount)',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: _isViewingOffboarded ? FontWeight.bold : FontWeight.w500,
+                        color: _isViewingOffboarded ? Colors.white : context.adapt(ExecTokens.textSecondary),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+
+            // Search Input Pill
             Container(
               width: 230,
               height: 36,
               decoration: BoxDecoration(
                 color: context.adapt(ExecTokens.canvasBg),
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(20),
                 border: Border.all(color: context.adapt(ExecTokens.borderMuted)),
               ),
               child: TextField(
@@ -763,37 +758,11 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                       : null,
                   border: InputBorder.none,
                   isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
                 ),
                 onChanged: (v) => setState(() => _searchQuery = v.trim()),
               ),
             ),
-            const SizedBox(width: 8),
-
-            // Calendar Expand/Collapse Filter Button (only for active attendance)
-            if (!_isViewingOffboarded)
-              OutlinedButton.icon(
-                onPressed: () => setState(() => _isCalendarExpanded = !_isCalendarExpanded),
-                icon: Icon(
-                  _isCalendarExpanded ? Icons.calendar_month_rounded : Icons.calendar_today_outlined,
-                  size: 15,
-                  color: _isCalendarExpanded ? ExecTokens.primaryCTA : context.adapt(ExecTokens.textSecondary),
-                ),
-                label: Text(
-                  _isCalendarExpanded ? 'Hide Calendar' : 'Calendar Filter',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w600,
-                    color: _isCalendarExpanded ? ExecTokens.primaryCTA : context.adapt(ExecTokens.textSecondary),
-                  ),
-                ),
-                style: OutlinedButton.styleFrom(
-                  backgroundColor: _isCalendarExpanded ? context.adapt(ExecTokens.rowSelected) : context.adapt(ExecTokens.secBtnSurface),
-                  side: BorderSide(color: _isCalendarExpanded ? ExecTokens.primaryRing : context.adapt(ExecTokens.secBtnBorder)),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                ),
-              ),
           ],
         );
 
@@ -802,22 +771,46 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
           runSpacing: 6,
           crossAxisAlignment: WrapCrossAlignment.center,
           children: [
-            // Leave Range
-            OutlinedButton.icon(
-              onPressed: () => _openLeaveRangeDialog(),
-              icon: Icon(Icons.date_range_outlined, size: 14, color: context.adapt(ExecTokens.textSecondary)),
-              label: Text('Leave Range', style: TextStyle(fontSize: 12, color: context.adapt(ExecTokens.textSecondary))),
-              style: OutlinedButton.styleFrom(
-                backgroundColor: context.adapt(ExecTokens.secBtnSurface),
-                side: BorderSide(color: context.adapt(ExecTokens.secBtnBorder)),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+            // Calendar Filter Pill Button
+            if (!_isViewingOffboarded)
+              InkWell(
+                borderRadius: BorderRadius.circular(20),
+                onTap: () => setState(() => _isCalendarExpanded = !_isCalendarExpanded),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: _isCalendarExpanded ? context.adapt(ExecTokens.rowSelected) : context.adapt(ExecTokens.secBtnSurface),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: _isCalendarExpanded ? ExecTokens.primaryRing : context.adapt(ExecTokens.secBtnBorder)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        _isCalendarExpanded ? Icons.calendar_month_rounded : Icons.calendar_today_outlined,
+                        size: 14,
+                        color: _isCalendarExpanded ? ExecTokens.primaryCTA : context.adapt(ExecTokens.textSecondary),
+                      ),
+                      const SizedBox(width: 6),
+                      Text(
+                        _isCalendarExpanded ? 'Hide Calendar' : 'Calendar Filter',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w600,
+                          color: _isCalendarExpanded ? ExecTokens.primaryCTA : context.adapt(ExecTokens.textSecondary),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
+                      Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: context.adapt(ExecTokens.textSecondary)),
+                    ],
+                  ),
+                ),
               ),
-            ),
 
-            // Monthly Grid
-            OutlinedButton.icon(
-              onPressed: () {
+            // Monthly Grid Pill Button
+            InkWell(
+              borderRadius: BorderRadius.circular(20),
+              onTap: () {
                 final t = RoleThemeScope.dataOf(context);
                 BulkAttendanceDialog.open(
                   context: context,
@@ -826,59 +819,92 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                   onSaved: () => setState(() {}),
                 );
               },
-              icon: Icon(Icons.table_chart_outlined, size: 14, color: context.adapt(ExecTokens.textSecondary)),
-              label: Text('Monthly Grid', style: TextStyle(fontSize: 12, color: context.adapt(ExecTokens.textSecondary))),
-              style: OutlinedButton.styleFrom(
-                backgroundColor: context.adapt(ExecTokens.secBtnSurface),
-                side: BorderSide(color: context.adapt(ExecTokens.secBtnBorder)),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-              ),
-            ),
-
-            // Biometric PINs
-            OutlinedButton.icon(
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(builder: (_) => BiometricDeviceManagerPage(branchId: widget.branchId)),
-                );
-              },
-              icon: Icon(Icons.fingerprint_rounded, size: 14, color: context.adapt(ExecTokens.textSecondary)),
-              label: Text('Biometric PINs', style: TextStyle(fontSize: 12, color: context.adapt(ExecTokens.textSecondary))),
-              style: OutlinedButton.styleFrom(
-                backgroundColor: context.adapt(ExecTokens.secBtnSurface),
-                side: BorderSide(color: context.adapt(ExecTokens.secBtnBorder)),
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-              ),
-            ),
-
-            // Wipe All Staff (User Request)
-            if (totalStaffCount > 0)
-              OutlinedButton.icon(
-                onPressed: _confirmWipeAllEmployees,
-                icon: const Icon(Icons.delete_sweep_outlined, size: 14, color: ExecTokens.absentDot),
-                label: const Text('Wipe Staff', style: TextStyle(fontSize: 12, color: ExecTokens.absentDot)),
-                style: OutlinedButton.styleFrom(
-                  backgroundColor: context.adapt(ExecTokens.absentBg),
-                  side: BorderSide(color: context.adapt(ExecTokens.absentBorder)),
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(
+                  color: context.adapt(ExecTokens.secBtnSurface),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: context.adapt(ExecTokens.secBtnBorder)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.table_chart_outlined, size: 14, color: context.adapt(ExecTokens.textSecondary)),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Monthly Grid',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: context.adapt(ExecTokens.textSecondary)),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: context.adapt(ExecTokens.textSecondary)),
+                  ],
                 ),
               ),
+            ),
 
-            // Primary CTA: Register Employee
-            ElevatedButton.icon(
-              onPressed: widget.onAddEmployee,
-              icon: const Icon(Icons.person_add_alt_1_rounded, size: 15),
-              label: const Text('Register Employee', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: ExecTokens.primaryCTA,
-                foregroundColor: ExecTokens.textInverse,
-                elevation: 0,
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+            // Holidays & Off Days Pill Button
+            InkWell(
+              borderRadius: BorderRadius.circular(20),
+              onTap: () {
+                HolidayManagerDialog.open(
+                  context: context,
+                  branchId: widget.branchId,
+                  branches: widget.branches,
+                  userRole: widget.userRole,
+                  onSaved: () => setState(() {}),
+                );
+              },
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                decoration: BoxDecoration(
+                  color: context.adapt(ExecTokens.secBtnSurface),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: context.adapt(ExecTokens.secBtnBorder)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.beach_access_outlined, size: 14, color: context.adapt(ExecTokens.textSecondary)),
+                    const SizedBox(width: 6),
+                    Text(
+                      'Holidays & Off Days',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: context.adapt(ExecTokens.textSecondary)),
+                    ),
+                    const SizedBox(width: 4),
+                    Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: context.adapt(ExecTokens.textSecondary)),
+                  ],
+                ),
+              ),
+            ),
+
+            // Primary CTA: Register Employee (Green Pill)
+            InkWell(
+              borderRadius: BorderRadius.circular(20),
+              onTap: widget.onAddEmployee,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF045D48),
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: const Color(0xFF045D48).withValues(alpha: 0.25),
+                      blurRadius: 4,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: const Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.person_add_alt_1_rounded, size: 14, color: Colors.white),
+                    SizedBox(width: 6),
+                    Text(
+                      'Register Employee',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+                  ],
+                ),
               ),
             ),
           ],
@@ -888,7 +914,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              searchAndCalendarToggle,
+              searchAndCategoryToggle,
               const SizedBox(height: 10),
               actionButtons,
             ],
@@ -897,7 +923,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
 
         return Row(
           children: [
-            searchAndCalendarToggle,
+            searchAndCategoryToggle,
             const Spacer(),
             actionButtons,
           ],
@@ -920,125 +946,142 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
 
     return Container(
       margin: const EdgeInsets.fromLTRB(24, 6, 24, 6),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       decoration: BoxDecoration(
         color: context.adapt(ExecTokens.cardSurface),
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(12),
         border: Border.all(color: context.adapt(ExecTokens.borderMuted)),
       ),
       child: LayoutBuilder(builder: (ctx, constraints) {
-        final isWide = constraints.maxWidth >= 850;
+            final isWide = constraints.maxWidth >= 850;
 
-        final dateNavigator = Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            IconButton(
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
-              icon: Icon(Icons.chevron_left_rounded, size: 20, color: context.adapt(ExecTokens.textSecondary)),
-              tooltip: 'Previous Day',
-              onPressed: () {
-                _draftRecords.clear();
-                widget.onDateChanged(widget.date.subtract(const Duration(days: 1)));
-              },
-            ),
-            const SizedBox(width: 4),
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: isSunday ? context.adapt(ExecTokens.lateBg) : context.adapt(ExecTokens.rowSelected),
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: isSunday ? context.adapt(ExecTokens.lateBorder) : ExecTokens.primaryRing),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(
-                    isSunday ? Icons.weekend_outlined : Icons.calendar_today_rounded,
-                    size: 13,
-                    color: isSunday ? context.adapt(ExecTokens.lateText) : ExecTokens.primaryCTA,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    isSunday ? '$dateTitle (Sunday Off)' : dateTitle,
-                    style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: isSunday ? context.adapt(ExecTokens.lateText) : ExecTokens.primaryCTA,
+            final dateNavigator = Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
+                  icon: Icon(Icons.chevron_left_rounded, size: 20, color: context.adapt(ExecTokens.textSecondary)),
+                  tooltip: 'Previous Day',
+                  onPressed: () {
+                    _draftRecords.clear();
+                    widget.onDateChanged(widget.date.subtract(const Duration(days: 1)));
+                  },
+                ),
+                const SizedBox(width: 4),
+                InkWell(
+                  borderRadius: BorderRadius.circular(20),
+                  onTap: () async {
+                    final picked = await showDatePicker(
+                      context: context,
+                      initialDate: widget.date,
+                      firstDate: DateTime(2020),
+                      lastDate: DateTime(2035),
+                    );
+                    if (picked != null) {
+                      _draftRecords.clear();
+                      widget.onDateChanged(picked);
+                    }
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: isSunday ? context.adapt(ExecTokens.lateBg) : context.adapt(ExecTokens.rowSelected),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: isSunday ? context.adapt(ExecTokens.lateBorder) : const Color(0xFFBBF7D0)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          isSunday ? Icons.weekend_outlined : Icons.calendar_today_rounded,
+                          size: 13,
+                          color: isSunday ? context.adapt(ExecTokens.lateText) : const Color(0xFF045D48),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          isSunday ? '$dateTitle (Sunday Off)' : dateTitle,
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: isSunday ? context.adapt(ExecTokens.lateText) : const Color(0xFF042F2E),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        Icon(Icons.keyboard_arrow_down_rounded, size: 14, color: const Color(0xFF045D48)),
+                      ],
                     ),
                   ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 4),
-            IconButton(
-              padding: EdgeInsets.zero,
-              constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
-              icon: Icon(Icons.chevron_right_rounded, size: 20, color: context.adapt(ExecTokens.textSecondary)),
-              tooltip: 'Next Day',
-              onPressed: () {
-                _draftRecords.clear();
-                widget.onDateChanged(widget.date.add(const Duration(days: 1)));
-              },
-            ),
-            const SizedBox(width: 4),
-            InkWell(
-              onTap: () {
-                _draftRecords.clear();
-                final now = DateTime.now();
-                setState(() => _calendarMonth = DateTime(now.year, now.month, 1));
-                widget.onDateChanged(now);
-              },
-              borderRadius: BorderRadius.circular(4),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: context.adapt(ExecTokens.rowHover),
-                  borderRadius: BorderRadius.circular(4),
-                  border: Border.all(color: context.adapt(ExecTokens.borderMuted)),
                 ),
-                child: Text('Today', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: context.adapt(ExecTokens.textPrimary))),
-              ),
-            ),
-          ],
-        );
+                const SizedBox(width: 4),
+                IconButton(
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 26, minHeight: 26),
+                  icon: Icon(Icons.chevron_right_rounded, size: 20, color: context.adapt(ExecTokens.textSecondary)),
+                  tooltip: 'Next Day',
+                  onPressed: () {
+                    _draftRecords.clear();
+                    widget.onDateChanged(widget.date.add(const Duration(days: 1)));
+                  },
+                ),
+                const SizedBox(width: 4),
+                InkWell(
+                  onTap: () {
+                    _draftRecords.clear();
+                    final now = DateTime.now();
+                    setState(() => _calendarMonth = DateTime(now.year, now.month, 1));
+                    widget.onDateChanged(now);
+                  },
+                  borderRadius: BorderRadius.circular(20),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: context.adapt(ExecTokens.canvasBg),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: context.adapt(ExecTokens.borderMuted)),
+                    ),
+                    child: Text('Today', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: context.adapt(ExecTokens.textPrimary))),
+                  ),
+                ),
+              ],
+            );
 
-        final filterPills = Wrap(
-          spacing: 6,
-          runSpacing: 4,
-          crossAxisAlignment: WrapCrossAlignment.center,
-          children: [
-            _statusFilterPill('All Staff', '$totalStaff', 'all', context.adapt(ExecTokens.textSecondary), context.adapt(ExecTokens.canvasBg), context.adapt(ExecTokens.borderMuted)),
-            _statusFilterPill('Present', '$present', 'present', context.adapt(ExecTokens.presentText), context.adapt(ExecTokens.presentBg), context.adapt(ExecTokens.presentBorder)),
-            if (late > 0)
-              _statusFilterPill('Late', '$late', 'late', context.adapt(ExecTokens.lateText), context.adapt(ExecTokens.lateBg), context.adapt(ExecTokens.lateBorder)),
-            if (leave > 0)
-              _statusFilterPill('On Leave', '$leave', 'leave', context.adapt(ExecTokens.leaveText), context.adapt(ExecTokens.leaveBg), context.adapt(ExecTokens.leaveBorder)),
-            _statusFilterPill('Absent', '$absent', 'absent', context.adapt(ExecTokens.absentText), context.adapt(ExecTokens.absentBg), context.adapt(ExecTokens.absentBorder)),
-            if (holiday > 0)
-              _statusFilterPill('Holiday', '$holiday', 'holiday', context.adapt(ExecTokens.holidayText), context.adapt(ExecTokens.holidayBg), context.adapt(ExecTokens.holidayBorder)),
-          ],
-        );
+            final filterPills = Wrap(
+              spacing: 8,
+              runSpacing: 4,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                _statusFilterPill('All Staff', '$totalStaff', 'all', Colors.white, const Color(0xFF042F2E), const Color(0xFF042F2E)),
+                _statusFilterPill('Present', '$present', 'present', const Color(0xFF15803D), const Color(0xFFDCFCE7), const Color(0xFFBBF7D0)),
+                if (late > 0)
+                  _statusFilterPill('Late', '$late', 'late', context.adapt(ExecTokens.lateText), context.adapt(ExecTokens.lateBg), context.adapt(ExecTokens.lateBorder)),
+                if (leave > 0)
+                  _statusFilterPill('On Leave', '$leave', 'leave', context.adapt(ExecTokens.leaveText), context.adapt(ExecTokens.leaveBg), context.adapt(ExecTokens.leaveBorder)),
+                _statusFilterPill('Absent', '$absent', 'absent', const Color(0xFFB91C1C), const Color(0xFFFEE2E2), const Color(0xFFFECACA)),
+                if (holiday > 0)
+                  _statusFilterPill('Holiday', '$holiday', 'holiday', context.adapt(ExecTokens.holidayText), context.adapt(ExecTokens.holidayBg), context.adapt(ExecTokens.holidayBorder)),
+              ],
+            );
 
-        if (!isWide) {
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              dateNavigator,
-              const SizedBox(height: 6),
-              filterPills,
-            ],
-          );
-        }
+            if (!isWide) {
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  dateNavigator,
+                  const SizedBox(height: 6),
+                  filterPills,
+                ],
+              );
+            }
 
-        return Row(
-          children: [
-            dateNavigator,
-            const SizedBox(width: 14),
-            Expanded(child: filterPills),
-          ],
-        );
-      }),
+            return Row(
+              children: [
+                dateNavigator,
+                const SizedBox(width: 14),
+                Expanded(child: filterPills),
+              ],
+            );
+          }),
     );
   }
 
@@ -1351,7 +1394,7 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
           const SizedBox(height: 2),
           Text(value, style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, color: color, letterSpacing: -0.3)),
           const SizedBox(height: 1),
-          Text(subtitle, style: TextStyle(fontSize: 9.5, color: color.withValues(alpha: 0.8))),
+          Text(subtitle, style: TextStyle(fontSize: 9.5, color: context.adapt(ExecTokens.textMuted))),
         ],
       ),
     );
@@ -1359,14 +1402,18 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
 
   Widget _statusFilterPill(String label, String count, String filterKey, Color textColor, Color bg, Color border) {
     final isSelected = _statusFilter == filterKey;
+    final isAllStaff = filterKey == 'all';
+    final isPresent = filterKey == 'present';
+    final isAbsent = filterKey == 'absent';
+
     return InkWell(
       onTap: () => setState(() => _statusFilter = isSelected && filterKey != 'all' ? 'all' : filterKey),
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(20),
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         decoration: BoxDecoration(
-          color: isSelected ? context.adapt(ExecTokens.rowSelected) : bg,
-          borderRadius: BorderRadius.circular(6),
+          color: isSelected && !isAllStaff ? context.adapt(ExecTokens.rowSelected) : bg,
+          borderRadius: BorderRadius.circular(20),
           border: Border.all(
             color: isSelected ? ExecTokens.primaryCTA : border,
             width: isSelected ? 1.5 : 1,
@@ -1375,20 +1422,36 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(label, style: TextStyle(fontSize: 11, fontWeight: isSelected ? FontWeight.bold : FontWeight.w500, color: textColor)),
-            const SizedBox(width: 5),
+            if (isPresent) ...[
+              const Icon(Icons.check_circle_rounded, size: 13, color: Color(0xFF15803D)),
+              const SizedBox(width: 4),
+            ] else if (isAbsent) ...[
+              const Icon(Icons.cancel_rounded, size: 13, color: Color(0xFFB91C1C)),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 11.5,
+                fontWeight: FontWeight.bold,
+                color: isSelected && !isAllStaff ? ExecTokens.primaryCTA : textColor,
+              ),
+            ),
+            const SizedBox(width: 6),
             Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1.5),
               decoration: BoxDecoration(
-                color: isSelected ? ExecTokens.primaryCTA : textColor.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(4),
+                color: isAllStaff
+                    ? const Color(0xFF0F766E)
+                    : (isSelected ? ExecTokens.primaryCTA : textColor.withValues(alpha: 0.15)),
+                borderRadius: BorderRadius.circular(10),
               ),
               child: Text(
                 count,
                 style: TextStyle(
                   fontSize: 10.5,
                   fontWeight: FontWeight.w800,
-                  color: isSelected ? SoftPalette.gray50 : textColor,
+                  color: isAllStaff ? Colors.white : (isSelected ? SoftPalette.gray50 : textColor),
                 ),
               ),
             ),
@@ -1445,6 +1508,115 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                   side: BorderSide(color: context.adapt(ExecTokens.absentBorder)),
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  // ── Scheduled Holiday Notification Banner ──────────────────────────────────
+  Widget _buildHolidayBanner(DateTime date) {
+    if (!Hive.isBoxOpen(LocalStorageService.financeHolidaysBox)) return const SizedBox.shrink();
+
+    return ValueListenableBuilder<Box>(
+      valueListenable: Hive.box(LocalStorageService.financeHolidaysBox).listenable(),
+      builder: (context, _, _) {
+        final hol = FinanceLocalStorage.getHolidayForDate(
+          branchId: widget.branchId,
+          dateStr: DateFormat('yyyy-MM-dd').format(date),
+        );
+        if (hol == null) return const SizedBox.shrink();
+
+        final name = hol['name']?.toString() ?? 'Public Holiday';
+        final type = (hol['type'] ?? 'static').toString().toLowerCase();
+        final workingEmps = hol['workingEmployees'] is List ? List<String>.from(hol['workingEmployees'] as List) : <String>[];
+        String typeLabel = 'Fixed Annual Holiday';
+        if (type == 'floating') typeLabel = 'Interchangeable / Floating Holiday';
+        if (type == 'adhoc') typeLabel = 'Emergency / Special Day Off';
+
+        final departments = hol['departments'] is List ? List<String>.from(hol['departments'] as List) : <String>[];
+        final roles = hol['roles'] is List ? List<String>.from(hol['roles'] as List) : <String>[];
+        final branches = hol['branches'] is List ? List<String>.from(hol['branches'] as List) : <String>[];
+
+        final isSpecificDept = departments.isNotEmpty && !departments.contains('all');
+        final isSpecificRole = roles.isNotEmpty && !roles.contains('all');
+        final isSpecificBranch = branches.isNotEmpty && !branches.contains('all');
+
+        final List<String> scopeNotes = [];
+        if (isSpecificBranch) scopeNotes.add('Branches: ${branches.join(", ")}');
+        if (isSpecificDept) scopeNotes.add('Depts: ${departments.join(", ")}');
+        if (isSpecificRole) scopeNotes.add('Roles: ${roles.join(", ")}');
+        if (workingEmps.isNotEmpty) scopeNotes.add('${workingEmps.length} Duty Staff Working');
+
+        final scopeText = scopeNotes.isNotEmpty
+            ? scopeNotes.join(' • ')
+            : 'All branch personnel have an authorized organization day off.';
+
+        return Container(
+          margin: const EdgeInsets.fromLTRB(24, 8, 24, 4),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: context.adapt(ExecTokens.holidayBg),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: context.adapt(ExecTokens.holidayBorder)),
+          ),
+          child: Row(
+            children: [
+              Icon(Icons.festival_outlined, size: 20, color: context.adapt(ExecTokens.holidayText)),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Row(
+                      children: [
+                        Text(
+                          'OFFICIAL HOLIDAY: $name',
+                          style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.bold,
+                            color: context.adapt(ExecTokens.holidayText),
+                            letterSpacing: 0.3,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: context.adapt(ExecTokens.holidayText).withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Text(
+                            typeLabel,
+                            style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w600, color: context.adapt(ExecTokens.holidayText)),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      scopeText,
+                      style: TextStyle(fontSize: 11, color: context.adapt(ExecTokens.textSecondary), fontWeight: FontWeight.w500),
+                    ),
+                  ],
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () {
+                  HolidayManagerDialog.open(
+                    context: context,
+                    branchId: widget.branchId,
+                    branches: widget.branches,
+                    userRole: widget.userRole,
+                    onSaved: () => setState(() {}),
+                  );
+                },
+                icon: const Icon(Icons.tune, size: 14),
+                label: const Text('Manage', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                style: TextButton.styleFrom(foregroundColor: context.adapt(ExecTokens.holidayText)),
               ),
             ],
           ),
@@ -2344,15 +2516,50 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                 } else if (val == 'mark_present') {
                   record['status'] = 'present';
                   record['leaveType'] = null;
+                  record['manualOverride'] = true;
+                  if (record['checkInTime'] == null) {
+                    record['checkInTime'] = DateFormat('hh:mm a').format(DateTime.now());
+                  }
                   await _saveRecordInstantly(empId, record);
                 } else if (val == 'mark_absent') {
                   record['status'] = 'absent';
+                  record['leaveType'] = null;
                   record['checkInTime'] = null;
                   record['checkOutTime'] = null;
+                  record['arrivalTime'] = null;
+                  record['departureTime'] = null;
+                  record['lastPunchTime'] = null;
+                  record['manualOverride'] = true;
                   await _saveRecordInstantly(empId, record);
                 } else if (val == 'mark_leave') {
                   record['status'] = 'leave';
-                  record['leaveType'] = 'paid';
+                  record['leaveType'] = record['leaveType'] ?? 'Paid';
+                  record['checkInTime'] = null;
+                  record['checkOutTime'] = null;
+                  record['arrivalTime'] = null;
+                  record['departureTime'] = null;
+                  record['lastPunchTime'] = null;
+                  record['manualOverride'] = true;
+                  await _saveRecordInstantly(empId, record);
+                } else if (val == 'mark_holiday') {
+                  record['status'] = 'holiday';
+                  record['leaveType'] = null;
+                  record['checkInTime'] = null;
+                  record['checkOutTime'] = null;
+                  record['arrivalTime'] = null;
+                  record['departureTime'] = null;
+                  record['lastPunchTime'] = null;
+                  record['manualOverride'] = true;
+                  await _saveRecordInstantly(empId, record);
+                } else if (val == 'mark_off') {
+                  record['status'] = 'off';
+                  record['leaveType'] = null;
+                  record['checkInTime'] = null;
+                  record['checkOutTime'] = null;
+                  record['arrivalTime'] = null;
+                  record['departureTime'] = null;
+                  record['lastPunchTime'] = null;
+                  record['manualOverride'] = true;
                   await _saveRecordInstantly(empId, record);
                 } else if (val == 'offboard') {
                   _offboardEmployee(empId);
@@ -2422,6 +2629,22 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
                     Icon(Icons.time_to_leave_outlined, size: 16, color: ExecTokens.leaveDot),
                     SizedBox(width: 8),
                     Text('Mark On Leave', style: TextStyle(fontSize: 12.5)),
+                  ]),
+                ),
+                const PopupMenuItem(
+                  value: 'mark_holiday',
+                  child: Row(children: [
+                    Icon(Icons.festival_outlined, size: 16, color: ExecTokens.holidayDot),
+                    SizedBox(width: 8),
+                    Text('Mark Holiday', style: TextStyle(fontSize: 12.5)),
+                  ]),
+                ),
+                const PopupMenuItem(
+                  value: 'mark_off',
+                  child: Row(children: [
+                    Icon(Icons.beach_access_outlined, size: 16, color: ExecTokens.sundayDot),
+                    SizedBox(width: 8),
+                    Text('Mark Off Day', style: TextStyle(fontSize: 12.5)),
                   ]),
                 ),
                 const PopupMenuDivider(height: 1),
@@ -2500,14 +2723,32 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
       onSelected: (newStatus) async {
         setState(() {
           record['status'] = newStatus;
+          record['manualOverride'] = true;
           if (newStatus == 'present') {
             record['leaveType'] = null;
             if (record['checkInTime'] == null) {
               record['checkInTime'] = DateFormat('hh:mm a').format(DateTime.now());
             }
-          } else if (newStatus == 'absent') {
+          } else if (newStatus == 'late') {
+            record['leaveType'] = null;
+            if (record['checkInTime'] == null) {
+              record['checkInTime'] = DateFormat('hh:mm a').format(DateTime.now());
+            }
+          } else if (newStatus == 'leave') {
+            record['leaveType'] = record['leaveType'] ?? 'Paid';
             record['checkInTime'] = null;
             record['checkOutTime'] = null;
+            record['arrivalTime'] = null;
+            record['departureTime'] = null;
+            record['lastPunchTime'] = null;
+          } else {
+            // absent, holiday, off
+            record['leaveType'] = null;
+            record['checkInTime'] = null;
+            record['checkOutTime'] = null;
+            record['arrivalTime'] = null;
+            record['departureTime'] = null;
+            record['lastPunchTime'] = null;
           }
         });
         await _saveRecordInstantly(empId, record);
@@ -2517,6 +2758,8 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
         PopupMenuItem(value: 'late', child: Text('● LATE', style: TextStyle(color: context.adapt(ExecTokens.lateText), fontWeight: FontWeight.bold, fontSize: 12))),
         PopupMenuItem(value: 'leave', child: Text('● ON LEAVE', style: TextStyle(color: context.adapt(ExecTokens.leaveText), fontWeight: FontWeight.bold, fontSize: 12))),
         PopupMenuItem(value: 'absent', child: Text('● ABSENT', style: TextStyle(color: context.adapt(ExecTokens.absentText), fontWeight: FontWeight.bold, fontSize: 12))),
+        PopupMenuItem(value: 'holiday', child: Text('● HOLIDAY', style: TextStyle(color: context.adapt(ExecTokens.holidayText), fontWeight: FontWeight.bold, fontSize: 12))),
+        PopupMenuItem(value: 'off', child: Text('● OFF DAY', style: TextStyle(color: context.adapt(ExecTokens.sundayText), fontWeight: FontWeight.bold, fontSize: 12))),
       ],
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
@@ -3036,79 +3279,260 @@ class _EmployeeManagementTabState extends State<EmployeeManagementTab> {
 
   void _editBiometricPin(String empId, String empName, String currentPin) {
     final ctrl = TextEditingController(text: currentPin);
+    final empData = FinanceLocalStorage.getEmployee(empId);
+    final dept = empData?['department']?.toString() ?? 'Office';
+    final suggestedPins = ZkTecoNetworkService.getSuggestedPinsForDepartment(dept, count: 4, excludeEntityId: empId);
+    bool overwriteConfirmed = false;
+
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: context.adapt(ExecTokens.cardSurface),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        title: Row(
-          children: [
-            const Icon(Icons.fingerprint_rounded, color: ExecTokens.primaryCTA, size: 22),
-            const SizedBox(width: 8),
-            Text('Biometric PIN - $empName', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: context.adapt(ExecTokens.textPrimary))),
-          ],
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'Enter the hardware User ID / PIN registered for this employee on the physical ZKTeco machine.',
-              style: TextStyle(fontSize: 12, color: context.adapt(ExecTokens.textSecondary)),
+      builder: (ctx) => StatefulBuilder(
+        builder: (dialogCtx, setDialogState) {
+          final enteredPin = ctrl.text.trim();
+          final takenCred = enteredPin.isNotEmpty ? ZkTecoNetworkService.getCredentialByPin(enteredPin) : null;
+          final isCollision = takenCred != null && takenCred.entityId != empId;
+
+          return AlertDialog(
+            backgroundColor: context.adapt(ExecTokens.cardSurface),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            title: Row(
+              children: [
+                const Icon(Icons.fingerprint_rounded, color: ExecTokens.primaryCTA, size: 22),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text('Biometric PIN - $empName', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: context.adapt(ExecTokens.textPrimary))),
+                ),
+              ],
             ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: ctrl,
-              keyboardType: TextInputType.number,
-              autofocus: true,
-              decoration: InputDecoration(
-                labelText: 'ZKTeco Hardware PIN',
-                filled: true,
-                fillColor: context.adapt(ExecTokens.canvasBg),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: context.adapt(ExecTokens.borderMuted))),
-                enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(6), borderSide: BorderSide(color: context.adapt(ExecTokens.borderMuted))),
+            content: SizedBox(
+              width: 440,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Enter the numeric PIN registered on physical ZKTeco attendance hardware. Department pattern for $dept is applied.',
+                    style: TextStyle(fontSize: 12, color: context.adapt(ExecTokens.textSecondary)),
+                  ),
+                  const SizedBox(height: 12),
+
+                  // Suggested PIN chips
+                  if (suggestedPins.isNotEmpty) ...[
+                    Row(
+                      children: [
+                        Icon(Icons.auto_awesome_rounded, size: 13, color: ExecTokens.primaryCTA),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Suggested for $dept:',
+                          style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: context.adapt(ExecTokens.textSecondary)),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 4,
+                      children: suggestedPins.map((pin) {
+                        final isCur = enteredPin == pin;
+                        return InkWell(
+                          borderRadius: BorderRadius.circular(16),
+                          onTap: () {
+                            ctrl.text = pin;
+                            overwriteConfirmed = false;
+                            setDialogState(() {});
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                            decoration: BoxDecoration(
+                              color: isCur ? const Color(0xFF042F2E) : const Color(0xFFDCFCE7),
+                              borderRadius: BorderRadius.circular(16),
+                              border: Border.all(color: isCur ? const Color(0xFF042F2E) : const Color(0xFFBBF7D0)),
+                            ),
+                            child: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.pin, size: 12, color: isCur ? Colors.white : const Color(0xFF15803D)),
+                                const SizedBox(width: 4),
+                                Text(
+                                  pin,
+                                  style: TextStyle(fontSize: 11.5, fontWeight: FontWeight.bold, color: isCur ? Colors.white : const Color(0xFF15803D)),
+                                ),
+                              ],
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+
+                  TextField(
+                    controller: ctrl,
+                    keyboardType: TextInputType.number,
+                    autofocus: true,
+                    onChanged: (_) => setDialogState(() {
+                      overwriteConfirmed = false;
+                    }),
+                    decoration: InputDecoration(
+                      labelText: 'Hardware PIN',
+                      filled: true,
+                      fillColor: context.adapt(ExecTokens.canvasBg),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: context.adapt(ExecTokens.borderMuted))),
+                      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide(color: context.adapt(ExecTokens.borderMuted))),
+                      focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: const BorderSide(color: ExecTokens.primaryCTA, width: 1.5)),
+                    ),
+                  ),
+
+                  // PIN Collision Warning Banner
+                  if (isCollision) ...[
+                    const SizedBox(height: 12),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(
+                        color: overwriteConfirmed ? const Color(0xFFF0FDF4) : const Color(0xFFFEF3C7),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: overwriteConfirmed ? const Color(0xFF86EFAC) : const Color(0xFFFCD34D)),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Icon(
+                                overwriteConfirmed ? Icons.check_circle_rounded : Icons.warning_amber_rounded,
+                                color: overwriteConfirmed ? const Color(0xFF15803D) : const Color(0xFFB45309),
+                                size: 18,
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      overwriteConfirmed
+                                          ? 'PIN Overwrite Confirmed'
+                                          : 'PIN $enteredPin is already taken!',
+                                      style: TextStyle(
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.bold,
+                                        color: overwriteConfirmed ? const Color(0xFF15803D) : const Color(0xFF92400E),
+                                      ),
+                                    ),
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      overwriteConfirmed
+                                          ? 'This PIN will be unassigned from ${takenCred.entityName} and reassigned to $empName.'
+                                          : 'Currently assigned to ${takenCred.entityName} (${takenCred.entityType.replaceAll('_', ' ')}). Should we overwrite this or use a new one?',
+                                      style: TextStyle(
+                                        fontSize: 11,
+                                        color: overwriteConfirmed ? const Color(0xFF166534) : const Color(0xFF78350F),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (!overwriteConfirmed) ...[
+                            const SizedBox(height: 8),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                if (suggestedPins.isNotEmpty)
+                                  TextButton(
+                                    style: TextButton.styleFrom(
+                                      foregroundColor: const Color(0xFF045D48),
+                                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                    ),
+                                    onPressed: () {
+                                      ctrl.text = suggestedPins.first;
+                                      overwriteConfirmed = false;
+                                      setDialogState(() {});
+                                    },
+                                    child: Text('Use Suggested (${suggestedPins.first})', style: const TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                  ),
+                                const SizedBox(width: 4),
+                                ElevatedButton(
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFFB45309),
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                    elevation: 0,
+                                  ),
+                                  onPressed: () => setDialogState(() => overwriteConfirmed = true),
+                                  child: const Text('Overwrite PIN', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold)),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                  ],
+                ],
               ),
             ),
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: TextStyle(color: context.adapt(ExecTokens.textMuted)))),
-          ElevatedButton(
-            onPressed: () async {
-              final newPin = ctrl.text.trim();
-              if (newPin.isEmpty) return;
-              Navigator.pop(ctx);
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(ctx), child: Text('Cancel', style: TextStyle(color: context.adapt(ExecTokens.textMuted)))),
+              ElevatedButton(
+                onPressed: () async {
+                  final newPin = ctrl.text.trim();
+                  if (newPin.isEmpty) return;
 
-              await ZkTecoNetworkService.mapPinToEntity(
-                pin: newPin,
-                entityId: empId,
-                entityName: empName,
-                entityType: 'employee',
-                branchId: widget.branchId,
-              );
+                  if (isCollision && !overwriteConfirmed) {
+                    final proceed = await showDialog<bool>(
+                      context: context,
+                      builder: (c) => AlertDialog(
+                        title: const Text('Confirm PIN Overwrite', style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold)),
+                        content: Text('PIN $newPin is currently assigned to ${takenCred.entityName}. Do you really want to overwrite and assign it to $empName?'),
+                        actions: [
+                          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('No, cancel')),
+                          ElevatedButton(
+                            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFB45309), foregroundColor: Colors.white),
+                            onPressed: () => Navigator.pop(c, true),
+                            child: const Text('Yes, Overwrite'),
+                          ),
+                        ],
+                      ),
+                    );
+                    if (proceed != true) return;
+                  }
 
-              final emp = FinanceLocalStorage.getEmployee(empId);
-              if (emp != null) {
-                emp['biometricPin'] = newPin;
-                emp['pin'] = newPin;
-                await FinanceLocalStorage.saveEmployee(
-                  branchId: emp['branchId']?.toString() ?? widget.branchId,
-                  data: emp,
-                  performedBy: LocalStorageService.getActiveUsername(),
-                );
-              }
+                  Navigator.pop(ctx);
 
-              if (mounted) {
-                AppToast.showSnackBar(context, 
-                  SnackBar(content: Text('✅ PIN $newPin assigned to $empName!'), backgroundColor: ExecTokens.primaryCTA),
-                );
-                setState(() {});
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: ExecTokens.primaryCTA, foregroundColor: SoftPalette.gray50),
-            child: const Text('Save PIN'),
-          ),
-        ],
+                  await ZkTecoNetworkService.assignPinToEntity(
+                    entityId: empId,
+                    entityName: empName,
+                    entityType: 'employee',
+                    branchId: widget.branchId,
+                    customPin: newPin,
+                  );
+
+                  final emp = FinanceLocalStorage.getEmployee(empId);
+                  if (emp != null) {
+                    emp['biometricPin'] = newPin;
+                    emp['pin'] = newPin;
+                    await FinanceLocalStorage.saveEmployee(
+                      branchId: emp['branchId']?.toString() ?? widget.branchId,
+                      data: emp,
+                      performedBy: LocalStorageService.getActiveUsername(),
+                    );
+                  }
+
+                  if (mounted) {
+                    AppToast.showSnackBar(context, 
+                      SnackBar(content: Text('✅ PIN $newPin assigned to $empName!'), backgroundColor: ExecTokens.primaryCTA),
+                    );
+                    setState(() {});
+                  }
+                },
+                style: ElevatedButton.styleFrom(backgroundColor: ExecTokens.primaryCTA, foregroundColor: SoftPalette.gray50),
+                child: const Text('Save PIN'),
+              ),
+            ],
+          );
+        },
       ),
     );
   }

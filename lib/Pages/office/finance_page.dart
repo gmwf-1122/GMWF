@@ -318,40 +318,85 @@ class _FinancePageState extends State<FinancePage> {
     Icons.history_edu_outlined, Icons.account_balance_outlined
   ];
 
+  Widget _buildCircularActionButton({
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onPressed,
+    required RoleThemeData t,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: InkWell(
+        onTap: onPressed,
+        borderRadius: BorderRadius.circular(20),
+        child: Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: t.bgCard,
+            shape: BoxShape.circle,
+            border: Border.all(color: t.bgRule),
+          ),
+          child: Icon(icon, color: t.textSecondary, size: 16),
+        ),
+      ),
+    );
+  }
+
   Widget _buildHeader(BuildContext ctx, bool canViewAudits, RoleThemeData t) {
     return Container(
-      height: 58,
-      padding: const EdgeInsets.symmetric(horizontal: 24),
-      decoration: BoxDecoration(
-        color: t.bgCard,
-        border: Border(bottom: BorderSide(color: t.bgRule)),
+      padding: const EdgeInsets.fromLTRB(24, 14, 24, 6),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: const Color(0xFF059669), // primary emerald green
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.people_alt_rounded, color: Colors.white, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                _sectionTitles[_selectedIndex],
+                style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.w800, fontSize: 17, letterSpacing: -0.2),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'Manage and track employees across all branches and departments.',
+                style: TextStyle(color: t.textSecondary, fontSize: 11.5),
+              ),
+            ],
+          ),
+          const Spacer(),
+          _buildSyncChip(),
+          const SizedBox(width: 10),
+          _buildCircularActionButton(
+            tooltip: 'Force Refresh Data',
+            icon: _isDownloadingData ? Icons.sync_rounded : Icons.refresh_rounded,
+            onPressed: () => _triggerDownloadForActiveBranch(force: true),
+            t: t,
+          ),
+          const SizedBox(width: 6),
+          _buildCircularActionButton(
+            tooltip: 'Export Reports',
+            icon: Icons.download_rounded,
+            onPressed: () => _openExportDialog(ctx),
+            t: t,
+          ),
+          const SizedBox(width: 6),
+          _buildCircularActionButton(
+            tooltip: 'Manage Holidays',
+            icon: Icons.calendar_month_outlined,
+            onPressed: () => _openHolidaysManager(ctx),
+            t: t,
+          ),
+        ],
       ),
-      child: Row(children: [
-        Icon(_sectionIcons[_selectedIndex], color: t.accent, size: 22),
-        const SizedBox(width: 10),
-        Text(
-          _sectionTitles[_selectedIndex],
-          style: TextStyle(color: t.textPrimary, fontWeight: FontWeight.w800, fontSize: 18, letterSpacing: -0.3),
-        ),
-        const Spacer(),
-        _buildSyncChip(),
-        const SizedBox(width: 12),
-        IconButton(
-          tooltip: 'Force Refresh Data',
-          icon: Icon(_isDownloadingData ? Icons.sync_rounded : Icons.refresh_rounded, color: t.textSecondary, size: 20),
-          onPressed: () => _triggerDownloadForActiveBranch(force: true),
-        ),
-        IconButton(
-          tooltip: 'Export Reports',
-          icon: Icon(Icons.download_outlined, color: t.textSecondary, size: 20),
-          onPressed: () => _openExportDialog(ctx),
-        ),
-        IconButton(
-          tooltip: 'Manage Holidays',
-          icon: Icon(Icons.calendar_month_outlined, color: t.textSecondary, size: 20),
-          onPressed: () => _openHolidaysManager(ctx),
-        ),
-      ]),
     );
   }
 
@@ -403,114 +448,137 @@ class _FinancePageState extends State<FinancePage> {
     final branchName = FinanceLocalStorage.getBranchName(effectiveUserBranch);
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 10),
+      margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
         color: t.bgCard,
-        border: Border(bottom: BorderSide(color: t.bgRule)),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: t.bgRule),
       ),
       child: Row(
         children: [
-          Icon(Icons.filter_list_rounded, size: 16, color: t.textSecondary),
-          const SizedBox(width: 8),
-          Text('Filters:', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 12, color: t.textSecondary)),
-          const SizedBox(width: 16),
+          const Icon(Icons.filter_alt_outlined, size: 16, color: Color(0xFF042F2E)),
+          const SizedBox(width: 6),
+          const Text('Filters', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+          const SizedBox(width: 20),
           if (isBranchScoped) ...[
-            Text('Branch', style: TextStyle(fontSize: 11, color: t.textSecondary)),
-            const SizedBox(width: 8),
-            Container(
-              height: 30,
-              padding: const EdgeInsets.symmetric(horizontal: 10),
-              alignment: Alignment.center,
-              decoration: BoxDecoration(
-                color: t.bgCardAlt,
-                borderRadius: BorderRadius.circular(6),
-                border: Border.all(color: t.bgRule),
-              ),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(Icons.lock_outline_rounded, size: 12, color: t.accent),
-                  const SizedBox(width: 6),
-                  Text(
-                    branchName.isNotEmpty ? branchName : effectiveUserBranch,
-                    style: TextStyle(color: t.textPrimary, fontSize: 11, fontWeight: FontWeight.bold),
+            Row(
+              children: [
+                Icon(Icons.domain_outlined, size: 15, color: t.textSecondary),
+                const SizedBox(width: 6),
+                Text('Branch', style: TextStyle(fontSize: 12, color: t.textSecondary)),
+                const SizedBox(width: 8),
+                Container(
+                  height: 32,
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: t.bgCardAlt,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: t.bgRule),
                   ),
-                ],
-              ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.lock_outline_rounded, size: 12, color: t.accent),
+                      const SizedBox(width: 6),
+                      Text(
+                        branchName.isNotEmpty ? branchName : effectiveUserBranch,
+                        style: TextStyle(color: t.textPrimary, fontSize: 11, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
             const SizedBox(width: 16),
           ] else if (_isLoadingBranches) ...[
             const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)),
             const SizedBox(width: 8),
           ] else if (_branches.isNotEmpty) ...[
-            Text('Branch', style: TextStyle(fontSize: 11, color: t.textSecondary)),
-            Builder(
-              builder: (context) {
-                final branchItems = _getUniqueBranchDropdownItems();
-                final normActive = _activeBranchId.toLowerCase().trim();
-                final safeBranchValue = branchItems.any((it) => it.value == normActive) ? normActive : 'all';
-                return Container(
-                  height: 30,
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  decoration: BoxDecoration(
-                    color: t.bgCardAlt,
-                    borderRadius: BorderRadius.circular(6),
-                    border: Border.all(color: t.bgRule),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<String>(
-                      value: safeBranchValue,
-                      dropdownColor: t.bgCard,
-                      style: TextStyle(color: t.textPrimary, fontSize: 11, fontWeight: FontWeight.bold),
-                      items: branchItems,
-                      onChanged: (val) {
-                        if (val != null) {
-                          setState(() {
-                            _activeBranchId = val.toLowerCase().trim();
-                          });
-                          _triggerDownloadForActiveBranch();
-                        }
-                      },
-                    ),
-                  ),
-                );
-              },
+            Row(
+              children: [
+                Icon(Icons.domain_outlined, size: 15, color: t.textSecondary),
+                const SizedBox(width: 6),
+                Text('Branch', style: TextStyle(fontSize: 12, color: t.textSecondary)),
+                const SizedBox(width: 8),
+                Builder(
+                  builder: (context) {
+                    final branchItems = _getUniqueBranchDropdownItems();
+                    final normActive = _activeBranchId.toLowerCase().trim();
+                    final safeBranchValue = branchItems.any((it) => it.value == normActive) ? normActive : 'all';
+                    return Container(
+                      height: 32,
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      decoration: BoxDecoration(
+                        color: t.bgCardAlt,
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: t.bgRule),
+                      ),
+                      child: DropdownButtonHideUnderline(
+                        child: DropdownButton<String>(
+                          value: safeBranchValue,
+                          icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 16),
+                          dropdownColor: t.bgCard,
+                          style: TextStyle(color: t.textPrimary, fontSize: 11, fontWeight: FontWeight.bold),
+                          items: branchItems,
+                          onChanged: (val) {
+                            if (val != null) {
+                              setState(() {
+                                _activeBranchId = val.toLowerCase().trim();
+                              });
+                              _triggerDownloadForActiveBranch();
+                            }
+                          },
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ],
             ),
             const SizedBox(width: 16),
           ],
-          Text('Department', style: TextStyle(fontSize: 11, color: t.textSecondary)),
-          const SizedBox(width: 8),
-          Builder(
-            builder: (context) {
-              final deptItems = _getUniqueDepartmentDropdownItems();
-              final safeDeptValue = deptItems.any((it) => it.value == _selectedDeptFilter.toLowerCase())
-                  ? _selectedDeptFilter.toLowerCase()
-                  : 'all';
-              return Container(
-                height: 30,
-                padding: const EdgeInsets.symmetric(horizontal: 8),
-                decoration: BoxDecoration(
-                  color: t.bgCardAlt,
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: t.bgRule),
-                ),
-                child: DropdownButtonHideUnderline(
-                  child: DropdownButton<String>(
-                    value: safeDeptValue,
-                    dropdownColor: t.bgCard,
-                    style: TextStyle(color: t.textPrimary, fontSize: 11, fontWeight: FontWeight.bold),
-                    items: deptItems,
-                    onChanged: (val) {
-                      if (val != null) {
-                        setState(() {
-                          _selectedDeptFilter = val;
-                        });
-                      }
-                    },
-                  ),
-                ),
-              );
-            },
+          Row(
+            children: [
+              Icon(Icons.people_outline_rounded, size: 15, color: t.textSecondary),
+              const SizedBox(width: 6),
+              Text('Department', style: TextStyle(fontSize: 12, color: t.textSecondary)),
+              const SizedBox(width: 8),
+              Builder(
+                builder: (context) {
+                  final deptItems = _getUniqueDepartmentDropdownItems();
+                  final safeDeptValue = deptItems.any((it) => it.value == _selectedDeptFilter.toLowerCase())
+                      ? _selectedDeptFilter.toLowerCase()
+                      : 'all';
+                  return Container(
+                    height: 32,
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    decoration: BoxDecoration(
+                      color: t.bgCardAlt,
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: t.bgRule),
+                    ),
+                    child: DropdownButtonHideUnderline(
+                      child: DropdownButton<String>(
+                        value: safeDeptValue,
+                        icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 16),
+                        dropdownColor: t.bgCard,
+                        style: TextStyle(color: t.textPrimary, fontSize: 11, fontWeight: FontWeight.bold),
+                        items: deptItems,
+                        onChanged: (val) {
+                          if (val != null) {
+                            setState(() {
+                              _selectedDeptFilter = val;
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ],
           ),
           const Spacer(),
           if ((!isBranchScoped && _activeBranchId != 'all') || _selectedDeptFilter != 'all')
@@ -1187,15 +1255,11 @@ class _FinancePageState extends State<FinancePage> {
 
   void _openHolidaysManager(BuildContext ctx) {
     final userRole = LocalStorageService.getActiveUserRole();
-    showModalBottomSheet(
+    HolidayManagerDialog.open(
       context: ctx,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => Card(
-        margin: EdgeInsets.zero,
-        shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-        child: HolidayManagerDialog(branchId: _activeBranchId, branches: _branches, userRole: userRole),
-      ),
+      branchId: _activeBranchId,
+      branches: _branches,
+      userRole: userRole,
     );
   }
 }

@@ -728,11 +728,40 @@ class FinanceLocalStorage {
     final lastPunch = record['lastPunchTime']?.toString();
     final shifts = record['shifts'] is Map ? (record['shifts'] as Map) : null;
     final shiftSessions = record['shiftSessions'] is List ? (record['shiftSessions'] as List) : null;
-    return (inTime != null && inTime.isNotEmpty && inTime != '--:--') ||
+
+    final hasDirectPunch = (inTime != null && inTime.isNotEmpty && inTime != '--:--') ||
         (outTime != null && outTime.isNotEmpty && outTime != '--:--') ||
-        (lastPunch != null && lastPunch.isNotEmpty) ||
-        (shifts != null && shifts.isNotEmpty) ||
-        (shiftSessions != null && shiftSessions.isNotEmpty);
+        (lastPunch != null && lastPunch.isNotEmpty);
+    if (hasDirectPunch) return true;
+
+    if (shifts != null && shifts.isNotEmpty) {
+      for (final s in shifts.values) {
+        if (s is Map) {
+          final sIn = (s['checkInTime'] ?? s['arrivalTime'] ?? s['checkIn'])?.toString();
+          final sOut = (s['checkOutTime'] ?? s['departureTime'] ?? s['checkOut'])?.toString();
+          final sLast = s['lastPunchTime']?.toString();
+          if ((sIn != null && sIn.isNotEmpty && sIn != '--:--') ||
+              (sOut != null && sOut.isNotEmpty && sOut != '--:--') ||
+              (sLast != null && sLast.isNotEmpty)) {
+            return true;
+          }
+        }
+      }
+    }
+
+    if (shiftSessions != null && shiftSessions.isNotEmpty) {
+      for (final s in shiftSessions) {
+        if (s is Map) {
+          final sIn = s['in'] ?? s['checkIn'] ?? s['checkInTime'] ?? '';
+          final sOut = s['out'] ?? s['checkOut'] ?? s['checkOutTime'] ?? '';
+          if (sIn.toString().isNotEmpty || sOut.toString().isNotEmpty) {
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
   }
 
   static bool hasAnyPunch(Map<String, dynamic> record) => _hasAnyPunch(record);
@@ -761,22 +790,35 @@ class FinanceLocalStorage {
       merged['biometricPin'] = pinB;
     }
 
-    final inA = (merged['checkInTime'] ?? merged['arrivalTime'] ?? merged['checkIn'])?.toString();
-    final inB = (recB['checkInTime'] ?? recB['arrivalTime'] ?? recB['checkIn'])?.toString();
-    final earliestIn = _pickEarlierTime(inA, inB);
-    if (earliestIn != null) {
-      merged['checkInTime'] = earliestIn;
-      merged['arrivalTime'] = earliestIn;
-      merged['checkIn'] = earliestIn;
-    }
+    final rawStatusB = (recB['status'] ?? '').toString().toLowerCase().trim();
+    final isExplicitNonPresentB = rawStatusB == 'absent' || rawStatusB == 'leave' || rawStatusB == 'holiday' || rawStatusB == 'off';
 
-    final outA = (merged['checkOutTime'] ?? merged['departureTime'] ?? merged['checkOut'])?.toString();
-    final outB = (recB['checkOutTime'] ?? recB['departureTime'] ?? recB['checkOut'])?.toString();
-    final latestOut = _pickLaterTime(outA, outB);
-    if (latestOut != null) {
-      merged['checkOutTime'] = latestOut;
-      merged['departureTime'] = latestOut;
-      merged['checkOut'] = latestOut;
+    if (isExplicitNonPresentB) {
+      merged['checkInTime'] = recB['checkInTime'];
+      merged['arrivalTime'] = recB['arrivalTime'];
+      merged['checkIn'] = recB['checkIn'];
+      merged['checkOutTime'] = recB['checkOutTime'];
+      merged['departureTime'] = recB['departureTime'];
+      merged['checkOut'] = recB['checkOut'];
+      merged['lastPunchTime'] = recB['lastPunchTime'];
+    } else {
+      final inA = (merged['checkInTime'] ?? merged['arrivalTime'] ?? merged['checkIn'])?.toString();
+      final inB = (recB['checkInTime'] ?? recB['arrivalTime'] ?? recB['checkIn'])?.toString();
+      final earliestIn = _pickEarlierTime(inA, inB);
+      if (earliestIn != null) {
+        merged['checkInTime'] = earliestIn;
+        merged['arrivalTime'] = earliestIn;
+        merged['checkIn'] = earliestIn;
+      }
+
+      final outA = (merged['checkOutTime'] ?? merged['departureTime'] ?? merged['checkOut'])?.toString();
+      final outB = (recB['checkOutTime'] ?? recB['departureTime'] ?? recB['checkOut'])?.toString();
+      final latestOut = _pickLaterTime(outA, outB);
+      if (latestOut != null) {
+        merged['checkOutTime'] = latestOut;
+        merged['departureTime'] = latestOut;
+        merged['checkOut'] = latestOut;
+      }
     }
 
     final inTsA = merged['checkInTimestamp']?.toString();
@@ -839,34 +881,43 @@ class FinanceLocalStorage {
       merged['shiftSessions'] = uniqueSessions.values.toList();
     }
 
-    final punchesExist = _hasAnyPunch(merged);
     final statusA = (merged['status'] ?? '').toString().toLowerCase();
     final statusB = (recB['status'] ?? '').toString().toLowerCase();
+    final hasExplicitStatusB = statusB.isNotEmpty && statusB != 'unmarked';
 
-    if (punchesExist) {
-      if (statusA == 'late' || statusB == 'late') {
-        merged['status'] = 'Late';
-      } else {
-        merged['status'] = 'Present';
+    if (hasExplicitStatusB) {
+      merged['status'] = recB['status'];
+      merged['leaveType'] = recB['leaveType'];
+      if (isExplicitNonPresentB) {
+        merged['manualOverride'] = true;
       }
-      merged['leaveType'] = null;
     } else {
-      const statusRank = {
-        'present': 10,
-        'late': 9,
-        'half_day': 8,
-        'leave': 7,
-        'holiday': 6,
-        'off': 5,
-        'absent': 4,
-        'unmarked': 1,
-        '': 0,
-      };
-      final rankA = statusRank[statusA] ?? 2;
-      final rankB = statusRank[statusB] ?? 2;
-      if (rankB > rankA) {
-        merged['status'] = recB['status'];
-        merged['leaveType'] = recB['leaveType'];
+      final punchesExist = _hasAnyPunch(merged);
+      if (punchesExist) {
+        if (statusA == 'late') {
+          merged['status'] = 'Late';
+        } else {
+          merged['status'] = 'Present';
+        }
+        merged['leaveType'] = null;
+      } else {
+        const statusRank = {
+          'present': 10,
+          'late': 9,
+          'half_day': 8,
+          'leave': 7,
+          'holiday': 6,
+          'off': 5,
+          'absent': 4,
+          'unmarked': 1,
+          '': 0,
+        };
+        final rankA = statusRank[statusA] ?? 2;
+        final rankB = statusRank[statusB] ?? 2;
+        if (rankB > rankA) {
+          merged['status'] = recB['status'];
+          merged['leaveType'] = recB['leaveType'];
+        }
       }
     }
 
@@ -2197,6 +2248,26 @@ class FinanceLocalStorage {
     merged['employeeId'] = employeeId;
     merged['date'] = dateStr;
     merged['branchId'] = branchId;
+    if (data.containsKey('status') && data['status'] != null) {
+      merged['status'] = data['status'];
+    }
+    if (data.containsKey('leaveType')) {
+      merged['leaveType'] = data['leaveType'];
+    }
+    if (data.containsKey('checkInTime')) {
+      merged['checkInTime'] = data['checkInTime'];
+      merged['arrivalTime'] = data['checkInTime'];
+    }
+    if (data.containsKey('checkOutTime')) {
+      merged['checkOutTime'] = data['checkOutTime'];
+      merged['departureTime'] = data['checkOutTime'];
+    }
+    if (data.containsKey('lastPunchTime')) {
+      merged['lastPunchTime'] = data['lastPunchTime'];
+    }
+    if (data.containsKey('manualOverride')) {
+      merged['manualOverride'] = data['manualOverride'];
+    }
     merged['remoteId'] = existingRecord?['remoteId'];
     merged['updatedAt'] = now;
     merged['syncStatus'] = 'pending';
@@ -2355,23 +2426,19 @@ class FinanceLocalStorage {
     final box = Hive.box(LocalStorageService.financeHolidaysBox);
     final cleanDept = (department ?? '').trim().toLowerCase();
 
+    final parts = monthKey.split('-');
+    if (parts.length < 2) return const {};
+    final year = int.tryParse(parts[0]) ?? DateTime.now().year;
+    final month = int.tryParse(parts[1]) ?? DateTime.now().month;
+    final daysInMonth = DateTime(year, month + 1, 0).day;
+
     for (final key in box.keys) {
       if (!key.toString().startsWith(prefix)) continue;
       final raw = box.get(key);
       if (raw is! Map) continue;
       final record = Map<String, dynamic>.from(raw);
-      final rawDate = record['date'];
-      String? recordDateStr;
-      if (rawDate is Timestamp) {
-        recordDateStr = DateFormat('yyyy-MM-dd').format(rawDate.toDate());
-      } else if (rawDate is String) {
-        try {
-          recordDateStr = DateFormat('yyyy-MM-dd').format(DateTime.parse(rawDate));
-        } catch (_) {
-          recordDateStr = rawDate;
-        }
-      }
-      if (recordDateStr == null || !recordDateStr.startsWith(monthKey)) continue;
+      final type = (record['type'] ?? 'adhoc').toString().toLowerCase();
+      final isFixed = (type == 'static' || type == 'fixed' || record['isRecurringAnnual'] == true);
 
       final departments = record['departments'] is List
           ? List<String>.from(record['departments'] as List).map((d) => d.trim().toLowerCase()).toList()
@@ -2379,33 +2446,56 @@ class FinanceLocalStorage {
       bool deptApplies = departments.isEmpty || departments.contains('all') || (cleanDept.isNotEmpty && departments.contains(cleanDept));
       if (!deptApplies) continue;
 
-      final exceptions = record['exceptions'] is List ? List<dynamic>.from(record['exceptions'] as List) : [];
-      bool isExcepted = false;
-      for (final ex in exceptions) {
-        final exStr = ex.toString().trim().toLowerCase();
-        if (cleanDept.isNotEmpty && exStr == cleanDept) {
-          isExcepted = true;
-          break;
+      if (isFixed) {
+        final rawDate = record['date'];
+        DateTime? recDate = rawDate is Timestamp ? rawDate.toDate() : (rawDate is String ? DateTime.tryParse(rawDate) : null);
+        final recMonth = (record['recurringMonth'] as num?)?.toInt() ?? recDate?.month;
+        final recDay = (record['recurringDay'] as num?)?.toInt() ?? recDate?.day;
+        if (recMonth == month && recDay != null && recDay >= 1 && recDay <= daysInMonth) {
+          holidays.add('$monthKey-${recDay.toString().padLeft(2, '0')}');
+        }
+      } else {
+        final rawDate = record['date'];
+        DateTime? recDate = rawDate is Timestamp ? rawDate.toDate() : (rawDate is String ? DateTime.tryParse(rawDate) : null);
+        final rawEnd = record['endDate'];
+        DateTime? endDate = rawEnd is Timestamp ? rawEnd.toDate() : (rawEnd is String && rawEnd.isNotEmpty ? DateTime.tryParse(rawEnd) : null);
+
+        if (recDate != null) {
+          if (endDate != null && endDate.isAfter(recDate)) {
+            var curr = DateTime(recDate.year, recDate.month, recDate.day);
+            final limit = DateTime(endDate.year, endDate.month, endDate.day);
+            while (curr.isBefore(limit) || curr.isAtSameMomentAs(limit)) {
+              final dStr = DateFormat('yyyy-MM-dd').format(curr);
+              if (dStr.startsWith(monthKey)) holidays.add(dStr);
+              curr = curr.add(const Duration(days: 1));
+            }
+          } else {
+            final dStr = DateFormat('yyyy-MM-dd').format(recDate);
+            if (dStr.startsWith(monthKey)) holidays.add(dStr);
+          }
         }
       }
-      if (isExcepted) continue;
-
-      holidays.add(recordDateStr);
     }
     return holidays;
   }
 
   static bool isHoliday({
     required String branchId,
-    required String department,
+    String department = 'all',
+    String role = 'all',
     required String dateStr,
+    String? employeeId,
   }) {
     if (branchId.isEmpty) return false;
     if (!Hive.isBoxOpen(LocalStorageService.financeHolidaysBox)) return false;
 
+    final targetDate = DateTime.tryParse(dateStr);
+    if (targetDate == null) return false;
+
     final prefix = '${branchId.toLowerCase().trim()}__hol__';
     final box = Hive.box(LocalStorageService.financeHolidaysBox);
     final cleanDept = department.trim().toLowerCase();
+    final cleanRole = role.trim().toLowerCase();
     final cleanBranch = branchId.trim().toLowerCase();
 
     for (final key in box.keys) {
@@ -2414,32 +2504,74 @@ class FinanceLocalStorage {
       if (raw is! Map) continue;
 
       final record = Map<String, dynamic>.from(raw);
-      
-      // Date check
+      final type = (record['type'] ?? 'adhoc').toString().toLowerCase();
+      final isFixed = (type == 'static' || type == 'fixed' || record['isRecurringAnnual'] == true);
+
       final rawDate = record['date'];
-      String? recordDateStr;
+      DateTime? recDate;
+      String? recDateStr;
       if (rawDate is Timestamp) {
-        recordDateStr = DateFormat('yyyy-MM-dd').format(rawDate.toDate());
+        recDate = rawDate.toDate();
+        recDateStr = DateFormat('yyyy-MM-dd').format(recDate);
       } else if (rawDate is String) {
-        try {
-          recordDateStr = DateFormat('yyyy-MM-dd').format(DateTime.parse(rawDate));
-        } catch (_) {
-          recordDateStr = rawDate;
+        recDate = DateTime.tryParse(rawDate);
+        recDateStr = recDate != null ? DateFormat('yyyy-MM-dd').format(recDate) : rawDate;
+      }
+
+      if (isFixed) {
+        final recMonth = (record['recurringMonth'] as num?)?.toInt() ?? recDate?.month;
+        final recDay = (record['recurringDay'] as num?)?.toInt() ?? recDate?.day;
+        if (recMonth != null && recDay != null) {
+          if (targetDate.month != recMonth || targetDate.day != recDay) continue;
+        } else if (recDateStr != null && recDateStr.length >= 10) {
+          if (dateStr.substring(5) != recDateStr.substring(5)) continue;
+        } else {
+          continue;
+        }
+      } else {
+        final endDateRaw = record['endDate'];
+        DateTime? endDate;
+        if (endDateRaw is Timestamp) {
+          endDate = endDateRaw.toDate();
+        } else if (endDateRaw is String && endDateRaw.isNotEmpty) {
+          endDate = DateTime.tryParse(endDateRaw);
+        }
+
+        if (recDate != null && endDate != null) {
+          final t = DateTime(targetDate.year, targetDate.month, targetDate.day);
+          final s = DateTime(recDate.year, recDate.month, recDate.day);
+          final e = DateTime(endDate.year, endDate.month, endDate.day);
+          if (t.isBefore(s) || t.isAfter(e)) continue;
+        } else {
+          if (recDateStr != dateStr) continue;
         }
       }
-      
-      if (recordDateStr != dateStr) continue;
 
       // Department scope check
       final departments = record['departments'] is List
           ? List<String>.from(record['departments'] as List).map((d) => d.trim().toLowerCase()).toList()
           : <String>[];
-      
-      // If departments list is empty or contains 'all', it applies to all departments
-      bool deptApplies = departments.isEmpty || departments.contains('all') || departments.contains(cleanDept);
+      bool deptApplies = departments.isEmpty || departments.contains('all') || cleanDept == 'all' || departments.contains(cleanDept);
       if (!deptApplies) continue;
 
-      // Exception check
+      // Role scope check
+      final roles = record['roles'] is List
+          ? List<String>.from(record['roles'] as List).map((r) => r.trim().toLowerCase()).toList()
+          : <String>[];
+      bool roleApplies = roles.isEmpty || roles.contains('all') || cleanRole == 'all' || roles.contains(cleanRole);
+      if (!roleApplies) continue;
+
+      // Working Employee Check (Duty on Holiday)
+      if (employeeId != null && employeeId.isNotEmpty) {
+        final workingEmps = record['workingEmployees'] is List
+            ? List<String>.from(record['workingEmployees'] as List)
+            : <String>[];
+        if (workingEmps.contains(employeeId)) {
+          return false; // This employee is designated to work on this holiday!
+        }
+      }
+
+      // Exception Check (Departments/Employees operating on Holiday)
       final exceptions = record['exceptions'] is List
           ? List<dynamic>.from(record['exceptions'] as List)
           : [];
@@ -2449,29 +2581,138 @@ class FinanceLocalStorage {
         if (ex is! Map) continue;
         final exBranch = ex['branchId']?.toString().trim().toLowerCase() ?? '';
         final exDept = ex['department']?.toString().trim().toLowerCase() ?? '';
+        final exEmpId = ex['employeeId']?.toString().trim() ?? '';
 
-        if (exBranch == 'all' && exDept == cleanDept) {
+        if (exEmpId.isNotEmpty && employeeId != null && exEmpId == employeeId) {
           isExcepted = true;
           break;
         }
-        if (exBranch == cleanBranch && exDept == cleanDept) {
-          isExcepted = true;
-          break;
-        }
-        if (exBranch == cleanBranch && exDept == 'all') {
+        if ((exBranch == 'all' || exBranch == cleanBranch) && (exDept == cleanDept || exDept == 'all')) {
           isExcepted = true;
           break;
         }
       }
 
-      if (isExcepted) {
-        continue;
-      }
+      if (isExcepted) continue;
 
       return true;
     }
 
     return false;
+  }
+
+  static Map<String, dynamic>? getHolidayForDate({
+    required String branchId,
+    String department = 'all',
+    String role = 'all',
+    required String dateStr,
+    String? employeeId,
+  }) {
+    if (branchId.isEmpty || !Hive.isBoxOpen(LocalStorageService.financeHolidaysBox)) return null;
+
+    final targetDate = DateTime.tryParse(dateStr);
+    if (targetDate == null) return null;
+
+    final prefix = '${branchId.toLowerCase().trim()}__hol__';
+    final box = Hive.box(LocalStorageService.financeHolidaysBox);
+    final cleanDept = department.trim().toLowerCase();
+    final cleanRole = role.trim().toLowerCase();
+    final cleanBranch = branchId.trim().toLowerCase();
+
+    for (final key in box.keys) {
+      if (!key.toString().startsWith(prefix)) continue;
+      final raw = box.get(key);
+      if (raw is! Map) continue;
+
+      final record = Map<String, dynamic>.from(raw);
+      final type = (record['type'] ?? 'adhoc').toString().toLowerCase();
+      final isFixed = (type == 'static' || type == 'fixed' || record['isRecurringAnnual'] == true);
+
+      final rawDate = record['date'];
+      DateTime? recDate;
+      String? recDateStr;
+      if (rawDate is Timestamp) {
+        recDate = rawDate.toDate();
+        recDateStr = DateFormat('yyyy-MM-dd').format(recDate);
+      } else if (rawDate is String) {
+        recDate = DateTime.tryParse(rawDate);
+        recDateStr = recDate != null ? DateFormat('yyyy-MM-dd').format(recDate) : rawDate;
+      }
+
+      if (isFixed) {
+        final recMonth = (record['recurringMonth'] as num?)?.toInt() ?? recDate?.month;
+        final recDay = (record['recurringDay'] as num?)?.toInt() ?? recDate?.day;
+        if (recMonth != null && recDay != null) {
+          if (targetDate.month != recMonth || targetDate.day != recDay) continue;
+        } else if (recDateStr != null && recDateStr.length >= 10) {
+          if (dateStr.substring(5) != recDateStr.substring(5)) continue;
+        } else {
+          continue;
+        }
+      } else {
+        final endDateRaw = record['endDate'];
+        DateTime? endDate;
+        if (endDateRaw is Timestamp) {
+          endDate = endDateRaw.toDate();
+        } else if (endDateRaw is String && endDateRaw.isNotEmpty) {
+          endDate = DateTime.tryParse(endDateRaw);
+        }
+
+        if (recDate != null && endDate != null) {
+          final t = DateTime(targetDate.year, targetDate.month, targetDate.day);
+          final s = DateTime(recDate.year, recDate.month, recDate.day);
+          final e = DateTime(endDate.year, endDate.month, endDate.day);
+          if (t.isBefore(s) || t.isAfter(e)) continue;
+        } else {
+          if (recDateStr != dateStr) continue;
+        }
+      }
+
+      final departments = record['departments'] is List
+          ? List<String>.from(record['departments'] as List).map((d) => d.trim().toLowerCase()).toList()
+          : <String>[];
+      bool deptApplies = departments.isEmpty || departments.contains('all') || cleanDept == 'all' || departments.contains(cleanDept);
+      if (!deptApplies) continue;
+
+      // Role scope check
+      final roles = record['roles'] is List
+          ? List<String>.from(record['roles'] as List).map((r) => r.trim().toLowerCase()).toList()
+          : <String>[];
+      bool roleApplies = roles.isEmpty || roles.contains('all') || cleanRole == 'all' || roles.contains(cleanRole);
+      if (!roleApplies) continue;
+
+      // Check if employee or department is on duty
+      bool isOnDuty = false;
+      if (employeeId != null && employeeId.isNotEmpty) {
+        final workingEmps = record['workingEmployees'] is List
+            ? List<String>.from(record['workingEmployees'] as List)
+            : <String>[];
+        if (workingEmps.contains(employeeId)) isOnDuty = true;
+      }
+
+      final exceptions = record['exceptions'] is List ? List<dynamic>.from(record['exceptions'] as List) : [];
+      for (final ex in exceptions) {
+        if (ex is! Map) continue;
+        final exBranch = ex['branchId']?.toString().trim().toLowerCase() ?? '';
+        final exDept = ex['department']?.toString().trim().toLowerCase() ?? '';
+        final exEmpId = ex['employeeId']?.toString().trim() ?? '';
+        if (exEmpId.isNotEmpty && employeeId != null && exEmpId == employeeId) {
+          isOnDuty = true;
+          break;
+        }
+        if ((exBranch == 'all' || exBranch == cleanBranch) && (exDept == cleanDept || exDept == 'all')) {
+          isOnDuty = true;
+          break;
+        }
+      }
+
+      return {
+        ...record,
+        'isOnDuty': isOnDuty,
+        'isHoliday': !isOnDuty,
+      };
+    }
+    return null;
   }
 
   static List<Map<String, dynamic>> getHolidays(String branchId) {
@@ -2497,15 +2738,72 @@ class FinanceLocalStorage {
     return list;
   }
 
+  static List<String> getAllEmployeeRoles() {
+    final Set<String> roles = {
+      'Teacher',
+      'Doctor',
+      'Nurse',
+      'Chef / Cook',
+      'Kitchen Boy',
+      'Office Boy',
+      'Driver',
+      'Security Guard',
+      'Accountant',
+      'Manager',
+      'Supervisor',
+      'Coordinator',
+      'Admin',
+      'Worker',
+      'Staff',
+    };
+    try {
+      final allEmps = getEmployees('all');
+      for (final e in allEmps) {
+        final r = (e['role'] ?? e['designation'] ?? '').toString().trim();
+        if (r.isNotEmpty && r.toLowerCase() != 'null') {
+          roles.add(r);
+        }
+      }
+    } catch (_) {}
+    final list = roles.toList();
+    list.sort();
+    return list;
+  }
+
+  static List<String> getAllDepartments() {
+    final Set<String> depts = {'Dispensary', 'Kitchen', 'Office', 'Madrassa', 'General', 'Education', 'Transport', 'Security'};
+    try {
+      final custom = getCustomDepartments();
+      depts.addAll(custom);
+      final allEmps = getEmployees('all');
+      for (final e in allEmps) {
+        final d = (e['department'] ?? '').toString().trim();
+        if (d.isNotEmpty && d.toLowerCase() != 'null') {
+          depts.add(d);
+        }
+      }
+    } catch (_) {}
+    final list = depts.toList();
+    list.sort();
+    return list;
+  }
+
   static Future<void> saveHoliday({
     required String name,
     required DateTime date,
+    DateTime? endDate,
+    String type = 'static', // 'static' (Fixed Annual), 'floating' (Eid / Variable), 'adhoc' (Rain / Emergency)
     required List<String> branches,
     required List<String> departments,
+    List<String> roles = const ['all'],
     required List<Map<String, dynamic>> exceptions,
+    List<String> workingEmployees = const [],
+    bool isPaid = true,
+    String? notes,
     required String performedBy,
+    String? holidayId,
   }) async {
-    final localId = _uuid.v4();
+    final localId = holidayId ?? _uuid.v4();
     final now = _nowIso();
 
     List<String> targetBranches = [];
@@ -2515,9 +2813,12 @@ class FinanceLocalStorage {
           .map((v) => Map<String, dynamic>.from(v as Map)['id']?.toString() ?? '')
           .where((id) => id.isNotEmpty)
           .toList();
+      if (targetBranches.isEmpty) targetBranches = ['karachi', 'all'];
     } else {
       targetBranches = branches;
     }
+
+    final isFixedAnnual = (type == 'static' || type == 'fixed');
 
     for (final bId in targetBranches) {
       final record = {
@@ -2525,10 +2826,18 @@ class FinanceLocalStorage {
         'localId': localId,
         'remoteId': null,
         'name': name,
-        'date': date.toIso8601String(),
+        'type': type,
+        'date': DateFormat('yyyy-MM-dd').format(date),
+        'endDate': endDate != null ? DateFormat('yyyy-MM-dd').format(endDate) : null,
+        'recurringMonth': isFixedAnnual ? date.month : null,
+        'recurringDay': isFixedAnnual ? date.day : null,
         'branches': branches,
         'departments': departments,
+        'roles': roles,
         'exceptions': exceptions,
+        'workingEmployees': workingEmployees,
+        'isPaid': isPaid,
+        'notes': notes,
         'updatedAt': now,
         'syncStatus': 'pending',
       };
@@ -2554,7 +2863,7 @@ class FinanceLocalStorage {
         entityId: localId,
         action: 'create',
         performedBy: performedBy,
-        reason: 'Created holiday: $name on ${DateFormat('yyyy-MM-dd').format(date)}',
+        reason: 'Created holiday: $name on ${DateFormat('yyyy-MM-dd').format(date)} ($type)',
         rawData: sanitized,
       );
     }
@@ -2892,7 +3201,9 @@ class FinanceLocalStorage {
             (lastPunch != null && lastPunch.isNotEmpty) ||
             (shifts != null && shifts.isNotEmpty);
 
-        if (hasPunch && status != 'late') {
+        final rawSt = (recMap['status'] ?? '').toString().toLowerCase().trim();
+        final isExplicitNonPresent = rawSt == 'absent' || rawSt == 'leave' || rawSt == 'holiday' || rawSt == 'off';
+        if (!isExplicitNonPresent && hasPunch && status != 'late') {
           status = 'present';
         }
       } else {
