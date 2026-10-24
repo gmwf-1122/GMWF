@@ -16,6 +16,7 @@ import '../widgets/dashboard_widgets.dart';
 import 'local_storage_service.dart';
 import 'camp_session_service.dart';
 import 'donations_local_storage.dart';
+import 'finance_local_storage.dart';
 import '../pages/madrassa/utils/madrassa_local_storage.dart';
 
 /// Indefinite cache for historical (non-today) BranchStats.
@@ -31,6 +32,7 @@ void clearLocalStatsCache() {
   _historicalStatsCache.clear();
   _cloudBranchStatsCache.clear();
   _cloudDayCountsCache.clear();
+  _cloudAuxCache.clear();
 }
 
 /// Computations already running, so a second caller (the dashboard's provider and its
@@ -577,6 +579,106 @@ Future<CloudDayCounts?> fetchCloudDayCountsCached(String branchId, DateTime date
   });
   _cloudDayCountsCache[key] = (now, future);
   return future;
+}
+
+/// Attendance figures for the dashboard tiles, read from Firestore. The tiles used to count
+/// only this PC's Hive, so HQ (and any PC that didn't mark the attendance) showed 0.
+class CloudAuxCounts {
+  int emp = 0;
+  int madrassa = 0;
+  int madrassaYesterday = 0;
+  int schoolStudents = 0;
+  int schoolTeachers = 0;
+}
+
+final Map<String, (DateTime, Future<CloudAuxCounts?>)> _cloudAuxCache = {};
+
+int _countPresentEntries(Map<String, dynamic>? doc, {bool nested = false}) {
+  if (doc == null) return 0;
+  final src = nested ? (doc['entries'] is Map ? doc['entries'] as Map : const {}) : doc;
+  var n = 0;
+  for (final v in src.values) {
+    if (v is Map) {
+      final s = (v['attendance'] ?? v['status'])?.toString().toLowerCase().trim();
+      if (s == 'present' || s == 'p') n++;
+    }
+  }
+  return n;
+}
+
+/// Present employees, madrassa students (today and yesterday) and school students/teachers
+/// across [branchIds]. About five reads per branch, cached for 10 minutes (cleared by refresh).
+Future<CloudAuxCounts?> fetchCloudAuxCountsCached(List<String> branchIds) {
+  final ids = branchIds.map((b) => LocalStorageService.sanitizeBranchId(b, fallback: b)).toSet().toList()..sort();
+  final key = ids.join(',');
+  final now = DateTime.now();
+  final cached = _cloudAuxCache[key];
+  if (cached != null && now.difference(cached.$1) < const Duration(minutes: 10)) return cached.$2;
+
+  final today = DateFormat('yyyy-MM-dd').format(now);
+  final yesterday = DateFormat('yyyy-MM-dd').format(now.subtract(const Duration(days: 1)));
+  final fs = FirebaseFirestore.instance;
+
+  Future<Map<String, dynamic>?> docData(DocumentReference<Map<String, dynamic>> ref) async {
+    try {
+      return (await ref.get().timeout(_cloudQueryTimeout)).data();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  final future = () async {
+    final out = CloudAuxCounts();
+    await Future.wait(ids.map((b) async {
+      final branch = fs.collection('branches').doc(b);
+      // Attendance is stored under the marking PC's spelling ('grt' / 'gujrat'); Karachi's
+      // sub-camps are mirrored into 'karachi', so it is read once.
+      final empBranches = b == 'karachi' ? const ['karachi'] : FinanceLocalStorage.attendanceBranchIds(b);
+      Future<int> empCount() async {
+        var n = 0;
+        for (final eb in empBranches) {
+          n += await _countOf(fs.collection('branches').doc(eb).collection('employee_attendance').doc(today)
+                  .collection('records').where('status', whereIn: ['present', 'late', 'overtime']))
+              .catchError((_) => 0);
+        }
+        return n;
+      }
+      final r = await Future.wait<Object?>([
+        empCount(),
+        docData(branch.collection('madrassa_daily_logs').doc(today)),
+        docData(branch.collection('madrassa_daily_logs').doc(yesterday)),
+        docData(branch.collection('school_attendance').doc(today)),
+        docData(branch.collection('school_teacher_attendance').doc(today)),
+      ]);
+      out.emp += r[0] as int;
+      out.madrassa += _countPresentEntries(r[1] as Map<String, dynamic>?);
+      out.madrassaYesterday += _countPresentEntries(r[2] as Map<String, dynamic>?);
+      out.schoolStudents += _countPresentEntries(r[3] as Map<String, dynamic>?, nested: true);
+      out.schoolTeachers += _countPresentEntries(r[4] as Map<String, dynamic>?, nested: true);
+    }));
+    return out;
+  }().then<CloudAuxCounts?>((v) => v).catchError((Object e) {
+    debugPrint('[HomeDashboard] cloud attendance counts failed: $e');
+    _cloudAuxCache.remove(key);
+    return null;
+  });
+  _cloudAuxCache[key] = (now, future);
+  return future;
+}
+
+/// Local attendance counts max-merged with the cloud ones (see [fetchCloudAuxCountsCached]).
+Future<Map<String, int>> mergeCloudAuxCounts(Map<String, int> local, List<String> branchIds) async {
+  final c = await fetchCloudAuxCountsCached(branchIds);
+  if (c == null) return local;
+  int mx(String k, int v) => (local[k] ?? 0) > v ? (local[k] ?? 0) : v;
+  return {
+    ...local,
+    'emp': mx('emp', c.emp),
+    'students': mx('students', c.schoolStudents),
+    'teachers': mx('teachers', c.schoolTeachers),
+    'madrassa': mx('madrassa', c.madrassa),
+    'madrassa_yesterday': mx('madrassa_yesterday', c.madrassaYesterday),
+  };
 }
 
 final Map<String, (DateTime, BranchStats?)> _cloudBranchStatsCache = {};

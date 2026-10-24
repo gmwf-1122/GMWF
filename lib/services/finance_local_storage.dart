@@ -4136,13 +4136,26 @@ class FinanceLocalStorage {
     return list;
   }
 
+  // Attendance is uploaded under the branch id the marking PC had (raw: 'grt' as well as
+  // 'gujrat', 'jalalpur_jattan' as well as 'jalalpurjattan'), so readers query every spelling.
+  static const Map<String, List<String>> _branchSpellings = {
+    'gujrat': ['gujrat', 'grt', 'gjt'],
+    'jalalpurjattan': ['jalalpurjattan', 'jalalpur_jattan', 'jlj'],
+    'sialkot': ['sialkot', 'skt'],
+    'rawalpindi': ['rawalpindi', 'rwp'],
+  };
+
+  /// Firestore branch ids that may hold [branchId]'s attendance (see [_branchSpellings]).
+  static List<String> attendanceBranchIds(String branchId) => _getKnownBranchIds(branchId);
+
   static List<String> _getKnownBranchIds(String branchId) {
     final clean = branchId.toLowerCase().trim();
     if (clean.isNotEmpty && clean != 'all' && clean != 'global') {
-      if (clean == 'karachi' || clean.contains('saddar') || clean.contains('kapaya') || clean.contains('haji')) {
+      if (clean == 'karachi' || clean == 'khi' || clean.contains('saddar') || clean.contains('kapaya') || clean.contains('haji')) {
         return ['karachi', 'saddar', 'haji_camp', 'kapaya'];
       }
-      return [clean];
+      final spellings = _branchSpellings[LocalStorageService.sanitizeBranchId(clean, fallback: clean)];
+      return spellings ?? [clean];
     }
     final empBranches = employeesBox.values
         .whereType<Map>()

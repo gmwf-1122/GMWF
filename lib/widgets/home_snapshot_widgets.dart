@@ -3557,7 +3557,8 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
     // 5. Fetch recent activity (cross-branch)
     final recentActivities = await RecentActivityService.getRecentActivityAsync(limit: 15);
     
-    final auxCounts = _computeLocalDashboardAuxCounts();
+    // Attendance tiles max-merged with Firestore (they were Hive-only, so HQ showed 0).
+    final auxCounts = await mergeCloudAuxCounts(_computeLocalDashboardAuxCounts(), branchIds);
     return SnapshotDashboardData(
       todayCombined: todayCombined,
       yesterdayCombined: yesterdayCombined,
@@ -3642,7 +3643,7 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
         ? combineBranchStats(branchRows.map((r) => r.today).toList()) 
         : todayStats;
 
-    final auxCounts = _computeLocalDashboardAuxCounts(branchId: branchId);
+    final auxCounts = await mergeCloudAuxCounts(_computeLocalDashboardAuxCounts(branchId: branchId), [branchId]);
     return SnapshotDashboardData(
       todayCombined: todayCombined,
       yesterdayCombined: yesterdayStats,
