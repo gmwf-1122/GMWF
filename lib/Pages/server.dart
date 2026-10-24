@@ -7181,13 +7181,8 @@ class ServerSyncManager {
                 .collection('prescriptions').doc(s);
             await setDoc(pRef1, cleanData);
           } catch (_) {}
-          try {
-            final pRef2 = db
-                .collection('branches').doc(effectiveBranchId)
-                .collection('patients').doc(pCnic)
-                .collection('prescriptions').doc(s);
-            await setDoc(pRef2, cleanData);
-          } catch (_) {}
+          // (No copy under patients/{cnic}/prescriptions: nothing reads it, and on the shared
+          // 20k-writes/day plan each extra copy per token adds up.)
         }
 
         // Direct write patient profile so historical patient details are queryable
@@ -7203,7 +7198,8 @@ class ServerSyncManager {
               if (cleanData['gender'] != null) 'gender': cleanData['gender'],
               if (cleanData['age'] != null) 'age': cleanData['age'],
               'branchId': effectiveBranchId,
-              'lastVisitedAt': cleanData['createdAt'] ?? DateTime.now().toIso8601String(),
+              // No per-visit field: an identical profile is skipped by CloudDb's fingerprint
+              // check, so repeat visits cost no write.
             };
             final patRef = db
                 .collection('branches').doc(effectiveBranchId)
@@ -7315,13 +7311,6 @@ class ServerSyncManager {
                 .collection('prescriptions').doc(cnic)
                 .collection('prescriptions').doc(s);
             await setDoc(pRef1, Map<String, dynamic>.from(cleanData)..addAll(updateMap));
-          } catch (_) {}
-          try {
-            final pRef2 = db
-                .collection('branches').doc(effectiveBranchId)
-                .collection('patients').doc(cnic)
-                .collection('prescriptions').doc(s);
-            await setDoc(pRef2, Map<String, dynamic>.from(cleanData)..addAll(updateMap));
           } catch (_) {}
         }
         try {
@@ -8010,7 +7999,11 @@ class ServerSyncManager {
             if (parsed != null) payload['joinDate'] = Timestamp.fromDate(parsed);
           }
           payload['lastUpdatedAt'] = FieldValue.serverTimestamp();
-          await setDoc(db.collection('branches').doc(effectiveBranchId).collection('madrassa_students').doc(studentId), payload);
+          payload['branchId'] = MadrassaLocalStorage.normalizeBranch(effectiveBranchId);
+          await setDoc(
+              db.collection('branches').doc(MadrassaLocalStorage.normalizeBranch(effectiveBranchId))
+                  .collection('madrassa_students').doc(studentId),
+              MadrassaLocalStorage.compactMediaForCloud(payload));
         }
         break;
 
