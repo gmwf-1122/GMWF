@@ -25,67 +25,16 @@ class DispenseQueue {
     return (e['dispenseStatus'] ?? '').toString().toLowerCase() == 'dispensed';
   }
 
-  /// Today (or a non-terminal entry carried over from the previous shift/day).
+  /// Whether the entry belongs to today's shift date. A token shows only on the date in its
+  /// serial: with the old 24-hour carry-over, yesterday's tokens sat in today's list and a
+  /// search for a slip's number could open yesterday's token and its medicines.
   static bool isEffectivelyToday(
     Map<String, dynamic> e,
     String currentTodayKey,
     String todayIso,
     String branchId,
-  ) {
-    final status = (e['status'] ?? '').toString().toLowerCase().trim();
-    final dispenseStatus = (e['dispenseStatus'] ?? '').toString().toLowerCase().trim();
-    // In the dispensary pharmacy, a token completed by the doctor is the MAIN active item to dispense!
-    // Terminal only applies once medicine is actually dispensed or the token is cancelled/deleted.
-    final isTerminal = status == 'dispensed' ||
-        dispenseStatus == 'dispensed' ||
-        status == 'cancelled' ||
-        status == 'expired' ||
-        status == 'reversed' ||
-        status == 'deleted';
-
-    final serial = (e['serial'] ?? e['id'] ?? '').toString().trim();
-    final serialDk = CampSessionService.getDateKeyFromSerial(serial);
-    final dk = (e['dateKey'] ?? '').toString().trim();
-    final rawTime = e['timestamp'] ?? e['createdAt'] ?? e['date'] ?? e['dispensedAt'] ?? e['completedAt'] ?? e['time'];
-
-    // 1. Exact match with today's dateKey or ISO date string
-    bool isTodayExact = false;
-    if (dk == currentTodayKey || (serialDk.isNotEmpty && serialDk == currentTodayKey)) {
-      isTodayExact = true;
-    } else if (rawTime != null) {
-      final rawStr = rawTime.toString();
-      if (rawStr.startsWith(todayIso)) {
-        isTodayExact = true;
-      } else {
-        final dt = DateTime.tryParse(rawStr);
-        // A token over 2 days old cannot resolve to today: skip the costly shift lookup, which ran
-        // for every historical token on every queue refresh.
-        if (dt != null && DateTime.now().difference(dt).inHours.abs() < 48) {
-          final dtKey = CampSessionService.resolveShiftAndDateKey(dt, branchId).dateKey;
-          if (dtKey == currentTodayKey) isTodayExact = true;
-        }
-      }
-    } else if (dk.isEmpty && serialDk.isEmpty) {
-      isTodayExact = true;
-    }
-
-    if (isTodayExact) return true;
-
-    // 2. Shift/Rollover Tolerance: Keep active/pending prescriptions in queue if within 24h
-    if (rawTime != null) {
-      final dt = DateTime.tryParse(rawTime.toString());
-      if (dt != null) {
-        final ageHours = DateTime.now().difference(dt).inHours.abs();
-        if (ageHours < 24) {
-          if (!isTerminal || ageHours < 16) return true;
-        }
-      }
-    } else if (!isTerminal) {
-      return true;
-    }
-
-    return false;
-  }
+  ) =>
+      CampSessionService.isTokenOnDate(e, currentTodayKey, branchId);
 
   static Map<String, dynamic> _userData() {
     try {

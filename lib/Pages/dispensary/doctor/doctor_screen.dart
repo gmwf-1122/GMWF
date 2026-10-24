@@ -9,7 +9,6 @@ import 'package:gmwf/design/components/app_toast.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:gmwf/design/components/flushbar_compat.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:intl/intl.dart';
 
 import 'package:gmwf/services/local_storage_service.dart';
 import 'package:gmwf/services/sync_service.dart';
@@ -788,21 +787,18 @@ class _DoctorScreenState extends State<DoctorScreen>
       _selectedPatientData = null;
       _isSaving = false; // Reset so next patient can be selected without being blocked!
 
-      // Auto-select next waiting patient from today's queue (including rollover waiting tokens)
+      // Auto-select the next waiting patient from today's tokens only. Yesterday's waiting
+      // tokens used to be included and, sorting first by serial, were always opened next.
       final userDisp = CampSessionService.getActiveCamp(widget.branchId);
       final todayKey = CampSessionService.resolveShiftAndDateKey(null, widget.branchId).dateKey;
-      final prevDateKey = DateFormat('ddMMyy').format(DateTime.now().subtract(const Duration(days: 1)));
       final waiting = LocalStorageService.getLocalEntries(
         widget.branchId,
         dispensaryId: userDisp,
         filterByCamp: true,
       ).where((e) {
-        final dk = (e['dateKey'] ?? '').toString().trim();
-        final s = (e['serial'] ?? e['id'] ?? '').toString().trim();
-        final serialDk = CampSessionService.getDateKeyFromSerial(s);
         final st = (e['status'] ?? '').toString().toLowerCase().trim();
         if (st != 'waiting') return false;
-        return (dk == todayKey || serialDk == todayKey || dk == prevDateKey || serialDk == prevDateKey);
+        return CampSessionService.isTokenOnDate(e, todayKey, widget.branchId);
       }).toList();
 
       if (waiting.isNotEmpty) {

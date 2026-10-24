@@ -5639,28 +5639,10 @@ class ServerSyncManager {
       final Map<String, Map<String, dynamic>> dedupedEntries = {};
       for (final b in branchesToQuery) {
         for (final e in LocalStorageService.getLocalEntries(b)) {
-          final dk = (e['dateKey'] ?? '').toString().trim();
           final serial = (e['serial'] ?? e['id'] ?? '').toString().trim();
-          final serialDk = CampSessionService.getDateKeyFromSerial(serial);
-          final status = (e['status'] ?? '').toString().toLowerCase().trim();
-          final dispenseStatus = (e['dispenseStatus'] ?? '').toString().toLowerCase().trim();
-          final isWaitingOrActive = status == 'waiting' || status == 'in_consultation' || status == 'skipped' || (dispenseStatus != 'dispensed');
-
-          bool shouldInclude = (dk == today || dk.startsWith(today) || serialDk == today || serialDk.startsWith(today));
-          if (!shouldInclude) {
-            final createdAt = (e['createdAt'] ?? e['timestamp'] ?? '').toString().trim();
-            if (createdAt.isNotEmpty) {
-              final parsed = DateTime.tryParse(createdAt);
-              if (parsed != null) {
-                final entryDk = CampSessionService.resolveShiftAndDateKey(parsed, branchId).dateKey;
-                if (entryDk == today || DateTime.now().difference(parsed).inHours.abs() < 24) {
-                  shouldInclude = true;
-                }
-              }
-            } else if (isWaitingOrActive) {
-              shouldInclude = true;
-            }
-          }
+          // Only tokens dated today by their serial. The old 24-hour carry-over re-pushed
+          // yesterday's tokens to every desk the next morning.
+          final shouldInclude = CampSessionService.isTokenOnDate(e, today, branchId);
           if (shouldInclude && serial.isNotEmpty) {
             dedupedEntries[serial.toUpperCase()] = e;
           }

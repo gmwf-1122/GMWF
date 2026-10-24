@@ -1708,6 +1708,36 @@ class CampSessionService {
     return parts[0];
   }
 
+  static bool _isDdMMyy(String s) {
+    if (!RegExp(r'^\d{6}$').hasMatch(s)) return false;
+    final d = int.parse(s.substring(0, 2));
+    final m = int.parse(s.substring(2, 4));
+    return d >= 1 && d <= 31 && m >= 1 && m <= 12;
+  }
+
+  /// The shift date (ddMMyy) a token belongs to. The date in its serial decides:
+  /// 241026M-SADD-005 belongs to 24 Oct 2026 and to no other day, however recently it
+  /// was created or replayed. The stored dateKey is used only when the serial has no date,
+  /// and the creation time only when neither has one. '' when nothing dates the token.
+  static String tokenDateKey(Map e, [String? branchId]) {
+    final serialDk = getDateKeyFromSerial((e['serial'] ?? e['id'] ?? '').toString());
+    if (_isDdMMyy(serialDk)) return serialDk;
+    final dk = (e['dateKey'] ?? '').toString().trim();
+    if (_isDdMMyy(dk)) return dk;
+    final raw = e['createdAt'] ?? e['timestamp'] ?? e['time'] ?? e['date'];
+    final DateTime? dt = raw is Timestamp
+        ? raw.toDate()
+        : raw is DateTime
+            ? raw
+            : DateTime.tryParse(raw?.toString() ?? '');
+    if (dt == null) return '';
+    return resolveShiftAndDateKey(dt, branchId).dateKey;
+  }
+
+  /// Whether a token belongs to the shift date [dateKey] (see [tokenDateKey]).
+  static bool isTokenOnDate(Map e, String dateKey, [String? branchId]) =>
+      tokenDateKey(e, branchId) == dateKey;
+
   /// Returns a clean short keyword tag for token serial prefixes (e.g. 'SKT', 'LHR', 'RWP', 'GRT', 'JLJ', 'SADD', 'HAJI', 'KAP')
   static String getDispensaryKeyword(String? id, {String? branchId}) {
     final effectiveCamp = (id != null && id.trim().isNotEmpty && id.trim().toLowerCase() != 'all')

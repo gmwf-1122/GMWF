@@ -159,66 +159,11 @@ class _PatientQueueState extends State<PatientQueue> {
     return false;
   }
 
-  bool _isEffectivelyToday(Map<String, dynamic> e, String currentTodayKey, String todayIso) {
-    final status = (e['status'] ?? '').toString().toLowerCase().trim();
-    final dispenseStatus = (e['dispenseStatus'] ?? '').toString().toLowerCase().trim();
-    final isTerminal = status == 'dispensed' ||
-        dispenseStatus == 'dispensed' ||
-        status == 'cancelled' ||
-        status == 'expired' ||
-        status == 'reversed' ||
-        status == 'deleted';
-
-    final serial = (e['serial'] ?? e['id'] ?? '').toString().trim();
-    final serialDk = CampSessionService.getDateKeyFromSerial(serial);
-    final dk = (e['dateKey'] ?? '').toString().trim();
-    final rawTime = e['createdAt'] ?? e['timestamp'] ?? e['date'] ?? e['time'];
-
-    // 1. Exact match with today's dateKey or ISO date string
-    bool isTodayExact = false;
-    if (dk == currentTodayKey || (serialDk.isNotEmpty && serialDk == currentTodayKey)) {
-      isTodayExact = true;
-    } else if (rawTime != null) {
-      final rawStr = rawTime.toString();
-      if (rawStr.startsWith(todayIso)) {
-        isTodayExact = true;
-      } else {
-        final dt = DateTime.tryParse(rawStr);
-        // A token over 2 days old cannot resolve to today: skip the costly shift lookup, which ran
-        // for every historical token on every queue refresh.
-        if (dt != null && DateTime.now().difference(dt).inHours.abs() < 48) {
-          final dtKey = CampSessionService.resolveShiftAndDateKey(dt, widget.branchId).dateKey;
-          if (dtKey == currentTodayKey) isTodayExact = true;
-        }
-      }
-    } else if (dk.isEmpty && serialDk.isEmpty) {
-      isTodayExact = true;
-    }
-
-    if (isTodayExact) return true;
-
-    // 2. Rollover & Clock Skew Tolerance:
-    // If a patient is waiting/in consultation/skipped, or token was created within the last 24h,
-    // keep it visible so doctor can examine the patient and write the prescription!
-    final isWaitingOrActive = status == 'waiting' ||
-        status == 'in_consultation' ||
-        status == 'in consultation' ||
-        status == 'skipped';
-
-    if (rawTime != null) {
-      final dt = DateTime.tryParse(rawTime.toString());
-      if (dt != null) {
-        final ageHours = DateTime.now().difference(dt).inHours.abs();
-        if (ageHours < 24 && (isWaitingOrActive || !isTerminal || ageHours < 16)) {
-          return true;
-        }
-      }
-    } else if (isWaitingOrActive) {
-      return true;
-    }
-
-    return false;
-  }
+  // A token shows only on the date in its serial. There is no "recent" carry-over: a token
+  // replayed from a desk's outbox the next day (e.g. after a server crash) used to land in the
+  // waiting list next to today's tokens, sorted by number, and got prescribed on by mistake.
+  bool _isEffectivelyToday(Map<String, dynamic> e, String currentTodayKey, String todayIso) =>
+      CampSessionService.isTokenOnDate(e, currentTodayKey, widget.branchId);
 
   // ─── Strict two-group sort ─────────────────────────────────────────────────
   List<Map<String, dynamic>> _getSortedQueue() {

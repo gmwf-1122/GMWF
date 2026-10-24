@@ -958,50 +958,9 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
     return true;
   }
 
-  bool _isEffectivelyToday(Map<String, dynamic> e, String currentTodayKey, String todayIso) {
-    final serial = (e['serial'] ?? e['id'] ?? '').toString().trim();
-    final serialDk = CampSessionService.getDateKeyFromSerial(serial);
-    final dk = (e['dateKey'] as String?)?.trim() ?? '';
-    final rawTime = e['createdAt'] ?? e['timestamp'] ?? e['time'] ?? e['date'];
-
-    // 1. Exact match with today's dateKey or ISO date string only
-    if (dk == currentTodayKey || (serialDk.isNotEmpty && serialDk == currentTodayKey)) {
-      return true;
-    } else if (rawTime != null) {
-      final rawStr = rawTime.toString();
-      if (rawStr.startsWith(todayIso)) {
-        return true;
-      } else {
-        final dt = DateTime.tryParse(rawStr);
-        // A token over 2 days old cannot resolve to today: skip the costly shift lookup, which ran
-        // for every historical token on every queue refresh.
-        if (dt != null && DateTime.now().difference(dt).inHours.abs() < 48) {
-          final dtKey = CampSessionService.resolveShiftAndDateKey(dt, widget.branchId).dateKey;
-          if (dtKey == currentTodayKey) return true;
-        }
-      }
-    }
-
-    // 2. Rollover & Clock Skew Tolerance:
-    // If a token was issued in the last 24 hours or is actively in progress/waiting,
-    // NEVER hide it from the receptionist's desk!
-    final status = (e['status'] as String?)?.toLowerCase().trim() ?? '';
-    final isWaitingOrActive = status == 'waiting' || status == 'in_consultation' || status == 'in consultation' || status == 'skipped';
-
-    if (rawTime != null) {
-      final dt = DateTime.tryParse(rawTime.toString());
-      if (dt != null) {
-        final ageHours = DateTime.now().difference(dt).inHours.abs();
-        if (ageHours < 24 && (isWaitingOrActive || ageHours < 16)) {
-          return true;
-        }
-      }
-    } else if (isWaitingOrActive) {
-      return true;
-    }
-
-    return false;
-  }
+  // A token shows only on the date in its serial (no "recent" carry-over).
+  bool _isEffectivelyToday(Map<String, dynamic> e, String currentTodayKey, String todayIso) =>
+      CampSessionService.isTokenOnDate(e, currentTodayKey, widget.branchId);
 
   Timer? _debounceRebuildTimer;
   void _debouncedRebuild() {
