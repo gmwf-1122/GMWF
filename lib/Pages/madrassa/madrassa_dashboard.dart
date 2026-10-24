@@ -1333,16 +1333,33 @@ class _MadrassaDashboardState extends State<MadrassaDashboard> {
             ),
           );
           final now = DateTime.now();
-          await MadrassaLocalStorage.downloadStudents(widget.branchId, force: true);
+          // Upload first: this button used to only download, so students saved on this PC
+          // stayed queued however often it was pressed, while it still said "completed".
+          await SyncService().triggerUpload(force: true, urgent: true);
+          final downloaded = await MadrassaLocalStorage.downloadStudents(widget.branchId, force: true);
           await MadrassaLocalStorage.downloadLogsForMonth(widget.branchId, now.year, now.month);
           await MadrassaLocalStorage.downloadHolidays(widget.branchId);
+          final pending = MadrassaLocalStorage.pendingStudentUploads();
           if (mounted) setState(() {});
           if (context.mounted) {
-            AppToast.showSnackBar(context, 
+            final ok = downloaded && pending == 0;
+            final String msg;
+            if (ok) {
+              msg = context.isUrdu ? 'ڈیٹا کامیابی سے اپ ڈیٹ ہو گیا' : 'Sync completed successfully!';
+            } else if (!downloaded) {
+              msg = context.isUrdu
+                  ? 'کلاؤڈ سے رابطہ نہیں ہو سکا۔ انٹرنیٹ چیک کر کے دوبارہ کوشش کریں'
+                  : 'Could not reach the cloud. Check the internet and try again.';
+            } else {
+              msg = context.isUrdu
+                  ? '$pending طالب علم ابھی اپ لوڈ ہونا باقی ہیں'
+                  : '$pending student(s) still waiting to upload. They will retry automatically.';
+            }
+            AppToast.showSnackBar(context,
               SnackBar(
-                content: Text(context.isUrdu ? 'ڈیٹا کامیابی سے اپ ڈیٹ ہو گیا' : 'Sync completed successfully!'),
-                backgroundColor: SoftPalette.teal550,
-                duration: const Duration(seconds: 2),
+                content: Text(msg),
+                backgroundColor: ok ? SoftPalette.teal550 : SoftPalette.amber600,
+                duration: Duration(seconds: ok ? 2 : 5),
               ),
             );
           }

@@ -131,13 +131,17 @@ class RealtimeEvents {
   }) {
     // Make a clean copy of data.
     // Preserve branchId for entity models (employee, user, donor, patient, student)
+    // Madrassa receivers (RealtimeRouter._handleMadrassaEvent) read data['branchId'] for every
+    // type; without it daily logs, attendance, fees and offboards sent over the LAN were dropped
+    // and peers only saw them after a slow Firestore pull.
     final cleanData = Map<String, dynamic>.from(data);
+    final isMadrassa = type.contains('madrassa');
     if (type != saveEmployee &&
         type != saveUser &&
         type != saveDonor &&
         type != savePatient &&
-        type != saveMadrassaStudent &&
-        type != saveFaculty) {
+        type != saveFaculty &&
+        !isMadrassa) {
       cleanData.remove('branchId');
     }
     
