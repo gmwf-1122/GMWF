@@ -385,7 +385,8 @@ Future<BranchStats> fetchBranchStats(String originalBranchId, {DashboardFilter? 
           das++;
         }
 
-        if (status == 'dispensed' || status == 'completed') {
+        // 'completed' means prescribed; only a dispense sets dispenseStatus 'dispensed'.
+        if (status == 'dispensed' || (val['dispenseStatus'] ?? '').toString().toLowerCase() == 'dispensed') {
           dispensed++;
         }
       }
@@ -528,7 +529,8 @@ Future<BranchStats> fetchBranchStats(String originalBranchId, {DashboardFilter? 
             final cachedDocs = LocalStorageService.getBranchDayCache(b, dk, 'dispensary');
             if (cachedDocs != null) {
               for (final val in cachedDocs) {
-                final rawType = val['type']?.toString().toLowerCase() ?? '';
+                // Serial docs carry 'queueType'; 'type' is absent, so nothing was counted.
+                final rawType = (val['queueType'] ?? val['type'])?.toString().toLowerCase() ?? '';
                 final normType = rawType.replaceAll('-', '').replaceAll('_', '').trim();
                 final days = (val['daysOfMedicine'] as num?)?.toInt() ?? 1;
                 if (onlyMulti && days <= 1) continue;

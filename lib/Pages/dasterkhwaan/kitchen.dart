@@ -180,7 +180,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
 
   final DateFormat _dateFmt    = DateFormat('yyyy-MM-dd');
   final DateFormat _displayFmt = DateFormat('dd MMM yyyy');
-  late final String today = _dateFmt.format(DateTime.now());
+  String get today => _dateFmt.format(DateTime.now()); // not frozen at screen open: tokens after midnight went to yesterday
 
   List<StockItem> _allStockItems = [];
   bool _stockLoaded = false;
@@ -291,7 +291,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
     _role = widget.role;
 
     if (widget.branchId != null && widget.branchId!.isNotEmpty && widget.branchId != 'all') {
-      _branchId = widget.branchId;
+      _branchId = LocalStorageService.sanitizeBranchId(widget.branchId);
       _username = widget.username ?? 'Kitchen Staff';
       SyncService().start(_branchId!);
       _loadAllStockItems().then((_) => _applyPreviousDaySaved());
@@ -326,7 +326,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
             SyncService().start(b);
             setState(() {
               _username = (u['username'] ?? u['name'] ?? user.email?.split('@').first ?? 'Kitchen Staff').toString();
-              _branchId = b;
+              _branchId = LocalStorageService.sanitizeBranchId(b);
               _role ??= u['role']?.toString();
             });
             await _loadAllStockItems();
@@ -340,7 +340,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
           SyncService().start(cb);
           setState(() {
             _username = user.email?.split('@').first ?? 'Kitchen Staff';
-            _branchId = cb;
+            _branchId = LocalStorageService.sanitizeBranchId(cb);
           });
           await _loadAllStockItems();
           await _applyPreviousDaySaved();
@@ -367,7 +367,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
               _username = data['username'] ??
                   user.email?.split('@').first ??
                   'Kitchen Staff';
-              _branchId = b;
+              _branchId = LocalStorageService.sanitizeBranchId(b);
               _role ??= data['role'];
             });
           }
@@ -399,7 +399,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
               _username = data['username'] ??
                   user.email?.split('@').first ??
                   'Kitchen Staff';
-              _branchId = branch.id;
+              _branchId = LocalStorageService.sanitizeBranchId(branch.id);
               _role ??= data['role'];
             });
           }

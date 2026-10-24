@@ -1491,7 +1491,15 @@ class _PatientFormState extends State<PatientForm> {
 
       final queueType = _resolvedQueueType;
       final now = DateTime.now();
-      final dateKey = DateFormat('ddMMyy').format(now);
+      // The token's own date (from its serial), not today's: dispensing a night-shift or
+      // previous-day token wrote a stub under today's serials document, which inflated today's
+      // count while the real token never showed as dispensed.
+      final serialDateKey = CampSessionService.getDateKeyFromSerial(serial);
+      final dateKey = serialDateKey.length == 6
+          ? serialDateKey
+          : (widget.queueEntry['dateKey']?.toString().trim().isNotEmpty == true
+              ? widget.queueEntry['dateKey'].toString().trim()
+              : DateFormat('ddMMyy').format(now));
       final nowIso = now.toIso8601String();
       final dispenserName = widget.dispenserName ?? 'Unknown Dispenser';
 
@@ -1683,8 +1691,10 @@ class _PatientFormState extends State<PatientForm> {
           // When connected, the LAN server handles cloud sync from the dispense_completed event.
           if (!RealtimeManager().isConnected) {
             try {
+              // Same folded branch id as the uploaders ('grt' → 'gujrat'); the raw id put the
+              // dispense in a branch document the dashboard never reads.
               final branchRef = CloudDb.instance
-                  .collection('branches').doc(widget.branchId);
+                  .collection('branches').doc(LocalStorageService.sanitizeBranchId(widget.branchId));
               await branchRef.collection('serials').doc(campDocKey)
                   .collection(queueType).doc(upperSerial)
                   .set(minimalUpdate, SetOptions(merge: true));

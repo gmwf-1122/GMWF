@@ -3470,7 +3470,9 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
       } else if (norm.contains('rawalpindi') || norm.contains('pindi')) {
         cleanBranchIds.add('rawalpindi');
       } else if (norm.isNotEmpty && norm != 'all' && norm != 'global' && norm != 'unknown') {
-        cleanBranchIds.add(norm);
+        // Short ids ('grt', 'skt', 'rwp', 'khi', 'jlj') fold to their branch; as rows of their
+        // own they double-counted local records and looked up empty cloud branches.
+        cleanBranchIds.add(LocalStorageService.sanitizeBranchId(norm, fallback: norm));
       }
     }
     final branchIds = cleanBranchIds.toList();
@@ -3478,7 +3480,7 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
     // 2. Fetch today-vs-yesterday per branch. This PC is on no clinic's LAN, so the figures
     // are combined with cached cloud counts (the local-only view is buildLocalSnapshotDashboardData).
     final Map<String, TodayVsYesterday> statsMap = await fetchTodayVsYesterdayPerBranch(branchIds, allowRemoteFallback: true);
-    final weeklyPatients = await fetchWeeklyPatientCounts(branchIds);
+    final weeklyPatients = await fetchWeeklyPatientCounts(branchIds, includeCloud: true);
 
     // 3. Build branch/camp rows for table
     final List<HomeBranchRow> branchRows = [];
@@ -3504,6 +3506,9 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
           nonZakat: hasCampBreakdown ? karachiCamps.kapayaNonZakat : value.today.nonZakat,
           gmwf: hasCampBreakdown ? karachiCamps.kapayaGmwf : value.today.gmwf,
           prescribed: value.today.prescribed,
+          // Karachi's dispensed total (the camp breakdown has none per camp). Both rows used
+          // to omit it, so Karachi always added 0 dispensed to the combined figure.
+          dispensed: value.today.dispensed,
           dispensaryRevenue: hasCampBreakdown ? karachiCamps.kapayaRevenue : value.today.dispensaryRevenue,
           donations: value.today.donations,
           dasterkhwaan: value.today.dasterkhwaan,
@@ -3567,18 +3572,24 @@ Future<SnapshotDashboardData> fetchSnapshotDashboardData(Map<String, dynamic> us
       onlineUsersCount: auxCounts['online'] ?? 1,
     );
   } else {
-    // Branch-locked role
-    final String branchId = userBranchId.isNotEmpty ? userBranchId : 'karachi';
-    
-    // 1. Fetch today vs yesterday stats for this single branch
-    final todayStats = await fetchBranchStats(branchId);
-    final yesterdayStats = await fetchHistoricalDayStats(branchId, DateTime.now().subtract(const Duration(days: 1)));
+    // Branch-locked role. The branch id is folded like the uploaders fold it ('grt' → 'gujrat',
+    // 'khi' → 'karachi'), otherwise the cloud counts are looked up under a branch nobody writes.
+    final String branchId = userBranchId.isNotEmpty
+        ? LocalStorageService.sanitizeBranchId(userBranchId)
+        : 'karachi';
+
+    // 1. Today vs yesterday, max-merged with the cloud counts. This used fetchBranchStats /
+    // fetchHistoricalDayStats, which read only this PC's Hive, so anything uploaded from other
+    // PCs of the branch never showed here.
+    final todayStats = await fetchLocalBranchStats(branchId, DateTime.now(), allowRemoteFallback: true);
+    final yesterdayStats = await fetchLocalBranchStats(
+        branchId, DateTime.now().subtract(const Duration(days: 1)), allowRemoteFallback: true);
     final weeklyPatients = await fetchWeeklyPatientCounts([branchId]);
-    
+
     // 2. Build branchRows for single branch/camps
     final List<HomeBranchRow> branchRows = [];
     if (branchId == 'karachi') {
-      final karachiCamps = await fetchKarachiCampBreakdown();
+      final karachiCamps = await fetchKarachiCampBreakdown(null, true);
       branchRows.add(HomeBranchRow(
         id: 'karachi_haji',
         name: 'Karachi — Haji Camp Dispensary', subtitle: 'Morning ${karachiCamps.hajiCampMorningPatients} • Evening ${karachiCamps.hajiCampEveningPatients}',
@@ -3721,7 +3732,9 @@ Future<SnapshotDashboardData> buildLocalSnapshotDashboardData(Map<String, dynami
       } else if (norm.contains('rawalpindi') || norm.contains('pindi')) {
         cleanBranchIds.add('rawalpindi');
       } else if (norm.isNotEmpty && norm != 'all' && norm != 'global' && norm != 'unknown') {
-        cleanBranchIds.add(norm);
+        // Short ids ('grt', 'skt', 'rwp', 'khi', 'jlj') fold to their branch; as rows of their
+        // own they double-counted local records and looked up empty cloud branches.
+        cleanBranchIds.add(LocalStorageService.sanitizeBranchId(norm, fallback: norm));
       }
     }
     final branchIds = cleanBranchIds.toList();
@@ -3928,6 +3941,10 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
   _DashboardUserKey get _userKey => _DashboardUserKey.fromMap(widget.userData);
   late Future<SnapshotDashboardData> _localFuture;
   static SnapshotDashboardData? _lastGlobalSnapshotData;
+  // Cloud-merged numbers (fetchSnapshotDashboardData). build() used to render only the
+  // provider's local-only data and overwrite this with it, so on HQ/chairman PCs, which hold no
+  // clinic tokens in Hive, everything uploaded by the branches showed as 0.
+  SnapshotDashboardData? _remoteData;
   static final Set<String> _shownAppreciationSessionKeys = {};
   bool _isTrophyDismissed = false;
   bool _isAppreciationDialogShowing = false;
@@ -3947,6 +3964,7 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
         final remoteData = await fetchSnapshotDashboardData(widget.userData);
         if (mounted) {
           setState(() {
+            _remoteData = remoteData;
             _lastGlobalSnapshotData = remoteData;
             _localFuture = Future.value(remoteData);
           });
@@ -4026,8 +4044,10 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
   void didUpdateWidget(covariant HomeSnapshotDashboard oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.userData != widget.userData) {
+      _remoteData = null; // belongs to the previous user
       _localFuture = buildLocalSnapshotDashboardData(widget.userData);
       _checkAndShowImmediateStartupAppreciation();
+      _triggerBackgroundRemoteSync();
     }
   }
 
@@ -4041,9 +4061,13 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
         unawaited(LocalStorageService.downloadDasterkhwaanTokens(b, days: 2, force: true));
       }
     }
+    final remote = fetchSnapshotDashboardData(widget.userData);
     setState(() {
-      _localFuture = fetchSnapshotDashboardData(widget.userData);
+      _localFuture = remote;
     });
+    remote.then((d) {
+      if (mounted) setState(() => _remoteData = d);
+    }).catchError((_) {});
     ref.invalidate(snapshotDashboardDataProvider(_userKey));
   }
 
@@ -4107,8 +4131,11 @@ class _HomeSnapshotDashboardState extends ConsumerState<HomeSnapshotDashboard> {
         );
       },
       data: (data) {
-        _lastGlobalSnapshotData = data;
-        return _buildBodyWithData(data, hPad: hPad);
+        // Prefer the cloud-merged numbers once they've arrived; local data is the instant
+        // first paint only.
+        final shown = _remoteData ?? data;
+        _lastGlobalSnapshotData = shown;
+        return _buildBodyWithData(shown, hPad: hPad);
       },
     );
   }

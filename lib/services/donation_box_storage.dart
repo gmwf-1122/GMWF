@@ -101,7 +101,9 @@ class DonationBoxStorage {
       final raw = hiveBox.get(key);
       if (raw is Map) {
         final box = DonationBox.fromMap(raw, key.toString());
-        if (branchId == 'all' || box.branchId == branchId) {
+        // Folded on both sides: boxes are uploaded under 'gujrat' while a user's id may be 'grt'.
+        if (branchId == 'all' ||
+            LocalStorageService.sanitizeBranchId(box.branchId) == LocalStorageService.sanitizeBranchId(branchId)) {
           results.add(box);
         }
       }
@@ -394,7 +396,8 @@ class DonationBoxStorage {
       final raw = hiveBox.get(key);
       if (raw is Map) {
         final opening = BoxOpening.fromMap(raw, key.toString());
-        if (branchId == 'all' || opening.branchId == branchId) {
+        if (branchId == 'all' ||
+            LocalStorageService.sanitizeBranchId(opening.branchId) == LocalStorageService.sanitizeBranchId(branchId)) {
           results.add(opening);
         }
       }
@@ -707,7 +710,8 @@ class DonationBoxStorage {
         final bSnap = await db.collection('branches').get();
         targetBranches = bSnap.docs.map((d) => d.id).toList();
       } else {
-        targetBranches = [branchId];
+        // The uploader writes under the folded id ('grt' → 'gujrat').
+        targetBranches = [LocalStorageService.sanitizeBranchId(branchId)];
       }
 
       final hiveBox = Hive.box(boxesBoxName);

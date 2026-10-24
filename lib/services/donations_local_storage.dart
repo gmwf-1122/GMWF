@@ -302,7 +302,8 @@ class DonationsLocalStorage {
     final rawStatus = data['status'];
     recordMap['status'] = rawStatus?.toString() ?? kStatusPending;
     recordMap['firestoreId'] = null;
-    final nowIso = DateTime.now().toIso8601String();
+    // UTC, like every other writer: downloadAllDonations compares these as strings.
+    final nowIso = DateTime.now().toUtc().toIso8601String();
     recordMap['lastUpdatedAt'] = nowIso;
     recordMap['updatedAt'] = nowIso;
 
@@ -742,9 +743,11 @@ class DonationsLocalStorage {
   /// All donations for branch, newest first. Credit keys excluded.
   static List<DonationRecord> getAllDonations(String branchIdRaw) {
     if (!Hive.isBoxOpen(donationsBox)) return [];
-    final branchId = branchIdRaw.toLowerCase().trim();
+    final rawId = branchIdRaw.toLowerCase().trim();
+    final isGlobal = rawId == 'all' || rawId.isEmpty;
+    // Keys use the folded id (saveDonation); a raw 'grt' prefix matched none of them.
+    final branchId = isGlobal ? rawId : LocalStorageService.sanitizeBranchId(rawId);
     final box = Hive.box(donationsBox);
-    final isGlobal = branchId == 'all' || branchId.isEmpty;
 
     return box.keys
         .where((k) {
@@ -1052,8 +1055,13 @@ class DonationsLocalStorage {
       {int days = 90, bool force = false, bool allTime = false}) async {
     int saved = 0;
     try {
-      final normBranch = branchId.toLowerCase().trim();
-      final syncKey = 'donations_$normBranch';
+      final rawBranch = branchId.toLowerCase().trim();
+      final normBranch = (rawBranch == 'all' || rawBranch.isEmpty)
+          ? rawBranch
+          : LocalStorageService.sanitizeBranchId(rawBranch);
+      // v2: watermarks saved before timestamps were normalised to UTC may sit hours ahead and
+      // skip donations; the new key starts one fresh date-window download.
+      final syncKey = 'donations_v2_$normBranch';
       final lastSyncedTs = force ? null : LocalStorageService.getLastSyncedServerTimestamp(syncKey);
 
       final cutoff = DateTime.now().subtract(Duration(days: days));
@@ -1136,7 +1144,10 @@ class DonationsLocalStorage {
           final lId = v['localId']?.toString();
           if (lId != null && lId.isNotEmpty) tombstoneIds.add(lId);
           final cleanRcpt = v['receiptNoClean']?.toString() ?? cleanReceiptNumber(v['receiptNo']?.toString() ?? '');
-          if (cleanRcpt.isNotEmpty) tombstoneReceipts.add(cleanRcpt);
+          // Receipt numbers repeat across branches: match within the same branch only, or deleting
+          // a receipt locally purged another branch's donation from the cloud.
+          final tBranch = LocalStorageService.sanitizeBranchId((v['branchId'] ?? '').toString());
+          if (cleanRcpt.isNotEmpty) tombstoneReceipts.add('$tBranch|$cleanRcpt');
         }
       }
 
@@ -1145,9 +1156,10 @@ class DonationsLocalStorage {
         final d = doc.data();
 
         final String? rawBranch = d['branchId'] as String?;
-        final docBranch = (rawBranch != null && rawBranch.isNotEmpty)
-            ? rawBranch.toLowerCase().trim()
-            : (doc.reference.parent.parent?.id ?? normBranch).toLowerCase().trim();
+        // Folded like saveDonation's keys ('grt' → 'gujrat'), so getAllDonations finds them.
+        final docBranch = LocalStorageService.sanitizeBranchId((rawBranch != null && rawBranch.isNotEmpty)
+            ? rawBranch
+            : (doc.reference.parent.parent?.id ?? normBranch));
         final date = (d['date'] as String?) ?? _today();
         final localId = (d['localId'] as String?) ?? doc.id;
         final key = _donationKey(docBranch, date, localId);
@@ -1156,12 +1168,16 @@ class DonationsLocalStorage {
         // If this document was deleted locally, purge it from Firestore and do NOT revive
         if (tombstoneIds.contains(doc.id) ||
             tombstoneIds.contains(localId) ||
-            (cleanRcpt.isNotEmpty && tombstoneReceipts.contains(cleanRcpt))) {
+            (cleanRcpt.isNotEmpty && tombstoneReceipts.contains('$docBranch|$cleanRcpt'))) {
           doc.reference.delete().catchError((_) {});
           continue;
         }
 
-        final docUpdatedAt = d['updatedAt']?.toString() ?? d['lastUpdatedAt']?.toString();
+        // Normalised to UTC before it becomes the watermark: older docs carry local-time strings
+        // (no 'Z') that sort ~5 h ahead and made the next query skip newer UTC-stamped donations.
+        final rawUpdatedAt = d['updatedAt']?.toString() ?? d['lastUpdatedAt']?.toString();
+        final parsedUpdatedAt = rawUpdatedAt == null ? null : DateTime.tryParse(rawUpdatedAt);
+        final docUpdatedAt = parsedUpdatedAt?.toUtc().toIso8601String();
         if (docUpdatedAt != null) {
           if (maxServerTs == null || docUpdatedAt.compareTo(maxServerTs) > 0) {
             maxServerTs = docUpdatedAt;
@@ -1293,7 +1309,8 @@ class DonationsLocalStorage {
           final lId = v['localId']?.toString();
           if (lId != null && lId.isNotEmpty) tombstoneIds.add(lId);
           final cleanRcpt = v['receiptNoClean']?.toString() ?? cleanReceiptNumber(v['receiptNo']?.toString() ?? '');
-          if (cleanRcpt.isNotEmpty) tombstoneReceipts.add(cleanRcpt);
+          final tBranch = LocalStorageService.sanitizeBranchId((v['branchId'] ?? '').toString());
+          if (cleanRcpt.isNotEmpty) tombstoneReceipts.add('$tBranch|$cleanRcpt'); // same branch only
         }
       }
 
@@ -1302,9 +1319,9 @@ class DonationsLocalStorage {
         final d = doc.data();
 
         final String? rawBranch = d['branchId'] as String?;
-        final docBranch = (rawBranch != null && rawBranch.isNotEmpty)
-            ? rawBranch.toLowerCase().trim()
-            : (doc.reference.parent.parent?.id ?? normBranch).toLowerCase().trim();
+        final docBranch = LocalStorageService.sanitizeBranchId((rawBranch != null && rawBranch.isNotEmpty)
+            ? rawBranch
+            : (doc.reference.parent.parent?.id ?? normBranch));
         final date = (d['date'] as String?) ?? _today();
         final localId = (d['localId'] as String?) ?? doc.id;
         final key = _donationKey(docBranch, date, localId);
@@ -1312,7 +1329,7 @@ class DonationsLocalStorage {
 
         if (tombstoneIds.contains(doc.id) ||
             tombstoneIds.contains(localId) ||
-            (cleanRcpt.isNotEmpty && tombstoneReceipts.contains(cleanRcpt))) {
+            (cleanRcpt.isNotEmpty && tombstoneReceipts.contains('$docBranch|$cleanRcpt'))) {
           doc.reference.delete().catchError((_) {});
           continue;
         }

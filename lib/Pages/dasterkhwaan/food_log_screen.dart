@@ -109,8 +109,10 @@ class _DasterkhwaanFoodLogScreenState extends State<DasterkhwaanFoodLogScreen> {
                         if (entry.value is Map) {
                           final data = Map<String, dynamic>.from(entry.value as Map);
                           data['id'] ??= entry.key.toString();
+                          final logBranch = (data['branchId']?.toString() ?? '').trim();
                           if ((data['dateKey']?.toString() ?? '') == dateKey &&
-                              (data['branchId']?.toString().toLowerCase() ?? '') == widget.branchId.toLowerCase()) {
+                              logBranch.isNotEmpty &&
+                              LocalStorageService.sanitizeBranchId(logBranch) == LocalStorageService.sanitizeBranchId(widget.branchId)) {
                             allItems.add(data);
                           }
                         }
@@ -505,7 +507,7 @@ class _AddFoodLogSheetState extends State<_AddFoodLogSheet> {
       final logId = 'food_log_${DateTime.now().millisecondsSinceEpoch}';
       final logData = <String, dynamic>{
         'id': logId,
-        'branchId': widget.branchId.toLowerCase(),
+        'branchId': LocalStorageService.sanitizeBranchId(widget.branchId),
         'dateKey': dateKey,
         'sourceType': _sourceType == 0 ? 'cooked' : 'outside',
         'dishName': dish,
@@ -534,7 +536,7 @@ class _AddFoodLogSheetState extends State<_AddFoodLogSheet> {
       await LocalStorageService.enqueueSync({
         'type': 'save_dasterkhwan_food_log',
         'entityId': logId,
-        'branchId': widget.branchId.toLowerCase(),
+        'branchId': LocalStorageService.sanitizeBranchId(widget.branchId),
         'dateKey': dateKey,
         'data': logData,
       });
@@ -550,7 +552,7 @@ class _AddFoodLogSheetState extends State<_AddFoodLogSheet> {
           }
           await FirebaseFirestore.instance
               .collection('branches')
-              .doc(widget.branchId.toLowerCase())
+              .doc(LocalStorageService.sanitizeBranchId(widget.branchId))
               .collection('dasterkhwaan_food_logs')
               .doc(logId)
               .set(payload, SetOptions(merge: true));

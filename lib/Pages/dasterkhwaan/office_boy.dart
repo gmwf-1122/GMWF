@@ -181,7 +181,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
 
   final DateFormat _dateFmt    = DateFormat('yyyy-MM-dd');
   final DateFormat _displayFmt = DateFormat('EEE, dd MMM yyyy');
-  late final String today      = _dateFmt.format(DateTime.now());
+  String get today => _dateFmt.format(DateTime.now()); // not frozen at screen open: tokens after midnight went to yesterday
 
   StreamSubscription<DocumentSnapshot<Map<String, dynamic>>>? _dayDocSub;
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _tokensSub;

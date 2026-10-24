@@ -23,7 +23,15 @@ import '../pages/madrassa/utils/madrassa_local_storage.dart';
 final Map<String, BranchStats> _historicalStatsCache = {};
 final Map<String, _CachedLocalBranchStats> _localStatsTTLCache = {};
 
-void clearLocalStatsCache() => _localStatsTTLCache.clear();
+/// Called by the dashboard's refresh. It cleared only the local TTL cache, so the cloud counts
+/// (10 min for today, 6 h for past days) and frozen past-day local stats survived a refresh and
+/// a branch's fresh uploads stayed invisible.
+void clearLocalStatsCache() {
+  _localStatsTTLCache.clear();
+  _historicalStatsCache.clear();
+  _cloudBranchStatsCache.clear();
+  _cloudDayCountsCache.clear();
+}
 
 /// Computations already running, so a second caller (the dashboard's provider and its
 /// initState ask for the same figures together) waits for that one instead of starting a
@@ -196,12 +204,11 @@ Future<BranchStats> _computeLocalBranchStats(String branchId, String bId, DateTi
           final rawDate = e['dateKey'] ?? e['date'] ?? e['createdAt'] ?? e['timestamp'] ?? e['serial'];
           final rawSerial = (e['serial'] ?? e['id'] ?? e['tokenNumber'] ?? '').toString().trim().toLowerCase();
           if (_isMatchingBranch(b, bId, rawSerial) && (dk == dateKeyDmyy || _isSameDate(rawDate, dateKeyYmd, dateKeyDmyy))) {
-            final parts = rawSerial.split('-');
-            final sNum = parts.length > 1 ? parts.last : rawSerial;
-            final canonicalKey = parts.length > 2
-                ? '${parts[1]}-${parts[2]}'
-                : (parts.length > 1 ? '${parts[0]}-${parts[1]}' : sNum);
-            entryMap[canonicalKey] = e;
+            // Full serial (date + session letter + tag + number). 'tag-number' alone merged the
+            // morning and evening tokens with the same number (241026M-SADD-001 and
+            // 241026E-SADD-001), so patients seen were undercounted.
+            final canonicalKey = CampSessionService.cleanSerial(rawSerial, bId).toUpperCase();
+            entryMap[canonicalKey.isNotEmpty ? canonicalKey : rawSerial] = e;
           }
         }
       }
@@ -228,7 +235,8 @@ Future<BranchStats> _computeLocalBranchStats(String branchId, String bId, DateTi
           zRev += rev;
         }
 
-        if (status == 'dispensed' || status == 'completed') {
+        // 'completed' means prescribed; only a dispense sets dispenseStatus 'dispensed'.
+        if (status == 'dispensed' || (val['dispenseStatus'] ?? '').toString().toLowerCase() == 'dispensed') {
           dispensed++;
         }
       }
@@ -297,9 +305,10 @@ Future<BranchStats> _computeLocalBranchStats(String branchId, String bId, DateTi
       final cachedDocs = LocalStorageService.getBranchDayCache(bId, dateKeyDmyy, 'dispensary');
       if (cachedDocs != null) {
         for (final val in cachedDocs) {
-          final type = val['type']?.toString().toLowerCase();
+          // Serial docs carry 'queueType' ('type' is absent), so this fallback counted nothing.
+          final type = (val['queueType'] ?? val['type'])?.toString().toLowerCase();
           final days = (val['daysOfMedicine'] as num?)?.toInt() ?? 1;
-          
+
           if (type == 'zakat') {
             z++;
             final rev = 20 * days;
@@ -424,7 +433,10 @@ Future<BranchStats> _computeLocalBranchStats(String branchId, String bId, DateTi
 /// Token counts of one queue (zakat / non-zakat / gmwf) for one camp and day.
 class CloudQueueCount {
   int total = 0;
+  /// Prescribed by the doctor (status 'completed'); not the same as dispensed.
   int completed = 0;
+  /// Medicines handed out (dispenseStatus 'dispensed').
+  int dispensed = 0;
   int evening = 0;
   /// Days beyond the first, summed over all tokens (revenue is fee x days).
   int extraDays = 0;
@@ -434,13 +446,14 @@ class CloudQueueCount {
   void add(CloudQueueCount o) {
     total += o.total;
     completed += o.completed;
+    dispensed += o.dispensed;
     evening += o.evening;
     extraDays += o.extraDays;
   }
 }
 
 const _cloudQueues = ['zakat', 'non-zakat', 'gmwf'];
-const _cloudQueryTimeout = Duration(seconds: 6);
+const _cloudQueryTimeout = Duration(seconds: 10);
 
 Future<int> _countOf(Query<Map<String, dynamic>> q) async =>
     (await q.count().get().timeout(_cloudQueryTimeout)).count ?? 0;
@@ -454,10 +467,12 @@ Future<CloudQueueCount> _countQueue(CollectionReference<Map<String, dynamic>> co
     _countOf(col.where('status', isEqualTo: 'completed')),
     _countOf(col.where('session', isEqualTo: 'evening')),
     _countOf(col.where('daysOfMedicine', isGreaterThan: 1)),
+    _countOf(col.where('dispenseStatus', isEqualTo: 'dispensed')),
   ]);
   c.total = all - r[0];
   c.completed = r[1];
   c.evening = r[2];
+  c.dispensed = r[4];
   if (r[3] > 0) {
     final perDay = await Future.wait([
       for (var d = 2; d <= 7; d++) _countOf(col.where('daysOfMedicine', isEqualTo: d)),
@@ -484,6 +499,7 @@ Future<CloudQueueCount> _countQueueDeduped(List<CollectionReference<Map<String, 
         if (LocalStorageService.isPlaceholderValue(m[k])) m[k] = v;
       });
       if (doc.data()['status'] == 'completed') m['status'] = 'completed';
+      if (doc.data()['dispenseStatus'] == 'dispensed') m['dispenseStatus'] = 'dispensed';
     }
   }
   final c = CloudQueueCount();
@@ -492,6 +508,7 @@ Future<CloudQueueCount> _countQueueDeduped(List<CollectionReference<Map<String, 
     if (status == 'deleted' || status == 'void' || status == 'cancelled') continue;
     c.total++;
     if (status == 'completed') c.completed++;
+    if ((m['dispenseStatus'] ?? '').toString().toLowerCase() == 'dispensed') c.dispensed++;
     if ((m['session'] ?? '').toString().toLowerCase() == 'evening') c.evening++;
     final days = (m['daysOfMedicine'] as num?)?.toInt() ?? 1;
     if (days > 1) c.extraDays += days - 1;
@@ -518,13 +535,19 @@ Future<CloudDayCounts> _fetchCloudDayCounts(String branchId, String dmyy) async 
     groups.forEach((campKey, docIds) {
       for (final q in _cloudQueues) {
         jobs.add(() async {
-          final cols = [for (final id in docIds) base.doc(id).collection(q)];
-          final counts = await Future.wait(cols.map(_countQueue));
-          final filled = counts.where((c) => c.total > 0).length;
-          final c = filled > 1
-              ? await _countQueueDeduped(cols)
-              : counts.firstWhere((c) => c.total > 0, orElse: CloudQueueCount.new);
-          out.putIfAbsent(campKey, () => {}).putIfAbsent(q, CloudQueueCount.new).add(c);
+          // One queue failing (timeout, missing index) must not void the branch's other
+          // queues: a single error used to make the whole branch fall back to local zeros.
+          try {
+            final cols = [for (final id in docIds) base.doc(id).collection(q)];
+            final counts = await Future.wait(cols.map(_countQueue));
+            final filled = counts.where((c) => c.total > 0).length;
+            final c = filled > 1
+                ? await _countQueueDeduped(cols)
+                : counts.firstWhere((c) => c.total > 0, orElse: CloudQueueCount.new);
+            out.putIfAbsent(campKey, () => {}).putIfAbsent(q, CloudQueueCount.new).add(c);
+          } catch (e) {
+            debugPrint('[HomeDashboard] cloud count $fsBranch/$campKey/$q failed: $e');
+          }
         }());
       }
     });
@@ -599,7 +622,8 @@ Future<BranchStats?> _fetchFirestoreBranchStats(String branchId, DateTime date) 
     final counts = await fetchCloudDayCountsCached(bId, date);
     for (final queues in (counts ?? const <String, Map<String, CloudQueueCount>>{}).values) {
       queues.forEach((q, c) {
-        dispensed += c.completed;
+        // Was c.completed: every prescribed token counted as dispensed.
+        dispensed += c.dispensed;
         if (q == 'zakat') {
           z += c.total;
           zRev += 20 * (c.total + c.extraDays);
@@ -1598,7 +1622,9 @@ Future<List<HomeLineChartPoint>> fetchLocalChartPoints(List<String> branchIds, {
   return points;
 }
 
-Future<Map<String, int>> fetchWeeklyPatientCounts(List<String> branchIds) async {
+/// Patients per branch over the last 7 days. [includeCloud] adds the cloud token counts
+/// (count queries); the instant local first paint leaves it off.
+Future<Map<String, int>> fetchWeeklyPatientCounts(List<String> branchIds, {bool includeCloud = false}) async {
   final result = <String, int>{for (final b in branchIds) b: 0};
   if (branchIds.isEmpty) return result;
 
@@ -1645,7 +1671,7 @@ Future<Map<String, int>> fetchWeeklyPatientCounts(List<String> branchIds) async 
         final cachedDocs = LocalStorageService.getBranchDayCache(branchId, dmyy, 'dispensary');
         if (cachedDocs != null) {
           for (final c in cachedDocs) {
-            final t = c['type']?.toString().toLowerCase() ?? '';
+            final t = (c['queueType'] ?? c['type'])?.toString().toLowerCase() ?? '';
             if (t == 'zakat' || t == 'non-zakat' || t == 'gmwf') {
               branchCachedTotal++;
             }
@@ -1656,6 +1682,27 @@ Future<Map<String, int>> fetchWeeklyPatientCounts(List<String> branchIds) async 
         result[branchId] = branchCachedTotal;
       }
     }
+  }
+
+  // Combine with the cloud counts (cached: 10 min today, 6 h older days). Weekly counts were
+  // local only, so HQ and any PC that didn't issue the tokens itself showed 0.
+  if (includeCloud) try {
+    await Future.wait(branchIds.map((branchId) async {
+      final perDay = await Future.wait([
+        for (int i = 0; i < 7; i++) fetchCloudDayCountsCached(branchId, now.subtract(Duration(days: i))),
+      ]);
+      var cloudTotal = 0;
+      for (final day in perDay) {
+        for (final queues in (day ?? const <String, Map<String, CloudQueueCount>>{}).values) {
+          for (final c in queues.values) {
+            cloudTotal += c.total;
+          }
+        }
+      }
+      if (cloudTotal > (result[branchId] ?? 0)) result[branchId] = cloudTotal;
+    }));
+  } catch (e) {
+    debugPrint('Error adding cloud weekly patient counts: $e');
   }
 
   return result;
