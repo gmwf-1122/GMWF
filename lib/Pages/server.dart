@@ -4517,6 +4517,11 @@ class ServerSyncManager {
     'echo',
     'broadcast',
     'unknown',
+    // Donation receipt/collection broadcasts: the PC that took the donation uploads the
+    // donation itself; queued here they had no handler and went to branches/*/sync_records,
+    // which nothing reads (wasted writes on the shared quota).
+    'save_donation_receipt',
+    'save_donation_collection',
     '',
   };
 

@@ -9491,7 +9491,10 @@ class LocalStorageService {
               'branchId': sanitizedBranch,
               'dateKey': dateKey,
               'issuedBy': issuedBy,
-              'pricePerToken': 10.0,
+              // The uploaded price, else this PC's copy, else the old default.
+              'pricePerToken': (data['pricePerToken'] as num?)?.toDouble() ??
+                  (existing is Map ? (existing['pricePerToken'] as num?)?.toDouble() : null) ??
+                  10.0,
               'syncStatus': 'synced',
               'synced': true,
             };

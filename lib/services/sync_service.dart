@@ -4144,14 +4144,31 @@ class SyncService {
                   'localId': tokenId,
                   'branchId': bId,
                   'dateKey': dateKey,
+                  // Kept (direct writes include it); dropping it made downloads assume 10.
+                  if ((tMap['pricePerToken'] ?? data['pricePerToken']) != null)
+                    'pricePerToken': tMap['pricePerToken'] ?? data['pricePerToken'],
                 };
                 batch.set(tokensColRef.doc(tokenId), fsToken, SetOptions(merge: true));
               }
             }
 
+            // Session totals from each token's own session: a backfill batch has no batch-level
+            // session, so every token used to land in one session's total.
+            final perSession = <String, int>{};
+            for (final t in tokensList) {
+              if (t is Map) {
+                final s = (t['session'] ?? session).toString();
+                perSession[s] = (perSession[s] ?? 0) + 1;
+              }
+            }
+            final sessionCounts = perSession.values.fold<int>(0, (a, b) => a + b) == qty
+                ? perSession
+                : {session.toString(): qty};
+
             final dayUpdate = <String, dynamic>{
               if (!alreadyApplied) 'totalTokens': FieldValue.increment(qty),
-              if (!alreadyApplied) 'session_${session}_total': FieldValue.increment(qty),
+              if (!alreadyApplied)
+                for (final e in sessionCounts.entries) 'session_${e.key}_total': FieldValue.increment(e.value),
               if (batchId != null) 'appliedBatches': FieldValue.arrayUnion([batchId]),
               'lastUpdated': FieldValue.serverTimestamp(),
               'date': dateKey,

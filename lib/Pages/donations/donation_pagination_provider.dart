@@ -139,7 +139,12 @@ class DonationPaginationNotifier
     _loading = true;
 
     try {
-      var query = _baseQuery().limit(_pageSize);
+      // The 'all' view queries the 'donations' collection group, which returns each donation
+      // twice (branches/{b}/donations and the top-level copy); _dedup merges them, so fetch a
+      // double page to show as many donations per page as a branch view.
+      final isAllView = branchId == 'all' || branchId.isEmpty;
+      final pageLimit = isAllView ? _pageSize * 2 : _pageSize;
+      var query = _baseQuery().limit(pageLimit);
       if (_lastDocument != null) {
         query = query.startAfterDocument(_lastDocument!);
       }
@@ -163,7 +168,7 @@ class DonationPaginationNotifier
       }
 
       _lastDocument = snapshot.docs.last;
-      if (snapshot.docs.length < _pageSize) _hasMore = false;
+      if (snapshot.docs.length < pageLimit) _hasMore = false;
       debugPrint('[DonPagination] _fetchPage got ${snapshot.docs.length} docs (hasMore=$_hasMore, replace=$replace)');
 
       final newDocs = snapshot.docs.map((doc) {
