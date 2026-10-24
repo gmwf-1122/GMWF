@@ -368,8 +368,8 @@ class OfflineAuthService {
 
           final isPwMatch = (savedPass != null && (savedPass == password || savedPass == hashedInput)) ||
                             (savedHash != null && (savedHash == hashedInput || savedHash == password)) ||
-                            (savedPass == '1122' && (password == '1122' || password == '123456' || password == '112233')) ||
-                            (savedPass == '123456' && (password == '1122' || password == '123456' || password == '112233'));
+                            (savedPass == '1122' && (password == '123456' || password == '112233')) ||
+                            (savedPass == '123456' && (password == '123456' || password == '112233'));
 
           // Also check stored offline_pw__ keys from Hive
           bool hivePwMatch = false;

@@ -113,7 +113,7 @@ class AuthService {
     } catch (_) {}
 
     // Common application default PINs/passwords
-    candidatePasswords.addAll(['112233', '1122', '123456', '1234', 'password']);
+    candidatePasswords.addAll(['112233', '123456', '1234', 'password']);
 
     if (!authDeleted && candidateEmails.isNotEmpty) {
       FirebaseApp? secondaryApp;

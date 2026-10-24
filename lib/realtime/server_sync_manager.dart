@@ -2298,10 +2298,12 @@ class ServerSyncManager {
         fsData.remove('deletedAt');
         fsData['updatedAt'] = FieldValue.serverTimestamp();
 
-        // Write to BOTH root and branch
-        await _db.collection('users').doc(uid).set(fsData, SetOptions(merge: true)).timeout(const Duration(seconds: 10));
+        // Write to BOTH root and branch. deletedAt is deleted explicitly: leaving it out of a
+        // merge write kept the old value, and restored accounts stayed "Access Revoked".
+        final cloudUser = {...fsData, 'deletedAt': FieldValue.delete()};
+        await _db.collection('users').doc(uid).set(cloudUser, SetOptions(merge: true)).timeout(const Duration(seconds: 10));
         if (bId.isNotEmpty && bId != 'all' && bId != 'global') {
-          await _db.collection('branches').doc(bId).collection('users').doc(uid).set(fsData, SetOptions(merge: true)).timeout(const Duration(seconds: 10)).catchError((_) {});
+          await _db.collection('branches').doc(bId).collection('users').doc(uid).set(cloudUser, SetOptions(merge: true)).timeout(const Duration(seconds: 10)).catchError((_) {});
         }
         break;
 

@@ -3622,7 +3622,11 @@ class _UsersScreenState extends State<UsersScreen>
         if (cleanUid.isNotEmpty && (vUid == cleanUid || kStr == cleanUid || kStr == 'user:$cleanUid')) return true;
         if (cleanEmail.isNotEmpty && (vEmail == cleanEmail || kStr == cleanEmail || kStr == 'user:$cleanEmail')) return true;
         if (cleanUsername.isNotEmpty && (vUsername == cleanUsername || kStr == cleanUsername || kStr == 'user:$cleanUsername')) return true;
-        if (cleanName.isNotEmpty && (vName == cleanName || kStr == cleanName || kStr == 'user:$cleanName')) return true;
+        // Not by display name: other people with the same name were revoked/restored too.
+        if (cleanUid.isEmpty && cleanEmail.isEmpty && cleanUsername.isEmpty && cleanName.isNotEmpty &&
+            (vName == cleanName || kStr == cleanName || kStr == 'user:$cleanName')) {
+          return true;
+        }
         return false;
       }
 
@@ -3668,7 +3672,8 @@ class _UsersScreenState extends State<UsersScreen>
           if (empId.isNotEmpty && (eId == empId || kStr == empId || kStr == 'emp_$empId')) return true;
           if (cnic.isNotEmpty && eCnic == cnic) return true;
           if (cleanEmail.isNotEmpty && eEmail == cleanEmail) return true;
-          if (cleanName.isNotEmpty && eName == cleanName) return true;
+          // Name only when nothing else identifies the employee (same-name staff were changed too).
+          if (empId.isEmpty && cnic.isEmpty && cleanEmail.isEmpty && cleanName.isNotEmpty && eName == cleanName) return true;
           return false;
         }
 
@@ -3694,24 +3699,19 @@ class _UsersScreenState extends State<UsersScreen>
       }
     } catch (_) {}
 
-    // 3. Update across Firestore (root /users, branches/{branch}/users, candidate branches)
-    final candidateBranches = <String>{};
-    candidateBranches.add(effectiveBranch);
-    try {
-      final customBranches = FinanceLocalStorage.getAllBranches([]);
-      for (final b in customBranches) {
-        final id = (b['id'] ?? '').toString().toLowerCase().trim();
-        if (id.isNotEmpty && id != 'all' && id != 'global') {
-          candidateBranches.add(id);
-        }
-      }
-    } catch (_) {}
-    candidateBranches.addAll(['karachi', 'khi', 'gujrat', 'grt', 'saddar', 'main']);
+    // 3. Update the user's real documents: root /users/{uid} and its own branch's copy.
+    // This used to write {uid, username, email} × root + seven branches. Every id that wasn't
+    // a real user doc became a "ghost" holding only these status fields; login reads
+    // users/{typed username/email} first, so a ghost from an old revoke kept showing
+    // "Access Revoked" after the account was restored.
+    final candidateBranches = <String>{LocalStorageService.sanitizeBranchId(effectiveBranch)};
 
     final targetDocIds = <String>{};
-    if (uid.isNotEmpty) targetDocIds.add(uid);
-    if (cleanUsername.isNotEmpty) targetDocIds.add(cleanUsername);
-    if (cleanEmail.isNotEmpty) targetDocIds.add(cleanEmail);
+    if (uid.isNotEmpty) {
+      targetDocIds.add(uid);
+    } else if (cleanUsername.isNotEmpty) {
+      targetDocIds.add(cleanUsername); // legacy account keyed by username
+    }
 
     final fsPayload = <String, dynamic>{
       ...updates,

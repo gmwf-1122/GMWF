@@ -189,10 +189,13 @@ class _HomeRouterState extends State<HomeRouter> {
           data['isRevoked'] == true ||
           data['accessRevoked'] == true ||
           data['isCorruptedOrOrphanAuth'] == true ||
-          data['isActive'] == false ||
-          data['deletedAt'] != null) {
+          data['isActive'] == false) {
         return true;
       }
+      // Restores set the account active but never removed deletedAt (merge writes keep it), so
+      // every restored account showed "Access Revoked". It only counts while not reactivated.
+      final restored = s == 'active' && data['isActive'] == true;
+      if (data['deletedAt'] != null && !restored) return true;
     }
     return false;
   }
@@ -244,7 +247,11 @@ class _HomeRouterState extends State<HomeRouter> {
         if (event is Map) {
           final type = (event['type'] ?? event['action'] ?? '').toString().toLowerCase();
           final targetUid = (event['uid'] ?? event['userId'] ?? '').toString();
-          if (targetUid == uid && (type == 'user_revoked' || type == 'revoke_user' || type == 'account_status_changed')) {
+          // account_status_changed also announces re-activations; only a revoking status counts.
+          final statusChangeRevokes = type == 'account_status_changed' &&
+              _isStatusRevoked((event['status'] ?? event['accountStatus'] ?? '').toString(),
+                  Map<String, dynamic>.from(event));
+          if (targetUid == uid && (type == 'user_revoked' || type == 'revoke_user' || statusChangeRevokes)) {
             debugPrint('[HomeRouter] LAN real-time revoke message received for UID: $uid');
             setState(() {
               _accessRevokedData = {'uid': uid, 'status': 'revoked', ...event};

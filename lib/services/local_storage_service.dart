@@ -3487,7 +3487,6 @@ class LocalStorageService {
 
     final validPasswords = [
       'admin',
-      '1122',
       'admin123',
       'Admin@123',
       'gmwf123',
@@ -4633,7 +4632,9 @@ class LocalStorageService {
         try {
           // Through the REST uploader: a real answer per write, no copy left in the SDK's hidden
           // queue when Firestore does not answer, and an immediate stop when the quota is used up.
-          await CloudDb.instance.collection('users').doc(uid).set(firestoreData, SetOptions(merge: true))
+          // deletedAt deleted explicitly (removing the key from a merge write keeps the old value).
+          final cloudUser = {...firestoreData, 'deletedAt': FieldValue.delete()};
+          await CloudDb.instance.collection('users').doc(uid).set(cloudUser, SetOptions(merge: true))
               .timeout(const Duration(seconds: 60));
           if (branchId.isNotEmpty && branchId != 'all' && branchId != 'global') {
             await CloudDb.instance
@@ -4641,7 +4642,7 @@ class LocalStorageService {
                 .doc(branchId)
                 .collection('users')
                 .doc(uid)
-                .set(firestoreData, SetOptions(merge: true))
+                .set(cloudUser, SetOptions(merge: true))
                 .catchError((_) {});
           }
 

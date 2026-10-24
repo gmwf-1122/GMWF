@@ -661,15 +661,29 @@ class _LoginPageState extends State<LoginPage> {
 
       if (fsUser == null) return false;
 
-      final fsPass = fsUser['password']?.toString();
-      final fsHash = (fsUser['passwordHash'] ?? fsUser['hashedPassword'])?.toString();
       final hashedInput = LocalStorageService.hashPassword(password);
+      bool passwordMatches(Map<String, dynamic> u) {
+        final fsPass = u['password']?.toString();
+        final fsHash = (u['passwordHash'] ?? u['hashedPassword'])?.toString();
+        return (fsPass != null && fsPass.isNotEmpty && fsPass == password) ||
+            (fsHash != null && fsHash.isNotEmpty && (fsHash == hashedInput || fsHash == password)) ||
+            (fsPass == '1122' && (password == '123456' || password == '112233')) ||
+            (fsPass == '123456' && (password == '123456' || password == '112233')) ||
+            (password == '112233' && fsPass != null);
+      }
 
-      final isPwMatch = (fsPass != null && fsPass.isNotEmpty && fsPass == password) ||
-                        (fsHash != null && fsHash.isNotEmpty && (fsHash == hashedInput || fsHash == password)) ||
-                        (fsPass == '1122' && (password == '1122' || password == '123456' || password == '112233')) ||
-                        (fsPass == '123456' && (password == '1122' || password == '123456' || password == '112233')) ||
-                        (password == '112233' && fsPass != null);
+      var isPwMatch = passwordMatches(fsUser);
+
+      // On Windows the preloaded doc is this PC's cached copy (local_users), whose password can
+      // be stale (changed on another device) or the '112233' default downloadUsers fills in.
+      // It used to be the only thing checked, so the right password was rejected; ask the cloud.
+      if (!isPwMatch && hasCreds) {
+        final cloudUser = await _findUserInBothPlaces(input);
+        if (cloudUser != null && passwordMatches(cloudUser)) {
+          fsUser = cloudUser;
+          isPwMatch = true;
+        }
+      }
 
       if (!isPwMatch) {
         debugPrint('[LoginPage] Firestore document found for $input, but password did not match');
@@ -1170,7 +1184,6 @@ class _LoginPageState extends State<LoginPage> {
                             (pwKeyEmail != null && (pwKeyEmail == password || pwKeyEmail == hashedInput)) ||
                             (pwKeyUser != null && (pwKeyUser == password || pwKeyUser == hashedInput)) ||
                             (pwKeyInput != null && (pwKeyInput == password || pwKeyInput == hashedInput)) ||
-                            password == '1122' ||
                             ((savedPass == null || savedPass.isEmpty) && (savedHash == null || savedHash.isEmpty));
 
           if (isKeyMatch && isPwMatch) {
@@ -2044,6 +2057,15 @@ class _LoginPageState extends State<LoginPage> {
   /// Searches BOTH places in Firestore (Root /users collection AND Branch subcollections /branches/{branchId}/users),
   /// as well as local Hive cache and sync queue.
   /// Merges all matching records so role, permissions, credentials, and branch mappings are never lost.
+  /// A user doc holding only status fields: written under a username/email doc id (or a
+  /// branch that isn't the user's) by the old allow/reject access action. Merged into the real
+  /// account it carried accessRevoked/offboarded and showed "Access Revoked" to active users.
+  static bool _isGhostUserDoc(Map<String, dynamic> d) {
+    bool has(String k) => (d[k]?.toString().trim() ?? '').isNotEmpty;
+    return !has('email') && !has('username') && !has('usernameLower') && !has('name') &&
+        !has('role') && !has('password') && !has('passwordHash');
+  }
+
   Future<Map<String, dynamic>?> _findUserInBothPlaces(String input, {bool knownOnline = false}) async {
     final trimmed = input.trim();
     final lower = trimmed.toLowerCase();
@@ -2087,6 +2109,7 @@ class _LoginPageState extends State<LoginPage> {
               .then((doc) {
             if (doc.exists && doc.data() != null) {
               final d = doc.data()!;
+              if (_isGhostUserDoc(d)) return <Map<String, dynamic>>[];
               final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
               if (d['isDeleted'] == true || st == 'deleted') return <Map<String, dynamic>>[];
               return [{
@@ -2108,6 +2131,7 @@ class _LoginPageState extends State<LoginPage> {
                 .then((doc) {
               if (doc.exists && doc.data() != null) {
                 final d = doc.data()!;
+                if (_isGhostUserDoc(d)) return <Map<String, dynamic>>[];
                 final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
                 if (d['isDeleted'] == true || st == 'deleted') return <Map<String, dynamic>>[];
                 return [{
@@ -2225,6 +2249,7 @@ class _LoginPageState extends State<LoginPage> {
                 .then((doc) {
               if (doc.exists && doc.data() != null) {
                 final d = doc.data()!;
+                if (_isGhostUserDoc(d)) return <Map<String, dynamic>>[];
                 final st = (d['status'] ?? d['accountStatus'] ?? '').toString().toLowerCase().trim();
                 if (d['isDeleted'] == true || st == 'deleted') return <Map<String, dynamic>>[];
                 return [{
