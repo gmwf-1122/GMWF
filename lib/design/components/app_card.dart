@@ -75,6 +75,7 @@ class AppCard extends StatelessWidget {
           decoration: BoxDecoration(
             color: t.bgCard,
             borderRadius: r,
+            border: Border.all(color: t.bgRule, width: 1),
             boxShadow: elevation == 0
                 ? GShadow.s0
                 : elevation == 1

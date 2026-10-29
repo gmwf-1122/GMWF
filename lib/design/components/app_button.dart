@@ -13,13 +13,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
-import 'package:gmwf/design/tokens/soft_palette.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/role_theme_provider.dart' show RoleThemeScope;
 import '../tokens/spacing.dart';
 import '../tokens/radius.dart';
 import '../tokens/typography.dart';
 import '../tokens/colors.dart';
+import '../tokens/motion.dart';
 
 // ── Enums ─────────────────────────────────────────────────────────────────────
 
@@ -151,13 +151,13 @@ class AppButton extends StatelessWidget {
     }
 
     final btn = AnimatedContainer(
-      duration: const Duration(milliseconds: 150),
+      duration: GMotion.fast,
       height: _height,
       decoration: BoxDecoration(
         color: bgColor,
         borderRadius: Gr.button,
         border: borderColor != null
-            ? Border.all(color: borderColor, width: 1.5)
+            ? Border.all(color: borderColor, width: 1)
             : null,
       ),
       child: Material(
@@ -198,7 +198,7 @@ class AppButton extends StatelessWidget {
     return switch (variant) {
       AppButtonVariant.primary => (
         t.accent,
-        SoftPalette.gray50,
+        GColor.onAccent(t.accent),
         null,
       ),
       AppButtonVariant.secondary => (
@@ -213,7 +213,7 @@ class AppButton extends StatelessWidget {
       ),
       AppButtonVariant.danger => (
         GColor.dangerOf(isDark),
-        SoftPalette.gray50,
+        GColor.onAccent(GColor.dangerOf(isDark)),
         null,
       ),
     };

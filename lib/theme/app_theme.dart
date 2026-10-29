@@ -18,6 +18,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
+import 'package:gmwf/design/tokens/colors.dart';
+import 'package:gmwf/design/tokens/shadows.dart';
 import 'package:gmwf/design/tokens/soft_palette.dart';
 
 enum RoleTheme {
@@ -98,21 +100,26 @@ class RoleThemeData {
     this.isDarkCanvas = false,
   });
 
+  // Design System v2 surfaces. Every role shares one neutral canvas per mode;
+  // the role identity lives in the accent. Cards sit one step off the canvas
+  // and are separated by a 1px hairline (bgRule) rather than heavy shadows.
   RoleThemeData toDarkMode() {
+    final darkAccent = _liftForDark(accent);
     return RoleThemeData(
       roleLabel: roleLabel,
       bg: SoftPalette.slate900,
-      bgCard: SoftPalette.slate900,
-      bgCardAlt: SoftPalette.slate800,
-      bgRule: SoftPalette.slate750,
-      accent: accent,
-      accentLight: accentLight,
-      accentMuted: accentMuted,
+      bgCard: SoftPalette.slate800,
+      bgCardAlt: SoftPalette.slate750,
+      bgRule: SoftPalette.slate700,
+      accent: darkAccent,
+      accentLight: _liftForDark(accentLight),
+      // Light tints glare on a dark canvas: use the accent washed over the card.
+      accentMuted: Color.alphaBlend(darkAccent.withValues(alpha: 0.18), SoftPalette.slate800),
       accentGradient: accentGradient,
-      glassTint: glassTint,
-      textPrimary: SoftPalette.gray50,
-      textSecondary: SoftPalette.slate200,
-      textTertiary: SoftPalette.slate350,
+      glassTint: darkAccent.withValues(alpha: 0.12),
+      textPrimary: SoftPalette.gray150,
+      textSecondary: SoftPalette.slate300,
+      textTertiary: SoftPalette.slate400,
       danger: danger,
       zakat: zakat,
       nonZakat: nonZakat,
@@ -128,11 +135,13 @@ class RoleThemeData {
     );
   }
 
+  static Color _liftForDark(Color c) => GColor.accentOnDark(c);
+
   RoleThemeData toLightMode() {
     return RoleThemeData(
       roleLabel: roleLabel,
-      bg: SoftPalette.gray50,
-      bgCard: SoftPalette.gray50,
+      bg: SoftPalette.slate100,
+      bgCard: SoftPalette.slate50,
       bgCardAlt: SoftPalette.slate100,
       bgRule: SoftPalette.slate150,
       accent: accent,
@@ -142,7 +151,7 @@ class RoleThemeData {
       glassTint: glassTint,
       textPrimary: SoftPalette.slate900,
       textSecondary: SoftPalette.slate600,
-      textTertiary: SoftPalette.slate350,
+      textTertiary: SoftPalette.slate500,
       danger: danger,
       zakat: zakat,
       nonZakat: nonZakat,
@@ -166,10 +175,10 @@ class RoleThemeData {
     bgCard:                SoftPalette.gray50,
     bgCardAlt:             SoftPalette.slate100,
     bgRule:                SoftPalette.slate150,
-    accent:                SoftPalette.amber350,
-    accentLight:           SoftPalette.amber300,
+    accent:                SoftPalette.amber500,
+    accentLight:           SoftPalette.amber400,
     accentMuted:           SoftPalette.yellow50m,
-    accentGradient:        LinearGradient(colors: [SoftPalette.amber350, SoftPalette.amber500]),
+    accentGradient:        LinearGradient(colors: [SoftPalette.amber500, SoftPalette.amber400]),
     glassTint:             SoftPalette.amber350A10,
     textPrimary:           SoftPalette.slate900,
     textSecondary:         SoftPalette.slate600,
@@ -178,10 +187,10 @@ class RoleThemeData {
     zakat:                 SoftPalette.green400,
     nonZakat:              SoftPalette.blue550,
     gmwf:                  SoftPalette.amber350,
-    cardFillTokens:        SoftPalette.amber350,
+    cardFillTokens:        SoftPalette.amber500,
     cardFillPrescriptions: SoftPalette.amber400,
     cardFillDispensary:    SoftPalette.amber550m,
-    chartBar1:             SoftPalette.amber350,
+    chartBar1:             SoftPalette.amber500,
     chartBar2:             SoftPalette.green400,
     chartBar3:             SoftPalette.blue550,
     chartGrid:             SoftPalette.slate150,
@@ -195,10 +204,10 @@ class RoleThemeData {
     bgCard:                SoftPalette.gray50,
     bgCardAlt:             SoftPalette.slate100,
     bgRule:                SoftPalette.slate150,
-    accent:                SoftPalette.blue500,
-    accentLight:           SoftPalette.blue400,
-    accentMuted:           SoftPalette.slate100,
-    accentGradient:        LinearGradient(colors: [SoftPalette.blue500, SoftPalette.blue600]),
+    accent:                SoftPalette.blue550,
+    accentLight:           SoftPalette.blue500,
+    accentMuted:           SoftPalette.indigo100,
+    accentGradient:        LinearGradient(colors: [SoftPalette.blue550, SoftPalette.blue600]),
     glassTint:             SoftPalette.blue500A10,
     textPrimary:           SoftPalette.slate900,
     textSecondary:         SoftPalette.slate600,
@@ -207,10 +216,10 @@ class RoleThemeData {
     zakat:                 SoftPalette.green400,
     nonZakat:              SoftPalette.blue550,
     gmwf:                  SoftPalette.amber350,
-    cardFillTokens:        SoftPalette.blue500,
+    cardFillTokens:        SoftPalette.blue550,
     cardFillPrescriptions: SoftPalette.blue600,
     cardFillDispensary:    SoftPalette.blue700,
-    chartBar1:             SoftPalette.blue500,
+    chartBar1:             SoftPalette.blue550,
     chartBar2:             SoftPalette.green400,
     chartBar3:             SoftPalette.amber350,
     chartGrid:             SoftPalette.slate150,
@@ -224,10 +233,10 @@ class RoleThemeData {
     bgCard:                SoftPalette.gray50,
     bgCardAlt:             SoftPalette.slate100,
     bgRule:                SoftPalette.slate150,
-    accent:                SoftPalette.teal400,
-    accentLight:           SoftPalette.teal350,
+    accent:                SoftPalette.teal550,
+    accentLight:           SoftPalette.teal400,
     accentMuted:           SoftPalette.teal100m,
-    accentGradient:        LinearGradient(colors: [SoftPalette.teal400, SoftPalette.teal550]),
+    accentGradient:        LinearGradient(colors: [SoftPalette.teal550, SoftPalette.teal600]),
     glassTint:             SoftPalette.teal400A10,
     textPrimary:           SoftPalette.slate900,
     textSecondary:         SoftPalette.slate600,
@@ -236,10 +245,10 @@ class RoleThemeData {
     zakat:                 SoftPalette.green400,
     nonZakat:              SoftPalette.blue550,
     gmwf:                  SoftPalette.amber350,
-    cardFillTokens:        SoftPalette.teal400,
-    cardFillPrescriptions: SoftPalette.teal550,
+    cardFillTokens:        SoftPalette.teal550,
+    cardFillPrescriptions: SoftPalette.teal600,
     cardFillDispensary:    SoftPalette.teal700,
-    chartBar1:             SoftPalette.teal400,
+    chartBar1:             SoftPalette.teal550,
     chartBar2:             SoftPalette.green400,
     chartBar3:             SoftPalette.blue350,
     chartGrid:             SoftPalette.slate150,
@@ -371,10 +380,10 @@ class RoleThemeData {
     bgCard:                SoftPalette.gray50,
     bgCardAlt:             SoftPalette.cyan100m,
     bgRule:                SoftPalette.cyan200,
-    accent:                SoftPalette.cyan400,
-    accentLight:           SoftPalette.cyan350,
+    accent:                SoftPalette.cyan550,
+    accentLight:           SoftPalette.cyan400,
     accentMuted:           SoftPalette.cyan150m,
-    accentGradient:        LinearGradient(colors: [SoftPalette.cyan400, SoftPalette.cyan500]),
+    accentGradient:        LinearGradient(colors: [SoftPalette.cyan550, SoftPalette.cyan600]),
     glassTint:             SoftPalette.cyan550A10,
     textPrimary:           SoftPalette.slate750,
     textSecondary:         SoftPalette.sky600,
@@ -383,10 +392,10 @@ class RoleThemeData {
     zakat:                 SoftPalette.vividGreen,
     nonZakat:              SoftPalette.vividBlue,
     gmwf:                  SoftPalette.amber350,
-    cardFillTokens:        SoftPalette.cyan500,
-    cardFillPrescriptions: SoftPalette.cyan400,
+    cardFillTokens:        SoftPalette.cyan550,
+    cardFillPrescriptions: SoftPalette.cyan500,
     cardFillDispensary:    SoftPalette.cyan600,
-    chartBar1:             SoftPalette.cyan400,
+    chartBar1:             SoftPalette.cyan550,
     chartBar2:             SoftPalette.vividGreen,
     chartBar3:             SoftPalette.vividBlue,
     chartGrid:             SoftPalette.cyan200,
@@ -401,10 +410,10 @@ class RoleThemeData {
     bgCard:                SoftPalette.gray50,
     bgCardAlt:             SoftPalette.emerald150m,
     bgRule:                SoftPalette.emerald200m,
-    accent:                SoftPalette.vividGreen,
-    accentLight:           SoftPalette.emerald350,
+    accent:                SoftPalette.emerald550,
+    accentLight:           SoftPalette.emerald400,
     accentMuted:           SoftPalette.emerald150m,
-    accentGradient:        LinearGradient(colors: [SoftPalette.vividGreen, SoftPalette.emerald400]),
+    accentGradient:        LinearGradient(colors: [SoftPalette.emerald550, SoftPalette.emerald600]),
     glassTint:             SoftPalette.emerald550A10,
     textPrimary:           SoftPalette.emerald800m,
     textSecondary:         SoftPalette.emerald700m,
@@ -416,7 +425,7 @@ class RoleThemeData {
     cardFillTokens:        SoftPalette.emerald500,
     cardFillPrescriptions: SoftPalette.emerald600,
     cardFillDispensary:    SoftPalette.emerald400,
-    chartBar1:             SoftPalette.vividGreen,
+    chartBar1:             SoftPalette.emerald550,
     chartBar2:             SoftPalette.vividBlue,
     chartBar3:             SoftPalette.vividAmber,
     chartGrid:             SoftPalette.emerald200m,
@@ -461,10 +470,12 @@ class RoleThemeData {
     bgCard:                SoftPalette.gray50,
     bgCardAlt:             SoftPalette.red150t,
     bgRule:                SoftPalette.pink200m,
-    accent:                SoftPalette.vividRed,
-    accentLight:           SoftPalette.red400,
-    accentMuted:           SoftPalette.red150m,
-    accentGradient:        LinearGradient(colors: [SoftPalette.vividRed, SoftPalette.red500]),
+    // v2: dusty rose instead of alarm red, so the whole reception UI no
+    // longer reads as an error state.
+    accent:                SoftPalette.pink550,
+    accentLight:           SoftPalette.pink400,
+    accentMuted:           SoftPalette.pink100m,
+    accentGradient:        LinearGradient(colors: [SoftPalette.pink550, SoftPalette.pink600]),
     glassTint:             SoftPalette.red500A10,
     textPrimary:           SoftPalette.red800,
     textSecondary:         SoftPalette.red700m,
@@ -473,10 +484,10 @@ class RoleThemeData {
     zakat:                 SoftPalette.vividGreen,
     nonZakat:              SoftPalette.vividBlue,
     gmwf:                  SoftPalette.vividAmber,
-    cardFillTokens:        SoftPalette.vividRed,
-    cardFillPrescriptions: SoftPalette.red700,
-    cardFillDispensary:    SoftPalette.red500,
-    chartBar1:             SoftPalette.vividRed,
+    cardFillTokens:        SoftPalette.pink550,
+    cardFillPrescriptions: SoftPalette.pink600,
+    cardFillDispensary:    SoftPalette.pink500,
+    chartBar1:             SoftPalette.pink550,
     chartBar2:             SoftPalette.vividGreen,
     chartBar3:             SoftPalette.vividBlue,
     chartGrid:             SoftPalette.pink200m,
@@ -1009,7 +1020,9 @@ class RatioBar extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Soft UI (Neumorphism 2.0) 3D Shadow Helper
+// Raised surface helper (Design System v2)
+// Formerly neumorphic dual shadows; now delegates to the flat GShadow scale so
+// every legacy caller picks up the clean border + soft shadow look.
 // ─────────────────────────────────────────────────────────────────────────────
 
 class Neumorphic3DStyle {
@@ -1018,58 +1031,8 @@ class Neumorphic3DStyle {
     Color? accentColor,
     double depth = 1.0,
     bool showGlow = false,
-  }) {
-    if (isDark) {
-      return [
-        BoxShadow(
-          color: SoftPalette.gray900.withValues(alpha: 0.65),
-          blurRadius: (18 * depth).clamp(4.0, 36.0),
-          spreadRadius: 1,
-          offset: Offset(6 * depth, 8 * depth),
-        ),
-        BoxShadow(
-          color: SoftPalette.gray50.withValues(alpha: 0.08),
-          blurRadius: (12 * depth).clamp(3.0, 24.0),
-          spreadRadius: -1,
-          offset: Offset(-4 * depth, -4 * depth),
-        ),
-        if (showGlow && accentColor != null)
-          BoxShadow(
-            color: accentColor.withValues(alpha: 0.28),
-            blurRadius: 24,
-            spreadRadius: 2,
-            offset: const Offset(0, 6),
-          ),
-      ];
-    } else {
-      return [
-        BoxShadow(
-          color: SoftPalette.gray900.withValues(alpha: 0.12),
-          blurRadius: (18 * depth).clamp(4.0, 36.0),
-          spreadRadius: 1,
-          offset: Offset(7 * depth, 8 * depth),
-        ),
-        BoxShadow(
-          color: SoftPalette.gray50.withValues(alpha: 0.95),
-          blurRadius: (14 * depth).clamp(3.0, 28.0),
-          spreadRadius: -1,
-          offset: Offset(-6 * depth, -6 * depth),
-        ),
-        BoxShadow(
-          color: SoftPalette.gray900.withValues(alpha: 0.03),
-          blurRadius: 4,
-          offset: const Offset(0, 2),
-        ),
-        if (showGlow && accentColor != null)
-          BoxShadow(
-            color: accentColor.withValues(alpha: 0.20),
-            blurRadius: 24,
-            spreadRadius: 2,
-            offset: const Offset(0, 8),
-          ),
-      ];
-    }
-  }
+  }) =>
+      GShadow.raised(isDark: isDark, accent: accentColor, depth: depth, showGlow: showGlow);
 
   static BoxDecoration raisedDecoration({
     required bool isDark,
@@ -1084,8 +1047,8 @@ class Neumorphic3DStyle {
       color: backgroundColor,
       borderRadius: BorderRadius.circular(borderRadius),
       border: Border.all(
-        color: borderColor ?? (isDark ? SoftPalette.slate750 : SoftPalette.slate150),
-        width: 1.2,
+        color: borderColor ?? (isDark ? SoftPalette.slate700 : SoftPalette.slate150),
+        width: 1,
       ),
       boxShadow: raisedShadows(
         isDark: isDark,
@@ -1095,4 +1058,4 @@ class Neumorphic3DStyle {
       ),
     );
   }
-}
+}

@@ -4,7 +4,7 @@
 // Single import for the entire design system:
 //   import 'package:gmwf/design/design_system.dart';
 //
-// Provides: Gsp, Gr, GText, GShadow, GColor, GBreakpoint,
+// Provides: Gsp, Gr, GText, GShadow, GColor, GMotion, GBreakpoint, GTheme,
 //           SoftPalette, GComfortColors (context.comfort),
 //           AppButton, AppCard, AppChip, StatusBadge,
 //           AppSectionHeader, AppSegmentedControl,
@@ -12,6 +12,20 @@
 //           AppEmptyState, AppFeedback, AppToast,
 //           AppDivider, AppVerticalDivider,
 //           AppResponsiveLayout, AppResponsivePadding, AppResponsiveGrid
+//
+// ── Design System v2 — "clean modern" (2026-10) ──────────────────────────────
+//   • One neutral canvas per mode for every role (RoleThemeData.toLight/
+//     toDarkMode): slate100 canvas, slate50 cards, slate150 1px hairline.
+//     Dark: slate900 canvas, slate800 cards. Role identity = the accent only.
+//   • Surfaces are separated by a 1px border; shadows (GShadow s1–s4) are soft
+//     and layered. The old neumorphic dual shadows are retired —
+//     Neumorphic3DStyle / RoleCard / GShadow.raised now return the flat scale.
+//   • One UI font: Inter (GText). Stat styles use tabular figures.
+//   • The whole Material theme (inputs, buttons, dialogs, chips, tabs, menus,
+//     tables, snackbars…) is built in theme/gmwf_theme.dart (GTheme.build).
+//   • Accents are deepened in light mode for contrast and lifted just enough in
+//     dark mode (GColor.accentOnDark) that light text on accent stays readable.
+//   • Live reference: flutter run -t lib/design/gallery/design_gallery.dart
 //
 // ── Colour rules (eye comfort) ───────────────────────────────────────────────
 //   • Every colour comes from SoftPalette (tokens/soft_palette.dart): no pure
@@ -26,12 +40,16 @@
 // ── Tokens ────────────────────────────────────────────────────────────────────
 export 'tokens/breakpoints.dart';
 export 'tokens/colors.dart';
+export 'tokens/motion.dart';
 export 'tokens/comfort_colors.dart';
 export 'tokens/soft_palette.dart';
 export 'tokens/radius.dart';
 export 'tokens/shadows.dart';
 export 'tokens/spacing.dart';
 export 'tokens/typography.dart';
+
+// ── Theme ─────────────────────────────────────────────────────────────────────
+export 'theme/gmwf_theme.dart';
 
 // ── Components ────────────────────────────────────────────────────────────────
 export 'components/app_button.dart';

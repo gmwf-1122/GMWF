@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:gmwf/design/tokens/soft_palette.dart';
 import 'package:hive/hive.dart';
 import 'app_theme.dart';
+import '../design/tokens/shadows.dart';
+import '../design/tokens/typography.dart';
 import '../services/user_theme_service.dart';
 
 
@@ -86,11 +88,7 @@ class RolePageScaffold extends StatelessWidget {
                   : null,
               title: Text(
                 title!,
-                style: TextStyle(
-                  color: t.textPrimary,
-                  fontSize: 17,
-                  fontWeight: FontWeight.w700,
-                ),
+                style: GText.h3(t.textPrimary).copyWith(fontSize: 17),
               ),
               actions: actions,
               bottom: PreferredSize(
@@ -105,7 +103,7 @@ class RolePageScaffold extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Soft UI (Neumorphism 2.0) 3D Card Container
+// Role card — flat surface, 1px hairline, soft shadow (Design System v2)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class RoleCard extends StatelessWidget {
@@ -138,56 +136,10 @@ class RoleCard extends StatelessWidget {
 
     final isDark = t.isDarkCanvas;
 
-    final List<BoxShadow> neumorphicShadows = isDark
-        ? [
-            // Dark Mode Neumorphic 2.0 dual shadows
-            BoxShadow(
-              color: SoftPalette.gray900.withValues(alpha: 0.65),
-              blurRadius: 18,
-              spreadRadius: 1,
-              offset: const Offset(6, 8),
-            ),
-            BoxShadow(
-              color: SoftPalette.gray50.withValues(alpha: 0.08),
-              blurRadius: 12,
-              spreadRadius: -1,
-              offset: const Offset(-4, -4),
-            ),
-            if (showGlow)
-              BoxShadow(
-                color: t.accent.withValues(alpha: 0.28),
-                blurRadius: 24,
-                spreadRadius: 2,
-                offset: const Offset(0, 6),
-              ),
-          ]
-        : [
-            // Light Mode Neumorphic 2.0 dual shadows (prominent 3D depth)
-            BoxShadow(
-              color: SoftPalette.gray900.withValues(alpha: 0.12),
-              blurRadius: 18,
-              spreadRadius: 1,
-              offset: const Offset(7, 8),
-            ),
-            BoxShadow(
-              color: SoftPalette.gray50.withValues(alpha: 0.95),
-              blurRadius: 14,
-              spreadRadius: -1,
-              offset: const Offset(-6, -6),
-            ),
-            BoxShadow(
-              color: SoftPalette.gray900.withValues(alpha: 0.03),
-              blurRadius: 4,
-              offset: const Offset(0, 2),
-            ),
-            if (showGlow)
-              BoxShadow(
-                color: t.accent.withValues(alpha: 0.22),
-                blurRadius: 24,
-                spreadRadius: 2,
-                offset: const Offset(0, 8),
-              ),
-          ];
+    // v2: flat surface on a 1px hairline; the shadow only hints at depth.
+    final List<BoxShadow> neumorphicShadows = showGlow
+        ? GShadow.s3(isDark, t.accent)
+        : GShadow.s1(isDark);
 
     final cardContent = AnimatedContainer(
       duration: const Duration(milliseconds: 200),
@@ -198,8 +150,8 @@ class RoleCard extends StatelessWidget {
         gradient: gradient,
         borderRadius: BorderRadius.circular(resolvedRadius),
         border: Border.all(
-          color: isDark ? t.bgRule : t.bgRule.withValues(alpha: 0.7),
-          width: 1.2,
+          color: t.bgRule,
+          width: 1,
         ),
         boxShadow: neumorphicShadows,
       ),
@@ -291,12 +243,14 @@ InputDecoration roleInputDecoration(
 }) {
   final t = RoleThemeScope.dataOf(context);
   final radius = Hive.isBoxOpen('app_settings')
-      ? Hive.box('app_settings').get('card_radius', defaultValue: 16.0) as double
-      : 12.0;
+      ? ((Hive.box('app_settings').get('card_radius', defaultValue: 16.0) as num) * 0.625).clamp(6.0, 14.0).toDouble()
+      : 10.0;
+  // v2: a visible-but-quiet resting border; the accent only on focus.
+  final rest = t.isDarkCanvas ? t.bgRule : SoftPalette.slate200;
 
   return InputDecoration(
     labelText: required ? '$label *' : label,
-    labelStyle: TextStyle(fontSize: 13.5, color: t.textTertiary),
+    labelStyle: TextStyle(fontSize: 13.5, color: t.textSecondary),
     floatingLabelStyle: TextStyle(fontSize: 12, color: t.accent, fontWeight: FontWeight.w600),
     prefixIcon: Icon(icon, color: t.textTertiary, size: 20),
     filled: true,
@@ -304,15 +258,15 @@ InputDecoration roleInputDecoration(
     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
     border: OutlineInputBorder(
       borderRadius: BorderRadius.circular(radius),
-      borderSide: BorderSide(color: t.bgRule, width: 1),
+      borderSide: BorderSide(color: rest, width: 1),
     ),
     enabledBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(radius),
-      borderSide: BorderSide(color: t.bgRule, width: 1),
+      borderSide: BorderSide(color: rest, width: 1),
     ),
     focusedBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(radius),
-      borderSide: BorderSide(color: t.accent, width: 2),
+      borderSide: BorderSide(color: t.accent, width: 1.6),
     ),
     errorBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(radius),

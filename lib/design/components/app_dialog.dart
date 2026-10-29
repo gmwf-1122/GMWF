@@ -10,6 +10,7 @@
 
 import 'package:flutter/material.dart';
 import '../tokens/soft_palette.dart';
+import '../tokens/comfort_colors.dart';
 import '../tokens/radius.dart';
 
 /// Shows a standardized confirmation dialog across the application.
@@ -25,19 +26,20 @@ Future<bool> showAppConfirmDialog({
   String? warningNotice,
 }) async {
   final isDark = Theme.of(context).brightness == Brightness.dark;
+  final c = context.comfort;
   final accentColor = isDanger ? SoftPalette.vividRed : SoftPalette.teal600;
 
   final result = await showDialog<bool>(
     context: context,
-    barrierColor: SoftPalette.gray900.withValues(alpha: 0.5),
+    barrierColor: SoftPalette.slate900.withValues(alpha: 0.45),
     builder: (dialogCtx) => AlertDialog(
-      backgroundColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
+      backgroundColor: c.surface,
       surfaceTintColor: Colors.transparent,
       shape: RoundedRectangleBorder(
         borderRadius: Gr.modal,
         side: BorderSide(
-          color: isDark ? SoftPalette.slate750 : SoftPalette.slate150,
-          width: 1.2,
+          color: c.border,
+          width: 1,
         ),
       ),
       contentPadding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
@@ -61,7 +63,7 @@ Future<bool> showAppConfirmDialog({
               style: TextStyle(
                 fontSize: 18,
                 fontWeight: FontWeight.w700,
-                color: isDark ? SoftPalette.gray50 : SoftPalette.gray900,
+                color: c.textPrimary,
                 letterSpacing: -0.3,
               ),
             ),
@@ -77,7 +79,7 @@ Future<bool> showAppConfirmDialog({
             style: TextStyle(
               fontSize: 14,
               height: 1.45,
-              color: isDark ? SoftPalette.slate350 : SoftPalette.gray600,
+              color: c.textSecondary,
             ),
           ),
           if (warningNotice != null) ...[

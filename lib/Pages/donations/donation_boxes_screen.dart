@@ -2258,7 +2258,7 @@ class _BoxCardState extends State<_BoxCard> {
                           ),
                           child: Text(
                             'Replaced 🔄',
-                            style: GoogleFonts.plusJakartaSans(
+                            style: GoogleFonts.inter(
                               fontSize: 11,
                               fontWeight: FontWeight.w800,
                               color: SoftPalette.violet550,
@@ -2338,7 +2338,7 @@ class _BoxCardState extends State<_BoxCard> {
                                     const SizedBox(width: 4),
                                     Text(
                                       'Open',
-                                      style: GoogleFonts.plusJakartaSans(
+                                      style: GoogleFonts.inter(
                                         fontSize: 11.5,
                                         fontWeight: FontWeight.w800,
                                         color: SoftPalette.emerald550,

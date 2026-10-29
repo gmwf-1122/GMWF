@@ -63,20 +63,21 @@ class GComfortColors extends ThemeExtension<GComfortColors> {
     required this.infoBg,
   });
 
+  // v2: cool slate canvas, near-white cards separated by a 1px hairline.
   static const light = GComfortColors(
     background: SoftPalette.slate100,
-    surface: SoftPalette.gray50,
-    surfaceRaised: SoftPalette.gray50,
-    surfaceSunken: SoftPalette.gray150,
-    border: SoftPalette.slate200,
-    borderStrong: SoftPalette.slate300,
-    textPrimary: SoftPalette.gray800,
+    surface: SoftPalette.slate50,
+    surfaceRaised: SoftPalette.slate50,
+    surfaceSunken: SoftPalette.slate100,
+    border: SoftPalette.slate150,
+    borderStrong: SoftPalette.slate200,
+    textPrimary: SoftPalette.slate900,
     textSecondary: SoftPalette.slate600,
     textMuted: SoftPalette.slate500,
     brand: SoftPalette.teal600,
     brandStrong: SoftPalette.teal700,
     brandSoft: SoftPalette.teal100t,
-    onBrand: SoftPalette.gray50,
+    onBrand: SoftPalette.slate50,
     success: SoftPalette.emerald550,
     successBg: SoftPalette.emerald100t,
     warning: SoftPalette.amber750,
@@ -87,15 +88,16 @@ class GComfortColors extends ThemeExtension<GComfortColors> {
     infoBg: SoftPalette.slate50,
   );
 
+  // v2: cards sit one step above the canvas instead of matching it.
   static const dark = GComfortColors(
     background: SoftPalette.slate900,
     surface: SoftPalette.slate800,
     surfaceRaised: SoftPalette.slate750,
     surfaceSunken: SoftPalette.slate900,
-    border: SoftPalette.slate700,
-    borderStrong: SoftPalette.slate600,
+    border: SoftPalette.slate750,
+    borderStrong: SoftPalette.slate700,
     textPrimary: SoftPalette.gray150,
-    textSecondary: SoftPalette.slate350,
+    textSecondary: SoftPalette.slate300,
     textMuted: SoftPalette.slate400,
     brand: SoftPalette.teal350,
     brandStrong: SoftPalette.teal300,

@@ -943,7 +943,7 @@ class _ServerDashboardWithSyncState
                       children: [
                         Text(
                           'Autonomous Sync Engine',
-                          style: GoogleFonts.outfit(
+                          style: GoogleFonts.inter(
                             fontWeight: FontWeight.bold,
                             fontSize: 18,
                             color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
@@ -1014,7 +1014,7 @@ class _ServerDashboardWithSyncState
                               Text('Legitimate offline operations buffered for Firestore', style: GoogleFonts.inter(fontSize: 11, color: isDark ? SoftPalette.gray50A38 : SoftPalette.gray900A45)),
                             ],
                           ),
-                          Text('$total items', style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: total > 0 ? SoftPalette.sky350 : SoftPalette.emerald350)),
+                          Text('$total items', style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.bold, color: total > 0 ? SoftPalette.sky350 : SoftPalette.emerald350)),
                         ],
                       ),
                     ),
@@ -1090,7 +1090,7 @@ class _ServerDashboardWithSyncState
                         title: Row(children: [
                           const Icon(Icons.warning_amber_rounded, color: SoftPalette.amber300, size: 22),
                           const SizedBox(width: 10),
-                          Text('Clear Flooded Queue?', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? SoftPalette.gray50 : SoftPalette.slate900)),
+                          Text('Clear Flooded Queue?', style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 16, color: isDark ? SoftPalette.gray50 : SoftPalette.slate900)),
                         ]),
                         content: Text(
                           'This will remove:\n'
@@ -1467,7 +1467,7 @@ class _ServerDashboardWithSyncState
                     children: [
                       Text(
                         'GMWF SERVER',
-                        style: GoogleFonts.outfit(
+                        style: GoogleFonts.inter(
                           fontWeight: FontWeight.bold,
                           fontSize: 16,
                           letterSpacing: 0.5,
@@ -1890,7 +1890,7 @@ class _ServerDashboardWithSyncState
                       children: [
                         Text(
                           currentTitle,
-                          style: GoogleFonts.outfit(
+                          style: GoogleFonts.inter(
                             fontSize: 17,
                             fontWeight: FontWeight.bold,
                             color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
@@ -2433,7 +2433,7 @@ class _ServerDashboardWithSyncState
                   const SizedBox(height: 8),
                   Text(
                     'GMWF Hybrid Command Center',
-                    style: GoogleFonts.outfit(
+                    style: GoogleFonts.inter(
                       fontWeight: FontWeight.bold,
                       fontSize: 22,
                       color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
@@ -2850,7 +2850,7 @@ class _ServerDashboardWithSyncState
             alignment: Alignment.centerLeft,
             child: Text(
               value,
-              style: GoogleFonts.outfit(
+              style: GoogleFonts.inter(
                 fontSize: 22,
                 fontWeight: FontWeight.w800,
                 color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
@@ -2902,7 +2902,7 @@ class _ServerDashboardWithSyncState
                 const SizedBox(width: 8),
                 Text(
                   'Live Network System Log Stream',
-                  style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 14, color: isDark ? SoftPalette.gray50 : SoftPalette.slate900),
+                  style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 14, color: isDark ? SoftPalette.gray50 : SoftPalette.slate900),
                 ),
                 const Spacer(),
                 Tooltip(
@@ -3063,7 +3063,7 @@ class _ServerDashboardWithSyncState
                 const SizedBox(width: 8),
                 Text(
                   'Active Branch Network Nodes',
-                  style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 14, color: isDark ? SoftPalette.gray50 : SoftPalette.slate900),
+                  style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 14, color: isDark ? SoftPalette.gray50 : SoftPalette.slate900),
                 ),
                 const Spacer(),
                 Container(
@@ -3251,7 +3251,7 @@ class _ServerDashboardWithSyncState
               const SizedBox(width: 8),
               Text(
                 'System Health Overview',
-                style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 14, color: isDark ? SoftPalette.gray50 : SoftPalette.slate900),
+                style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 14, color: isDark ? SoftPalette.gray50 : SoftPalette.slate900),
               ),
               const Spacer(),
               Container(
@@ -3414,7 +3414,7 @@ class _ServerDashboardWithSyncState
               ),
               Text(
                 centerText ?? (percentage == null ? 'n/a' : '${(percentage * 100).round()}%'),
-                style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 15, color: isDark ? SoftPalette.gray50 : SoftPalette.slate900),
+                style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 15, color: isDark ? SoftPalette.gray50 : SoftPalette.slate900),
               ),
             ],
           ),
@@ -3452,7 +3452,7 @@ class _ServerDashboardWithSyncState
                 const SizedBox(width: 8),
                 Text(
                   'LAN Hardware & Devices',
-                  style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 14, color: isDark ? SoftPalette.gray50 : SoftPalette.slate900),
+                  style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 14, color: isDark ? SoftPalette.gray50 : SoftPalette.slate900),
                 ),
                 const Spacer(),
                 TextButton(
@@ -3574,7 +3574,7 @@ class _ServerDashboardWithSyncState
           children: [
             const Icon(Icons.terminal_rounded, color: SoftPalette.sky500, size: 20),
             const SizedBox(width: 10),
-            Text('Full Network System Log', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16, color: SoftPalette.gray50)),
+            Text('Full Network System Log', style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 16, color: SoftPalette.gray50)),
           ],
         ),
         content: SizedBox(
@@ -3626,7 +3626,7 @@ class _ServerDashboardWithSyncState
           children: [
             const Icon(Icons.hub_rounded, color: SoftPalette.sky500, size: 20),
             const SizedBox(width: 10),
-            Text('Connected Network Nodes (${_connectedClients.length})', style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16, color: SoftPalette.gray50)),
+            Text('Connected Network Nodes (${_connectedClients.length})', style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 16, color: SoftPalette.gray50)),
           ],
         ),
         content: SizedBox(
@@ -3799,7 +3799,7 @@ class _ServerDashboardWithSyncState
                             children: [
                               Text(
                                 'LAN Gateway in Standby',
-                                style: GoogleFonts.outfit(
+                                style: GoogleFonts.inter(
                                   fontSize: 22,
                                   fontWeight: FontWeight.bold,
                                   color: textPrimary,
@@ -3859,7 +3859,7 @@ class _ServerDashboardWithSyncState
                         const SizedBox(width: 8),
                         Text(
                           'Pre-Flight System Check',
-                          style: GoogleFonts.outfit(
+                          style: GoogleFonts.inter(
                             fontSize: 15,
                             fontWeight: FontWeight.bold,
                             color: textPrimary,
@@ -3936,7 +3936,7 @@ class _ServerDashboardWithSyncState
                         icon: const Icon(Icons.rocket_launch_rounded, size: 22),
                         label: Text(
                           'Initialize & Broadcast LAN Server',
-                          style: GoogleFonts.outfit(
+                          style: GoogleFonts.inter(
                             fontSize: 16,
                             fontWeight: FontWeight.bold,
                             letterSpacing: 0.3,
@@ -4136,7 +4136,7 @@ class _ServerDashboardWithSyncState
                       children: [
                         Text(
                           'Windows Firewall Rules',
-                          style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: titleColor, fontSize: 13.5),
+                          style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: titleColor, fontSize: 13.5),
                         ),
                         const SizedBox(width: 8),
                         Container(
@@ -4297,7 +4297,7 @@ class _ServerDashboardWithSyncState
                 children: [
                   Text(
                     alreadyAdded ? 'Rules Already Added & Active' : 'Firewall Rules Successfully Configured',
-                    style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16, color: SoftPalette.gray50),
+                    style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 16, color: SoftPalette.gray50),
                   ),
                   Text(
                     'Ports 53281 (TCP), 8088 (TCP), and 4370 (UDP) are open',

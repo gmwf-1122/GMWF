@@ -70,7 +70,7 @@ class PythonTerminalScreen extends StatelessWidget {
                 children: [
                   Text(
                     'Python Biometric & Hardware Terminal',
-                    style: GoogleFonts.outfit(
+                    style: GoogleFonts.inter(
                       fontWeight: FontWeight.bold,
                       color: SoftPalette.gray50,
                       fontSize: 17,
@@ -117,7 +117,7 @@ class PythonTerminalScreen extends StatelessWidget {
             const SizedBox(width: 10),
             Text(
               'Python Terminal Guide',
-              style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: SoftPalette.gray50, fontSize: 18),
+              style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: SoftPalette.gray50, fontSize: 18),
             ),
           ],
         ),
@@ -732,7 +732,7 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
             const SizedBox(height: 16),
             Text(
               'Terminal Console Ready',
-              style: GoogleFonts.outfit(
+              style: GoogleFonts.inter(
                 color: SoftPalette.slate150,
                 fontSize: 16,
                 fontWeight: FontWeight.bold,
@@ -968,7 +968,7 @@ class _PythonTerminalViewState extends State<PythonTerminalView> {
               const SizedBox(width: 10),
               Text(
                 'Python Environment & Packages',
-                style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: SoftPalette.gray50, fontSize: 18),
+                style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: SoftPalette.gray50, fontSize: 18),
               ),
             ],
           ),

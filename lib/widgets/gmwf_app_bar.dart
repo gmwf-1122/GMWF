@@ -96,7 +96,7 @@ class GmwfAppBar extends StatelessWidget implements PreferredSizeWidget {
         final barContent = Container(
           height: toolbarHeight,
           decoration: BoxDecoration(
-            color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+            color: isDark ? SoftPalette.slate800 : SoftPalette.slate50,
             borderRadius: isFloating ? BorderRadius.circular(18) : BorderRadius.zero,
             border: isFloating
                 ? Border.all(
@@ -311,7 +311,7 @@ class GmwfAppBar extends StatelessWidget implements PreferredSizeWidget {
 
         if (!isFloating) {
           return Container(
-            color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+            color: isDark ? SoftPalette.slate800 : SoftPalette.slate50,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -608,7 +608,7 @@ class GmwfAppBar extends StatelessWidget implements PreferredSizeWidget {
             width: btnSize,
             height: btnSize,
             decoration: BoxDecoration(
-              color: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
+              color: isDark ? SoftPalette.slate800 : SoftPalette.slate50,
               borderRadius: BorderRadius.circular(isMobile ? 8 : 10),
               border: Border.all(
                 color:

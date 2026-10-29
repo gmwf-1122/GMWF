@@ -68,6 +68,25 @@ class GColor {
   static Color neutralOf(bool isDark) => isDark ? neutralDark : neutral;
   static Color neutralBgOf(bool isDark) => isDark ? neutralBgDark : neutralBg;
 
+  // ── Accent helpers (Design System v2) ──────────────────────────────────
+  /// Deep light-mode accents (600–700 tones) vanish on a dark canvas. Lifts
+  /// the accent just enough to read on slate900 (≥ ~3.4:1) while light text
+  /// on an accent fill — a pattern used all over the screens — stays readable
+  /// (≥ ~4.4:1). Accents already in that band are returned unchanged.
+  static Color accentOnDark(Color accent) {
+    const target = 0.17; // relative luminance
+    if (accent.computeLuminance() >= target) return accent;
+    var hsl = HSLColor.fromColor(accent);
+    while (hsl.lightness < 0.9 && hsl.toColor().computeLuminance() < target) {
+      hsl = hsl.withLightness((hsl.lightness + 0.02).clamp(0.0, 1.0));
+    }
+    return hsl.toColor().withValues(alpha: accent.a);
+  }
+
+  /// Readable text/icon colour on top of a filled [accent] surface.
+  static Color onAccent(Color accent) =>
+      accent.computeLuminance() > 0.4 ? SoftPalette.slate900 : SoftPalette.slate50;
+
   // â”€â”€ Icon size constants (standardised) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   // These aren't colors but live here as a convenience reference.
   // Actual usage: Icon(icon, size: GColor.iconSm)

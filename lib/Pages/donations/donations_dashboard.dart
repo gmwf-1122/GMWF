@@ -1271,7 +1271,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                         const SizedBox(height: 24),
                         Text(
                           'Importing $targetBranchName Donations',
-                          style: GoogleFonts.plusJakartaSans(
+                          style: GoogleFonts.inter(
                             fontSize: 16,
                             fontWeight: FontWeight.w800,
                             color: context.adapt(AppColors.gray900),
@@ -1286,7 +1286,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                         const SizedBox(height: 16),
                         Text(
                           'Imported: $imported  •  Skipped: $skipped  of  $total',
-                          style: GoogleFonts.plusJakartaSans(
+                          style: GoogleFonts.inter(
                             fontSize: 13,
                             fontWeight: FontWeight.w700,
                             color: context.adapt(AppColors.gray700),
@@ -1295,7 +1295,7 @@ class _DashboardTabState extends ConsumerState<DashboardTab> {
                         const SizedBox(height: 8),
                         Text(
                           statusMessage,
-                          style: GoogleFonts.plusJakartaSans(
+                          style: GoogleFonts.inter(
                             fontSize: 11,
                             fontWeight: FontWeight.w500,
                             color: context.adapt(AppColors.gray400),

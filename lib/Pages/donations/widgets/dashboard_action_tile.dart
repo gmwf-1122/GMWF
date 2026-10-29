@@ -98,7 +98,6 @@ class _DashboardActionTileState extends State<DashboardActionTile> {
                   child: Text(
                     widget.label,
                     style: TextStyle(
-                      fontFamily: 'Plus Jakarta Sans',
                       fontSize: 13,
                       fontWeight: FontWeight.w800,
                       color: widget.isActive

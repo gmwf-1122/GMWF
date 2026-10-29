@@ -334,7 +334,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
           const SizedBox(width: 4),
           Text(
             isReceived ? 'RECEIVED' : 'PENDING',
-            style: GoogleFonts.plusJakartaSans(
+            style: GoogleFonts.inter(
               fontSize: 9, 
               fontWeight: FontWeight.w800, 
               color: textClr, 
@@ -352,7 +352,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
       children: [
         Text(
           label.toUpperCase(),
-          style: GoogleFonts.plusJakartaSans(
+          style: GoogleFonts.inter(
             fontSize: 9.5,
             fontWeight: FontWeight.w800,
             color: t.textTertiary,
@@ -362,7 +362,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
         const SizedBox(height: 6),
         Text(
           value,
-          style: GoogleFonts.plusJakartaSans(
+          style: GoogleFonts.inter(
             fontSize: 13,
             fontWeight: FontWeight.w600,
             color: t.textPrimary,
@@ -393,7 +393,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
             const SizedBox(width: 6),
             Text(
               label,
-              style: GoogleFonts.plusJakartaSans(
+              style: GoogleFonts.inter(
                 fontSize: 11,
                 fontWeight: FontWeight.w700,
                 color: color,
@@ -448,7 +448,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                     ),
                     child: Text(
                       d.isGoods ? 'GOODS' : 'CASH', 
-                      style: GoogleFonts.plusJakartaSans(
+                      style: GoogleFonts.inter(
                         fontSize: 9, 
                         fontWeight: FontWeight.w800, 
                         color: d.isGoods ? SoftPalette.blue400 : t.accent, 
@@ -472,7 +472,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                   (d.probableAmount ?? 0) > 0 
                       ? '${d.goodsItem ?? 'Goods'} (Est. PKR ${NumberFormat('#,##0').format(d.probableAmount)})' 
                       : d.goodsItem ?? 'Goods', 
-                  style: GoogleFonts.plusJakartaSans(
+                  style: GoogleFonts.inter(
                     fontSize: 22, 
                     fontWeight: FontWeight.w800, 
                     color: t.textPrimary,
@@ -488,7 +488,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                   children: [
                     Text(
                       'PKR ',
-                      style: GoogleFonts.plusJakartaSans(
+                      style: GoogleFonts.inter(
                         fontSize: 16, 
                         fontWeight: FontWeight.w700, 
                         color: t.textSecondary,
@@ -497,7 +497,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                     ),
                     Text(
                       NumberFormat('#,##0').format(d.amount),
-                      style: GoogleFonts.plusJakartaSans(
+                      style: GoogleFonts.inter(
                         fontSize: 34, 
                         fontWeight: FontWeight.w800, 
                         color: t.textPrimary,
@@ -509,7 +509,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
               const SizedBox(height: 8),
               Text(
                 'RECEIPT: ${cleanReceiptNumber(d.receiptNo)}', 
-                style: GoogleFonts.plusJakartaSans(
+                style: GoogleFonts.inter(
                   fontSize: 11, 
                   fontWeight: FontWeight.w700, 
                   color: t.textTertiary,
@@ -613,7 +613,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                             const SizedBox(width: 8),
                             Text(
                               'Donor Lifetime Total:',
-                              style: GoogleFonts.plusJakartaSans(
+                              style: GoogleFonts.inter(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w700,
                                 color: t.textSecondary,
@@ -623,7 +623,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                         ),
                         Text(
                           'PKR ${NumberFormat('#,##0').format(lifetimeTotal)} ($lifetimeCount total ${lifetimeCount == 1 ? "gift" : "gifts"})',
-                          style: GoogleFonts.plusJakartaSans(
+                          style: GoogleFonts.inter(
                             fontSize: 12,
                             fontWeight: FontWeight.w800,
                             color: t.accent,
@@ -696,7 +696,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                           child: Row(children: [
                             Icon(Icons.check_circle_rounded, size: 16, color: SoftPalette.green400),
                             const SizedBox(width: 10),
-                            Text('Mark Received', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600)),
+                            Text('Mark Received', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600)),
                           ]),
                         ),
                       if (d.donorId != 'anonymous' && !d.donorId.startsWith('guest_') && widget.currentUserRole.canApprove)
@@ -705,7 +705,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                           child: Row(children: [
                             Icon(Icons.person_rounded, size: 16, color: context.adapt(SoftPalette.indigo600)),
                             const SizedBox(width: 10),
-                            Text('Edit Donor', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600)),
+                            Text('Edit Donor', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600)),
                           ]),
                         ),
                       if (widget.currentUserRole.canApprove)
@@ -714,7 +714,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                           child: Row(children: [
                             Icon(Icons.edit_rounded, size: 16, color: SoftPalette.orange350),
                             const SizedBox(width: 10),
-                            Text('Edit Donation', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600)),
+                            Text('Edit Donation', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600)),
                           ]),
                         ),
                       if (widget.currentUserRole.isChairman || widget.currentUserRole.isHqManager)
@@ -723,7 +723,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                           child: Row(children: [
                             const Icon(Icons.delete_forever_rounded, size: 16, color: SoftPalette.red400),
                             const SizedBox(width: 10),
-                            Text('Delete', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600, color: SoftPalette.red400)),
+                            Text('Delete', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: SoftPalette.red400)),
                           ]),
                         ),
                       const PopupMenuDivider(),
@@ -732,7 +732,7 @@ class _DonationDetailsDialogState extends State<_DonationDetailsDialog> {
                         child: Row(children: [
                           Icon(Icons.close_rounded, size: 16, color: context.adapt(AppColors.gray500)),
                           const SizedBox(width: 10),
-                          Text('Close', style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600, color: context.adapt(AppColors.gray500))),
+                          Text('Close', style: GoogleFonts.inter(fontSize: 12, fontWeight: FontWeight.w600, color: context.adapt(AppColors.gray500))),
                         ]),
                       ),
                     ],

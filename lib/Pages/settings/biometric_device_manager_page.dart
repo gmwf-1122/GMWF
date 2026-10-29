@@ -110,7 +110,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
             Expanded(
               child: Text(
                 'Delete Biometric Device',
-                style: GoogleFonts.outfit(
+                style: GoogleFonts.inter(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                   color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
@@ -150,7 +150,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                       Expanded(
                         child: Text(
                           dev.deviceName,
-                          style: GoogleFonts.outfit(
+                          style: GoogleFonts.inter(
                             fontWeight: FontWeight.bold,
                             fontSize: 14,
                             color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
@@ -262,7 +262,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
             Expanded(
               child: Text(
                 'Remove Biometric PIN',
-                style: GoogleFonts.outfit(
+                style: GoogleFonts.inter(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                   color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
@@ -345,7 +345,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
             Expanded(
               child: Text(
                 'Keep Madrassa Students Only',
-                style: GoogleFonts.outfit(
+                style: GoogleFonts.inter(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                   color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
@@ -448,7 +448,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
             Expanded(
               child: Text(
                 'Clear All Biometric PINs?',
-                style: GoogleFonts.outfit(
+                style: GoogleFonts.inter(
                   fontSize: 18,
                   fontWeight: FontWeight.bold,
                   color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,
@@ -740,7 +740,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
               automaticallyImplyLeading: false,
               title: Text(
                 'Biometric Attendance Settings & Devices',
-                style: GoogleFonts.outfit(fontWeight: FontWeight.bold, color: SoftPalette.gray50, fontSize: 19),
+                style: GoogleFonts.inter(fontWeight: FontWeight.bold, color: SoftPalette.gray50, fontSize: 19),
               ),
               backgroundColor: SoftPalette.slate900, // Rich dark slate header
               elevation: 2,
@@ -888,7 +888,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                     children: [
                       Text(
                         'Cloud Sync Active (Web View)',
-                        style: GoogleFonts.outfit(
+                        style: GoogleFonts.inter(
                           fontWeight: FontWeight.bold,
                           color: isDark ? SoftPalette.blue300 : SoftPalette.blue600,
                           fontSize: 16,
@@ -997,7 +997,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                       children: [
                         Text(
                           isRunning ? 'ZKTeco Server Active' : 'ZKTeco Server Stopped',
-                          style: GoogleFonts.outfit(
+                          style: GoogleFonts.inter(
                             fontWeight: FontWeight.bold,
                             color: isRunning
                                 ? (isDark ? SoftPalette.emerald200 : SoftPalette.emerald600)
@@ -1219,7 +1219,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                     children: [
                       Text(
                         'Building Biometric Devices',
-                        style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: textPrimary),
+                        style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.bold, color: textPrimary),
                       ),
                       const SizedBox(height: 2),
                       Text(
@@ -1284,7 +1284,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                             const SizedBox(height: 16),
                             Text(
                               'No Biometric Devices Configured',
-                              style: GoogleFonts.outfit(fontSize: 17, fontWeight: FontWeight.bold, color: textPrimary),
+                              style: GoogleFonts.inter(fontSize: 17, fontWeight: FontWeight.bold, color: textPrimary),
                             ),
                             const SizedBox(height: 6),
                             Text(
@@ -1362,7 +1362,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                       children: [
                                         Text(
                                           dev.deviceName,
-                                          style: GoogleFonts.outfit(
+                                          style: GoogleFonts.inter(
                                             fontWeight: FontWeight.bold,
                                             fontSize: 16,
                                             color: textPrimary,
@@ -1854,7 +1854,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                   _entityCategory == 'madrassa_student'
                                       ? 'No Madrassa Students Matching Filter'
                                       : 'No Profiles Matching Filter',
-                                  style: GoogleFonts.outfit(fontSize: 16, fontWeight: FontWeight.bold, color: textPrimary),
+                                  style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.bold, color: textPrimary),
                                 ),
                                 const SizedBox(height: 4),
                                 Text(
@@ -1916,7 +1916,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                         ),
                                         Text(
                                           c.biometricPin,
-                                          style: GoogleFonts.outfit(
+                                          style: GoogleFonts.inter(
                                             fontWeight: FontWeight.bold,
                                             fontSize: 15,
                                             color: SoftPalette.gray50,
@@ -1931,7 +1931,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                 children: [
                                   Text(
                                     c.entityName,
-                                    style: GoogleFonts.outfit(
+                                    style: GoogleFonts.inter(
                                       fontWeight: FontWeight.bold,
                                       fontSize: 16,
                                       color: textPrimary,
@@ -2047,7 +2047,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                                 children: [
                                   Text(
                                     name,
-                                    style: GoogleFonts.outfit(
+                                    style: GoogleFonts.inter(
                                       fontWeight: FontWeight.bold,
                                       fontSize: 16,
                                       color: textPrimary,
@@ -2171,7 +2171,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
             children: [
               Text(
                 label,
-                style: GoogleFonts.outfit(
+                style: GoogleFonts.inter(
                   fontWeight: isSelected ? FontWeight.bold : FontWeight.w600,
                   fontSize: 13,
                   color: isSelected
@@ -2270,7 +2270,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                   children: [
                     Text(
                       'Live Incoming Scans & Cross-Branch Alerts',
-                      style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: textPrimary),
+                      style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.bold, color: textPrimary),
                     ),
                     Text(
                       'Real-time stream of finger scans captured from ZKTeco devices across all buildings',
@@ -2833,7 +2833,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
             Expanded(
               child: Text(
                 'Enroll Fingerprint for ${c.entityName}',
-                style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16),
+                style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 16),
               ),
             ),
           ],
@@ -2906,7 +2906,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
               const SizedBox(width: 10),
               Text(
                 'Simulate Biometric Scan',
-                style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 18),
+                style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 18),
               ),
             ],
           ),
@@ -3047,7 +3047,7 @@ class _BiometricDeviceManagerPageState extends State<BiometricDeviceManagerPage>
                 children: [
                   Text(
                     'Biometric Scanner Setup Guide',
-                    style: GoogleFonts.outfit(fontWeight: FontWeight.bold, fontSize: 16, color: SoftPalette.gray50),
+                    style: GoogleFonts.inter(fontWeight: FontWeight.bold, fontSize: 16, color: SoftPalette.gray50),
                   ),
                   Text(
                     'Hardware & Network Configuration Steps',

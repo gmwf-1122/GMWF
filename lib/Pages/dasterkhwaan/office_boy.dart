@@ -99,15 +99,15 @@ abstract class _TS {
       fontSize: 22, color: c, height: 1.2);
 
   static TextStyle label({Color c = _DS.ink3, double size = 10}) =>
-      GoogleFonts.dmSans(
+      GoogleFonts.inter(
           fontSize: size, fontWeight: FontWeight.w600,
           letterSpacing: 1.2, color: c);
 
   static TextStyle body({Color? c, double size = 14, FontWeight w = FontWeight.w400}) =>
-      GoogleFonts.dmSans(fontSize: size, fontWeight: w, color: c ?? _DS.ink);
+      GoogleFonts.inter(fontSize: size, fontWeight: w, color: c ?? _DS.ink);
 
   static TextStyle num({Color? c, double size = 22}) =>
-      GoogleFonts.dmSans(fontSize: size, fontWeight: FontWeight.w600, color: c ?? _DS.ink, height: 1.0);
+      GoogleFonts.inter(fontSize: size, fontWeight: FontWeight.w600, color: c ?? _DS.ink, height: 1.0);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -801,7 +801,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
               children: [
                 Text(
                   'Unintentionally issued tokens can be voided. ${localUnserved.length} unserved token(s) available today.',
-                  style: GoogleFonts.dmSans(fontSize: 13, color: dialogCtx.adapt(_DS.ink3)),
+                  style: GoogleFonts.inter(fontSize: 13, color: dialogCtx.adapt(_DS.ink3)),
                 ),
                 const SizedBox(height: 16),
                 Text('TOKENS TO REVERSE', style: _TS.label(c: dialogCtx.adapt(_DS.ink3))),
@@ -818,7 +818,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
                           color: sel ? _DS.red : dialogCtx.adapt(_DS.surface2),
                           borderRadius: BorderRadius.circular(_DS.r12),
                         ),
-                        child: Text('$q', style: GoogleFonts.dmSans(color: sel ? SoftPalette.gray50 : dialogCtx.adapt(_DS.ink), fontWeight: FontWeight.bold, fontSize: 13)),
+                        child: Text('$q', style: GoogleFonts.inter(color: sel ? SoftPalette.gray50 : dialogCtx.adapt(_DS.ink), fontWeight: FontWeight.bold, fontSize: 13)),
                       ),
                     );
                   }).toList(),
@@ -829,12 +829,12 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
                   keyboardType: TextInputType.number,
                   inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                   onChanged: (_) => setS(() {}),
-                  style: GoogleFonts.dmSans(fontSize: 16, fontWeight: FontWeight.bold, color: dialogCtx.adapt(_DS.ink)),
+                  style: GoogleFonts.inter(fontSize: 16, fontWeight: FontWeight.bold, color: dialogCtx.adapt(_DS.ink)),
                   decoration: InputDecoration(
                     hintText: 'Custom quantity…',
-                    hintStyle: GoogleFonts.dmSans(fontSize: 13, color: dialogCtx.adapt(_DS.ink3)),
+                    hintStyle: GoogleFonts.inter(fontSize: 13, color: dialogCtx.adapt(_DS.ink3)),
                     suffixText: '= PKR ${(qty * _pricePerToken).toStringAsFixed(0)}',
-                    suffixStyle: GoogleFonts.dmSans(color: _DS.red, fontWeight: FontWeight.bold, fontSize: 12),
+                    suffixStyle: GoogleFonts.inter(color: _DS.red, fontWeight: FontWeight.bold, fontSize: 12),
                     filled: true,
                     fillColor: dialogCtx.adapt(_DS.surface2),
                     border: OutlineInputBorder(borderRadius: BorderRadius.circular(_DS.r14), borderSide: BorderSide.none),
@@ -845,7 +845,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
             actions: [
               TextButton(
                 onPressed: () => Navigator.pop(ctx),
-                child: Text('Cancel', style: GoogleFonts.dmSans(color: dialogCtx.adapt(_DS.ink3), fontWeight: FontWeight.w600)),
+                child: Text('Cancel', style: GoogleFonts.inter(color: dialogCtx.adapt(_DS.ink3), fontWeight: FontWeight.w600)),
               ),
               ElevatedButton.icon(
                 onPressed: (qty <= 0 || qty > localUnserved.length)
@@ -1103,7 +1103,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
                 children: [
                   Text(
                     'GMWF',
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.inter(
                       color: SoftPalette.gray50,
                       fontSize: 18,
                       fontWeight: FontWeight.w900,
@@ -1113,7 +1113,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
                   const SizedBox(height: 1),
                   Text(
                     _effectiveUserName,
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.inter(
                       color: SoftPalette.gray50A70,
                       fontSize: 12,
                       fontWeight: FontWeight.w500,
@@ -1401,7 +1401,7 @@ class _DasterkhwaanOfficeBoyState extends State<DasterkhwaanOfficeBoy>
                         const SizedBox(height: 2),
                         Text(
                           labels[idx],
-                          style: GoogleFonts.dmSans(
+                          style: GoogleFonts.inter(
                             fontSize: 9.5,
                             fontWeight: sel ? FontWeight.w800 : FontWeight.w500,
                             color: sel ? (isDark ? _DS.mint : _DS.sage) : inactiveColor,
@@ -1732,7 +1732,7 @@ class _HeroHeader extends StatelessWidget {
                           children: [
                             Text(
                               greeting,
-                              style: GoogleFonts.dmSans(
+                              style: GoogleFonts.inter(
                                 color: SoftPalette.gray50.withValues(alpha: 0.60),
                                 fontSize: 13,
                                 fontWeight: FontWeight.w500,
@@ -1778,7 +1778,7 @@ class _HeroHeader extends StatelessWidget {
                             const SizedBox(width: 6),
                             Text(
                               badgeLabel.toUpperCase(),
-                              style: GoogleFonts.dmSans(
+                              style: GoogleFonts.inter(
                                 color: _DS.mint,
                                 fontSize: 10,
                                 fontWeight: FontWeight.w800,
@@ -1804,7 +1804,7 @@ class _HeroHeader extends StatelessWidget {
                             const SizedBox(width: 4),
                             Text(
                               branchName,
-                              style: GoogleFonts.dmSans(
+                              style: GoogleFonts.inter(
                                 color: SoftPalette.gray50,
                                 fontSize: 10,
                                 fontWeight: FontWeight.w600,
@@ -1817,7 +1817,7 @@ class _HeroHeader extends StatelessWidget {
                       // Date
                       Text(
                         DateFormat('EEE, dd MMM yyyy').format(DateTime.now()),
-                        style: GoogleFonts.dmSans(
+                        style: GoogleFonts.inter(
                           color: SoftPalette.gray50.withValues(alpha: 0.50),
                           fontSize: 11,
                           fontWeight: FontWeight.w500,
@@ -1973,7 +1973,7 @@ class _UserAvatar extends StatelessWidget {
         alignment: Alignment.center,
         child: Text(
           initial,
-          style: GoogleFonts.dmSans(
+          style: GoogleFonts.inter(
             color: SoftPalette.gray50,
             fontWeight: FontWeight.bold,
             fontSize: 20,
@@ -2033,7 +2033,7 @@ class _StatChip extends StatelessWidget {
                   const SizedBox(width: 6),
                   Text(
                     value,
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.inter(
                       fontSize: 22,
                       fontWeight: FontWeight.w700,
                       color: color,
@@ -2045,7 +2045,7 @@ class _StatChip extends StatelessWidget {
               const SizedBox(height: 6),
               Text(
                 label.toUpperCase(),
-                style: GoogleFonts.dmSans(
+                style: GoogleFonts.inter(
                   fontSize: 9.5,
                   fontWeight: FontWeight.w700,
                   color: isDark ? SoftPalette.slate350 : _DS.ink3,
@@ -2105,7 +2105,7 @@ class _DonationSummaryCard extends StatelessWidget {
                 children: [
                   Text(
                     "Today's Donations",
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.inter(
                       fontSize: 13,
                       fontWeight: FontWeight.w700,
                       color: isDark ? SoftPalette.gray50 : _DS.ink,
@@ -2113,7 +2113,7 @@ class _DonationSummaryCard extends StatelessWidget {
                   ),
                   Text(
                     '$count contributions recorded',
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.inter(
                       fontSize: 11,
                       color: isDark ? SoftPalette.slate350 : _DS.ink3,
                     ),
@@ -2133,7 +2133,7 @@ class _DonationSummaryCard extends StatelessWidget {
                 ),
                 Text(
                   'TOTAL COLLECTED',
-                  style: GoogleFonts.dmSans(
+                  style: GoogleFonts.inter(
                     fontSize: 8,
                     fontWeight: FontWeight.w800,
                     color: _DS.amber.withValues(alpha: 0.8),
@@ -2204,7 +2204,7 @@ class _RevenueBand extends StatelessWidget {
                   children: [
                     Text(
                       "Today's Food Revenue",
-                      style: GoogleFonts.dmSans(
+                      style: GoogleFonts.inter(
                         color: SoftPalette.gray50.withValues(alpha: 0.65),
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
@@ -2237,7 +2237,7 @@ class _RevenueBand extends StatelessWidget {
                       const SizedBox(width: 5),
                       Text(
                         'PKR ${pricePerToken.toInt()} / token',
-                        style: GoogleFonts.dmSans(
+                        style: GoogleFonts.inter(
                           color: _DS.mint,
                           fontSize: 11,
                           fontWeight: FontWeight.w700,
@@ -2264,7 +2264,7 @@ class _SectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Text(
         text.toUpperCase(),
-        style: GoogleFonts.dmSans(
+        style: GoogleFonts.inter(
           fontSize: 10.5,
           fontWeight: FontWeight.w800,
           letterSpacing: 1.2,
@@ -2334,7 +2334,7 @@ class _ActionCardWide extends StatelessWidget {
                   children: [
                     Text(
                       title,
-                      style: GoogleFonts.dmSans(
+                      style: GoogleFonts.inter(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
                         color: isDark ? SoftPalette.gray50 : _DS.ink,
@@ -2343,7 +2343,7 @@ class _ActionCardWide extends StatelessWidget {
                     const SizedBox(height: 2),
                     Text(
                       subtitle,
-                      style: GoogleFonts.dmSans(
+                      style: GoogleFonts.inter(
                         fontSize: 11,
                         color: isDark ? SoftPalette.slate350 : _DS.ink3,
                       ),
@@ -2552,7 +2552,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                                   children: [
                                     Text(
                                       'Issue $qty ${meta.shortTitle} Token${qty > 1 ? "s" : ""}',
-                                      style: GoogleFonts.dmSans(
+                                      style: GoogleFonts.inter(
                                         fontSize: 15,
                                         fontWeight: FontWeight.w700,
                                         color: SoftPalette.gray50,
@@ -2561,7 +2561,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                                     ),
                                     Text(
                                       'PKR ${(qty * widget.pricePerToken).toStringAsFixed(0)} · ${_sessionUrdu(widget.selectedSession)}',
-                                      style: GoogleFonts.dmSans(
+                                      style: GoogleFonts.inter(
                                         fontSize: 11,
                                         color: SoftPalette.gray50.withValues(alpha: 0.85),
                                       ),
@@ -2684,7 +2684,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                             const SizedBox(height: 2),
                             Text(
                               'Meal Distribution · ${widget.displayFormat.format(DateTime.now())}',
-                              style: GoogleFonts.dmSans(
+                              style: GoogleFonts.inter(
                                 color: SoftPalette.gray50.withValues(alpha: 0.55),
                                 fontSize: 11.5,
                               ),
@@ -2703,7 +2703,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                         ),
                         child: Text(
                           'PKR ${widget.pricePerToken.toInt()} / token',
-                          style: GoogleFonts.dmSans(
+                          style: GoogleFonts.inter(
                             color: SoftPalette.cyan200,
                             fontWeight: FontWeight.w700,
                             fontSize: 12,
@@ -2798,7 +2798,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                                 const SizedBox(width: 5),
                                 Text(
                                   'Combined: $total Issued · ${total - served} Pending',
-                                  style: GoogleFonts.dmSans(
+                                  style: GoogleFonts.inter(
                                     fontSize: 11,
                                     color: SoftPalette.gray50.withValues(alpha: 0.75),
                                     fontWeight: FontWeight.w500,
@@ -2808,7 +2808,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                             ),
                             Text(
                               'PKR ${(total * widget.pricePerToken).toStringAsFixed(0)}',
-                              style: GoogleFonts.dmSans(
+                              style: GoogleFonts.inter(
                                 fontSize: 12,
                                 color: SoftPalette.emerald150,
                                 fontWeight: FontWeight.w700,
@@ -2875,7 +2875,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                 Flexible(
                   child: Text(
                     title,
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.inter(
                       fontSize: 11.5,
                       fontWeight: active ? FontWeight.w700 : FontWeight.w500,
                       color: active ? SoftPalette.gray50 : SoftPalette.gray50.withValues(alpha: 0.7),
@@ -2889,7 +2889,7 @@ class _TokensScreenState extends State<_TokensScreen> {
               const SizedBox(height: 2),
               Text(
                 timingSubtitle,
-                style: GoogleFonts.dmSans(
+                style: GoogleFonts.inter(
                   fontSize: 9.5,
                   fontWeight: active ? FontWeight.w600 : FontWeight.normal,
                   color: active ? SoftPalette.gray50.withValues(alpha: 0.9) : SoftPalette.gray50.withValues(alpha: 0.45),
@@ -2914,7 +2914,7 @@ class _TokensScreenState extends State<_TokensScreen> {
       children: [
         Text(
           title,
-          style: GoogleFonts.dmSans(
+          style: GoogleFonts.inter(
             fontSize: 11,
             fontWeight: FontWeight.w600,
             color: accentColor,
@@ -2927,7 +2927,7 @@ class _TokensScreenState extends State<_TokensScreen> {
           children: [
             Text(
               '$total',
-              style: GoogleFonts.dmSans(
+              style: GoogleFonts.inter(
                 fontSize: 15,
                 fontWeight: FontWeight.w800,
                 color: SoftPalette.gray50,
@@ -2936,7 +2936,7 @@ class _TokensScreenState extends State<_TokensScreen> {
             const SizedBox(width: 3),
             Text(
               'issued',
-              style: GoogleFonts.dmSans(
+              style: GoogleFonts.inter(
                 fontSize: 9.5,
                 color: SoftPalette.gray50.withValues(alpha: 0.4),
               ),
@@ -2950,7 +2950,7 @@ class _TokensScreenState extends State<_TokensScreen> {
               ),
               child: Text(
                 '$pending wait',
-                style: GoogleFonts.dmSans(
+                style: GoogleFonts.inter(
                   fontSize: 8.5,
                   fontWeight: FontWeight.w700,
                   color: SoftPalette.yellow200,
@@ -3012,7 +3012,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                       children: [
                         Text(
                           'DASTERKHWAAN MEAL VOUCHER',
-                          style: GoogleFonts.dmSans(
+                          style: GoogleFonts.inter(
                             fontSize: 8.5,
                             fontWeight: FontWeight.w800,
                             letterSpacing: 0.6,
@@ -3021,7 +3021,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                         ),
                         Text(
                           '${meta.shortTitle} Session · ${_sessionUrdu(sessionKey)}',
-                          style: GoogleFonts.dmSans(
+                          style: GoogleFonts.inter(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
                             color: _DS.getInk(isDark),
@@ -3040,7 +3040,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                   ),
                   child: Text(
                     meta.shortTitle.toUpperCase(),
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.inter(
                       fontSize: 9,
                       fontWeight: FontWeight.w800,
                       color: meta.color,
@@ -3067,7 +3067,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                   children: [
                     Text(
                       'NEXT IN QUEUE',
-                      style: GoogleFonts.dmSans(
+                      style: GoogleFonts.inter(
                         fontSize: 8.5,
                         fontWeight: FontWeight.w700,
                         color: _DS.getInk3(isDark),
@@ -3077,7 +3077,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                     const SizedBox(height: 2),
                     Text(
                       rangeText,
-                      style: GoogleFonts.dmSans(
+                      style: GoogleFonts.inter(
                         fontSize: 17,
                         fontWeight: FontWeight.w900,
                         color: _DS.getInk(isDark),
@@ -3098,7 +3098,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                     children: [
                       Text(
                         '$qty Meal${qty > 1 ? "s" : ""} · ',
-                        style: GoogleFonts.dmSans(
+                        style: GoogleFonts.inter(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w600,
                           color: isDark ? _DS.mint : _DS.sage,
@@ -3106,7 +3106,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                       ),
                       Text(
                         'PKR $totalPKR',
-                        style: GoogleFonts.dmSans(
+                        style: GoogleFonts.inter(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w800,
                           color: isDark ? _DS.mint : _DS.sage,
@@ -3136,7 +3136,7 @@ class _TokensScreenState extends State<_TokensScreen> {
             _SectionLabel('Token Quantity', isDark: isDark),
             Text(
               '= PKR ${(currentQty * widget.pricePerToken).toStringAsFixed(0)}',
-              style: GoogleFonts.dmSans(
+              style: GoogleFonts.inter(
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
                 color: _DS.mint,
@@ -3192,7 +3192,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                 children: [
                   Text(
                     '$currentQty',
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.inter(
                       fontSize: 28,
                       fontWeight: FontWeight.w900,
                       color: _DS.getInk(isDark),
@@ -3201,7 +3201,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                   ),
                   Text(
                     '${currentQty == 1 ? "1 Meal" : "$currentQty Meals"} · PKR ${(currentQty * widget.pricePerToken).toStringAsFixed(0)}',
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.inter(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
                       color: _DS.mint,
@@ -3275,7 +3275,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                     ),
                     child: Text(
                       '$preset',
-                      style: GoogleFonts.dmSans(
+                      style: GoogleFonts.inter(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
                         color: selected ? (isDark ? SoftPalette.slate900 : SoftPalette.gray50) : _DS.getInk(isDark),
@@ -3301,7 +3301,7 @@ class _TokensScreenState extends State<_TokensScreen> {
             keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
             onChanged: (_) => setState(() {}),
-            style: GoogleFonts.dmSans(
+            style: GoogleFonts.inter(
               fontSize: 15,
               fontWeight: FontWeight.w700,
               color: _DS.getInk(isDark),
@@ -3309,13 +3309,13 @@ class _TokensScreenState extends State<_TokensScreen> {
             decoration: InputDecoration(
               prefixIcon: Icon(Icons.dialpad_rounded, color: _DS.getInk3(isDark), size: 20),
               suffixText: '= PKR ${(currentQty * widget.pricePerToken).toStringAsFixed(0)}',
-              suffixStyle: GoogleFonts.dmSans(
+              suffixStyle: GoogleFonts.inter(
                 color: _DS.mint,
                 fontWeight: FontWeight.w700,
                 fontSize: 13,
               ),
               hintText: 'Enter custom token quantity…',
-              hintStyle: GoogleFonts.dmSans(fontSize: 13, color: _DS.getInk3(isDark)),
+              hintStyle: GoogleFonts.inter(fontSize: 13, color: _DS.getInk3(isDark)),
               filled: true,
               fillColor: _DS.getSurface(isDark),
               border: OutlineInputBorder(
@@ -3357,7 +3357,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                 const SizedBox(height: 2),
                 Text(
                   'Live feed of meal tickets for today',
-                  style: GoogleFonts.dmSans(fontSize: 11, color: _DS.getInk3(isDark)),
+                  style: GoogleFonts.inter(fontSize: 11, color: _DS.getInk3(isDark)),
                 ),
               ],
             ),
@@ -3455,7 +3455,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                         const SizedBox(height: 8),
                         Text(
                           'No tokens issued today yet',
-                          style: GoogleFonts.dmSans(
+                          style: GoogleFonts.inter(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
                             color: _DS.getInk(isDark),
@@ -3464,7 +3464,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                         const SizedBox(height: 4),
                         Text(
                           'Select session and quantity above to issue tickets',
-                          style: GoogleFonts.dmSans(
+                          style: GoogleFonts.inter(
                             fontSize: 11,
                             color: _DS.getInk3(isDark),
                           ),
@@ -3512,7 +3512,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                             child: Center(
                               child: Text(
                                 '#$number',
-                                style: GoogleFonts.dmSans(
+                                style: GoogleFonts.inter(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w800,
                                   color: meta.color,
@@ -3538,7 +3538,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                                     Expanded(
                                       child: Text(
                                         '${meta.shortTitle} Session',
-                                        style: GoogleFonts.dmSans(
+                                        style: GoogleFonts.inter(
                                           fontSize: 12.5,
                                           fontWeight: FontWeight.w700,
                                           color: _DS.getInk(isDark),
@@ -3552,7 +3552,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                                 const SizedBox(height: 2),
                                 Text(
                                   '${time != null ? DateFormat('hh:mm a').format(time) : 'Today'} · ${_sessionUrdu(session)}',
-                                  style: GoogleFonts.dmSans(
+                                  style: GoogleFonts.inter(
                                     fontSize: 10.5,
                                     color: _DS.getInk3(isDark),
                                   ),
@@ -3586,7 +3586,7 @@ class _TokensScreenState extends State<_TokensScreen> {
                                 const SizedBox(width: 4),
                                 Text(
                                   served ? 'Served' : 'Waiting',
-                                  style: GoogleFonts.dmSans(
+                                  style: GoogleFonts.inter(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w700,
                                     color: served ? _DS.green : _DS.amber,
@@ -3620,7 +3620,7 @@ class _TokensScreenState extends State<_TokensScreen> {
         ),
         child: Text(
           label,
-          style: GoogleFonts.dmSans(
+          style: GoogleFonts.inter(
             fontSize: 10,
             fontWeight: FontWeight.w700,
             color: sel ? (isDark ? SoftPalette.slate900 : SoftPalette.gray50) : _DS.getInk3(isDark),
@@ -3676,7 +3676,7 @@ class _ReverseButton extends StatelessWidget {
                 const SizedBox(width: 8),
                 Text(
                   'Reverse / Void Issued Tokens',
-                  style: GoogleFonts.dmSans(
+                  style: GoogleFonts.inter(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
                     color: isDark ? SoftPalette.red350 : _DS.red,
@@ -4121,7 +4121,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                         ),
                         Text(
                           _isMonthView ? 'Cumulative tokens, boxes & donations' : 'Tokens, boxes & donations by date',
-                          style: GoogleFonts.dmSans(
+                          style: GoogleFonts.inter(
                               color: SoftPalette.gray50.withValues(alpha: 0.50),
                               fontSize: 11),
                         ),
@@ -4148,7 +4148,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                               ),
                               child: Text(
                                 'Day',
-                                style: GoogleFonts.dmSans(
+                                style: GoogleFonts.inter(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w700,
                                   color: !_isMonthView ? _DS.sage : SoftPalette.gray50A70,
@@ -4167,7 +4167,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                               ),
                               child: Text(
                                 'Month',
-                                style: GoogleFonts.dmSans(
+                                style: GoogleFonts.inter(
                                   fontSize: 11,
                                   fontWeight: FontWeight.w700,
                                   color: _isMonthView ? _DS.sage : SoftPalette.gray50A70,
@@ -4236,7 +4236,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                 _isMonthView
                                     ? monthLabel
                                     : (isToday ? 'Today · $displayDate' : displayDate),
-                                style: GoogleFonts.dmSans(
+                                style: GoogleFonts.inter(
                                     color: SoftPalette.gray50,
                                     fontWeight: FontWeight.w600,
                                     fontSize: 13),
@@ -4314,7 +4314,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                       _isMonthView
                           ? 'No records for $monthLabel'
                           : 'No records for $displayDate',
-                      style: GoogleFonts.dmSans(
+                      style: GoogleFonts.inter(
                           fontSize: 14,
                           fontWeight: FontWeight.w500,
                           color: context.adapt(_DS.ink3)),
@@ -4356,7 +4356,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         Text('Serving progress',
-                            style: GoogleFonts.dmSans(
+                            style: GoogleFonts.inter(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w500,
                                 color: context.adapt(_DS.ink3))),
@@ -4364,7 +4364,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                           totalTokens > 0
                               ? '${((servedTokens / totalTokens) * 100).toStringAsFixed(0)}%'
                               : '0%',
-                          style: GoogleFonts.dmSans(
+                          style: GoogleFonts.inter(
                               fontSize: 11,
                               fontWeight: FontWeight.w600,
                               color: _DS.mint),
@@ -4395,7 +4395,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                           padding: const EdgeInsets.symmetric(vertical: 6),
                           child: Text(
                             'No donation boxes opened on this date.',
-                            style: GoogleFonts.dmSans(color: context.adapt(_DS.ink3), fontSize: 13),
+                            style: GoogleFonts.inter(color: context.adapt(_DS.ink3), fontSize: 13),
                           ),
                         )
                       : Column(
@@ -4412,7 +4412,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                 children: [
                                   Text(
                                     'Total Box Collections',
-                                    style: GoogleFonts.dmSans(
+                                    style: GoogleFonts.inter(
                                         fontWeight: FontWeight.w600,
                                         color: context.adapt(SoftPalette.teal550),
                                         fontSize: 13),
@@ -4451,14 +4451,14 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                         children: [
                                           Text(
                                             'Box #${op.boxNumber}',
-                                            style: GoogleFonts.dmSans(
+                                            style: GoogleFonts.inter(
                                                 fontSize: 13,
                                                 fontWeight: FontWeight.w700,
                                                 color: context.adapt(_DS.ink)),
                                           ),
                                           Text(
                                             'Collected by ${op.collectedBy}',
-                                            style: GoogleFonts.dmSans(
+                                            style: GoogleFonts.inter(
                                                 fontSize: 11,
                                                 color: context.adapt(_DS.ink3)),
                                           ),
@@ -4467,7 +4467,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                     ),
                                     Text(
                                       'PKR ${op.amount.toStringAsFixed(0)}',
-                                      style: GoogleFonts.dmSans(
+                                      style: GoogleFonts.inter(
                                         fontSize: 13,
                                         fontWeight: FontWeight.w700,
                                         color: SoftPalette.teal500,
@@ -4503,7 +4503,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                               ),
                               child: Center(
                                 child: Text('#${t['number']}',
-                                    style: GoogleFonts.dmSans(
+                                    style: GoogleFonts.inter(
                                         fontSize: 11,
                                         fontWeight: FontWeight.w600,
                                         color: served ? _DS.green : _DS.amber)),
@@ -4515,7 +4515,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                 time != null
                                     ? 'Issued at ${DateFormat('hh:mm a').format(time)}'
                                     : 'Issued',
-                                style: GoogleFonts.dmSans(
+                                style: GoogleFonts.inter(
                                     fontSize: 12,
                                     color: context.adapt(_DS.ink3)),
                               ),
@@ -4529,7 +4529,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                               ),
                               child: Text(
                                 served ? 'Served' : 'Pending',
-                                style: GoogleFonts.dmSans(
+                                style: GoogleFonts.inter(
                                     fontSize: 10,
                                     fontWeight: FontWeight.w600,
                                     color: served ? _DS.green : _DS.amber),
@@ -4553,7 +4553,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                           padding: const EdgeInsets.symmetric(vertical: 8),
                           child: Text(
                             'No donations recorded for this period.',
-                            style: GoogleFonts.dmSans(
+                            style: GoogleFonts.inter(
                                 color: context.adapt(_DS.ink3), fontSize: 13),
                           ),
                         )
@@ -4569,7 +4569,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                               mainAxisAlignment: MainAxisAlignment.spaceBetween,
                               children: [
                                 Text('Total Donations',
-                                    style: GoogleFonts.dmSans(
+                                    style: GoogleFonts.inter(
                                         fontWeight: FontWeight.w600,
                                         color: context.adapt(SoftPalette.teal550),
                                         fontSize: 13)),
@@ -4606,7 +4606,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                       (don['donorName']?.toString() ?? 'D')
                                           .substring(0, 1)
                                           .toUpperCase(),
-                                      style: GoogleFonts.dmSans(
+                                      style: GoogleFonts.inter(
                                           fontSize: 13,
                                           fontWeight: FontWeight.w600,
                                           color: context.adapt(SoftPalette.teal550)),
@@ -4620,14 +4620,14 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                     children: [
                                       Text(
                                         don['donorName']?.toString() ?? 'Walk-in Donor',
-                                        style: GoogleFonts.dmSans(
+                                        style: GoogleFonts.inter(
                                             fontSize: 13,
                                             fontWeight: FontWeight.w600,
                                             color: context.adapt(_DS.ink)),
                                       ),
                                       Text(
                                         '${don['type'] ?? 'General'} · PKR ${(don['amount'] as num? ?? 0).toDouble().toStringAsFixed(0)}',
-                                        style: GoogleFonts.dmSans(
+                                        style: GoogleFonts.inter(
                                             fontSize: 11,
                                             color: context.adapt(_DS.ink3)),
                                       ),
@@ -4643,7 +4643,7 @@ class _HistoryScreenState extends State<_HistoryScreen> {
                                   ),
                                   child: Text(
                                     status,
-                                    style: GoogleFonts.dmSans(
+                                    style: GoogleFonts.inter(
                                       fontSize: 10,
                                       fontWeight: FontWeight.w600,
                                     ),
@@ -4735,7 +4735,7 @@ class _HistSectionCard extends StatelessWidget {
             ),
             const SizedBox(width: 10),
             Text(title,
-                style: GoogleFonts.dmSans(
+                style: GoogleFonts.inter(
                     fontSize: 14,
                     fontWeight: FontWeight.w600,
                     color: _DS.getInk(isDark))),
@@ -4769,14 +4769,14 @@ class _HistStatTile extends StatelessWidget {
           ),
           child: Column(children: [
             Text(value,
-                style: GoogleFonts.dmSans(
+                style: GoogleFonts.inter(
                     fontSize: smallVal ? 15 : 20,
                     fontWeight: FontWeight.w600,
                     color: color,
                     height: 1.0)),
             const SizedBox(height: 4),
             Text(label.toUpperCase(),
-                style: GoogleFonts.dmSans(
+                style: GoogleFonts.inter(
                     fontSize: 9,
                     fontWeight: FontWeight.w600,
                     color: color.withValues(alpha: 0.65),

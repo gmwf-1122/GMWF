@@ -222,7 +222,7 @@ class AppFeedbackNoticeCard extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: GoogleFonts.dmSans(
+                  style: GoogleFonts.inter(
                     fontSize: 12.5,
                     fontWeight: FontWeight.w700,
                     color: effectiveColor,
@@ -232,7 +232,7 @@ class AppFeedbackNoticeCard extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     subtitle!,
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.inter(
                       fontSize: 11,
                       fontWeight: FontWeight.w400,
                       color: effectiveColor.withValues(alpha: 0.85),

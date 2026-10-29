@@ -247,7 +247,7 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
 
         final title = Text(
           context.isUrdu ? 'طالب علموں کی کارکردگی' : 'Student Progress Insights',
-          style: GoogleFonts.plusJakartaSans(
+          style: GoogleFonts.inter(
             fontSize: 20,
             fontWeight: FontWeight.w800,
             color: textPrimary,
@@ -287,7 +287,7 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
                   ),
                   child: Text(
                     label,
-                    style: GoogleFonts.plusJakartaSans(
+                    style: GoogleFonts.inter(
                       fontSize: 12,
                       fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
                       color: isSelected
@@ -405,7 +405,7 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
               const SizedBox(width: 8),
               Text(
                 title,
-                style: GoogleFonts.plusJakartaSans(
+                style: GoogleFonts.inter(
                   fontSize: 14,
                   fontWeight: FontWeight.w800,
                   color: SoftPalette.gray50,
@@ -460,7 +460,7 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
                           Expanded(
                             child: Text(
                               std['name']?.toString() ?? '',
-                              style: GoogleFonts.plusJakartaSans(
+                              style: GoogleFonts.inter(
                                 fontSize: 13,
                                 fontWeight: FontWeight.w700,
                                 color: SoftPalette.gray50,
@@ -479,7 +479,7 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
                       ),
                       child: Text(
                         '+$progress ${context.isUrdu ? 'لائنیں' : 'lines'}',
-                        style: GoogleFonts.plusJakartaSans(
+                        style: GoogleFonts.inter(
                           fontSize: 11,
                           fontWeight: FontWeight.w800,
                           color: SoftPalette.gray50,
@@ -519,7 +519,7 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
         decoration: InputDecoration(
           icon: Icon(Icons.search, color: textMuted),
           hintText: context.isUrdu ? 'طالب علم کا نام یا رول نمبر تلاش کریں...' : 'Search student by name or roll number...',
-          hintStyle: GoogleFonts.plusJakartaSans(
+          hintStyle: GoogleFonts.inter(
             fontSize: 13,
             color: textMuted,
           ),
@@ -604,7 +604,7 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
           children: [
             Text(
               title,
-              style: GoogleFonts.plusJakartaSans(
+              style: GoogleFonts.inter(
                 fontSize: 14,
                 fontWeight: FontWeight.w800,
                 color: textPrimary,
@@ -618,7 +618,7 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
               ),
               child: Text(
                 '$count',
-                style: GoogleFonts.plusJakartaSans(
+                style: GoogleFonts.inter(
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
                   color: indicatorColor,
@@ -634,7 +634,7 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
               child: Center(
                 child: Text(
                   context.isUrdu ? 'اس زمرے میں کوئی طالب علم نہیں ہے' : 'No students in this category',
-                  style: GoogleFonts.plusJakartaSans(
+                  style: GoogleFonts.inter(
                     fontSize: 12,
                     color: textMuted,
                   ),
@@ -679,7 +679,7 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
                                 children: [
                                   Text(
                                     std['name']?.toString() ?? '',
-                                    style: GoogleFonts.plusJakartaSans(
+                                    style: GoogleFonts.inter(
                                       fontSize: 13,
                                       fontWeight: FontWeight.w700,
                                       color: textPrimary,
@@ -690,7 +690,7 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
                                   const SizedBox(height: 2),
                                   Text(
                                     '${context.isUrdu ? 'رول نمبر' : 'Roll'}: ${std['rollNumber'] ?? ''}',
-                                    style: GoogleFonts.plusJakartaSans(
+                                    style: GoogleFonts.inter(
                                       fontSize: 11,
                                       color: textMuted,
                                       fontWeight: FontWeight.w500,
@@ -722,7 +722,7 @@ class _MadrassaProgressViewState extends ConsumerState<MadrassaProgressView> {
                             const SizedBox(width: 2),
                             Text(
                               '$progress ${context.isUrdu ? 'لائنیں' : 'lines'}',
-                              style: GoogleFonts.plusJakartaSans(
+                              style: GoogleFonts.inter(
                                 fontSize: 11,
                                 fontWeight: FontWeight.w800,
                                 color: indicatorColor,

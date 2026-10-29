@@ -105,7 +105,7 @@ class _LanHardwareStatusWidgetState extends State<LanHardwareStatusWidget> {
                         children: [
                           Text(
                             'LAN Hardware & Device Monitor',
-                            style: GoogleFonts.outfit(
+                            style: GoogleFonts.inter(
                               fontSize: 16,
                               fontWeight: FontWeight.bold,
                               color: isDark ? SoftPalette.gray50 : SoftPalette.slate900,

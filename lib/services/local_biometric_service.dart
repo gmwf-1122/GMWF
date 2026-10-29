@@ -188,7 +188,7 @@ class LocalBiometricService {
             Text(
               'Attendance Marked Successfully! 🎉',
               textAlign: TextAlign.center,
-              style: GoogleFonts.outfit(fontSize: 18, fontWeight: FontWeight.bold, color: ctx.adapt(SoftPalette.emerald600)),
+              style: GoogleFonts.inter(fontSize: 18, fontWeight: FontWeight.bold, color: ctx.adapt(SoftPalette.emerald600)),
             ),
             const SizedBox(height: 6),
             Text(

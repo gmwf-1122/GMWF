@@ -96,15 +96,15 @@ abstract class _TS {
       fontSize: 22, color: c, height: 1.2);
 
   static TextStyle label({Color c = _DS.ink3, double size = 10}) =>
-      GoogleFonts.dmSans(
+      GoogleFonts.inter(
           fontSize: size, fontWeight: FontWeight.w600,
           letterSpacing: 1.2, color: c);
 
   static TextStyle body({Color? c, double size = 14, FontWeight w = FontWeight.w400}) =>
-      GoogleFonts.dmSans(fontSize: size, fontWeight: w, color: c ?? _DS.ink);
+      GoogleFonts.inter(fontSize: size, fontWeight: w, color: c ?? _DS.ink);
 
   static TextStyle num({Color? c, double size = 22}) =>
-      GoogleFonts.dmSans(fontSize: size, fontWeight: FontWeight.w600, color: c ?? _DS.ink, height: 1.0);
+      GoogleFonts.inter(fontSize: size, fontWeight: FontWeight.w600, color: c ?? _DS.ink, height: 1.0);
 }
 
 final Map<String, ({String title, String shortTitle, String urdu, IconData icon, Color color, Color bg, List<Color> gradient})> _kitchenSessionMeta = {
@@ -927,7 +927,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
                 children: [
                   Text(
                     'Unintentionally issued tokens can be voided. ${localUnserved.length} unserved token(s) available today.',
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.inter(
                         fontSize: 13, color: _DS.getInk3(isDark)),
                   ),
                   const SizedBox(height: 16),
@@ -948,7 +948,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
                             borderRadius: BorderRadius.circular(_DS.r12),
                           ),
                           child: Text('$q',
-                              style: GoogleFonts.dmSans(
+                              style: GoogleFonts.inter(
                                   color: sel
                                       ? SoftPalette.gray50
                                       : _DS.getInk(isDark),
@@ -964,17 +964,17 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
                     keyboardType: TextInputType.number,
                     inputFormatters: [FilteringTextInputFormatter.digitsOnly],
                     onChanged: (_) => setS(() {}),
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.inter(
                         fontSize: 16,
                         fontWeight: FontWeight.bold,
                         color: _DS.getInk(isDark)),
                     decoration: InputDecoration(
                       hintText: 'Custom quantity…',
-                      hintStyle: GoogleFonts.dmSans(
+                      hintStyle: GoogleFonts.inter(
                           fontSize: 13, color: _DS.getInk3(isDark)),
                       suffixText:
                           '= PKR ${(qty * _pricePerToken).toStringAsFixed(0)}',
-                      suffixStyle: GoogleFonts.dmSans(
+                      suffixStyle: GoogleFonts.inter(
                           color: _DS.red,
                           fontWeight: FontWeight.bold,
                           fontSize: 12),
@@ -991,7 +991,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
                 TextButton(
                   onPressed: () => Navigator.pop(ctx),
                   child: Text('Cancel',
-                      style: GoogleFonts.dmSans(
+                      style: GoogleFonts.inter(
                           color: _DS.getInk3(isDark),
                           fontWeight: FontWeight.w600)),
                 ),
@@ -1447,7 +1447,7 @@ class _DasterkhwaanKitchenState extends State<DasterkhwaanKitchen>
                         const SizedBox(width: 8),
                         Text(
                           item.label,
-                          style: GoogleFonts.dmSans(
+                          style: GoogleFonts.inter(
                             fontSize: 12.5,
                             fontWeight: FontWeight.w800,
                             color: item.color,
@@ -1482,7 +1482,7 @@ class _SectionLabel extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Text(
         text.toUpperCase(),
-        style: GoogleFonts.dmSans(
+        style: GoogleFonts.inter(
           fontSize: 10.5,
           fontWeight: FontWeight.w800,
           letterSpacing: 1.2,
@@ -1528,7 +1528,7 @@ class _ReverseButton extends StatelessWidget {
                 const SizedBox(width: 8),
                 Text(
                   'Reverse / Void Issued Tokens',
-                  style: GoogleFonts.dmSans(
+                  style: GoogleFonts.inter(
                     fontSize: 13,
                     fontWeight: FontWeight.w700,
                     color: isDark ? SoftPalette.red350 : _DS.red,
@@ -1690,7 +1690,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                                   children: [
                                     Text(
                                       'Issue $qty ${meta.shortTitle} Token${qty > 1 ? "s" : ""}',
-                                      style: GoogleFonts.dmSans(
+                                      style: GoogleFonts.inter(
                                         fontSize: 15,
                                         fontWeight: FontWeight.w700,
                                         color: SoftPalette.gray50,
@@ -1699,7 +1699,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                                     ),
                                     Text(
                                       'PKR ${(qty * widget.pricePerToken).toStringAsFixed(0)} · ${_kitchenSessionUrdu(widget.selectedSession)}',
-                                      style: GoogleFonts.dmSans(
+                                      style: GoogleFonts.inter(
                                         fontSize: 11,
                                         color: SoftPalette.gray50.withValues(alpha: 0.85),
                                       ),
@@ -1754,7 +1754,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                             children: [
                               Text(
                                 'Ready to distribute food?',
-                                style: GoogleFonts.dmSans(
+                                style: GoogleFonts.inter(
                                   fontSize: 13,
                                   fontWeight: FontWeight.w700,
                                   color: _DS.getInk(isDark),
@@ -1762,7 +1762,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                               ),
                               Text(
                                 'Open Serve Queue to mark meals as served',
-                                style: GoogleFonts.dmSans(
+                                style: GoogleFonts.inter(
                                   fontSize: 11,
                                   color: _DS.getInk3(isDark),
                                 ),
@@ -1905,7 +1905,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                           const SizedBox(height: 2),
                           Text(
                             'Meal Distribution · ${widget.displayFormat.format(DateTime.now())}',
-                            style: GoogleFonts.dmSans(
+                            style: GoogleFonts.inter(
                               color: SoftPalette.gray50.withValues(alpha: 0.65),
                               fontSize: 11,
                             ),
@@ -1924,7 +1924,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                       ),
                       child: Text(
                         'PKR ${widget.pricePerToken.toInt()} / token',
-                        style: GoogleFonts.dmSans(
+                        style: GoogleFonts.inter(
                           color: SoftPalette.cyan200,
                           fontWeight: FontWeight.w700,
                           fontSize: 11.5,
@@ -2021,7 +2021,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                               const SizedBox(width: 5),
                               Text(
                                 'Combined: $total Issued · ${total - served} Pending',
-                                style: GoogleFonts.dmSans(
+                                style: GoogleFonts.inter(
                                   fontSize: 11,
                                   color: SoftPalette.gray50.withValues(alpha: 0.75),
                                   fontWeight: FontWeight.w500,
@@ -2031,7 +2031,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                           ),
                           Text(
                             'PKR ${(total * widget.pricePerToken).toStringAsFixed(0)}',
-                            style: GoogleFonts.dmSans(
+                            style: GoogleFonts.inter(
                               fontSize: 12,
                               color: SoftPalette.emerald150,
                               fontWeight: FontWeight.w700,
@@ -2098,7 +2098,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                 Flexible(
                   child: Text(
                     title,
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.inter(
                       fontSize: 11.5,
                       fontWeight: active ? FontWeight.w700 : FontWeight.w500,
                       color: active ? SoftPalette.gray50 : SoftPalette.gray50.withValues(alpha: 0.7),
@@ -2112,7 +2112,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
               const SizedBox(height: 2),
               Text(
                 timingSubtitle,
-                style: GoogleFonts.dmSans(
+                style: GoogleFonts.inter(
                   fontSize: 9.5,
                   fontWeight: active ? FontWeight.w600 : FontWeight.normal,
                   color: active ? SoftPalette.gray50.withValues(alpha: 0.9) : SoftPalette.gray50.withValues(alpha: 0.45),
@@ -2137,7 +2137,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
       children: [
         Text(
           title,
-          style: GoogleFonts.dmSans(
+          style: GoogleFonts.inter(
             fontSize: 11,
             fontWeight: FontWeight.w600,
             color: accentColor,
@@ -2150,7 +2150,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
           children: [
             Text(
               '$total',
-              style: GoogleFonts.dmSans(
+              style: GoogleFonts.inter(
                 fontSize: 15,
                 fontWeight: FontWeight.w800,
                 color: SoftPalette.gray50,
@@ -2159,7 +2159,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
             const SizedBox(width: 3),
             Text(
               'issued',
-              style: GoogleFonts.dmSans(
+              style: GoogleFonts.inter(
                 fontSize: 9.5,
                 color: SoftPalette.gray50.withValues(alpha: 0.4),
               ),
@@ -2173,7 +2173,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
               ),
               child: Text(
                 '$pending wait',
-                style: GoogleFonts.dmSans(
+                style: GoogleFonts.inter(
                   fontSize: 8.5,
                   fontWeight: FontWeight.w700,
                   color: SoftPalette.yellow200,
@@ -2234,7 +2234,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                       children: [
                         Text(
                           'DASTERKHWAAN MEAL VOUCHER',
-                          style: GoogleFonts.dmSans(
+                          style: GoogleFonts.inter(
                             fontSize: 8.5,
                             fontWeight: FontWeight.w800,
                             letterSpacing: 0.6,
@@ -2243,7 +2243,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                         ),
                         Text(
                           '${meta.shortTitle} Session · ${_kitchenSessionUrdu(sessionKey)}',
-                          style: GoogleFonts.dmSans(
+                          style: GoogleFonts.inter(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
                             color: _DS.getInk(isDark),
@@ -2262,7 +2262,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                   ),
                   child: Text(
                     meta.shortTitle.toUpperCase(),
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.inter(
                       fontSize: 9,
                       fontWeight: FontWeight.w800,
                       color: meta.color,
@@ -2287,7 +2287,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                   children: [
                     Text(
                       'NEXT IN QUEUE',
-                      style: GoogleFonts.dmSans(
+                      style: GoogleFonts.inter(
                         fontSize: 8.5,
                         fontWeight: FontWeight.w700,
                         color: _DS.getInk3(isDark),
@@ -2297,7 +2297,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                     const SizedBox(height: 2),
                     Text(
                       rangeText,
-                      style: GoogleFonts.dmSans(
+                      style: GoogleFonts.inter(
                         fontSize: 17,
                         fontWeight: FontWeight.w900,
                         color: _DS.getInk(isDark),
@@ -2318,7 +2318,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                     children: [
                       Text(
                         '$qty Meal${qty > 1 ? "s" : ""} · ',
-                        style: GoogleFonts.dmSans(
+                        style: GoogleFonts.inter(
                           fontSize: 11.5,
                           fontWeight: FontWeight.w600,
                           color: isDark ? _DS.mint : _DS.sage,
@@ -2326,7 +2326,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                       ),
                       Text(
                         'PKR $totalPKR',
-                        style: GoogleFonts.dmSans(
+                        style: GoogleFonts.inter(
                           fontSize: 12.5,
                           fontWeight: FontWeight.w800,
                           color: isDark ? _DS.mint : _DS.sage,
@@ -2355,7 +2355,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
             _SectionLabel('Token Quantity', isDark: isDark),
             Text(
               '= PKR ${(currentQty * widget.pricePerToken).toStringAsFixed(0)}',
-              style: GoogleFonts.dmSans(
+              style: GoogleFonts.inter(
                 fontSize: 14,
                 fontWeight: FontWeight.w700,
                 color: _DS.mint,
@@ -2407,7 +2407,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                 children: [
                   Text(
                     '$currentQty',
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.inter(
                       fontSize: 28,
                       fontWeight: FontWeight.w900,
                       color: _DS.getInk(isDark),
@@ -2416,7 +2416,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                   ),
                   Text(
                     '${currentQty == 1 ? "1 Meal" : "$currentQty Meals"} · PKR ${(currentQty * widget.pricePerToken).toStringAsFixed(0)}',
-                    style: GoogleFonts.dmSans(
+                    style: GoogleFonts.inter(
                       fontSize: 11,
                       fontWeight: FontWeight.w600,
                       color: _DS.mint,
@@ -2487,7 +2487,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                     ),
                     child: Text(
                       '$preset',
-                      style: GoogleFonts.dmSans(
+                      style: GoogleFonts.inter(
                         fontSize: 14,
                         fontWeight: FontWeight.w700,
                         color: selected ? (isDark ? SoftPalette.slate900 : SoftPalette.gray50) : _DS.getInk(isDark),
@@ -2512,7 +2512,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
             keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.digitsOnly],
             onChanged: (_) => setState(() {}),
-            style: GoogleFonts.dmSans(
+            style: GoogleFonts.inter(
               fontSize: 15,
               fontWeight: FontWeight.w700,
               color: _DS.getInk(isDark),
@@ -2520,13 +2520,13 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
             decoration: InputDecoration(
               prefixIcon: Icon(Icons.dialpad_rounded, color: _DS.getInk3(isDark), size: 20),
               suffixText: '= PKR ${(currentQty * widget.pricePerToken).toStringAsFixed(0)}',
-              suffixStyle: GoogleFonts.dmSans(
+              suffixStyle: GoogleFonts.inter(
                 color: _DS.mint,
                 fontWeight: FontWeight.w700,
                 fontSize: 13,
               ),
               hintText: 'Enter custom token quantity…',
-              hintStyle: GoogleFonts.dmSans(fontSize: 13, color: _DS.getInk3(isDark)),
+              hintStyle: GoogleFonts.inter(fontSize: 13, color: _DS.getInk3(isDark)),
               filled: true,
               fillColor: _DS.getSurface(isDark),
               border: OutlineInputBorder(
@@ -2568,7 +2568,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                 const SizedBox(height: 2),
                 Text(
                   'Live feed of meal tickets for today',
-                  style: GoogleFonts.dmSans(fontSize: 11, color: _DS.getInk3(isDark)),
+                  style: GoogleFonts.inter(fontSize: 11, color: _DS.getInk3(isDark)),
                 ),
               ],
             ),
@@ -2662,7 +2662,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                         const SizedBox(height: 8),
                         Text(
                           'No tokens issued today yet',
-                          style: GoogleFonts.dmSans(
+                          style: GoogleFonts.inter(
                             fontSize: 13,
                             fontWeight: FontWeight.w600,
                             color: _DS.getInk(isDark),
@@ -2671,7 +2671,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                         const SizedBox(height: 4),
                         Text(
                           'Select session and quantity above to issue tickets',
-                          style: GoogleFonts.dmSans(
+                          style: GoogleFonts.inter(
                             fontSize: 11,
                             color: _DS.getInk3(isDark),
                           ),
@@ -2718,7 +2718,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                             child: Center(
                               child: Text(
                                 '#$number',
-                                style: GoogleFonts.dmSans(
+                                style: GoogleFonts.inter(
                                   fontSize: 14,
                                   fontWeight: FontWeight.w800,
                                   color: meta.color,
@@ -2742,7 +2742,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                                     Expanded(
                                       child: Text(
                                         '${meta.shortTitle} Session',
-                                        style: GoogleFonts.dmSans(
+                                        style: GoogleFonts.inter(
                                           fontSize: 12.5,
                                           fontWeight: FontWeight.w700,
                                           color: _DS.getInk(isDark),
@@ -2756,7 +2756,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                                 const SizedBox(height: 2),
                                 Text(
                                   '${time != null ? DateFormat('hh:mm a').format(time) : 'Today'} · ${_kitchenSessionUrdu(session)}',
-                                  style: GoogleFonts.dmSans(
+                                  style: GoogleFonts.inter(
                                     fontSize: 10.5,
                                     color: _DS.getInk3(isDark),
                                   ),
@@ -2788,7 +2788,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
                                 const SizedBox(width: 4),
                                 Text(
                                   served ? 'Served' : 'Waiting',
-                                  style: GoogleFonts.dmSans(
+                                  style: GoogleFonts.inter(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w700,
                                     color: served ? _DS.green : _DS.amber,
@@ -2822,7 +2822,7 @@ class _KitchenIssueTokenTabState extends State<_KitchenIssueTokenTab> {
         ),
         child: Text(
           label,
-          style: GoogleFonts.dmSans(
+          style: GoogleFonts.inter(
             fontSize: 10,
             fontWeight: FontWeight.w700,
             color: sel ? (isDark ? SoftPalette.slate900 : SoftPalette.gray50) : _DS.getInk3(isDark),
@@ -2917,7 +2917,7 @@ class _KitchenServeQueueTabState extends State<_KitchenServeQueueTab> {
                   controller: _searchCtrl,
                   keyboardType: TextInputType.number,
                   onChanged: (val) => setState(() => _searchQuery = val.trim()),
-                  style: GoogleFonts.dmSans(
+                  style: GoogleFonts.inter(
                     fontSize: 13.5,
                     fontWeight: FontWeight.w600,
                     color: _DS.getInk(isDark),
@@ -2934,7 +2934,7 @@ class _KitchenServeQueueTabState extends State<_KitchenServeQueueTab> {
                           )
                         : null,
                     hintText: 'Search token number (e.g. 15)...',
-                    hintStyle: GoogleFonts.dmSans(fontSize: 12.5, color: _DS.getInk3(isDark)),
+                    hintStyle: GoogleFonts.inter(fontSize: 12.5, color: _DS.getInk3(isDark)),
                     border: InputBorder.none,
                     contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
                   ),
@@ -3054,7 +3054,7 @@ class _KitchenServeQueueTabState extends State<_KitchenServeQueueTab> {
                                 _selectedSessionFilter == 'all'
                                     ? 'All Tokens Served!'
                                     : 'No pending ${_kitchenSessionMeta[_selectedSessionFilter]?.shortTitle ?? _selectedSessionFilter} tokens',
-                                style: GoogleFonts.dmSans(
+                                style: GoogleFonts.inter(
                                   fontSize: 18,
                                   fontWeight: FontWeight.w800,
                                   color: _DS.getInk(isDark),
@@ -3064,7 +3064,7 @@ class _KitchenServeQueueTabState extends State<_KitchenServeQueueTab> {
                               Text(
                                 'New tokens will appear instantly when generated.\nOr tap below to issue meal tokens.',
                                 textAlign: TextAlign.center,
-                                style: GoogleFonts.dmSans(
+                                style: GoogleFonts.inter(
                                   fontSize: 12.5,
                                   color: _DS.getInk3(isDark),
                                   height: 1.4,
@@ -3149,7 +3149,7 @@ class _KitchenServeQueueTabState extends State<_KitchenServeQueueTab> {
           child: Center(
             child: Text(
               label,
-              style: GoogleFonts.dmSans(
+              style: GoogleFonts.inter(
                 fontSize: 11,
                 fontWeight: isSelected ? FontWeight.w800 : FontWeight.w600,
                 color: isSelected ? color : _DS.getInk3(isDark),
@@ -3257,7 +3257,7 @@ class _KitchenServeQueueTabState extends State<_KitchenServeQueueTab> {
                               const SizedBox(height: 2),
                               Text(
                                 '${widget.username} · Serving Meals',
-                                style: GoogleFonts.dmSans(
+                                style: GoogleFonts.inter(
                                   color: SoftPalette.gray50.withValues(alpha: 0.65),
                                   fontSize: 11,
                                   fontWeight: FontWeight.w500,
@@ -3285,7 +3285,7 @@ class _KitchenServeQueueTabState extends State<_KitchenServeQueueTab> {
                         borderRadius: BorderRadius.circular(10),
                         side: BorderSide(color: SoftPalette.gray50.withValues(alpha: 0.3)),
                       ),
-                      textStyle: GoogleFonts.dmSans(fontSize: 11.5, fontWeight: FontWeight.w700),
+                      textStyle: GoogleFonts.inter(fontSize: 11.5, fontWeight: FontWeight.w700),
                     ),
                   ),
                   const SizedBox(width: 6),
@@ -3492,7 +3492,7 @@ class _TokenCard extends StatelessWidget {
                   children: [
                     Text(
                       'TOKEN',
-                      style: GoogleFonts.dmSans(
+                      style: GoogleFonts.inter(
                         fontSize: 9.5,
                         fontWeight: FontWeight.w800,
                         letterSpacing: 1.2,
@@ -3540,7 +3540,7 @@ class _TokenCard extends StatelessWidget {
                                 const SizedBox(width: 4),
                                 Text(
                                   meta.shortTitle,
-                                  style: GoogleFonts.dmSans(
+                                  style: GoogleFonts.inter(
                                     fontSize: 11,
                                     fontWeight: FontWeight.w700,
                                     color: meta.color,
@@ -3572,7 +3572,7 @@ class _TokenCard extends StatelessWidget {
                           const SizedBox(width: 4),
                           Text(
                             DateFormat('hh:mm a').format(time),
-                            style: GoogleFonts.dmSans(
+                            style: GoogleFonts.inter(
                               fontSize: 11.5,
                               fontWeight: FontWeight.w600,
                               color: _DS.getInk2(isDark),
@@ -3585,7 +3585,7 @@ class _TokenCard extends StatelessWidget {
                             Flexible(
                               child: Text(
                                 issuedBy!,
-                                style: GoogleFonts.dmSans(
+                                style: GoogleFonts.inter(
                                   fontSize: 11,
                                   color: _DS.getInk3(isDark),
                                 ),
@@ -3637,7 +3637,7 @@ class _TokenCard extends StatelessWidget {
                             const SizedBox(width: 6),
                             Text(
                               'Serve',
-                              style: GoogleFonts.dmSans(
+                              style: GoogleFonts.inter(
                                 fontSize: 13,
                                 fontWeight: FontWeight.bold,
                                 color: Colors.white,

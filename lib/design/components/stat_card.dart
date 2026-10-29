@@ -72,8 +72,8 @@ class StatCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: t.bgCard,
           borderRadius: Gr.card,
-          boxShadow: GShadow.s2(isDark),
-          border: Border.all(color: t.bgRule, width: 0.5),
+          boxShadow: GShadow.s1(isDark),
+          border: Border.all(color: t.bgRule, width: 1),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -159,7 +159,9 @@ class HeroStatCard extends StatelessWidget {
     final isDark = t.isDarkCanvas;
     final resolvedGradient = gradient ?? t.accentGradient;
 
-    final trendColor = trendUp ? GColor.successOf(isDark) : GColor.dangerOf(isDark);
+    // Sits on the accent gradient: green/red would vanish, so use light ink
+    // and let the arrow carry the direction.
+    final trendColor = SoftPalette.gray50.withValues(alpha: 0.9);
     final trendIcon = trendUp ? Icons.trending_up_rounded : Icons.trending_down_rounded;
 
     return GestureDetector(

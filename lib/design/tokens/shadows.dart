@@ -1,8 +1,18 @@
 // lib/design/tokens/shadows.dart
 //
-// ── GShadow — Elevation / Shadow Scale ───────────────────────────────────────
-// 5-step elevation system.
-// s0 = none, s1 = hairline, s2 = card rest, s3 = interactive, s4 = modal
+// ── GShadow — Elevation / Shadow Scale (Design System v2) ────────────────────
+// Clean, layered shadows: a tight contact shadow plus a soft ambient one, both
+// tinted with the cool slate ink so they sit naturally on the slate canvas.
+// Surfaces are separated mainly by a 1px border; shadows only hint at depth.
+//
+//   s0  none          inner chip, badge, flat panel
+//   s1  hairline      resting card, list group
+//   s2  card          raised card, sticky header
+//   s3  interactive   hovered / selected card (optional accent glow)
+//   s4  overlay       dialog, menu, toast
+//
+// The old neumorphic dual shadows (light highlight top-left) are gone:
+// raised() keeps its signature for existing callers but returns s2/s3.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import 'package:flutter/material.dart';
@@ -11,112 +21,61 @@ import 'package:gmwf/design/tokens/soft_palette.dart';
 class GShadow {
   GShadow._(); // prevent instantiation
 
+  static const Color _ink = SoftPalette.slate900;
+
+  static BoxShadow _layer(bool isDark, double light, double dark, double blur, double y, [double spread = 0]) =>
+      BoxShadow(
+        color: _ink.withValues(alpha: isDark ? dark : light),
+        blurRadius: blur,
+        spreadRadius: spread,
+        offset: Offset(0, y),
+      );
+
   /// s0 — No shadow. Flat surface (e.g., inner chip, badge).
   static List<BoxShadow> get s0 => const [];
 
-  /// s1 — Hairline lift. Barely-there shadow for subtle separation.
+  /// s1 — Hairline lift. Resting cards on the canvas.
   static List<BoxShadow> s1(bool isDark) => [
-    BoxShadow(
-      color: SoftPalette.gray900.withValues(alpha: isDark ? 0.18 : 0.04),
-      blurRadius: 2,
-      offset: const Offset(0, 1),
-    ),
-  ];
+        _layer(isDark, 0.04, 0.30, 2, 1),
+      ];
 
-  /// s2 — Card rest state. Standard shadow for resting cards.
+  /// s2 — Raised card. Contact shadow + soft ambient.
   static List<BoxShadow> s2(bool isDark) => [
-    BoxShadow(
-      color: SoftPalette.gray900.withValues(alpha: isDark ? 0.25 : 0.06),
-      blurRadius: 6,
-      spreadRadius: 0,
-      offset: const Offset(0, 2),
-    ),
-  ];
+        _layer(isDark, 0.04, 0.30, 2, 1),
+        _layer(isDark, 0.05, 0.28, 12, 4, -2),
+      ];
 
-  /// s3 — Interactive / hover card. Adds accent glow.
+  /// s3 — Interactive / hover / selected card, with a faint accent glow.
   static List<BoxShadow> s3(bool isDark, Color accent) => [
-    BoxShadow(
-      color: SoftPalette.gray900.withValues(alpha: isDark ? 0.30 : 0.08),
-      blurRadius: 12,
-      offset: const Offset(0, 4),
-    ),
-    BoxShadow(
-      color: accent.withValues(alpha: isDark ? 0.20 : 0.12),
-      blurRadius: 16,
-      offset: const Offset(0, 4),
-    ),
-  ];
+        _layer(isDark, 0.05, 0.32, 4, 2),
+        _layer(isDark, 0.08, 0.34, 24, 10, -4),
+        BoxShadow(
+          color: accent.withValues(alpha: isDark ? 0.16 : 0.10),
+          blurRadius: 20,
+          spreadRadius: -6,
+          offset: const Offset(0, 8),
+        ),
+      ];
 
-  /// s4 — Modal / dialog. Deepest shadow for floating surfaces.
+  /// s4 — Overlay: dialog, menu, toast. Deepest shadow.
   static List<BoxShadow> s4(bool isDark) => [
-    BoxShadow(
-      color: SoftPalette.gray900.withValues(alpha: isDark ? 0.40 : 0.12),
-      blurRadius: 24,
-      spreadRadius: 2,
-      offset: const Offset(0, 8),
-    ),
-  ];
+        _layer(isDark, 0.06, 0.36, 6, 2),
+        _layer(isDark, 0.14, 0.50, 48, 20, -8),
+      ];
 
-  // ── Neumorphic helpers (wraps existing Neumorphic3DStyle logic) ───────────
+  // ── Legacy raised helper ──────────────────────────────────────────────────
 
-  /// Raised card shadow — wraps the existing Neumorphic3DStyle.raisedShadows().
-  /// This is provided so new components can use GShadow.raised() instead of
-  /// calling Neumorphic3DStyle directly, keeping a single import path.
+  /// Raised surface shadow. Kept for callers of the old neumorphic API
+  /// (Neumorphic3DStyle, RoleCard): depth ≥ 1.5 or [showGlow] lifts to s3.
   static List<BoxShadow> raised({
     required bool isDark,
     Color? accent,
     double depth = 1.0,
     bool showGlow = false,
   }) {
-    if (isDark) {
-      return [
-        BoxShadow(
-          color: SoftPalette.gray900.withValues(alpha: 0.65),
-          blurRadius: (18 * depth).clamp(4.0, 36.0),
-          spreadRadius: 1,
-          offset: Offset(6 * depth, 8 * depth),
-        ),
-        BoxShadow(
-          color: SoftPalette.gray50.withValues(alpha: 0.08),
-          blurRadius: (12 * depth).clamp(3.0, 24.0),
-          spreadRadius: -1,
-          offset: Offset(-4 * depth, -4 * depth),
-        ),
-        if (showGlow && accent != null)
-          BoxShadow(
-            color: accent.withValues(alpha: 0.28),
-            blurRadius: 24,
-            spreadRadius: 2,
-            offset: const Offset(0, 6),
-          ),
-      ];
-    } else {
-      return [
-        BoxShadow(
-          color: SoftPalette.gray900.withValues(alpha: 0.12),
-          blurRadius: (18 * depth).clamp(4.0, 36.0),
-          spreadRadius: 1,
-          offset: Offset(7 * depth, 8 * depth),
-        ),
-        BoxShadow(
-          color: SoftPalette.gray50.withValues(alpha: 0.95),
-          blurRadius: (14 * depth).clamp(3.0, 28.0),
-          spreadRadius: -1,
-          offset: Offset(-6 * depth, -6 * depth),
-        ),
-        BoxShadow(
-          color: SoftPalette.gray900.withValues(alpha: 0.03),
-          blurRadius: 4,
-          offset: const Offset(0, 2),
-        ),
-        if (showGlow && accent != null)
-          BoxShadow(
-            color: accent.withValues(alpha: 0.20),
-            blurRadius: 24,
-            spreadRadius: 2,
-            offset: const Offset(0, 8),
-          ),
-      ];
-    }
+    if (showGlow && accent != null) return s3(isDark, accent);
+    if (depth <= 0) return s0;
+    if (depth < 0.75) return s1(isDark);
+    return s2(isDark);
   }
 }

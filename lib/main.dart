@@ -6,7 +6,7 @@ import 'dart:ui';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:gmwf/design/components/app_toast.dart';
-import 'package:gmwf/design/tokens/comfort_colors.dart';
+import 'package:gmwf/design/theme/gmwf_theme.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
@@ -17,7 +17,6 @@ import 'package:path/path.dart' as path;
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:flutter_native_splash/flutter_native_splash.dart';
-import 'package:google_fonts/google_fonts.dart';
 import 'package:sentry_flutter/sentry_flutter.dart';
 import 'constants/colors.dart';
 
@@ -509,90 +508,17 @@ class _MyAppState extends State<MyApp> {
     return false;
   }
 
+  // The whole Material theme lives in the design system (GTheme); main only
+  // supplies the user's accent, card roundness and the blur-aware transitions.
   ThemeData _buildThemeData({
     required Color seedColor,
     required double cardRadius,
-    required String? fontFamily,
     required Brightness brightness,
   }) {
-    final isDark = brightness == Brightness.dark;
-    return ThemeData(
-      useMaterial3: true,
+    return GTheme.build(
+      seedColor: seedColor,
+      cardRadius: cardRadius,
       brightness: brightness,
-      fontFamily: fontFamily,
-      // Semantic eye-comfort colours for every screen: context.comfort.<role>.
-      extensions: [isDark ? GComfortColors.dark : GComfortColors.light],
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: seedColor,
-        primary: seedColor,
-        secondary: AppColors.navy,
-        // Soft palette error colour instead of Material's saturated default red.
-        error: isDark ? SoftPalette.red350 : SoftPalette.red550,
-        brightness: brightness,
-      ),
-      scaffoldBackgroundColor: isDark ? SoftPalette.slate900 : SoftPalette.slate100,
-      cardTheme: CardThemeData(
-        elevation: 0,
-        color: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(cardRadius),
-        ),
-      ),
-      dialogTheme: DialogThemeData(
-        backgroundColor: isDark ? SoftPalette.slate900 : SoftPalette.gray50,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(cardRadius),
-        ),
-      ),
-      inputDecorationTheme: InputDecorationTheme(
-        filled: true,
-        fillColor: isDark ? SoftPalette.slate800 : SoftPalette.gray50,
-        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(cardRadius),
-          borderSide: BorderSide(color: isDark ? SoftPalette.slate750 : AppColors.gray200, width: 1.5),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(cardRadius),
-          borderSide: BorderSide(color: isDark ? SoftPalette.slate750 : AppColors.gray200, width: 1.5),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(cardRadius),
-          borderSide: BorderSide(color: seedColor, width: 2.0),
-        ),
-        labelStyle: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: isDark ? SoftPalette.slate400 : AppColors.gray600),
-        hintStyle: TextStyle(fontSize: 14, color: isDark ? SoftPalette.slate500 : AppColors.gray400),
-      ),
-      elevatedButtonTheme: ElevatedButtonThemeData(
-        style: ElevatedButton.styleFrom(
-          backgroundColor: seedColor,
-          foregroundColor: SoftPalette.gray50,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(cardRadius)),
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
-          textStyle: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600),
-          elevation: 3,
-          shadowColor: seedColor.withValues(alpha: isDark ? 0.4 : 0.35),
-        ),
-      ),
-      outlinedButtonTheme: OutlinedButtonThemeData(
-        style: OutlinedButton.styleFrom(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(cardRadius)),
-        ),
-      ),
-      textButtonTheme: TextButtonThemeData(
-        style: TextButton.styleFrom(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(cardRadius)),
-        ),
-      ),
-      snackBarTheme: SnackBarThemeData(
-        contentTextStyle: const TextStyle(
-          color: SoftPalette.gray50,
-          fontSize: 13.5,
-          fontWeight: FontWeight.w600,
-        ),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      ),
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
           TargetPlatform.android: BlurOnDialogPageTransitionsBuilder(CupertinoPageTransitionsBuilder()),
@@ -621,7 +547,6 @@ class _MyAppState extends State<MyApp> {
                   theme: _buildThemeData(
                     seedColor: AppColors.primary,
                     cardRadius: 16.0,
-                    fontFamily: GoogleFonts.dmSans().fontFamily,
                     brightness: Brightness.light,
                   ),
                   routes: {
@@ -656,7 +581,6 @@ class _MyAppState extends State<MyApp> {
                     final cardRadius = (box.get('card_radius', defaultValue: 16.0) as num).toDouble();
                     final isDarkMode = box.get('is_dark_mode', defaultValue: false) as bool;
                     final language = box.get('language', defaultValue: 'en') as String;
-                    final fontFamily = GoogleFonts.dmSans().fontFamily;
                     final isUrdu = language == 'ur';
 
                     return MaterialApp(
@@ -669,13 +593,11 @@ class _MyAppState extends State<MyApp> {
                       theme: _buildThemeData(
                         seedColor: seedColor,
                         cardRadius: cardRadius,
-                        fontFamily: fontFamily,
                         brightness: Brightness.light,
                       ),
                       darkTheme: _buildThemeData(
                         seedColor: seedColor,
                         cardRadius: cardRadius,
-                        fontFamily: fontFamily,
                         brightness: Brightness.dark,
                       ),
                       builder: (context, child) {
