@@ -1072,8 +1072,16 @@ class LocalStorageService {
           rethrow;
         }
 
-        debugPrint('[LocalStorageService] ❌ Retry failed for "$name": $retryEx. Proceeding to backup + single-box recovery.');
         await _logStorageError(name, 'Retry open failed: $retryEx', retrySt);
+
+        // Only a damaged file is backed up and reset. "Hive not initialised" and file-access
+        // errors say nothing about the file: on 2026-10-23 a start without Hive init made every
+        // box "fail" here, copying ~160 healthy box files to .bak (311 MB) and trying to reset them.
+        if (!_looksLikeCorruption(retryEx)) {
+          debugPrint('[LocalStorageService] ❌ Open failed for "$name" ($retryEx) — not file damage; box file left as is.');
+          rethrow;
+        }
+        debugPrint('[LocalStorageService] ❌ Retry failed for "$name": $retryEx. Proceeding to backup + single-box recovery.');
 
         final backupCreated = await _backupCorruptedBoxFiles(name);
 
@@ -1140,6 +1148,19 @@ class LocalStorageService {
     }
   }
 
+  /// Whether an open error means the box file itself is damaged (and may be reset).
+  static bool _looksLikeCorruption(Object error) {
+    final s = error.toString().toLowerCase();
+    if (s.contains('initialize hive') || s.contains('provide a path')) return false;
+    if (error is FileSystemException) return false; // access denied, sharing violation, disk
+    if (s.contains('lock') || s.contains('another process') || s.contains('access is denied')) return false;
+    if (error is TimeoutException) return false;
+    return true;
+  }
+
+  /// Backups kept per box; older ones are removed (each is a full copy of the box file).
+  static const int _maxBackupsPerBox = 2;
+
   static Future<bool> _backupCorruptedBoxFiles(String boxName) async {
     try {
       final hivePath = await _getHiveDirectoryPath();
@@ -1149,6 +1170,14 @@ class LocalStorageService {
 
       final nowMs = DateTime.now().millisecondsSinceEpoch;
       bool backedUp = false;
+
+      // One backup per box per hour is enough: repeated failures used to copy the same file
+      // again on every attempt.
+      final existing = await _backupFilesFor(hiveDir, boxName);
+      if (existing.isNotEmpty) {
+        final newest = await existing.first.lastModified();
+        if (DateTime.now().difference(newest) < const Duration(hours: 1)) return true;
+      }
 
       await for (final entity in hiveDir.list()) {
         if (entity is File) {
@@ -1163,10 +1192,172 @@ class LocalStorageService {
           }
         }
       }
+      if (backedUp) await _pruneBackups(hiveDir, boxName);
       return backedUp;
     } catch (e) {
       debugPrint('[LocalStorageService] Failed to backup box files for $boxName: $e');
       return false;
+    }
+  }
+
+  /// This box's backup files, newest first.
+  static Future<List<File>> _backupFilesFor(Directory hiveDir, String boxName) async {
+    final files = <File>[];
+    await for (final entity in hiveDir.list()) {
+      if (entity is File) {
+        final name = p.basename(entity.path);
+        if (name.startsWith('${boxName}_corrupted_') && name.endsWith('.bak')) files.add(entity);
+      }
+    }
+    final stamps = <File, DateTime>{};
+    for (final f in files) {
+      stamps[f] = await f.lastModified();
+    }
+    files.sort((a, b) => stamps[b]!.compareTo(stamps[a]!));
+    return files;
+  }
+
+  /// Keeps the newest [_maxBackupsPerBox] backups of [boxName] (a .hive and its .lock are
+  /// separate files of one backup, so files are grouped by their timestamp).
+  static Future<void> _pruneBackups(Directory hiveDir, String boxName) async {
+    try {
+      final files = await _backupFilesFor(hiveDir, boxName);
+      final stampOf = RegExp('^${RegExp.escape(boxName)}_corrupted_(\\d+)_');
+      final keptStamps = <String>{};
+      for (final f in files) {
+        final stamp = stampOf.firstMatch(p.basename(f.path))?.group(1) ?? '';
+        if (keptStamps.contains(stamp)) continue;
+        if (keptStamps.length < _maxBackupsPerBox) {
+          keptStamps.add(stamp);
+          continue;
+        }
+        await f.delete();
+      }
+    } catch (e) {
+      debugPrint('[LocalStorageService] Backup pruning for $boxName failed: $e');
+    }
+  }
+
+  // ── Nested prescription copies ────────────────────────────────────────────
+  // Many writers embed "the prescription" into a token with `entry['prescription'] = data`,
+  // where data was itself built from a token that already carried a prescription. Each save
+  // and each LAN catch-up round wrapped the previous copy again: on the dev PC 2,117 tokens
+  // took 47 MB, 40 MB of it prescription.prescription.prescription... (7+ levels, up to
+  // 120 KB per token), all decoded on the UI thread at startup and sent in every catch-up.
+
+  static bool _hasRxContent(Map m) {
+    final meds = m['medicines'] ?? m['prescriptions'] ?? m['items'];
+    return (meds is List && meds.isNotEmpty) ||
+        (m['diagnosis'] != null && m['diagnosis'].toString().trim().isNotEmpty) ||
+        (m['complaints'] != null && m['complaints'].toString().trim().isNotEmpty) ||
+        (m['complaint'] != null && m['complaint'].toString().trim().isNotEmpty) ||
+        (m['condition'] != null && m['condition'].toString().trim().isNotEmpty) ||
+        m['injectables'] != null;
+  }
+
+  /// The prescription to embed in a token: wrapper maps without prescription content are
+  /// unwrapped, and older copies nested inside are dropped.
+  static Map<String, dynamic> prescriptionForEmbedding(Map source) {
+    var cur = Map<String, dynamic>.from(source);
+    var guard = 0;
+    while (cur['prescription'] is Map && !_hasRxContent(cur) && guard++ < 32) {
+      cur = Map<String, dynamic>.from(cur['prescription'] as Map);
+    }
+    cur.remove('prescription');
+    final meds = cur['medicines'] ?? cur['prescriptions'] ?? cur['items'];
+    if (meds is List) {
+      cur['medicines'] ??= meds;
+      cur['prescriptions'] ??= meds;
+    }
+    return cur;
+  }
+
+  /// Flattens `map['prescription']` in place. True when something was removed.
+  static bool flattenEmbeddedPrescription(Map map) {
+    final p = map['prescription'];
+    if (p is! Map || p['prescription'] == null) return false;
+    map['prescription'] = prescriptionForEmbedding(p);
+    return true;
+  }
+
+  /// One pass over the token and prescription boxes that removes nested prescription copies,
+  /// then compacts the boxes so the file shrinks too. Yields every 50 records.
+  static Future<int> healNestedPrescriptions() async {
+    var fixed = 0;
+    for (final name in [entriesBox, prescriptionsBox]) {
+      if (!Hive.isBoxOpen(name)) continue;
+      final box = Hive.box(name);
+      var seen = 0;
+      for (final k in box.keys.toList()) {
+        final v = box.get(k);
+        if (v is Map) {
+          final copy = Map<String, dynamic>.from(v);
+          var changed = flattenEmbeddedPrescription(copy);
+          // A prescription record carrying its own older copy.
+          if (name == prescriptionsBox && copy['prescription'] is Map && _hasRxContent(copy)) {
+            copy.remove('prescription');
+            changed = true;
+          }
+          if (changed) {
+            await box.put(k, copy);
+            fixed++;
+          }
+        }
+        if (++seen % 50 == 0) await Future<void>.delayed(Duration.zero);
+      }
+      if (fixed > 0) {
+        try {
+          await box.compact();
+        } catch (_) {}
+      }
+    }
+    if (fixed > 0) debugPrint('[LocalStorageService] Flattened $fixed nested prescription copies');
+    return fixed;
+  }
+
+  /// Compacts boxes whose file is mostly overwritten records. Hive compacts on its own only
+  /// after 60+ deleted records, so a box of a few large records that are rewritten often
+  /// (branch_data_cache: 115 keys, 15 MB live, 35 MB file) never shrinks.
+  static Future<void> compactBloatedBoxes() async {
+    // Once a day is plenty (each compaction rewrites the file).
+    const flag = 'last_box_compaction_day';
+    final today = getTodayDateKey();
+    if (Hive.isBoxOpen('app_settings')) {
+      final s = Hive.box('app_settings');
+      if (s.get(flag) == today) return;
+      await s.put(flag, today);
+    }
+    for (final name in [branchCacheBox, entriesBox, syncBox, usersBox]) {
+      if (!Hive.isBoxOpen(name)) continue;
+      try {
+        await Hive.box(name).compact();
+      } catch (e) {
+        debugPrint('[LocalStorageService] compact $name failed: $e');
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+  }
+
+  /// Startup housekeeping: trims every box's backups to the newest [_maxBackupsPerBox].
+  static Future<void> pruneAllBoxBackups() async {
+    try {
+      final hivePath = await _getHiveDirectoryPath();
+      if (hivePath == null || hivePath.isEmpty) return;
+      final hiveDir = Directory(hivePath);
+      if (!await hiveDir.exists()) return;
+      final boxNames = <String>{};
+      await for (final entity in hiveDir.list()) {
+        if (entity is File) {
+          final name = p.basename(entity.path);
+          final i = name.indexOf('_corrupted_');
+          if (i > 0 && name.endsWith('.bak')) boxNames.add(name.substring(0, i));
+        }
+      }
+      for (final b in boxNames) {
+        await _pruneBackups(hiveDir, b);
+      }
+    } catch (e) {
+      debugPrint('[LocalStorageService] Backup pruning failed: $e');
     }
   }
 
@@ -9299,7 +9490,8 @@ class LocalStorageService {
       // Cleanup duplicate lowercase docs from Firestore to save cloud space & quota
       for (final docRef in duplicateDocsToDelete) {
         try {
-          await docRef.delete();
+          // An SDK write only completes once the server acknowledges it; offline it never would.
+          await docRef.delete().timeout(const Duration(seconds: 8));
           debugPrint('[LocalStorage] 🧹 Cleaned duplicate lowercase doc from Firestore: ${docRef.path}');
         } catch (_) {}
       }
@@ -9540,7 +9732,8 @@ class LocalStorageService {
           .doc(sanitizedBranch)
           .collection('dasterkhwaan_food_logs')
           .where('dateKey', isGreaterThanOrEqualTo: cutoffDate)
-          .get();
+          .get()
+          .timeout(_cloudReadTimeout);
 
       final Map<dynamic, dynamic> toPut = {};
       for (final doc in snap.docs) {
@@ -9568,6 +9761,9 @@ class LocalStorageService {
 
   static DateTime? _lastInventoryDownloadTime;
   static const Duration _inventoryDownloadCooldown = Duration(minutes: 5);
+
+  /// Upper bound for one background Firestore read (downloads, catch-ups).
+  static const Duration _cloudReadTimeout = Duration(seconds: 45);
 
   static Future<void> downloadInventory(String branchId, {bool forceFull = false, String? campId}) async {
     if (LanFirestoreGate.isLanDesk) return; // a dispensary desk on the LAN gets this from the LAN server
@@ -9612,7 +9808,9 @@ class LocalStorageService {
         }
 
         final isDelta = !forceFull && currentCount >= 15 && lastSyncedStr != null && lastSyncedStr.isNotEmpty;
-        var snapshot = await query.get();
+        // Bounded: on a half-working Wi-Fi the Windows SDK can leave a get() pending for many
+        // minutes, and the screens that start this (dispenser, receptionist) wait on it.
+        var snapshot = await query.get().timeout(_cloudReadTimeout);
         // Full fallback only when a FULL read came back empty (e.g. wrong branch casing). An
         // empty delta just means "nothing changed" — it used to trigger a full re-download of
         // the whole inventory every time.
@@ -9621,14 +9819,16 @@ class LocalStorageService {
               .collection('branches')
               .doc(effectiveFirestoreBranch)
               .collection(invCol)
-              .get();
+              .get()
+              .timeout(_cloudReadTimeout);
         }
         if (snapshot.docs.isEmpty && effectiveFirestoreBranch == 'karachi') {
           snapshot = await FirebaseFirestore.instance
               .collection('branches')
               .doc('Karachi')
               .collection(invCol)
-              .get();
+              .get()
+              .timeout(_cloudReadTimeout);
         }
 
         if (snapshot.docs.isNotEmpty) {

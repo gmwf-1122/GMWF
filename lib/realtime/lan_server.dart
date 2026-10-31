@@ -59,6 +59,25 @@ class LanServer {
   static const _dedupMaxSize   = 50000; // hard cap to prevent unbounded growth
   Timer? _dedupPurgeTimer;
 
+  /// Messages being saved right now. A resend that arrives meanwhile is ignored without an
+  /// ACK: if the save fails, the desk still holds the message and sends it again.
+  final Set<String> _inFlightMessageIds = {};
+
+  /// Ids already forwarded to the other desks: a resend after a failed save is not forwarded
+  /// again (their screens listen to the raw stream and would apply it again).
+  final LinkedHashSet<String> _routedMessageIds = LinkedHashSet<String>();
+
+  /// Save failures per message id. A message that keeps failing is parked in
+  /// [unsavedMessagesBox] and ACKed after [_maxSaveFailures], so it does not loop forever.
+  final Map<String, int> _saveFailures = {};
+  static const int _maxSaveFailures = 5;
+  static const String unsavedMessagesBox = 'lan_unsaved_messages';
+
+  /// Set by ServerSyncManager once its handler saves incoming messages (to Hive and the cloud
+  /// queue). Until then data messages are not ACKed or processed: desks reconnect within
+  /// seconds of a server restart, and messages ACKed before the handler existed were lost.
+  bool persistenceReady = false;
+
   // ── [FIX 5] In-memory & disk persisted record version arbiter map ──────────
   final Map<String, int> _recordVersionMap = {};
 
@@ -217,8 +236,10 @@ class LanServer {
               deadSockets.add(client);
             }
           }
-          // Tolerant 120s liveness timeout before evicting
-          if (now.difference(lastActive) > const Duration(seconds: 120)) {
+          // Desks ping every 10 s. A socket silent for 60 s is dead (Wi-Fi drop leaves it
+          // half-open); at 120 s every broadcast in between went into it and was lost. Not
+          // lower: a server busy for a while (big scans) must not evict every desk at once.
+          if (now.difference(lastActive) > const Duration(seconds: 60)) {
             deadSockets.add(client);
           }
         }
@@ -226,7 +247,9 @@ class LanServer {
       for (final dead in deadSockets) {
         final sid = dead.hashCode.toString();
         print('[LanServer] ⏱️ Client $sid closed/timed out — evicting');
-        try { dead.close(1001, 'Liveness timeout'); } catch (_) {}
+        // dart:io rejects 1001 ("close code must be 1000 or in the range 3000-4999", seen in
+        // gmwf_crash.log), so the dead socket was never closed.
+        try { dead.close(4000, 'Liveness timeout'); } catch (_) {}
         _removeClient(dead);
       }
     });
@@ -378,7 +401,7 @@ class LanServer {
         if (authToken != null && authToken!.isNotEmpty && clientToken != authToken) {
           print('[LanServer] ❌ Auth handshake failed for client $socketId — invalid token');
           socket.add(jsonEncode({'type': 'error', 'message': 'Auth Failed: Invalid token'}));
-          socket.close(1008, 'Auth Failed');
+          socket.close(4001, 'Auth Failed'); // dart:io allows 1000 or 3000-4999 only
           return;
         }
         socket.add(jsonEncode({'type': 'auth_ack', 'status': 'authenticated'}));
@@ -421,7 +444,7 @@ class LanServer {
             'code': 'VERSION_MISMATCH_REJECTED',
             'message': 'Protocol version mismatch. Please update app to v1.3.7 or higher.'
           }));
-          socket.close(1008, 'VERSION_MISMATCH_REJECTED');
+          socket.close(4008, 'VERSION_MISMATCH_REJECTED'); // dart:io allows 1000 or 3000-4999 only
           return;
         }
 
@@ -464,6 +487,15 @@ class LanServer {
             onClientDisconnected?.call(oldWs.hashCode.toString());
           }
 
+          // Desks send identify again on the live socket whenever a screen starts the
+          // connection. Treating that as a new client reset the server's per-socket "seen" set
+          // and pushed the whole day again each time.
+          final prevInfo = _clientInfo[socket];
+          final reIdentify = prevInfo != null &&
+              prevInfo['identified'] == true &&
+              prevInfo['role'] == normRole &&
+              prevInfo['branchId'] == normBranch;
+
           final info = {
             'role':        normRole,
             'branchId':    normBranch,
@@ -493,7 +525,7 @@ class LanServer {
             'serverEpoch':  DateTime.now().millisecondsSinceEpoch,
           }));
 
-          onClientConnected?.call(socketId, info);
+          if (!reIdentify) onClientConnected?.call(socketId, info);
           _broadcastClientCount();
 
           // Safely drain any messages the client sent before identify was acknowledged
@@ -524,7 +556,16 @@ class LanServer {
 
       // ── [DEDUP] Server-side deduplication ─────────────────────────────────
       final messageId = (data['_messageId'] ?? data['messageId'])?.toString();
+      if (messageId != null &&
+          messageId.isNotEmpty &&
+          !persistenceReady &&
+          !_serverOnlyEventTypes.contains(eventType)) {
+        // Not ACKed, so the desk keeps it in its outbox and resends it shortly.
+        print('[LanServer] ⏳ Sync manager not ready — leaving $eventType ($messageId) with the desk');
+        return;
+      }
       if (messageId != null && messageId.isNotEmpty) {
+        if (_inFlightMessageIds.contains(messageId)) return; // still being saved; no ACK yet
         if (_processedMessageIds.containsKey(messageId)) {
           // Already processed — send immediate ACK so client removes from outbox
           // but do NOT process or broadcast.
@@ -540,14 +581,9 @@ class LanServer {
         _processedMessageIds[messageId] = DateTime.now();
       }
 
-      // ── Acknowledge message immediately ───────────────────────────────────
-      if (messageId != null && messageId.isNotEmpty) {
-        socket.add(jsonEncode({
-          'event_type': 'message_ack',
-          'messageId':  messageId,
-          'duplicate':  false,
-        }));
-      }
+      // The ACK is sent once the handler has saved the message (_deliverAndAck): the desk
+      // deletes it from its outbox on the ACK, so an ACK before the save lost it whenever the
+      // save failed.
 
       // ── [FIX 5] Server Authoritative Version Check with Disk Persistence & Tie-Breaker ──
       // 'version' is the sending PC's own clock. Comparing it across PCs dropped real updates
@@ -568,6 +604,7 @@ class LanServer {
         final knownVersion = _recordVersionMap[versionKey] ?? 0;
         if (incomingVersion < knownVersion) {
           print('[LanServer] 🛑 Out-of-order update for $versionKey ($incomingVersion < $knownVersion) — dropping');
+          if (messageId != null && messageId.isNotEmpty) _sendAck(socket, messageId); // superseded
           return;
         }
         _recordVersionMap[versionKey] = incomingVersion;
@@ -595,16 +632,71 @@ class LanServer {
       // Acknowledgements and catch-up requests are for the server only. Forwarding them made
       // every catch-up cost (PCs x tokens x PCs) frames: each client ACKs every token it is
       // sent, and each ACK went to every other client, keeping the LAN busy all the time.
-      if (!_serverOnlyEventTypes.contains(eventType)) {
+      final alreadyRouted = messageId != null && messageId.isNotEmpty && !_routedMessageIds.add(messageId);
+      if (_routedMessageIds.length > _dedupMaxSize) _routedMessageIds.remove(_routedMessageIds.first);
+      if (!_serverOnlyEventTypes.contains(eventType) && !alreadyRouted) {
         _routeMessage(socket, enhanced);
       }
-      try {
-        onMessageReceived?.call(enhanced);
-      } catch (e, st) {
-        print('❌ onMessageReceived handler threw (peer routing was NOT affected): $e\n$st');
-      }
+      unawaited(_deliverAndAck(socket, enhanced, messageId));
     } catch (e) {
       print('❌ Error processing message from $socketId: $e');
+    }
+  }
+
+  /// Runs the server's handler (local save + cloud queue) and ACKs the message only after it
+  /// finished. On failure the id is forgotten and no ACK is sent, so the desk resends it.
+  Future<void> _deliverAndAck(WebSocket socket, Map<String, dynamic> message, String? messageId) async {
+    final tracked = messageId != null && messageId.isNotEmpty;
+    if (tracked) _inFlightMessageIds.add(messageId);
+    try {
+      await onMessageReceived?.call(message);
+    } catch (e, st) {
+      print('❌ onMessageReceived handler threw (peer routing was NOT affected): $e\n$st');
+      if (tracked) {
+        _inFlightMessageIds.remove(messageId);
+        final failures = (_saveFailures[messageId] ?? 0) + 1;
+        if (failures < _maxSaveFailures) {
+          _saveFailures[messageId] = failures;
+          _processedMessageIds.remove(messageId); // not ACKed: the desk resends it
+          return;
+        }
+        // Keeps failing (bad data, broken box): park a copy for recovery and ACK it, so the
+        // desk stops resending it every 30 s.
+        _saveFailures.remove(messageId);
+        await _parkUnsaved(message, e);
+        _sendAck(socket, messageId);
+      }
+      return;
+    }
+    if (tracked) {
+      _inFlightMessageIds.remove(messageId);
+      _saveFailures.remove(messageId);
+      _sendAck(socket, messageId);
+    }
+  }
+
+  Future<void> _parkUnsaved(Map<String, dynamic> message, Object error) async {
+    try {
+      final box = Hive.isBoxOpen(unsavedMessagesBox)
+          ? Hive.box(unsavedMessagesBox)
+          : await Hive.openBox(unsavedMessagesBox);
+      final id = (message['_messageId'] ?? message['messageId'] ?? DateTime.now().microsecondsSinceEpoch).toString();
+      await box.put(id, {
+        'message': jsonDecode(jsonEncode(message, toEncodable: (o) => o.toString())),
+        'error': error.toString(),
+        'parkedAt': DateTime.now().toIso8601String(),
+      });
+      print('⚠️ [LanServer] Message $id could not be saved after $_maxSaveFailures tries — parked in $unsavedMessagesBox');
+    } catch (e) {
+      print('❌ [LanServer] Could not park unsaved message: $e');
+    }
+  }
+
+  void _sendAck(WebSocket socket, String messageId) {
+    try {
+      socket.add(jsonEncode({'event_type': 'message_ack', 'messageId': messageId, 'duplicate': false}));
+    } catch (_) {
+      // Socket closed meanwhile: the desk resends and gets the duplicate ACK then.
     }
   }
 

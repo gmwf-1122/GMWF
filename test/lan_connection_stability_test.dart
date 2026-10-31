@@ -25,7 +25,8 @@ void main() {
     await Hive.openBox(LocalStorageService.stockBox);
     await Hive.openBox('realtime_outbox');
 
-    server = LanServer(port: testPort);
+    server = LanServer(port: testPort)
+      ..persistenceReady = true; // no ServerSyncManager in these tests
     await server.start('127.0.0.1');
   });
 

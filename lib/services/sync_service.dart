@@ -4949,7 +4949,14 @@ class SyncService {
     try {
       if (!Hive.isBoxOpen(LocalStorageService.patientsBox) ||
           Hive.box(LocalStorageService.patientsBox).isEmpty) {
-        final patientsSnap = await _db.collection('branches').doc(normBranchId).collection('patients').get();
+        // Bounded: a pending whole-collection read on flaky Wi-Fi kept every later step (and
+        // the 'done' flag) waiting for many minutes. A timeout retries on the next start.
+        final patientsSnap = await _db
+            .collection('branches')
+            .doc(normBranchId)
+            .collection('patients')
+            .get()
+            .timeout(const Duration(seconds: 90));
         final List<Map<String, dynamic>> patientsList = [];
         for (final doc in patientsSnap.docs) {
           final d = doc.data();
@@ -4970,7 +4977,8 @@ class SyncService {
       await Future.delayed(const Duration(milliseconds: 50));
       await DonationsLocalStorage.downloadDonors(normBranchId);
       await Future.delayed(const Duration(milliseconds: 50));
-      await FinanceLocalStorage.downloadAllFinanceData(normBranchId);
+      // Nine sequential collection downloads; a stalled one throws here (flag stays unset).
+      await FinanceLocalStorage.downloadAllFinanceData(normBranchId).timeout(const Duration(minutes: 3));
       await Future.delayed(const Duration(milliseconds: 50));
       await FinanceLoansStorage.migrateLegacyAdvancesToLoans(performedBy: 'System');
       await settings.put(key, true);

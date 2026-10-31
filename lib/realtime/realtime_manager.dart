@@ -84,6 +84,9 @@ class RealtimeManager {
   bool _gotFirstFrame    = false; // true once the server has actually sent us a frame on this socket
   bool _serverIdentified = false;
   bool _flushedOnConnect = false; // [BUG-4] guard against double outbox flush
+  bool _outboxFlushing = false; // one _flushOutbox pass at a time
+  Future<void> _routeChain = Future<void>.value(); // incoming messages are routed one at a time
+  bool _stressPurgeDone = false; // the stress-test sweep scans every entry: once per app run
 
   // ── LAN Health State (3-up / 2-down Hysteresis) ───────────────────────────
   static final ValueNotifier<bool> isLanHealthyNotifier = ValueNotifier<bool>(false);
@@ -128,6 +131,7 @@ class RealtimeManager {
     'token_created',
     'save_prescription',
     'prescription_created',
+    'dispense_completed',
     'save_stock_item',
     'token_reversal_approved',
     'save_proforma_item',
@@ -264,7 +268,10 @@ class RealtimeManager {
     final normBranch = branchId.trim().toLowerCase();
     final normIp = serverIp.trim();
 
-    if (_isConnected && _serverIp == normIp && _branchId == normBranch) {
+    // A socket that was accepted but has had no frame for >15 s (pings go every 10 s) is
+    // half-open after a Wi-Fi drop: reusing it kept the desk "connected" to nothing.
+    final staleLink = _serverIdentified && _lastPong != null && DateTime.now().difference(_lastPong!).inSeconds > 15;
+    if (_isConnected && !staleLink && _serverIp == normIp && _branchId == normBranch) {
       _role = normRole;
       if (username != null && username.trim().isNotEmpty) {
         _username = username.trim();
@@ -323,6 +330,20 @@ class RealtimeManager {
   // ── WebSocket connect ──────────────────────────────────────────────────────
   int _connectGen = 0;
 
+  /// Closes the current socket without waiting (closing a SYN_SENT socket can block ~20 s).
+  /// Code 1000: dart:io rejects 1001 (goingAway) with "close code must be 1000 or in the range
+  /// 3000-4999" (gmwf_crash.log), so the old half-open socket was never closed at all.
+  void _closeChannelQuietly() {
+    final channel = _channel;
+    if (channel == null) return;
+    try {
+      unawaited(channel.sink
+          .close(ws_status.normalClosure)
+          .timeout(const Duration(seconds: 1), onTimeout: () {})
+          .catchError((Object _) {}));
+    } catch (_) {}
+  }
+
   Future<void> _connectClient() async {
     if (_serverIp == null || _serverIp!.isEmpty) return;
 
@@ -337,7 +358,7 @@ class RealtimeManager {
     // without awaiting (closing a SYN_SENT socket can block for ~20s).
     try { _channelSub?.cancel(); } catch (_) {}
     _channelSub = null;
-    try { _channel?.sink.close(ws_status.goingAway).timeout(const Duration(seconds: 1), onTimeout: () {}); } catch (_) {}
+    _closeChannelQuietly();
 
     final gen = ++_connectGen;
 
@@ -639,9 +660,14 @@ class RealtimeManager {
   /// arriving later was then ignored).
   void _onServerIdentified() {
     _serverIdentified = true;
-    // Safety net: remove any stress-test tokens left by a test this device missed.
-    purgeStressTestEntries();
-    LocalStorageService.purgeStressTestLeftovers().ignore();
+    // Safety net: remove any stress-test tokens left by a test this device missed. Once per
+    // run: both sweeps scan the whole entries box on the UI thread, and on flapping Wi-Fi this
+    // ran on every reconnect.
+    if (!_stressPurgeDone) {
+      _stressPurgeDone = true;
+      purgeStressTestEntries();
+      LocalStorageService.purgeStressTestLeftovers().ignore();
+    }
     _reconnectAttempts = 0;
     if (kDebugMode) {
       print('[RealtimeManager] Identified — flushing ${_pendingMessages.length} pending');
@@ -795,7 +821,7 @@ class RealtimeManager {
     _ackFlushTimer?.cancel();
     _outboxSweepTimer?.cancel();
     _channelSub?.cancel();
-    _channel?.sink.close(ws_status.goingAway);
+    _closeChannelQuietly();
     _channelSub = null;
 
     // Compute next delay; after exhausting the back-off table, hold at 5 s.
@@ -970,6 +996,10 @@ class RealtimeManager {
   // ── [FIX-P2] Flush Hive outbox on reconnect ────────────────────────────────
   Future<void> _flushOutbox() async {
     if (!_isConnected || !_serverIdentified || _channel == null) return;
+    // Started from identify, the 30 s sweep, its own 2 s follow-up and forceFlushAndCatchUp;
+    // overlapping passes sent every item twice and pushed items to the failed box early.
+    if (_outboxFlushing) return;
+    _outboxFlushing = true;
 
     try {
       if (!Hive.isBoxOpen(_outboxBox)) return;
@@ -985,12 +1015,14 @@ class RealtimeManager {
       // Pre-pass: for each business record keep only its NEWEST queued copy; older duplicates
       // (left over from earlier versions or sessions) are dropped without being sent.
       final latestByLogical = <String, ({dynamic key, String ts})>{};
+      final queuedAt = <dynamic, String>{};
       for (final key in box.keys.toList()) {
         final raw = box.get(key);
         if (raw is! Map) continue;
+        final ts = (raw['_outboxTimestamp'] ?? raw['createdAt'] ?? '').toString();
+        queuedAt[key] = ts;
         final lk = _logicalKey(raw);
         if (lk == null) continue;
-        final ts = (raw['_outboxTimestamp'] ?? raw['createdAt'] ?? '').toString();
         final cur = latestByLogical[lk];
         if (cur == null || ts.compareTo(cur.ts) >= 0) latestByLogical[lk] = (key: key, ts: ts);
       }
@@ -998,7 +1030,12 @@ class RealtimeManager {
       var sentThisPass = 0;
       const maxPerPass = 250; // never push thousands of frames at once; the rest follows shortly
 
-      for (final key in box.keys.toList()) {
+      // Oldest first. Hive returns keys sorted, and the keys are random message ids, so after a
+      // restart a dispense or status update could reach the server before its token.
+      final orderedKeys = box.keys.toList()
+        ..sort((a, b) => (queuedAt[a] ?? '').compareTo(queuedAt[b] ?? ''));
+
+      for (final key in orderedKeys) {
         final raw = box.get(key);
         if (raw is! Map) { toDelete.add(key); continue; }
 
@@ -1016,18 +1053,7 @@ class RealtimeManager {
 
         // Expire non-critical items from previous days or older than 12 hours.
         // Critical business entities (tokens, prescriptions, dispenses, patients, donations) MUST NOT be discarded.
-        final eventType = (item['event_type'] ?? item['type'])?.toString() ?? '';
-        final isCriticalEvent = eventType == RealtimeEvents.saveEntry ||
-            eventType == RealtimeEvents.savePrescription ||
-            eventType == RealtimeEvents.dispenseCompleted ||
-            eventType == RealtimeEvents.savePatient ||
-            eventType == 'save_donation' ||
-            eventType == RealtimeEvents.saveEmployee ||
-            eventType == 'save_dispensary_charge' ||
-            eventType == 'save_dispensary_record' ||
-            eventType == 'update_serial_status' ||
-            eventType == 'token_created' ||
-            eventType == 'prescription_created';
+        final isCriticalEvent = _isCriticalOutboxItem(item);
 
         final itemDateKey = (item['dateKey'] ?? item['data']?['dateKey'])?.toString().trim();
         final tsStr    = (item['_outboxTimestamp'] ?? item['createdAt'])?.toString();
@@ -1048,8 +1074,11 @@ class RealtimeManager {
         msg.remove('_outboxKey');
         msg.remove('_outboxTimestamp');
         final retryCount = (msg.remove('_outboxRetryCount') as int?) ?? 0;
-        msg['_resent']    = true;
-        msg['_isReplay']  = true;
+        msg.remove('_outboxSends');
+        // Not marked _resent/_isReplay: the server forwards a resend only when it never handled
+        // the first copy (duplicates are ACKed and dropped there), so for the other desks it is
+        // a first delivery. The replay flags made them skip the stock deduction and alerts.
+        msg['_outboxResend'] = true;
         msg['_timestamp'] = DateTime.now().millisecondsSinceEpoch;
 
         if (kDebugMode) {
@@ -1103,7 +1132,26 @@ class RealtimeManager {
       }
     } catch (e) {
       if (kDebugMode) print('[RealtimeManager] _flushOutbox error: $e');
+    } finally {
+      _outboxFlushing = false;
     }
+  }
+
+  /// Business records (tokens, prescriptions, dispenses, patients, donations, ...) that are
+  /// never discarded as stale, however old: they must reach the server.
+  static bool _isCriticalOutboxItem(Map item) {
+    final eventType = (item['event_type'] ?? item['type'])?.toString() ?? '';
+    return eventType == RealtimeEvents.saveEntry ||
+        eventType == RealtimeEvents.savePrescription ||
+        eventType == RealtimeEvents.dispenseCompleted ||
+        eventType == RealtimeEvents.savePatient ||
+        eventType == 'save_donation' ||
+        eventType == RealtimeEvents.saveEmployee ||
+        eventType == 'save_dispensary_charge' ||
+        eventType == 'save_dispensary_record' ||
+        eventType == 'update_serial_status' ||
+        eventType == 'token_created' ||
+        eventType == 'prescription_created';
   }
 
   // ── [FAIL-BOX] Move an entry to the failed outbox ─────────────────────────
@@ -1149,8 +1197,11 @@ class RealtimeManager {
         final itemDateKey = (item['dateKey'] ?? item['data']?['dateKey'])?.toString().trim();
         final tsStr = (item['_outboxTimestamp'] ?? item['_failedAt'])?.toString();
         final ts    = tsStr != null ? DateTime.tryParse(tsStr) : null;
-        final isStale = (itemDateKey != null && itemDateKey.isNotEmpty && itemDateKey != todayDateKey) ||
-            (ts != null && (ts.isBefore(cutoff) || ts.day != DateTime.now().day));
+        // Same exemption as _flushOutbox: a prescription or token that failed in the evening
+        // was deleted here on the next connect.
+        final isStale = !_isCriticalOutboxItem(item) &&
+            ((itemDateKey != null && itemDateKey.isNotEmpty && itemDateKey != todayDateKey) ||
+                (ts != null && (ts.isBefore(cutoff) || ts.day != DateTime.now().day)));
 
         if (isStale) {
           failedBox.delete(key);
@@ -1162,8 +1213,12 @@ class RealtimeManager {
         item.remove('_failReason');
         item.remove('_originalKey');
         item['_outboxRetryCount'] = 0;
+        item['_outboxSends'] = 0;
         item['_outboxTimestamp']  = item['_outboxTimestamp'] ?? DateTime.now().toIso8601String();
-        final newKey = 'outbox_retry_${DateTime.now().microsecondsSinceEpoch}';
+        // Keyed by its message id again, so the server's ACK finds and removes it (a generated
+        // key was missed by the ACK lookup, and the item bounced between the boxes forever).
+        final msgId = (item['_messageId'] ?? '').toString();
+        final newKey = msgId.isNotEmpty ? msgId : 'outbox_retry_${DateTime.now().microsecondsSinceEpoch}';
         item['_outboxKey'] = newKey;
         box.put(newKey, item);
         failedBox.delete(key);
@@ -1179,6 +1234,16 @@ class RealtimeManager {
   }
 
   // ── Helpers ────────────────────────────────────────────────────────────────
+  /// Drops older prescription copies nested inside an embedded prescription (both in the
+  /// message and in its data), in and out: they grew every token by a level per round trip.
+  static void _flattenNestedPrescriptions(Map<String, dynamic> message) {
+    try {
+      LocalStorageService.flattenEmbeddedPrescription(message);
+      final data = message['data'];
+      if (data is Map) LocalStorageService.flattenEmbeddedPrescription(data);
+    } catch (_) {}
+  }
+
   Map<String, dynamic> _normalizeMessage(Map<String, dynamic> original) {
     final copy = Map<String, dynamic>.from(original);
 
@@ -1205,6 +1270,8 @@ class RealtimeManager {
       }
       copy['data'] = data;
     }
+    // After copying 'data': flattening must not change the caller's (often a Hive record's) map.
+    _flattenNestedPrescriptions(copy);
 
     return Map<String, dynamic>.from(_sanitizeForRealtime(copy) as Map);
   }
@@ -1251,6 +1318,8 @@ class RealtimeManager {
       return;
     }
 
+    _flattenNestedPrescriptions(decoded);
+
     final msgBranch = (decoded['branchId'] ?? decoded['_senderBranch'])
         ?.toString().toLowerCase().trim();
     final myBranch = _branchId?.toLowerCase().trim();
@@ -1270,9 +1339,19 @@ class RealtimeManager {
     }
 
     UiStallMonitor.mark("lan in: ${decoded['event_type'] ?? '?'}");
-    RealtimeRouter.routeMessage(decoded).catchError((e, st) {
+    // One message at a time, in arrival order. Unserialized, a catch-up burst ran the entry,
+    // prescription and dispense handlers of one token concurrently and their read-modify-write
+    // of the same record interleaved at each await.
+    // Bounded per message: a handler stuck on a Hive open or an offline Firestore call would
+    // otherwise hold every later LAN message behind it. It keeps running; it is just not ACKed.
+    final routed = _routeChain
+        .then((_) => RealtimeRouter.routeMessage(decoded).timeout(const Duration(seconds: 20)))
+        .then<bool>((_) => true)
+        .catchError((Object e, StackTrace st) {
       if (kDebugMode) print('[RealtimeManager] RealtimeRouter error: $e\n$st');
+      return false;
     });
+    _routeChain = routed;
 
     if (type == 'save_stock_item') {
       final isCatchUp = decoded['isCatchUp'] == true || decoded['_isReplay'] == true;
@@ -1296,21 +1375,25 @@ class RealtimeManager {
     } else if (type != null && _immAckEvents.contains(type)) {
       final serial = data['serial']?.toString().trim() ?? '';
       if (serial.isNotEmpty) {
-        // Send immediately inline — do not wait for the 5-second batch.
-        try {
-          final ackMsg = {
-            'event_type': 'ack_serials',
-            'serials':    [serial],
-            '_clientId':  _clientId,
-            '_timestamp': DateTime.now().millisecondsSinceEpoch,
-            '_immediate': true,
-          };
-          _channel?.sink.add(jsonEncode(ackMsg));
-          if (kDebugMode) print('[RealtimeManager] ⚡ Immediate ACK: $serial ($type)');
-        } catch (_) {
-          // Fallback: add to batch queue.
-          _pendingAckSerials.add(serial);
-        }
+        // Sent once the router has applied it (not on receipt: a dropped or failed message
+        // was still reported as delivered), without waiting for the 5-second batch.
+        unawaited(routed.then((ok) {
+          if (!ok) return;
+          try {
+            final ackMsg = {
+              'event_type': 'ack_serials',
+              'serials':    [serial],
+              '_clientId':  _clientId,
+              '_timestamp': DateTime.now().millisecondsSinceEpoch,
+              '_immediate': true,
+            };
+            _channel?.sink.add(jsonEncode(ackMsg));
+            if (kDebugMode) print('[RealtimeManager] ⚡ ACK: $serial ($type)');
+          } catch (_) {
+            // Fallback: add to batch queue.
+            _pendingAckSerials.add(serial);
+          }
+        }));
       }
     }
 
@@ -1319,7 +1402,10 @@ class RealtimeManager {
     if (isServerPush && (type == 'save_entry' || type == 'token_created')) {
       final serial = data['serial']?.toString().trim() ?? '';
       if (serial.isNotEmpty) {
-        _pendingAckSerials.add(serial);
+        // Only once applied: the server counts an ACKed serial as delivered.
+        unawaited(routed.then((ok) {
+          if (ok) _pendingAckSerials.add(serial);
+        }));
       }
     }
 

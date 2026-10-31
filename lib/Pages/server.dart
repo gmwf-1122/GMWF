@@ -4526,8 +4526,19 @@ class ServerSyncManager {
   };
 
    // ── [CATCH-UP] Per-client seen-serial tracking ─────────────────────────────
+  // A serial is "seen" once the desk ACKs it (ack_serials), not when it is sent: a message the
+  // desk dropped or failed to apply used to wait for the 30-min full resync. A change to a
+  // token (_markSerialChanged) makes it unseen for every desk until each one ACKs it again.
   final Map<String, Set<String>> _clientSeenSerials = {};
   static const int _maxSeenPerClient = 2000;
+  // Sent but not ACKed yet: not re-sent before [_resendUnackedAfter].
+  final Map<String, Map<String, DateTime>> _clientSentAt = {};
+  static const Duration _resendUnackedAfter = Duration(minutes: 3);
+  // Seen sets of desks that disconnected, by their clientId: a desk that reconnects (Wi-Fi
+  // blip, new socket) only gets what it has not ACKed, instead of the whole day again.
+  final Map<String, Set<String>> _seenByClientId = {};
+  final Map<String, String> _socketClientId = {};
+  static const int _maxRememberedClients = 64;
 
   // ── [INV-CATCHUP] Per-client seen-stock tracking — mirrors seen-serials.
   // Keyed as "medicineId|version" so a re-restock (new version) is treated
@@ -4850,17 +4861,44 @@ class ServerSyncManager {
     }
     _lastTokenDownloadTime = now;
     try {
+      final before = _todayTokenSignatures();
       await LocalStorageService.downloadTodayTokens(branchId, null, true);
+      // Edits made in the cloud (admin screens, another PC uploading late) must reach the desks
+      // too, including desks that are offline now: make every changed token unseen, so the
+      // next catch-up (reconnect or the 5-min sweep) sends it.
+      final after = _todayTokenSignatures();
+      var changed = 0;
+      after.forEach((serial, sig) {
+        if (before[serial] != sig) {
+          _markSerialChanged(serial);
+          changed++;
+        }
+      });
+      if (changed > 0) debugPrint('[SSM] Cloud download changed $changed token(s); desks will get them');
     } catch (e) {
       debugPrint('[SSM] _downloadTodayTokens error: $e');
     }
   }
 
+  /// serial -> signature of each of today's tokens on this server.
+  Map<String, String> _todayTokenSignatures() {
+    final out = <String, String>{};
+    if (!Hive.isBoxOpen(LocalStorageService.entriesBox)) return out;
+    final today = LocalStorageService.getTodayDateKey();
+    for (final v in Hive.box(LocalStorageService.entriesBox).values) {
+      if (v is! Map || v['dateKey']?.toString() != today) continue;
+      final serial = v['serial']?.toString().trim() ?? '';
+      if (serial.isEmpty) continue;
+      out[serial] = [
+        LocalStorageService.lanPushSignature(v),
+        v['patientName'], v['queueType'], v['isDeleted'], v['tokenStatus'],
+      ].join('|');
+    }
+    return out;
+  }
+
   Future<void> start() async {
     debugPrint('ServerSyncManager: Starting for branch $branchId');
-
-    // Clean any dead items on start
-    await purgeInvalidQueue(force: true);
 
     // Initial sync of today's tokens from Firestore into server local Hive
     _downloadTodayTokens().ignore();
@@ -4880,8 +4918,15 @@ class ServerSyncManager {
     _prevOnClientDisconnected = server.onClientDisconnected;
 
                   server.onClientConnected = (socketId, info) {
-      _clientSeenSerials[socketId] = {};
+      final clientId = (info['clientId'] ?? '').toString();
+      if (clientId.isNotEmpty) _socketClientId[socketId] = clientId;
+      _clientSeenSerials[socketId] = (clientId.isNotEmpty ? _seenByClientId.remove(clientId) : null) ?? {};
+      _clientSentAt[socketId] = {};
       _clientSeenStock[socketId] = {};
+      // The push below is this socket's full catch-up. Without this mark the desk's own
+      // request_catch_up (sent right after identify) counted as "no full sync yet", cleared
+      // the seen set and sent the whole day a second time on every reconnect.
+      _lastFullCatchUpPerSocket[socketId] = DateTime.now();
       _prevOnClientConnected?.call(socketId, info);
       Future.delayed(const Duration(milliseconds: 500), () async {
         _pushCatchUpToSocket(socketId, Map<String, dynamic>.from(info));
@@ -4890,7 +4935,15 @@ class ServerSyncManager {
       });
     };
     server.onClientDisconnected = (socketId) {
-      _clientSeenSerials.remove(socketId);
+      final seen = _clientSeenSerials.remove(socketId);
+      final clientId = _socketClientId.remove(socketId);
+      if (seen != null && clientId != null) {
+        if (_seenByClientId.length >= _maxRememberedClients) {
+          _seenByClientId.remove(_seenByClientId.keys.first);
+        }
+        _seenByClientId[clientId] = seen;
+      }
+      _clientSentAt.remove(socketId);
       _clientSeenStock.remove(socketId);
       _lastCatchUpPerSocket.remove(socketId);
       _lastFullCatchUpPerSocket.remove(socketId);
@@ -4898,6 +4951,12 @@ class ServerSyncManager {
     };
 
     server.onMessageReceived = _handleIncomingMessage;
+    // Desk messages are ACKed (and leave the desk's outbox) only from here on.
+    server.persistenceReady = true;
+
+    // Clean any dead items on start. After the handler is installed: this scans the whole
+    // sync queue, and desks' messages (and their relay to the other desks) waited on it.
+    await purgeInvalidQueue(force: true);
 
     // ── Periodic catch-up to all connected clients every 5 minutes (live changes are pushed
     // instantly; this is only a safety net and scans entries + stock per client) ──
@@ -4922,6 +4981,13 @@ class ServerSyncManager {
   Future<void> _handleIncomingMessage(Map<String, dynamic> message) async {
     final eventType = message['event_type'] as String?;
     if (eventType == null) return;
+    // Before the first await: LanServer has just forwarded this to the other desks, and their
+    // ACKs (which mark it seen again) must not arrive before this invalidation.
+    if (_tokenChangeEvents.contains(eventType)) {
+      final inner = message['data'] is Map ? message['data'] as Map : message;
+      final serial = (inner['serial'] ?? message['serial'])?.toString().trim() ?? '';
+      if (serial.isNotEmpty) _markSerialChanged(serial, senderSocketId: message['_socketId']?.toString());
+    }
     await onMessageReceived(message);
 
         // ── Handle catch-up / ACK events (do NOT queue for Firestore) ────────────
@@ -5020,13 +5086,16 @@ class ServerSyncManager {
             // [A4] Cross-socket write lock queue for this specific serial
             final lockKey = '$msgBranch-$serial';
             final currentLock = _serialLocks[lockKey] ?? Future.value();
+            Object? saveError;
             final nextLock = currentLock.then((_) async {
               await LocalStorageService.saveEntryLocal(msgBranch, serial, data);
             }).catchError((e) {
               debugPrint('[SSM] Error in serial write lock for $lockKey: $e');
+              saveError = e; // the lock chain stays usable; this message is not ACKed
             });
             _serialLocks[lockKey] = nextLock;
             await nextLock;
+            if (saveError != null) throw saveError!;
             debugPrint('[SSM] ✅ Entry saved locally: $msgBranch-$serial');
 
             // ── DIRECT CLOUD SYNC & ENQUEUE ON SERVER ──
@@ -5038,25 +5107,24 @@ class ServerSyncManager {
               final campId = (data['campId'] ?? data['dispensaryId'] ?? data['dispensaryTag'] ?? '').toString().toLowerCase().trim();
               final targetKey = 'sync_serial_${canonicalBranch}_$upperSerial';
 
-              if (Hive.isBoxOpen(LocalStorageService.syncBox)) {
-                final sBox = Hive.box(LocalStorageService.syncBox);
-                await sBox.put(targetKey, {
-                  'type': 'save_entry',
-                  'entityId': '$canonicalBranch-$upperSerial',
-                  'branchId': canonicalBranch,
-                  'dateKey': dateKey,
-                  'queueType': queueType,
-                  'serial': upperSerial,
-                  'campId': campId,
-                  'data': data,
-                  'createdAt': DateTime.now().toIso8601String(),
-                  'attempts': 0,
-                  'status': 'pending',
-                });
-              }
+              final sBox = await _syncQueueBox();
+              await sBox.put(targetKey, {
+                'type': 'save_entry',
+                'entityId': '$canonicalBranch-$upperSerial',
+                'branchId': canonicalBranch,
+                'dateKey': dateKey,
+                'queueType': queueType,
+                'serial': upperSerial,
+                'campId': campId,
+                'data': data,
+                'createdAt': DateTime.now().toIso8601String(),
+                'attempts': 0,
+                'status': 'pending',
+              });
               _scheduleSyncDebounced();
             } catch (e) {
               debugPrint('[SSM] Direct sync enqueue error for entry: $e');
+              rethrow; // not ACKed: the desk resends, so the token still reaches the cloud
             }
           }
           break;
@@ -5106,7 +5174,8 @@ class ServerSyncManager {
                 if (existing != null && existing is Map) {
                   final updated = Map<String, dynamic>.from(existing);
                   updated['status'] = 'completed';
-                  updated['prescription'] = data;
+                  // Without its nested older copies (they grew every token a level per save).
+                  updated['prescription'] = LocalStorageService.prescriptionForEmbedding(data);
                   updated['prescriptionId'] = data['id'] ?? serial;
                   updated['completedAt'] ??= data['completedAt'] ?? DateTime.now().toIso8601String();
                   if (entryUid != null && entryUid.isNotEmpty) {
@@ -5131,25 +5200,24 @@ class ServerSyncManager {
               final campId = (data['campId'] ?? data['dispensaryId'] ?? data['dispensaryTag'] ?? '').toString().toLowerCase().trim();
               final targetKey = 'sync_presc_${canonicalBranch}_$upperSerial';
 
-              if (Hive.isBoxOpen(LocalStorageService.syncBox)) {
-                final sBox = Hive.box(LocalStorageService.syncBox);
-                await sBox.put(targetKey, {
-                  'type': 'save_prescription',
-                  'entityId': '$canonicalBranch-$upperSerial',
-                  'branchId': canonicalBranch,
-                  'dateKey': dateKey,
-                  'queueType': queueType,
-                  'serial': upperSerial,
-                  'campId': campId,
-                  'data': data,
-                  'createdAt': DateTime.now().toIso8601String(),
-                  'attempts': 0,
-                  'status': 'pending',
-                });
-              }
+              final sBox = await _syncQueueBox();
+              await sBox.put(targetKey, {
+                'type': 'save_prescription',
+                'entityId': '$canonicalBranch-$upperSerial',
+                'branchId': canonicalBranch,
+                'dateKey': dateKey,
+                'queueType': queueType,
+                'serial': upperSerial,
+                'campId': campId,
+                'data': data,
+                'createdAt': DateTime.now().toIso8601String(),
+                'attempts': 0,
+                'status': 'pending',
+              });
               _scheduleSyncDebounced();
             } catch (e) {
               debugPrint('[SSM] Direct sync enqueue error for prescription: $e');
+              rethrow; // not ACKed: the desk resends
             }
           }
           break;
@@ -5239,36 +5307,35 @@ class ServerSyncManager {
               final campId = (data['campId'] ?? data['dispensaryId'] ?? data['dispensaryTag'] ?? '').toString().toLowerCase().trim();
               final targetKey = 'sync_dispense_${canonicalBranch}_$upperSerial';
 
-              if (Hive.isBoxOpen(LocalStorageService.syncBox)) {
-                final sBox = Hive.box(LocalStorageService.syncBox);
-                await sBox.put(targetKey, {
-                  'type': 'update_serial_status',
-                  'entityId': '$canonicalBranch-$upperSerial',
-                  'branchId': canonicalBranch,
-                  'dateKey': dateKey,
-                  'queueType': queueType,
-                  'serial': upperSerial,
-                  'campId': campId,
-                  'data': {
-                    ...data,
-                    'dispenseStatus': 'dispensed',
-                    'status': 'completed',
-                  },
-                  'createdAt': DateTime.now().toIso8601String(),
-                  'attempts': 0,
-                  'status': 'pending',
-                });
-              }
+              final sBox = await _syncQueueBox();
+              await sBox.put(targetKey, {
+                'type': 'update_serial_status',
+                'entityId': '$canonicalBranch-$upperSerial',
+                'branchId': canonicalBranch,
+                'dateKey': dateKey,
+                'queueType': queueType,
+                'serial': upperSerial,
+                'campId': campId,
+                'data': {
+                  ...data,
+                  'dispenseStatus': 'dispensed',
+                  'status': 'completed',
+                },
+                'createdAt': DateTime.now().toIso8601String(),
+                'attempts': 0,
+                'status': 'pending',
+              });
               _scheduleSyncDebounced();
             } catch (e) {
               debugPrint('[SSM] Direct sync enqueue error for dispense: $e');
+              rethrow; // not ACKed: the desk resends
             }
           }
           break;
 
         case 'save_patient':
           try {
-            LocalStorageService.saveLocalPatient(
+            await LocalStorageService.saveLocalPatient(
                 {...data, 'branchId': msgBranch},
                 isFromSync: true);
             debugPrint('[SSM] ✅ Patient saved locally');
@@ -5278,22 +5345,23 @@ class ServerSyncManager {
             if (pid.isNotEmpty) {
               final canonicalBranch = msgBranch.toLowerCase().trim();
               final targetKey = 'sync_patient_${canonicalBranch}_$pid';
-              if (Hive.isBoxOpen(LocalStorageService.syncBox)) {
-                final sBox = Hive.box(LocalStorageService.syncBox);
-                await sBox.put(targetKey, {
-                  'type': 'save_patient',
-                  'entityId': pid,
-                  'branchId': canonicalBranch,
-                  'patientId': pid,
-                  'data': {...data, 'branchId': canonicalBranch},
-                  'createdAt': DateTime.now().toIso8601String(),
-                  'attempts': 0,
-                  'status': 'pending',
-                });
-              }
+              final sBox = await _syncQueueBox();
+              await sBox.put(targetKey, {
+                'type': 'save_patient',
+                'entityId': pid,
+                'branchId': canonicalBranch,
+                'patientId': pid,
+                'data': {...data, 'branchId': canonicalBranch},
+                'createdAt': DateTime.now().toIso8601String(),
+                'attempts': 0,
+                'status': 'pending',
+              });
               _scheduleSyncDebounced();
             }
-          } catch (_) {}
+          } catch (e) {
+            debugPrint('[SSM] save_patient error: $e');
+            rethrow; // not ACKed: the desk resends
+          }
           break;
 
         // [FIX-INV] Handle save_stock_item events so the server's local
@@ -5623,8 +5691,41 @@ class ServerSyncManager {
       }
     } catch (e) {
       debugPrint('[SSM] _saveToLocalHive error: $e');
+      // Tokens, prescriptions, dispenses and patients must not be ACKed when they were not
+      // stored: LanServer only ACKs after this returns, so the desk keeps and resends them.
+      if (_mustPersist.contains(eventType)) rethrow;
     }
   }
+
+  static const Set<String> _tokenChangeEvents = {
+    'save_entry', 'token_created', 'save_prescription', 'prescription_created', 'dispense_completed',
+    'update_serial_status',
+  };
+
+  /// A token changed: every desk has to ACK it again (the live broadcast does that for desks
+  /// that got it; the others get it at their next catch-up, including desks that are offline
+  /// right now). The sender already has it.
+  void _markSerialChanged(String serial, {String? senderSocketId}) {
+    final variants = {serial, serial.toUpperCase(), serial.toLowerCase()};
+    for (final entry in _clientSeenSerials.entries) {
+      if (entry.key == senderSocketId) continue;
+      entry.value.removeAll(variants);
+      _clientSentAt[entry.key]?.removeWhere((k, _) => variants.contains(k));
+    }
+    for (final seen in _seenByClientId.values) {
+      seen.removeAll(variants);
+    }
+    if (senderSocketId != null) (_clientSeenSerials[senderSocketId] ??= {}).add(serial);
+  }
+
+  static const Set<String> _mustPersist = {
+    'save_entry', 'token_created', 'save_prescription', 'prescription_created',
+    'dispense_completed', 'save_patient',
+  };
+
+  /// The server's cloud upload queue, opened if the LRU timer or a slow start left it closed
+  /// (the old isBoxOpen check skipped the enqueue silently and the record never uploaded).
+  Future<Box> _syncQueueBox() => LocalStorageService.ensureBoxOpen(LocalStorageService.syncBox);
 
   // ── Catch-up push — send today's entries to a client (supports forceAll) ──
   Future<int> _pushCatchUpToSocket(
@@ -5660,6 +5761,8 @@ class ServerSyncManager {
     }
 
     final clientSeen = _clientSeenSerials[socketId] ?? <String>{};
+    final sentAt = _clientSentAt[socketId] ??= {};
+    final now = DateTime.now();
     final candidates = entries.where((e) {
       final serial = e['serial']?.toString().trim() ?? '';
       // Filter out phantom unknown tokens with synthetic CNIC
@@ -5668,7 +5771,11 @@ class ServerSyncManager {
       if ((cnic.startsWith('unknown_cnic_') || cnic.isEmpty) && (name.isEmpty || name == 'unknown patient' || name == 'unknown')) {
         return false;
       }
-      return serial.isNotEmpty && (forceAll || !clientSeen.contains(serial));
+      if (serial.isEmpty) return false;
+      if (forceAll) return true;
+      if (clientSeen.contains(serial)) return false;
+      final sent = sentAt[serial];
+      return sent == null || now.difference(sent) >= _resendUnackedAfter;
     }).toList();
 
     if (candidates.isEmpty) return 0;
@@ -5682,6 +5789,7 @@ class ServerSyncManager {
       if (serial.isEmpty) continue;
 
       final entryCopy = Map<String, dynamic>.from(entry);
+      LocalStorageService.flattenEmbeddedPrescription(entryCopy);
 
       Map<String, dynamic>? presc;
       try {
@@ -5693,7 +5801,7 @@ class ServerSyncManager {
 
       if (presc != null && presc.isNotEmpty) {
         entryCopy['status'] = 'completed';
-        entryCopy['prescription'] = presc;
+        entryCopy['prescription'] = LocalStorageService.prescriptionForEmbedding(presc);
         entryCopy['prescriptionId'] = presc['id'] ?? serial;
       }
       if ((entry['dispenseStatus'] ?? '') == 'dispensed') {
@@ -5760,16 +5868,13 @@ class ServerSyncManager {
 
       // [FIX-A] Only mark seen if ALL related messages (entry + presc + dispense)
       // were confirmed successful on socket. If any failed, retry next sweep.
+      // Seen only once the desk ACKs it (_handleClientAck); until then it is just "sent".
       if (allSent) {
         pushedCount++;
-        _clientSeenSerials[socketId] ??= {};
-        _clientSeenSerials[socketId]!.add(serial);
-
-        if (_clientSeenSerials[socketId]!.length > _maxSeenPerClient) {
-          final overflow =
-              _clientSeenSerials[socketId]!.length - _maxSeenPerClient;
-          _clientSeenSerials[socketId]!.removeAll(
-              _clientSeenSerials[socketId]!.take(overflow).toList());
+        final sent = _clientSentAt[socketId] ??= {};
+        sent[serial] = DateTime.now();
+        if (sent.length > _maxSeenPerClient) {
+          sent.remove(sent.keys.first);
         }
       }
 
@@ -5909,9 +6014,13 @@ class ServerSyncManager {
     if (socketId.isEmpty || serials is! List) return;
 
     _clientSeenSerials[socketId] ??= {};
+    final sent = _clientSentAt[socketId];
     for (final s in serials) {
       final serial = s?.toString().trim() ?? '';
-      if (serial.isNotEmpty) _clientSeenSerials[socketId]!.add(serial);
+      if (serial.isNotEmpty) {
+        _clientSeenSerials[socketId]!.add(serial);
+        sent?.remove(serial);
+      }
     }
 
     final seen = _clientSeenSerials[socketId]!;

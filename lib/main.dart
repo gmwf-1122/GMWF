@@ -234,14 +234,18 @@ Future<void> main() async {
       options.environment = 'production';
     },
     appRunner: () async {
+      // Firebase starts in parallel with Hive and never gates it. It used to run first with a
+      // 1.5 s timeout whose fallback called Firebase.app(), which throws while the app is still
+      // initialising: on a slow cold start that skipped every Hive/storage init below and the
+      // app ran with no local data ("You need to initialize Hive" on login, endless loading).
+      final firebaseInit = Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform)
+          .then<bool>((_) => true)
+          .catchError((Object e) {
+        debugPrint('[Main] Firebase init warning: $e');
+        _logError('Firebase init failed: $e');
+        return false;
+      });
       try {
-        await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform)
-            .timeout(const Duration(milliseconds: 1500))
-            .catchError((e) {
-              debugPrint('[Main] Firebase init warning: $e');
-              return Firebase.app();
-            });
-
         if (kIsWeb) {
           await Hive.initFlutter();
         } else if (Platform.isWindows) {
@@ -277,11 +281,21 @@ Future<void> main() async {
           return <dynamic>[];
         });
 
+        // Firebase set-up is local (no network). Services below use it; if it is still not
+        // done the app opens anyway and Firebase finishes in the background.
+        await firebaseInit.timeout(const Duration(seconds: 6), onTimeout: () {
+          _logError('Firebase init still running after startup wait — opening the app anyway');
+          return false;
+        });
+
         await CampSessionService.clearServerOffset();
         CampSessionService.checkClockSkew();
         unawaited(CampSessionService.syncInternetTime());
 
-        await LocalStorageService.seedLocalAdmins();
+        // Opens local_users (can be tens of MB): bounded so a slow decode never holds the window.
+        await LocalStorageService.seedLocalAdmins().timeout(const Duration(seconds: 3), onTimeout: () {
+          debugPrint('[Main] Local admin seeding still running — continuing in background');
+        }).catchError((Object e) => debugPrint('[Main] Local admin seeding warning: $e'));
         await _clearCrashMarkerOnSuccess();
         AuthService.onSignOutCallback = AuthHomeWrapper.clearSession;
 
@@ -362,6 +376,17 @@ Future<void> _runBackgroundCleanups() async {
     }
 
     await LocalStorageService.purgeBloatedSyncQueue();
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    // Corrupted-box backups are full copies of a box; keep the newest two per box.
+    await LocalStorageService.pruneAllBoxBackups();
+    await Future.delayed(const Duration(milliseconds: 300));
+
+    // Tokens carried prescriptions nested inside prescriptions (the bulk of local_entries);
+    // flatten them, then compact boxes that are mostly dead space.
+    await LocalStorageService.healNestedPrescriptions();
+    await Future.delayed(const Duration(milliseconds: 300));
+    await LocalStorageService.compactBloatedBoxes();
     await Future.delayed(const Duration(milliseconds: 300));
 
     if (Hive.isBoxOpen(DonationsLocalStorage.donationsBox)) {
@@ -758,7 +783,15 @@ class _AuthHomeWrapperState extends State<AuthHomeWrapper> {
       }
 
       // 1. Fast local user session return (instant 0ms launch)
-      final currentUser = FirebaseAuth.instance.currentUser;
+      // Firebase may still be starting (main no longer waits for it without limit); reading
+      // FirebaseAuth then throws, which used to drop a valid local session to the login page.
+      final firebaseReady = Firebase.apps.isNotEmpty;
+      User? currentUser;
+      if (firebaseReady) {
+        try {
+          currentUser = FirebaseAuth.instance.currentUser;
+        } catch (_) {}
+      }
       if (localUserData != null) {
         final isMaster = localUserData['isMasterAdmin'] == true ||
             localUserData['uid'] == 'master-local-admin' ||
@@ -785,10 +818,12 @@ class _AuthHomeWrapperState extends State<AuthHomeWrapper> {
       }
 
       // 2. Wait at most 400ms for authStateChanges event (fast resolution)
-      final streamUser = await FirebaseAuth.instance
-          .authStateChanges()
-          .firstWhere((u) => u != null, orElse: () => null)
-          .timeout(const Duration(milliseconds: 400), onTimeout: () => null);
+      final streamUser = !firebaseReady
+          ? null
+          : await FirebaseAuth.instance
+              .authStateChanges()
+              .firstWhere((u) => u != null, orElse: () => null)
+              .timeout(const Duration(milliseconds: 400), onTimeout: () => null);
 
       if (streamUser != null) {
         final localData = _getLocalUserData(streamUser);

@@ -23,6 +23,8 @@
 //       a Dart duplicate-case compile error). Each event type now maps to
 //       exactly ONE case clause in routeMessage().
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:intl/intl.dart';
@@ -160,6 +162,29 @@ class RealtimeRouter {
   };
 
   static Future<void> routeMessage(Map<String, dynamic> message) async {
+    final id = message['_messageId']?.toString();
+    try {
+      await _routeMessageInner(message);
+      if (id != null) _dedupKeyInFlight.remove(id);
+    } catch (_) {
+      // The id was marked seen (in memory and in the dedup box) before the handler ran; forget
+      // it so a resend of this message is applied instead of being dropped as a duplicate,
+      // also after a restart.
+      if (id != null) {
+        _seenMessageIds.remove(id);
+        final dedupKey = _dedupKeyInFlight.remove(id);
+        if (dedupKey != null && Hive.isBoxOpen(_dedupBox)) {
+          unawaited(Hive.box(_dedupBox).delete(dedupKey).catchError((Object _) {}));
+        }
+      }
+      rethrow;
+    }
+  }
+
+  /// Dedup-box key of each message being handled right now (removed on failure, see above).
+  static final Map<String, String> _dedupKeyInFlight = {};
+
+  static Future<void> _routeMessageInner(Map<String, dynamic> message) async {
     // Periodic prune — replaces the old 5-min in-memory clear
     if (DateTime.now().difference(_lastCleanup).inMinutes > 5) {
       _pruneExpired();
@@ -193,6 +218,7 @@ class RealtimeRouter {
         final box = Hive.box(_dedupBox);
         final dedupKey = '${DateTime.now().millisecondsSinceEpoch}_$messageId';
         box.put(dedupKey, messageId);
+        _dedupKeyInFlight[messageId] = dedupKey;
       }
     }
 

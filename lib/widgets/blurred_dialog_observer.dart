@@ -32,6 +32,7 @@ class DialogBlurManager extends NavigatorObserver {
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
     super.didPush(route, previousRoute);
     UiStallMonitor.mark('push ${route.settings.name ?? route.runtimeType}');
+    UiStallMonitor.topRoute = route;
     if (_isDialog(route)) {
       _dialogCount++;
       debugPrint('[Dialog] opened ${route.runtimeType} (count $_dialogCount)');
@@ -43,6 +44,7 @@ class DialogBlurManager extends NavigatorObserver {
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
     super.didPop(route, previousRoute);
     UiStallMonitor.mark('pop ${route.settings.name ?? route.runtimeType}');
+    UiStallMonitor.topRoute = previousRoute;
     if (_isDialog(route)) {
       _dialogCount = (_dialogCount - 1).clamp(0, 9999);
       debugPrint('[Dialog] closed ${route.runtimeType} (count $_dialogCount)');

@@ -8,7 +8,7 @@
 // relying on each of them checking the LAN state, this gate takes the Firestore SDK offline
 // while the desk has a live server link: SDK reads and listeners answer from the local cache
 // only (no reads billed, no traffic), and CloudDb (our REST writer) refuses writes. When the
-// link drops for real, the SDK goes back online so the desk can work alone.
+// link drops for real (down for [offlineGrace]), the SDK goes back online so the desk can work alone.
 
 import 'dart:async';
 
@@ -146,14 +146,28 @@ class LanFirestoreGate {
         .catchError((Object e) => debugPrint('[LanFirestoreGate] writeDoc($docPath) skipped: $e')));
   }
 
+  /// How long the link must stay down before the SDK goes back online. On Wi-Fi the link
+  /// drops for a few seconds at a time; switching at once re-synced every Firestore listener
+  /// on the desk (reads billed to the shared quota) on each blip. The LAN outbox keeps the
+  /// desk's changes meanwhile, so nothing waits on this.
+  static const Duration offlineGrace = Duration(seconds: 20);
+  static DateTime? _linkLostAt;
+
   static Future<void> evaluate() async {
     final link = isLanDesk;
 
     if (!link) {
       _linkSince = null;
-      if (_active) await _setActive(false);
+      if (!_active) return;
+      _linkLostAt ??= DateTime.now();
+      // A role change away from the desk (updateRole) switches at once; a lost link waits.
+      if (DateTime.now().difference(_linkLostAt!) >= offlineGrace) {
+        _linkLostAt = null;
+        await _setActive(false);
+      }
       return;
     }
+    _linkLostAt = null;
     _linkSince ??= DateTime.now();
     if (!_active && DateTime.now().difference(_linkSince!) >= settle) {
       await _setActive(true);

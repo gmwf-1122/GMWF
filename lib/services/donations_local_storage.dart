@@ -37,6 +37,9 @@ class DonationsLocalStorage {
   // ── Box names (public — SubmissionService references donationsBox) ─────────
   static const String donationsBox = 'local_donations';
   static const String donorsBox    = 'local_donors';
+
+  /// Upper bound for one background Firestore read (a pending get() on flaky Wi-Fi never ends).
+  static const Duration _readTimeout = Duration(seconds: 45);
   static const String bankSlipsBox = 'local_bank_slips';
 
   // ══════════════════════════════════════════════════════════════════════════
@@ -1072,7 +1075,7 @@ class DonationsLocalStorage {
 
       final branchesToQuery = <String>[];
       if (normBranch == 'all' || normBranch.isEmpty) {
-        final branchesSnap = await FirebaseFirestore.instance.collection('branches').get();
+        final branchesSnap = await FirebaseFirestore.instance.collection('branches').get().timeout(_readTimeout);
         branchesToQuery.addAll(branchesSnap.docs.map((d) => d.id));
       } else {
         branchesToQuery.add(normBranch);
@@ -1261,7 +1264,7 @@ class DonationsLocalStorage {
 
       final branchesToQuery = <String>[];
       if (normBranch == 'all' || normBranch.isEmpty) {
-        final branchesSnap = await FirebaseFirestore.instance.collection('branches').get();
+        final branchesSnap = await FirebaseFirestore.instance.collection('branches').get().timeout(_readTimeout);
         branchesToQuery.addAll(branchesSnap.docs.map((d) => d.id));
       } else {
         branchesToQuery.add(normBranch);
@@ -1397,18 +1400,19 @@ class DonationsLocalStorage {
       
       QuerySnapshot<Map<String, dynamic>> branchSnap;
       if (branchId == 'all' || branchId.isEmpty) {
-        branchSnap = await FirebaseFirestore.instance.collectionGroup('donors').get();
+        branchSnap = await FirebaseFirestore.instance.collectionGroup('donors').get().timeout(_readTimeout);
       } else {
         branchSnap = await FirebaseFirestore.instance
             .collection('branches')
             .doc(branchId)
             .collection('donors')
-            .get();
+            .get()
+            .timeout(_readTimeout);
       }
 
       final bool isGlobalRequest = branchId == 'all' || branchId.isEmpty;
       final rootSnap = isGlobalRequest
-          ? await FirebaseFirestore.instance.collection('donors').get()
+          ? await FirebaseFirestore.instance.collection('donors').get().timeout(_readTimeout)
           : null;
 
       final Map<String, dynamic> donorUpdates = {};

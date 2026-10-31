@@ -150,8 +150,12 @@ class ConnectionManager {
       if (!_running || _disposed) return;
       final hasNet = results.any((r) => r != ConnectivityResult.none);
       if (hasNet) {
-        if (!isConnected && !_discovering) {
-          debugPrint('[ConnectionManager] ⚡ OS network restored — triggering immediate reconnectNow()');
+        // After a Wi-Fi drop the old socket is often still "connected" (half-open) with no
+        // frames arriving; without this the desk kept writing into it until the 30 s pong
+        // timeout. A link that answered pings in the last 15 s is left alone.
+        final staleLink = isConnected && !RealtimeManager().isLinkAlive;
+        if ((!isConnected || staleLink) && !_discovering) {
+          debugPrint('[ConnectionManager] ⚡ OS network restored (stale link: $staleLink) — reconnectNow()');
           reconnectNow();
         }
       } else if (!kIsWeb && (io.Platform.isWindows || io.Platform.isLinux || io.Platform.isMacOS)) {
@@ -381,7 +385,12 @@ class ConnectionManager {
 
     // ── Auto-discovery path (UDP broadcast + fast parallel subnet scan + mDNS) ─
     if (!kIsWeb) {
-      final connList = await Connectivity().checkConnectivity();
+      // Bounded: if the plugin call hangs, _discovering stayed true and every retry path
+      // returned early, so the desk never reconnected until the app was restarted.
+      final connList = await Connectivity()
+          .checkConnectivity()
+          .timeout(const Duration(seconds: 2), onTimeout: () => const <ConnectivityResult>[])
+          .catchError((Object _) => const <ConnectivityResult>[]);
       // connectivity_plus often reports an empty list (or only "none") on Windows desktops that are
       // perfectly connected (virtual adapters, several NICs). Treating that as "no network" stopped
       // discovery before it started, so the client sat on "Disconnected" forever. On desktop we

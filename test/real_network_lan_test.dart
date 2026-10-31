@@ -25,7 +25,8 @@ void main() {
     await Hive.openBox('realtime_outbox');
 
     // Start REAL LanServer on real TCP network port 19876
-    server = LanServer(port: testPort);
+    server = LanServer(port: testPort)
+      ..persistenceReady = true; // no ServerSyncManager in these tests
     await server.start('127.0.0.1');
   });
 
@@ -107,6 +108,11 @@ void main() {
 
     // 5. Receptionist creates a Token over the live network wire
     const testMsgId = 'live_net_token_token_42';
+    // Listen before sending: the server relays to the other desks first and ACKs once the
+    // message is saved, so the doctor can get the token before the receptionist's ACK.
+    final docReceivedFuture = docBroadcastController.stream
+        .firstWhere((msg) => msg['event_type'] == 'save_entry' && msg['serial'] == '42')
+        .timeout(const Duration(seconds: 5));
     clientRec.add(jsonEncode({
       'event_type': 'save_entry',
       '_messageId': testMsgId,
@@ -124,9 +130,7 @@ void main() {
     expect(ack['messageId'], equals(testMsgId));
 
     // 7. Verify Doctor receives the routed token over the live TCP network wire
-    final docReceived = await docBroadcastController.stream
-        .firstWhere((msg) => msg['event_type'] == 'save_entry' && msg['serial'] == '42')
-        .timeout(const Duration(seconds: 5));
+    final docReceived = await docReceivedFuture;
     expect(docReceived['patientName'], equals('Ahmad Bilal'));
 
     // 8. High-Frequency Live Network Stress: 50 rapid tokens over the live wire
