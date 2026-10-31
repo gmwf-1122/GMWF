@@ -305,7 +305,7 @@ Future<void> main() async {
         AuthService.onSignOutCallback = AuthHomeWrapper.clearSession;
 
         // Load dynamic version from pubspec via package_info (max 400ms)
-        await AutoUpdateService.getAppVersion().timeout(const Duration(milliseconds: 400), onTimeout: () => '1.6.3');
+        await AutoUpdateService.getAppVersion().timeout(const Duration(milliseconds: 400), onTimeout: () => '1.6.4');
         unawaited(CloudMessagingService().initialize().catchError((e) {
           debugPrint('[Init] CloudMessagingService init warning: $e');
         }));

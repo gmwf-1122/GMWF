@@ -80,6 +80,7 @@ tool/temp_emp_audit/
 tool/temp_*/
 tool/out.txt
 *.hive
+*.rar
 # Stress / pressure test artefacts
 GMWF_Network_Pressure_Report_*.txt
 GMWF_Stress_Test_Cumulative_History.txt

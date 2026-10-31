@@ -35,7 +35,7 @@ class UpdateInfo {
 
 class AutoUpdateService {
   /// Default fallback version of the GMWF application if PackageInfo is unavailable.
-  static const String fallbackVersion = '1.6.3';
+  static const String fallbackVersion = '1.6.4';
 
   /// Dynamically retrieves current installed application version (from pubspec.yaml via PackageInfo).
   /// Falls back to [fallbackVersion] if not yet resolved.

@@ -44,6 +44,7 @@ def main():
         if os.path.exists(iss_path):
             with open(iss_path, 'r', encoding='utf-8') as f:
                 content = f.read()
+            content = re.sub(r'#define MyAppVersion "[^"]+"', f'#define MyAppVersion "{clean_ver}"', content)
             content = re.sub(r'AppVersion=[\d.]+', f'AppVersion={clean_ver}', content)
             content = re.sub(r'AppVerName=GMWF Management System v[\d.]+', f'AppVerName=GMWF Management System v{clean_ver}', content)
             content = re.sub(r'OutputBaseFilename=GMWF-v[\d.]+-(' + arch + ')', f'OutputBaseFilename=GMWF-v{clean_ver}-\\1', content)
