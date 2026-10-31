@@ -502,7 +502,8 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
         }
       }
       // An older snapshot (LAN catch-up / replay) must not replace the doctor's later edit.
-      final isStale = entry is Map && LocalStorageService.isOlderPrescription(data, entry['prescription']);
+      // Older, or without medicines while the stored copy has them (mayReplacePrescription).
+      final isStale = entry is Map && !LocalStorageService.mayReplacePrescription(data, entry['prescription']);
       if (cleanSerial.isNotEmpty && !isStale) {
         final updated = (entry != null && entry is Map)
             ? Map<String, dynamic>.from(entry)
@@ -518,8 +519,10 @@ class _DispensarScreenState extends State<DispensarScreen> with AutomaticKeepAli
         updated['completedAt'] = data['completedAt'] ?? DateTime.now().toIso8601String();
         updated['prescription'] = LocalStorageService.prescriptionForEmbedding(data);
         updated['prescriptionId'] = data['id'] ?? cleanSerial;
-        final pMeds = data['prescriptions'] ?? data['medicines'] ?? data['items'];
-        if (pMeds != null) {
+        // From the unwrapped copy: `prescriptions ?? medicines` took an empty list over a
+        // filled one, and a replay wrapper keeps the medicines nested.
+        final pMeds = updated['prescription']['medicines'];
+        if (pMeds is List && pMeds.isNotEmpty) {
           updated['prescriptions'] = pMeds;
           updated['medicines'] = pMeds;
         }

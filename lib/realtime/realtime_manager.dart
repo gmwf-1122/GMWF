@@ -1656,6 +1656,12 @@ class RealtimeManager {
       'event_type': type,
       'data':       data,
       'decoded':    decoded,
+      // The screens read the sender and the catch-up flags at the top level of the event
+      // (event['_clientId'], event['_serverPush'], ...). They only existed under 'decoded', so
+      // own echoes and catch-up copies looked like fresh edits: popups on every catch-up, and a
+      // replayed old prescription replaced the doctor's on-screen medicines.
+      for (final k in const ['_clientId', '_serverPush', 'isCatchUp', '_isReplay', '_resent', '_outboxResend'])
+        if (decoded[k] != null) k: decoded[k],
     });
   }
 

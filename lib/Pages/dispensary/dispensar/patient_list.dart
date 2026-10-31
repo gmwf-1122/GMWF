@@ -159,7 +159,10 @@ class _PatientListState extends State<PatientList> {
                     };
 
               updated['status'] = 'completed';
-              updated['prescription'] = LocalStorageService.prescriptionForEmbedding(data);
+              // Not an older or medicine-less copy over the stored prescription.
+              if (existing is! Map || LocalStorageService.mayReplacePrescription(data, existing['prescription'])) {
+                updated['prescription'] = LocalStorageService.prescriptionForEmbedding(data);
+              }
               updated['prescriptionId'] = data['id'] ?? serial;
               updated['completedAt'] ??= data['completedAt'] ?? DateTime.now().toIso8601String();
               if (data['doctorName'] != null) updated['doctorName'] = data['doctorName'];
@@ -384,12 +387,14 @@ class _PatientListState extends State<PatientList> {
               entryData['dateKey']   ??= _todayKey;
               entryData['serial']    ??= serial;
 
+              // One after the other: run concurrently, the token save read the entry before the
+              // prescription save wrote it and then put its older copy back. Both keep the
+              // newer prescription with medicines (preferredPrescription).
+              await LocalStorageService.saveEntryLocal(widget.branchId, serial, entryData);
               if (entryData['prescription'] is Map && (entryData['prescription'] as Map).isNotEmpty) {
-                LocalStorageService.saveLocalPrescription(
+                await LocalStorageService.saveLocalPrescription(
                     Map<String, dynamic>.from(entryData['prescription'] as Map));
               }
-
-              LocalStorageService.saveEntryLocal(widget.branchId, serial, entryData);
               hasChanges = true;
             }
           } catch (e) {

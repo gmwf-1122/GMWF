@@ -963,7 +963,12 @@ class SyncService {
               'branchId': effectiveBranch,
               if (data['entryUid'] != null) 'entryUid': data['entryUid'],
               'status': 'completed',
-              'completedAt': data['completedAt'] ?? DateTime.now().toIso8601String(),
+              // The prescription's own times, never "now": a replay stamped now looked newer
+              // than the doctor's real later edit, which the receivers then refused.
+              if ((data['completedAt'] ?? (data['prescription'] is Map ? data['prescription']['completedAt'] : null)) != null)
+                'completedAt': data['completedAt'] ?? data['prescription']['completedAt'],
+              if (data['prescription'] is Map && data['prescription']['updatedAt'] != null)
+                'updatedAt': data['prescription']['updatedAt'],
               'doctorName': data['doctorName'],
               'doctorId': data['doctorId'],
               'daysOfMedicine': data['daysOfMedicine'] ?? 1,

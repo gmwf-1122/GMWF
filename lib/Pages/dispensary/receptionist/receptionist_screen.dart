@@ -278,8 +278,10 @@ class _ReceptionistScreenState extends State<ReceptionistScreen>
               if (existing is Map) {
                 final updated = Map<String, dynamic>.from(existing);
                 updated['status'] = 'completed';
-                if (data != null) {
-                  updated['prescription'] = data;
+                // Not an older or medicine-less copy over the stored prescription (a replay of
+                // it was then pushed to every desk as this desk's token on reconnect).
+                if (data != null && LocalStorageService.mayReplacePrescription(data, existing['prescription'])) {
+                  updated['prescription'] = LocalStorageService.prescriptionForEmbedding(data);
                   updated['prescriptionId'] = data['id'] ?? serial;
                   updated['completedAt'] ??= data['completedAt'] ?? DateTime.now().toIso8601String();
                   if (data['doctorName'] != null) updated['doctorName'] = data['doctorName'];

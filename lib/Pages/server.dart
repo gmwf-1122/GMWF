@@ -5161,7 +5161,11 @@ class ServerSyncManager {
                 }
 
                 if (existing == null) {
-                  existing = eBox.get(key);
+                  // Entries are stored under the upper-case serial; the doctor sends it lower-case.
+                  final canonicalKey = '$normBranch-${serial.toUpperCase()}';
+                  existing = eBox.get(canonicalKey);
+                  if (existing != null) targetKey = canonicalKey;
+                  existing ??= eBox.get(key);
                   if (existing == null) {
                     for (final k in eBox.keys) {
                       final kStr = k.toString().toLowerCase().trim();
@@ -5174,7 +5178,10 @@ class ServerSyncManager {
                   }
                 }
 
-                if (existing != null && existing is Map) {
+                // An older replay or a copy without medicines must not replace what the token
+                // holds (the same rule as saveLocalPrescription above).
+                if (existing != null && existing is Map &&
+                    LocalStorageService.mayReplacePrescription(data, existing['prescription'])) {
                   final updated = Map<String, dynamic>.from(existing);
                   updated['status'] = 'completed';
                   // Without its nested older copies (they grew every token a level per save).
@@ -5796,16 +5803,23 @@ class ServerSyncManager {
 
       Map<String, dynamic>? presc;
       try {
-        presc = LocalStorageService.getLocalPrescription(serial) ??
-            (entry['prescription'] is Map
-                ? Map<String, dynamic>.from(entry['prescription'] as Map)
-                : null);
+        // The token's own prescription unless the lookup has a newer one with medicines (the
+        // lookup alone, without the branch, could pick an older or empty record).
+        presc = LocalStorageService.preferredPrescription(
+          LocalStorageService.getLocalPrescription(serial, branchId: branchId),
+          entry['prescription'],
+        );
       } catch (_) {}
 
       if (presc != null && presc.isNotEmpty) {
         entryCopy['status'] = 'completed';
         entryCopy['prescription'] = LocalStorageService.prescriptionForEmbedding(presc);
         entryCopy['prescriptionId'] = presc['id'] ?? serial;
+        final meds = entryCopy['prescription']['medicines'];
+        if (meds is List && meds.isNotEmpty) {
+          entryCopy['medicines'] = meds;
+          entryCopy['prescriptions'] = meds;
+        }
       }
       if ((entry['dispenseStatus'] ?? '') == 'dispensed') {
         entryCopy['status'] = 'completed';

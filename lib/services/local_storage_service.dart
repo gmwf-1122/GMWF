@@ -1290,6 +1290,48 @@ class LocalStorageService {
 
   static bool _hasNonEmptyList(Object? v) => v is List && v.isNotEmpty;
 
+  /// Which copy of a token's prescription to keep when [incoming] would replace [existing]:
+  /// the incoming one, unless it is older (isOlderPrescription) or has no medicines while the
+  /// stored one has. An empty or wrapper copy must never replace medicines the doctor
+  /// prescribed (cause of "no medicines" on the dispenser). Both are unwrapped and flattened.
+  /// A doctor removing every medicine is not supported by this rule: such an edit keeps the
+  /// previous list.
+  static Map<String, dynamic>? preferredPrescription(Object? incoming, Object? existing) {
+    final inc = incoming is Map && incoming.isNotEmpty ? prescriptionForEmbedding(incoming) : null;
+    final ex = existing is Map && existing.isNotEmpty ? prescriptionForEmbedding(existing) : null;
+    if (inc == null) return ex;
+    if (ex == null) return inc;
+    return mayReplacePrescription(inc, ex) ? inc : ex;
+  }
+
+  /// Whether [incoming] may replace the stored prescription [existing] (see
+  /// [preferredPrescription]).
+  static bool mayReplacePrescription(Object? incoming, Object? existing) {
+    if (existing is! Map || existing.isEmpty) return true;
+    if (incoming is! Map || incoming.isEmpty) return false;
+    final inc = prescriptionForEmbedding(incoming);
+    final ex = prescriptionForEmbedding(existing);
+    if (_hasMedicines(ex) && !_hasMedicines(inc)) return false;
+    return !isOlderPrescription(inc, ex);
+  }
+
+  /// Keeps a token's top-level 'medicines' / 'prescriptions' in step with its embedded
+  /// prescription (screens read the top level first). Without medicines in the embedded copy,
+  /// a filled list from the stored token [existing] is kept rather than an empty incoming one.
+  static void _alignTopLevelMedicines(Map<String, dynamic> entry, Map? existing) {
+    final rx = entry['prescription'];
+    final meds = rx is Map ? _medicinesOf(rx) : null;
+    if (meds != null) {
+      entry['medicines'] = meds;
+      entry['prescriptions'] = meds;
+      return;
+    }
+    if (existing == null) return;
+    for (final k in const ['medicines', 'prescriptions']) {
+      if (!_hasNonEmptyList(entry[k]) && _hasNonEmptyList(existing[k])) entry[k] = existing[k];
+    }
+  }
+
   static bool _hasMedicines(Map m) => _medicinesOf(m) != null;
 
   /// The first non-empty medicine list of a prescription map ('medicines', 'prescriptions'
@@ -6483,7 +6525,7 @@ class LocalStorageService {
         if (incomingDispStatus == 'dispensed' || localDispStatus == 'dispensed') {
           sanitized['dispenseStatus'] = 'dispensed';
           sanitized['status'] = 'completed';
-          sanitized['prescription'] = sanitized['prescription'] ?? existingExact['prescription'];
+          sanitized['prescription'] = preferredPrescription(sanitized['prescription'], existingExact['prescription']);
           sanitized['prescriptionId'] = sanitized['prescriptionId'] ?? existingExact['prescriptionId'];
           sanitized['dispensedAt'] = sanitized['dispensedAt'] ?? existingExact['dispensedAt'];
           sanitized['dispensedBy'] = sanitized['dispensedBy'] ?? existingExact['dispensedBy'];
@@ -6505,9 +6547,12 @@ class LocalStorageService {
           sanitized['completedAt'] = existingExact['completedAt'] ?? sanitized['completedAt'];
         }
 
-        // Doctor clinical edits must NEVER be overwritten by pre-existing values
-        sanitized['prescription']   = sanitized['prescription'] ?? existingExact['prescription'];
+        // A whole token re-sent by another desk (reconnect push, catch-up) carries that desk's
+        // copy of the prescription, which may be older or empty: it used to replace the
+        // stored one unconditionally, so the dispenser saw "no medicines".
+        sanitized['prescription']   = preferredPrescription(sanitized['prescription'], existingExact['prescription']);
         sanitized['prescriptionId'] = sanitized['prescriptionId'] ?? existingExact['prescriptionId'];
+        _alignTopLevelMedicines(sanitized, existingExact);
         final inVitals = sanitized['vitals'];
         if (inVitals == null || inVitals.toString().trim().isEmpty || inVitals.toString() == '{}') {
           sanitized['vitals'] = existingExact['vitals'];
@@ -6553,8 +6598,10 @@ class LocalStorageService {
           final existingPrescription = Map<String, dynamic>.from(rawPresc);
           preservePatientFields(existingPrescription);
           sanitized['status']         = 'completed';
-          sanitized['prescription']   = existingPrescription;
+          // The stored record wins only when it is not older and not emptier than the token's.
+          sanitized['prescription']   = preferredPrescription(sanitized['prescription'], existingPrescription);
           sanitized['prescriptionId'] = existingPrescription['id'] ?? normSerialUpper;
+          _alignTopLevelMedicines(sanitized, null);
           if (existingPrescription['completedAt'] != null && sanitized['completedAt'] == null) {
             sanitized['completedAt'] = existingPrescription['completedAt'];
           }
@@ -6647,16 +6694,10 @@ class LocalStorageService {
         target['status'] = 'completed';
         final inRx = e['prescription'];
         if (inRx is Map && inRx.isNotEmpty) {
-          final exRx = target['prescription'];
-          if (exRx is! Map || exRx.isEmpty) {
-            target['prescription'] = inRx;
-          } else {
-            final inTime = inRx['completedAt'] ?? inRx['updatedAt'] ?? e['completedAt'] ?? e['updatedAt'];
-            final exTime = exRx['completedAt'] ?? exRx['updatedAt'] ?? target['completedAt'] ?? target['updatedAt'];
-            if (inTime != null && (exTime == null || inTime.toString().compareTo(exTime.toString()) >= 0)) {
-              target['prescription'] = inRx;
-            }
-          }
+          // Same rule as every other writer (preferredPrescription): by the doctor's updatedAt,
+          // never a copy without medicines over one with. Comparing completedAt first let a
+          // duplicate with the original completedAt win over the doctor's later edit.
+          target['prescription'] = preferredPrescription(inRx, target['prescription']);
         } else {
           target['prescription'] ??= e['prescription'];
         }
@@ -8108,7 +8149,10 @@ class LocalStorageService {
       matchingKeys.add(canonicalKey);
     }
 
-    final pMeds = sanitized['prescriptions'] ?? sanitized['medicines'];
+    // From the unwrapped prescription: a replay wrapper keeps the medicines in its nested copy,
+    // and `prescriptions ?? medicines` picked an empty list over a filled one.
+    final embedded = prescriptionForEmbedding(sanitized);
+    final pMeds = _medicinesOf(embedded);
     final docName = sanitized['doctorName'] ?? sanitized['prescribedBy'];
     final docId = sanitized['doctorId'];
     final diag = sanitized['diagnosis'];
@@ -8122,7 +8166,8 @@ class LocalStorageService {
       final existing = entriesBoxRef.get(k);
       // A replayed (LAN catch-up) snapshot older than what the entry holds would put the
       // doctor's earlier medicines - or none - back on the dispenser's screen.
-      if (existing is Map && isOlderPrescription(sanitized, existing['prescription'])) continue;
+      // Nor may a copy without medicines replace one that has them.
+      if (existing is Map && !mayReplacePrescription(embedded, existing['prescription'])) continue;
       final updatedEntry = existing is Map ? Map<String, dynamic>.from(existing) : <String, dynamic>{};
 
       // Entries keep the upper-case serial (saveEntryLocal); the doctor sends it lower-cased.
@@ -8147,6 +8192,7 @@ class LocalStorageService {
         updatedEntry['cnic'] = cleanCnic;
       }
 
+      // Rebuilt here: the CNIC fix-up above changes `sanitized` per token.
       updatedEntry['prescription'] = prescriptionForEmbedding(sanitized);
       updatedEntry['status']       = 'completed';
       updatedEntry['completedAt']  ??= sanitized['completedAt'] ?? DateTime.now().toIso8601String();
@@ -8224,6 +8270,9 @@ class LocalStorageService {
         final raw = box.get(key);
         if (raw is Map) {
           final m = Map<String, dynamic>.from(raw);
+          // Duplicate keys of one token: the later key in Hive's order used to win the
+          // prescription too, however old or empty it was.
+          final keptRx = preferredPrescription(m['prescription'], mergedExisting['prescription']);
           m.forEach((k, v) {
             if (v != null && v != '' && v != 'unknown' && v != 'Unknown' && v != 'Unknown Patient') {
               mergedExisting[k] = v;
@@ -8231,6 +8280,7 @@ class LocalStorageService {
               mergedExisting.putIfAbsent(k, () => v);
             }
           });
+          if (keptRx != null) mergedExisting['prescription'] = keptRx;
         }
       }
     }
@@ -8483,6 +8533,11 @@ class LocalStorageService {
       if (cleanSerial != legacySerial) legacySerial.toLowerCase(),
     };
 
+    // A copy found without medicines is only used when nothing better turns up: returning it
+    // straight away showed the dispenser (and the doctor's edit dialog) an empty list while
+    // the token's own list or the prescriptions box still had the medicines.
+    Map<String, dynamic>? withoutMedicines;
+
     // 1. Check entriesBox strictly for this branch
     try {
       if (Hive.isBoxOpen(entriesBox)) {
@@ -8494,7 +8549,16 @@ class LocalStorageService {
           if (exactEntry is Map && exactEntry['prescription'] is Map) {
             final presc = exactEntry['prescription'] as Map;
             if (presc.isNotEmpty && matchesPatient(presc)) {
-              return Map<String, dynamic>.from(presc);
+              final rx = prescriptionForEmbedding(presc);
+              if (!_hasMedicines(rx)) {
+                final entryMeds = _medicinesOf(exactEntry);
+                if (entryMeds != null) {
+                  rx['medicines'] = entryMeds;
+                  rx['prescriptions'] = entryMeds;
+                }
+              }
+              if (_hasMedicines(rx)) return rx;
+              withoutMedicines ??= rx;
             }
           }
         }
@@ -8515,12 +8579,13 @@ class LocalStorageService {
       for (final k in keyCandidates) {
         final direct = box.get(k);
         if (direct != null && direct is Map && matchesPatient(direct)) {
-          return Map<String, dynamic>.from(direct);
+          final rx = prescriptionForEmbedding(direct);
+          if (_hasMedicines(rx) || withoutMedicines == null) return rx;
         }
       }
     }
 
-    return null;
+    return withoutMedicines;
   }
 
   static Future<void> deleteLocalPrescription(String serial) async {
@@ -9685,9 +9750,15 @@ class LocalStorageService {
             if (ex['dispensedAt'] != null) merged['dispensedAt'] = ex['dispensedAt'];
             if (ex['dispensedBy'] != null) merged['dispensedBy'] = ex['dispensedBy'];
           }
-          if (ex['prescription'] != null && merged['prescription'] == null) {
-            merged['prescription']   = ex['prescription'];
-            merged['prescriptionId'] = ex['prescriptionId'];
+          // The cloud copy can lag (upload queue, quota) behind the prescription this PC has:
+          // keep the local one unless the cloud's is newer and has medicines.
+          final keptRx = preferredPrescription(merged['prescription'], ex['prescription']);
+          if (keptRx != null) {
+            if (!identical(keptRx, merged['prescription']) && merged['prescription'] == null) {
+              merged['prescriptionId'] = ex['prescriptionId'];
+            }
+            merged['prescription'] = keptRx;
+            _alignTopLevelMedicines(merged, ex);
           }
           // Preserve local session override
           if (ex['session'] != null && ex['session'].toString().trim().isNotEmpty) {

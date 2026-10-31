@@ -78,6 +78,9 @@ class DoctorRightPanel extends StatefulWidget {
 }
 
 class _DoctorRightPanelState extends State<DoctorRightPanel> {
+  /// When this patient was opened here: remote prescription copies saved before it never
+  /// replace the doctor's on-screen list.
+  DateTime _openedAt = DateTime.now();
   final FocusNode _complaintFocus  = FocusNode();
   final FocusNode _diagnosisFocus  = FocusNode();
   final FocusNode _searchFocusNode = FocusNode();
@@ -217,6 +220,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
   @override
   void didUpdateWidget(covariant DoctorRightPanel oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.serialId != widget.serialId) _openedAt = DateTime.now();
     if (oldWidget.serialId != widget.serialId ||
         oldWidget.selectedPatientData != widget.selectedPatientData ||
         oldWidget.branchId != widget.branchId) {
@@ -282,9 +286,18 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
     final serial = data['serial'] as String?;
     if (serial == null || serial != widget.serialId) return;
 
+    // RealtimeManager's stream events are {'event_type','data','decoded'}: the sender id and the
+    // catch-up flags live on 'decoded'. Reading event['senderId'] / event['_serverPush'] never
+    // matched, so this panel treated its own echoes and every catch-up as fresh edits.
+    final decoded = event['decoded'] is Map ? event['decoded'] as Map : const {};
     final myId = RealtimeManager().clientId;
-    final senderId = (event['senderId'] ?? event['clientId'] ?? '').toString();
+    final senderId = (decoded['_clientId'] ?? event['_clientId'] ?? event['senderId'] ?? event['clientId'] ?? '').toString();
     if (senderId.isNotEmpty && myId != null && senderId == myId) return;
+    final isCatchUpCopy = decoded['_serverPush'] == true ||
+        decoded['isCatchUp'] == true ||
+        decoded['_isReplay'] == true ||
+        decoded['_resent'] == true ||
+        decoded['_outboxResend'] == true;
 
     if (type == RealtimeEvents.saveEntry) {
       if (mounted) setState(() {});
@@ -295,6 +308,14 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
       // Never let an empty remote event wipe out medicines the doctor has on screen
       if (incomingPrescriptions == null && widget.prescriptions.isNotEmpty) return;
       if (incomingPrescriptions != null && incomingPrescriptions.isEmpty && widget.prescriptions.isNotEmpty) return;
+      // While the doctor has medicines on screen, only an edit saved elsewhere after this
+      // patient was opened may replace them. A catch-up copy or another desk's reconnect replay
+      // of the earlier prescription used to replace the list, wiping medicines just picked.
+      if (widget.prescriptions.isNotEmpty) {
+        if (isCatchUpCopy) return;
+        final savedAt = DateTime.tryParse((data['updatedAt'] ?? data['completedAt'] ?? '').toString());
+        if (savedAt == null || !savedAt.isAfter(_openedAt)) return;
+      }
 
       setState(() {
         if (data['complaint'] != null || data['condition'] != null) {
@@ -334,15 +355,7 @@ class _DoctorRightPanelState extends State<DoctorRightPanel> {
         final d = data['daysOfMedicine'];
         if (d is int && d >= 1 && d <= 3) _daysOfMedicine = d;
       });
-      final isReplay = event['_serverPush'] == true ||
-          event['_resent'] == true ||
-          event['isCatchUp'] == true ||
-          event['_isReplay'] == true ||
-          data['_serverPush'] == true ||
-          data['_resent'] == true ||
-          data['isCatchUp'] == true ||
-          data['_isReplay'] == true;
-      if (!isReplay && mounted) {
+      if (!isCatchUpCopy && mounted) {
         Flushbar(
           message: 'Prescription updated in realtime',
           backgroundColor: SoftPalette.blue500,

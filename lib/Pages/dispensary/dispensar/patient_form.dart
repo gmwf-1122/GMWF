@@ -433,7 +433,8 @@ class _PatientFormState extends State<PatientForm> {
       if (mounted) {
         setState(() {
           // Nothing found on a refresh (or only an older copy): keep the prescription shown.
-          if (found.isNotEmpty && !LocalStorageService.isOlderPrescription(found, _data)) {
+          // Nor a copy without medicines over one that has them (mayReplacePrescription).
+          if (found.isNotEmpty && LocalStorageService.mayReplacePrescription(found, _data)) {
             _data = found;
           } else if (directEmbedded is Map && _data.isEmpty) {
             _data = Map<String, dynamic>.from(directEmbedded);
@@ -464,6 +465,7 @@ class _PatientFormState extends State<PatientForm> {
         .trim();
 
     // 1. Prioritize direct embedded prescription in entriesBox for this exact branch token
+    Map<String, dynamic>? directFallback;
     try {
       if (Hive.isBoxOpen(LocalStorageService.entriesBox)) {
         final entriesBox = Hive.box(LocalStorageService.entriesBox);
@@ -472,11 +474,23 @@ class _PatientFormState extends State<PatientForm> {
             entriesBox.get(normSerial) ??
             entriesBox.get(normSerial.toUpperCase());
         if (directEntry is Map && directEntry['prescription'] is Map) {
-          final emb = Map<String, dynamic>.from(directEntry['prescription'] as Map);
+          final emb = LocalStorageService.prescriptionForEmbedding(directEntry['prescription'] as Map);
           emb['doctorName'] ??= directEntry['doctorName'] ?? directEntry['prescribedBy'];
           emb['doctorId'] ??= directEntry['doctorId'];
           emb['prescribedBy'] ??= directEntry['prescribedBy'] ?? directEntry['doctorName'];
-          if (emb.isNotEmpty) return emb;
+          // The token's own list when the embedded copy lost its medicines.
+          if (!_hasMeds(emb)) {
+            final entryMeds = [directEntry['prescriptions'], directEntry['medicines']]
+                .firstWhere((v) => v is List && v.isNotEmpty, orElse: () => null);
+            if (entryMeds != null) {
+              emb['prescriptions'] = entryMeds;
+              emb['medicines'] = entryMeds;
+            }
+          }
+          // A copy without medicines is not returned straight away: the lookup below may
+          // still find them ("as if never prescribed" on the dispenser).
+          if (emb.isNotEmpty) directFallback = emb;
+          if (_hasMeds(emb)) return emb;
         }
       }
     } catch (_) {}
@@ -490,10 +504,12 @@ class _PatientFormState extends State<PatientForm> {
       branchId: widget.branchId,
       dateKey: dateKey,
     );
-    if (presc != null && presc.isNotEmpty) return presc;
-
-    return {};
+    final kept = LocalStorageService.preferredPrescription(presc, directFallback);
+    return kept ?? {};
   }
+
+  static bool _hasMeds(Map m) => [m['prescriptions'], m['medicines'], m['items']]
+      .any((v) => v is List && v.isNotEmpty);
 
   Future<Map<String, dynamic>> _fetchFromPrescriptionsByCnic(String serial, String cnic) async {
     try {
@@ -1621,6 +1637,16 @@ class _PatientFormState extends State<PatientForm> {
         if (tokenBy.isNotEmpty && tokenBy != 'Unknown') 'createdByName': tokenBy,
         if (createdBy.isNotEmpty) 'createdBy': createdBy,
       };
+
+      // The spread above let widget.queueEntry's prescription (the snapshot taken when this
+      // patient was opened) replace a newer one the doctor saved since. Keep the newest copy
+      // that has medicines, with what this form showed as the fallback.
+      final storedRx = LocalStorageService.preferredPrescription(
+        widget.queueEntry['prescription'],
+        existingEntry?['prescription'],
+      );
+      final keptRx = LocalStorageService.preferredPrescription(storedRx, _data);
+      if (keptRx != null) fullEntry['prescription'] = keptRx;
 
       await entriesBox.put(canonicalKey, fullEntry);
 

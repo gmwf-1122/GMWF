@@ -286,7 +286,7 @@ class _DoctorScreenState extends State<DoctorScreen>
     if (type == 'token_created' || (type == RealtimeEvents.saveEntry && (data['status'] == 'waiting' || data['status'] == null) && data['prescriptions'] == null)) {
       _handleNewToken(data, event);
     } else if (type == RealtimeEvents.savePrescription || type == 'prescription_created' || (type == RealtimeEvents.saveEntry && (data['status'] == 'completed' || data['prescriptions'] != null))) {
-      _handlePrescriptionUpdate(data);
+      _handlePrescriptionUpdate(data, event);
     } else if (type == 'dispense_completed') {
       _handleDispenseCompleted(data);
     } else if (type == RealtimeEvents.saveStockItem || type == 'save_stock_item' || type == 'medicine_registered') {
@@ -429,15 +429,19 @@ class _DoctorScreenState extends State<DoctorScreen>
     }
   }
 
-  void _handlePrescriptionUpdate(Map<String, dynamic> data) {
+  void _handlePrescriptionUpdate(Map<String, dynamic> data, [Map<String, dynamic>? event]) {
     final serial = data['serial']?.toString();
     if (serial == null || serial != _selectedPatientData?['serial']) return;
     if (!mounted) return;
 
     // Replays / catch-up pushes carry old snapshots; applying one would erase medicines
     // the doctor added after that snapshot was taken.
+    // The flags are on the event (RealtimeManager), not in 'data'. An outbox resend from
+    // another desk is an old snapshot here too.
     if (data['_serverPush'] == true || data['_resent'] == true ||
-        data['isCatchUp'] == true || data['_isReplay'] == true) {
+        data['isCatchUp'] == true || data['_isReplay'] == true ||
+        event?['_serverPush'] == true || event?['isCatchUp'] == true ||
+        event?['_isReplay'] == true || event?['_resent'] == true || event?['_outboxResend'] == true) {
       return;
     }
 

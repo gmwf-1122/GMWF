@@ -483,7 +483,10 @@ class _PatientQueueState extends State<PatientQueue> {
                 if (existing != null) {
                   final updated = Map<String, dynamic>.from(existing);
                   updated['status'] = 'completed';
-                  updated['prescription'] = data;
+                  // Not an older or medicine-less copy over the stored prescription.
+                  if (LocalStorageService.mayReplacePrescription(data, existing['prescription'])) {
+                    updated['prescription'] = LocalStorageService.prescriptionForEmbedding(data);
+                  }
                   updated['prescriptionId'] = data['id'] ?? cleanSerial;
                   updated['completedAt'] ??= data['completedAt'] ?? DateTime.now().toIso8601String();
                   if (data['doctorName'] != null) updated['doctorName'] = data['doctorName'];
