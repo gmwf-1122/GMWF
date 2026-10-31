@@ -283,7 +283,9 @@ class RealtimeRouter {
         }
       } catch (e) {
         if (kDebugMode) print('RealtimeRouter: could not open boxes for "$type": $e');
-        return;
+        // A failure, not a skip: returning normally made the desk ACK the token, so the server
+        // counted it as delivered and never sent it again.
+        rethrow;
       }
     }
 

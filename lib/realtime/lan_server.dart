@@ -63,9 +63,14 @@ class LanServer {
   /// ACK: if the save fails, the desk still holds the message and sends it again.
   final Set<String> _inFlightMessageIds = {};
 
-  /// Ids already forwarded to the other desks: a resend after a failed save is not forwarded
-  /// again (their screens listen to the raw stream and would apply it again).
-  final LinkedHashSet<String> _routedMessageIds = LinkedHashSet<String>();
+  /// Messages already forwarded, with the desks (clientIds) each one reached. A resend or
+  /// duplicate of one goes only to desks that have not had it: forwarding again to all of them
+  /// would apply it twice on their screens, and never forwarding again left a token that was
+  /// issued while the doctor's desk was reconnecting undelivered until the 5-minute catch-up
+  /// (token 01 showing up after 02-04 had been prescribed and dispensed).
+  final LinkedHashMap<String, ({Map<String, dynamic> message, Set<String> reached, DateTime at})> _routed =
+      LinkedHashMap();
+  static const int _maxRoutedTracked = 3000;
 
   /// Save failures per message id. A message that keeps failing is parked in
   /// [unsavedMessagesBox] and ACKed after [_maxSaveFailures], so it does not loop forever.
@@ -583,6 +588,7 @@ class LanServer {
 
           if (!reIdentify) onClientConnected?.call(socketId, info);
           _broadcastClientCount();
+          if (!reIdentify) _forwardMissedTo(socket);
 
           // Safely drain any messages the client sent before identify was acknowledged
           final pending = _stagedPreHandshakeMessages.remove(socket);
@@ -636,6 +642,12 @@ class LanServer {
           // Already processed — send immediate ACK so client removes from outbox
           // but do NOT process or broadcast.
           print('[LanServer] ⚠️ Duplicate messageId=$messageId from $socketId — ACK & ignore');
+          // Not processed again, but desks that missed the first forward (they were
+          // reconnecting) get it now instead of at the next catch-up.
+          final previous = _routed[messageId];
+          if (previous != null && !_serverOnlyEventTypes.contains(eventType)) {
+            previous.reached.addAll(_routeMessage(socket, previous.message, skip: previous.reached));
+          }
           socket.add(jsonEncode({
             'event_type': 'message_ack',
             'messageId':  messageId,
@@ -698,10 +710,18 @@ class LanServer {
       // Acknowledgements and catch-up requests are for the server only. Forwarding them made
       // every catch-up cost (PCs x tokens x PCs) frames: each client ACKs every token it is
       // sent, and each ACK went to every other client, keeping the LAN busy all the time.
-      final alreadyRouted = messageId != null && messageId.isNotEmpty && !_routedMessageIds.add(messageId);
-      if (_routedMessageIds.length > _dedupMaxSize) _routedMessageIds.remove(_routedMessageIds.first);
-      if (!_serverOnlyEventTypes.contains(eventType) && !alreadyRouted) {
-        _routeMessage(socket, enhanced);
+      if (!_serverOnlyEventTypes.contains(eventType)) {
+        final tracked = messageId != null && messageId.isNotEmpty;
+        final previous = tracked ? _routed[messageId] : null;
+        if (previous != null) {
+          previous.reached.addAll(_routeMessage(socket, previous.message, skip: previous.reached));
+        } else {
+          final reached = _routeMessage(socket, enhanced);
+          if (tracked) {
+            _routed[messageId] = (message: enhanced, reached: reached, at: DateTime.now());
+            if (_routed.length > _maxRoutedTracked) _routed.remove(_routed.keys.first);
+          }
+        }
       }
       unawaited(_deliverAndAck(socket, enhanced, messageId));
     } catch (e) {
@@ -767,9 +787,56 @@ class LanServer {
   }
 
   // ── Route message to branch peers ──────────────────────────────────────────
-  void _routeMessage(WebSocket sender, Map<String, dynamic> message) {
+  /// Sends a desk that just (re)connected the messages of the last 10 minutes it was not
+  /// written: a token issued while the doctor's desk was reconnecting reached nobody and
+  /// waited for the 5-minute catch-up (the catch-up on connect reads the server's own store,
+  /// which may not have that token saved yet). Same branch only, oldest first.
+  void _forwardMissedTo(WebSocket socket) {
+    final info = _clientInfo[socket];
+    if (info == null) return;
+    final desk = _deskKey(socket);
+    final clientBranch = (info['branchId'] as String?)?.toLowerCase().trim() ?? '';
+    final now = DateTime.now();
+    final cutoff = now.subtract(const Duration(minutes: 10));
+    // Written to this desk shortly before it reconnected: maybe into a socket that was already
+    // dead (Wi-Fi drop). Sent again as a catch-up copy, which the desk's router applies even
+    // if it has seen the id, and its screens treat as a replay (no alert).
+    final suspect = now.subtract(const Duration(minutes: 2));
+    var sent = 0;
+    for (final entry in _routed.entries) {
+      final r = entry.value;
+      if (r.at.isBefore(cutoff)) continue;
+      final hadIt = r.reached.contains(desk);
+      if (hadIt && r.at.isBefore(suspect)) continue;
+      final m = hadIt ? {...r.message, 'isCatchUp': true} : r.message;
+      if ((m['_clientId'] ?? '').toString() == info['clientId']?.toString()) continue; // its own
+      final msgBranch = ((m['branchId'] ?? (m['data'] is Map ? m['data']['branchId'] : null) ?? m['_senderBranch'] ?? '')
+              .toString())
+          .toLowerCase()
+          .trim();
+      final sameBranch = msgBranch.isEmpty || clientBranch.isEmpty || msgBranch == 'all' || clientBranch == 'all' ||
+          CampSessionService.areBranchesMatching(msgBranch, clientBranch);
+      if (!sameBranch) continue;
+      try {
+        socket.add(jsonEncode(m));
+        r.reached.add(desk);
+        sent++;
+      } catch (_) {
+        break; // socket gone again
+      }
+    }
+    if (sent > 0) print('[LanServer] 📬 Forwarded $sent message(s) desk $desk missed while away');
+  }
+
+  /// A desk's identity across reconnects (its clientId), else its socket.
+  String _deskKey(WebSocket ws) => (_clientInfo[ws]?['clientId'] ?? ws.hashCode).toString();
+
+  /// Forwards [message] to the identified desks of its branch except [sender] and the desks in
+  /// [skip]. Returns the desks it was written to.
+  Set<String> _routeMessage(WebSocket sender, Map<String, dynamic> message, {Set<String>? skip}) {
+    final reached = <String>{};
     final senderInfo = _clientInfo[sender];
-    if (senderInfo == null) return;
+    if (senderInfo == null) return reached;
 
     final senderBranch = senderInfo['branchId'] as String;
     final messageBranch =
@@ -801,6 +868,8 @@ class LanServer {
       if (!isUniversal) {
         continue;
       }
+      final desk = _deskKey(client);
+      if (skip != null && skip.contains(desk)) continue;
 
       try {
         client.add(messageJson);
@@ -808,6 +877,7 @@ class LanServer {
         trafficBytesOut += messageJson.length;
         sentCount++;
         _messagesSent++;
+        reached.add(desk);
       } catch (e) {
         failedCount++;
         final clientSocketId = client.hashCode.toString();
@@ -818,7 +888,7 @@ class LanServer {
     }
 
     // [FP-5 FIX] Enhanced zero-delivery logging with serial info for diagnostics
-    if (sentCount == 0 && message['event_type'] != 'identify') {
+    if (sentCount == 0 && skip == null && message['event_type'] != 'identify') {
       final eventType = message['event_type'] ?? 'unknown';
       final serial = message['data'] is Map
           ? (message['data']['serial'] ?? '').toString()
@@ -828,6 +898,7 @@ class LanServer {
           '(${_clientInfo.length} connected, ${failedCount > 0 ? "$failedCount failed" : "no matching peers"}) '
           '— catch-up will recover on next connect');
     }
+    return reached;
   }
 
   // ── Remove client ──────────────────────────────────────────────────────────

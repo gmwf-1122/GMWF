@@ -4469,6 +4469,7 @@ class ServerSyncManager {
 
   Timer? _syncTimer;
   Timer? _catchUpTimer;
+  Timer? _tokenCatchUpTimer; // undelivered tokens only, every 45 s (see start())
   Timer? _downloadTimer;
   Timer? _compactionTimer;
   Timer? _syncDebounceTimer;
@@ -4536,7 +4537,7 @@ class ServerSyncManager {
   static const int _maxSeenPerClient = 2000;
   // Sent but not ACKed yet: not re-sent before [_resendUnackedAfter].
   final Map<String, Map<String, DateTime>> _clientSentAt = {};
-  static const Duration _resendUnackedAfter = Duration(minutes: 3);
+  static const Duration _resendUnackedAfter = Duration(seconds: 60);
   // Seen sets of desks that disconnected, by their clientId: a desk that reconnects (Wi-Fi
   // blip, new socket) only gets what it has not ACKed, instead of the whole day again.
   final Map<String, Set<String>> _seenByClientId = {};
@@ -4936,6 +4937,13 @@ class ServerSyncManager {
         _pushInventoryCatchUpToSocket(socketId, Map<String, dynamic>.from(info));
         _pushPendingRequestsCatchUpToSocket(socketId, Map<String, dynamic>.from(info));
       });
+      // Again a few seconds later: tokens that reached the server while this desk was
+      // reconnecting may still have been saving during the first push (it reads the store).
+      Future.delayed(const Duration(seconds: 6), () {
+        if (_clientSeenSerials.containsKey(socketId)) {
+          _pushCatchUpToSocket(socketId, Map<String, dynamic>.from(info));
+        }
+      });
     };
     server.onClientDisconnected = (socketId) {
       final seen = _clientSeenSerials.remove(socketId);
@@ -4965,6 +4973,19 @@ class ServerSyncManager {
     // instantly; this is only a safety net and scans entries + stock per client) ──
     _catchUpTimer = Timer.periodic(const Duration(minutes: 5), (_) {
       _periodicCatchUpAll();
+    });
+
+    // ── Today's tokens a desk has not confirmed, every 45 s ──────────────────
+    // A token whose live forward was lost (desk reconnecting, Wi-Fi drop) used to wait for the
+    // 5-minute catch-up and showed up at the doctor after later tokens had been prescribed and
+    // dispensed. This pass sends only what a desk has not ACKed (and not in the last 60 s), so
+    // when everything is delivered it sends nothing; the entry list it reads is cached.
+    _tokenCatchUpTimer = Timer.periodic(const Duration(seconds: 45), (_) {
+      for (final client in server.getConnectedClients()) {
+        final sid = client['socketId']?.toString();
+        if (sid == null || !_clientSeenSerials.containsKey(sid)) continue;
+        unawaited(_pushCatchUpToSocket(sid, Map<String, dynamic>.from(client)).catchError((Object _) => 0));
+      }
     });
 
     // ── High-performance periodic sync timer every 30 seconds ───────────────
@@ -8305,6 +8326,7 @@ class ServerSyncManager {
     _downloadTimer?.cancel();
     _syncTimer?.cancel();
     _catchUpTimer?.cancel();
+    _tokenCatchUpTimer?.cancel();
     _compactionTimer?.cancel();
     _clientSeenSerials.clear();
 

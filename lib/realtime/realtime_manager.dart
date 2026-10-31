@@ -87,6 +87,7 @@ class RealtimeManager {
   bool _serverIdentified = false;
   bool _flushedOnConnect = false; // [BUG-4] guard against double outbox flush
   bool _outboxFlushing = false; // one _flushOutbox pass at a time
+  bool _outboxFlushAgain = false; // a flush was asked for during a pass: run one right after
   DateTime? _lastPingTick; // to spot ping ticks delayed by a frozen UI thread
   Future<void> _routeChain = Future<void>.value(); // incoming messages are routed one at a time
   bool _stressPurgeDone = false; // the stress-test sweep scans every entry: once per app run
@@ -1223,7 +1224,12 @@ class RealtimeManager {
     if (!_isConnected || !_serverIdentified || _channel == null) return;
     // Started from identify, the 30 s sweep, its own 2 s follow-up and forceFlushAndCatchUp;
     // overlapping passes sent every item twice and pushed items to the failed box early.
-    if (_outboxFlushing) return;
+    if (_outboxFlushing) {
+      // Not dropped: this pass works on the keys it read at its start, so an item queued since
+      // (the token sent into a dead socket just before a reconnect) would wait for the 30 s sweep.
+      _outboxFlushAgain = true;
+      return;
+    }
     _outboxFlushing = true;
 
     try {
@@ -1360,6 +1366,10 @@ class RealtimeManager {
       if (kDebugMode) print('[RealtimeManager] _flushOutbox error: $e');
     } finally {
       _outboxFlushing = false;
+      if (_outboxFlushAgain) {
+        _outboxFlushAgain = false;
+        Future.delayed(const Duration(milliseconds: 300), _flushOutbox);
+      }
     }
   }
 
